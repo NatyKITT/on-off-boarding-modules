@@ -1,0 +1,7 @@
+{
+  "name": "On-Off-Boarding-Module",
+  "short_name": "On-OffBoarding app",
+  "theme_color": "#ffffff",
+  "background_color": "#ffffff",
+  "display": "standalone"
+}

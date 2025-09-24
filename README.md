@@ -1,0 +1,32 @@
+# Modul pro nástupy a odchody zaměstnanců (KITT6)
+
+Interní aplikace pro správu onboarding a offboarding procesů ve veřejné správě pro KITT6 rganizaci. Umožňuje efektivní spolupráci mezi HR, IT a vedením při zajištění nástupu nebo odchodu zaměstnanců.
+
+## 🔧 Technologie
+
+- [Next.js 14](https://nextjs.org/)
+- TypeScript + Tailwind CSS + shadcn/ui
+- Autentizace přes NextAuth (Google OAuth)
+- Role-based přístup: `USER`, `HR`, `IT`, `ADMIN`
+- Databáze: MySQL (Prisma ORM)
+- E-maily: Resend + React Email
+- Validace vstupů přes Zod
+- Smooth scrolling (Lenis), přepínání motivů (light/dark)
+
+## ✅ Funkce
+
+- Správa nástupů a odchodů (oddělené podle role)
+- Uživatelé a jejich oprávnění (včetně nastavení)
+- Záznamy s přehledem podle měsíců
+- Zobrazení detailu nástupu/odchodu s checklistem
+- Připraveno pro více typů e-mailových oznámení (např. HR/IT notifikace)
+
+## 📦 Skripty
+
+```bash
+pnpm dev             # Spuštění vývoje
+pnpm build           # Produkční build
+pnpm db:push         # Deploy schématu do DB
+pnpm db:studio       # Admin rozhraní pro DB
+pnpm lint:fix        # Oprava linter chyb
+pnpm prettier:format # Formátování kódu

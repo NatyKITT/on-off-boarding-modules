@@ -1,0 +1,6 @@
+{
+  "crons": [
+    { "path": "/api/cron/ensure-monthly-summary", "schedule": "0 8 1 * *" },
+    { "path": "/api/cron/mail-worker", "schedule": "*/10 * * * *" }
+  ]
+}

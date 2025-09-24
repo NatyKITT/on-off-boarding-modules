@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE `mail_jobs` MODIFY `status` ENUM('QUEUED', 'PROCESSING', 'SENT', 'FAILED') NOT NULL DEFAULT 'QUEUED';
