@@ -1,17 +1,22 @@
 "use client"
 
 import * as React from "react"
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { useForm, type FieldErrors } from "react-hook-form"
+import { addMonths, format, subMonths } from "date-fns"
+import { AlertCircle, Calendar, Trash2, User } from "lucide-react"
+import { useForm } from "react-hook-form"
 import { z } from "zod"
 
-import { type Position } from "@/types/position"
-
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -19,604 +24,661 @@ import {
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { PositionCombobox } from "@/components/common/position-combobox"
+import { EmployeeCombobox } from "@/components/common/employee-combobox"
 
-/* -------------------------------- types -------------------------------- */
 type Mode = "create-planned" | "create-actual" | "edit"
 
-type FormValues = {
+export type FormValues = {
   titleBefore?: string
   name: string
   surname: string
   titleAfter?: string
-  userEmail?: string
+  personalNumber: string
   positionNum: string
-  positionName?: string
-  department?: string
-  unitName?: string
+  positionName: string
+  department: string
+  unitName: string
+  userEmail?: string
+  noticeFiled: string
   plannedEnd?: string
   actualEnd?: string
-  userName?: string
-  personalNumber?: string
   notes?: string
   status?: "NEW" | "IN_PROGRESS" | "COMPLETED"
+  noticeEnd?: string
+  noticeMonths?: number
+  hasCustomDates?: boolean
 }
 
-type NullableInitial = Partial<{
-  titleBefore: string | null
-  name: string | null
-  surname: string | null
-  titleAfter: string | null
-  userEmail: string | null
-  positionNum: string | number | null
-  positionName: string | null
-  department: string | null
-  unitName: string | null
-  plannedEnd: string | null
-  actualEnd: string | null
-  userName: string | null
-  personalNumber: string | null
-  notes: string | null
-  status: "NEW" | "IN_PROGRESS" | "COMPLETED" | null
-}>
-
 type Props = {
-  positions: Position[]
   id?: number
-  initial?: NullableInitial
+  initial?: Partial<FormValues>
+  mode?: Mode
   defaultCreateMode?: Mode
   prefillDate?: string
   editContext?: "planned" | "actual"
-  submitLabel?: string
-  onSuccess?: (newId?: number) => void
+  excludePersonalNumbers?: string[]
+  onSuccess?: (newId?: number) => void | Promise<void>
 }
 
-/* ------------------------------- helpers -------------------------------- */
-const toPosNumString = (v: unknown) =>
-  typeof v === "number" ? String(v) : typeof v === "string" ? v.trim() : ""
-
-const trimOrEmpty = (v?: string | null) =>
-  typeof v === "string" ? v.trim() : (v ?? "")
-const nn = (v?: string | null) =>
+const undefIfEmpty = (v?: string | null) =>
   v == null || String(v).trim() === "" ? undefined : v
-const nullIfEmpty = (v?: string | null) =>
-  v == null || String(v).trim() === "" ? null : v
 
-function firstErrorMessage(errors: FieldErrors<FormValues>) {
-  const q: unknown[] = [errors]
-  while (q.length) {
-    const v = q.shift()
-    if (!v || typeof v !== "object") continue
-    const rec = v as Record<string, unknown>
-    if (typeof rec.message === "string") return rec.message
-    for (const val of Object.values(rec))
-      if (val && typeof val === "object") q.push(val)
-  }
-  return undefined
-}
-
-type DirtyFlags<T> = Partial<Record<keyof T, boolean>>
-function pickDirty<T extends Record<string, unknown>>(
-  values: T,
-  dirty: DirtyFlags<T>
-) {
-  const out: Record<string, unknown> = {}
-  for (const k of Object.keys(values) as (keyof T)[])
-    if (dirty[k]) out[k as string] = values[k]
-  return out
-}
-
-type ApiRow = Partial<FormValues> & {
-  id?: number
-  plannedEnd?: string | null
-  actualEnd?: string | null
-  userEmail?: string | null
-  positionNum?: string | number | null
-  positionName?: string | null
-  department?: string | null
-  unitName?: string | null
-  userName?: string | null
-  personalNumber?: string | null
-  notes?: string | null
-  status?: "NEW" | "IN_PROGRESS" | "COMPLETED" | null
-}
-
-function apiToForm(d: ApiRow): FormValues {
-  const dateOnly = (s?: string | null) =>
-    typeof s === "string" && s ? s.slice(0, 10) : ""
-  return {
-    titleBefore: trimOrEmpty(d.titleBefore),
-    name: trimOrEmpty(d.name),
-    surname: trimOrEmpty(d.surname),
-    titleAfter: trimOrEmpty(d.titleAfter),
-    userEmail: trimOrEmpty(d.userEmail),
-    positionNum: toPosNumString(d.positionNum),
-    positionName: trimOrEmpty(d.positionName),
-    department: trimOrEmpty(d.department),
-    unitName: trimOrEmpty(d.unitName),
-    plannedEnd: dateOnly(d.plannedEnd),
-    actualEnd: dateOnly(d.actualEnd),
-    userName: trimOrEmpty(d.userName),
-    personalNumber: trimOrEmpty(d.personalNumber),
-    notes: trimOrEmpty(d.notes),
-    status: (d.status as FormValues["status"]) ?? "NEW",
-  }
-}
-
-/* ------------------------------- schema --------------------------------- */
-const emailOptional = z.union([
-  z.literal(""),
-  z.string().trim().email("Neplatný e-mail"),
-])
+const toYMD = (d: Date) => format(d, "yyyy-MM-dd")
 
 const baseSchema = z.object({
   titleBefore: z.string().optional(),
   name: z.string().trim().min(1, "Jméno je povinné"),
   surname: z.string().trim().min(1, "Příjmení je povinné"),
   titleAfter: z.string().optional(),
-  userEmail: emailOptional.optional(),
+  personalNumber: z.string().trim().min(1, "Osobní číslo je povinné"),
+  userEmail: z.string().email("Neplatný e-mail").or(z.literal("")).optional(),
   positionNum: z.string().trim().min(1, "Číslo pozice je povinné"),
-  positionName: z.string().optional(),
-  department: z.string().optional(),
-  unitName: z.string().optional(),
-  plannedEnd: z.string().optional(),
-  actualEnd: z.string().optional(),
-  userName: z.string().optional(),
-  personalNumber: z.string().optional(),
+  positionName: z.string().trim().min(1, "Název pozice je povinný"),
+  department: z.string().trim().min(1, "Odbor je povinný"),
+  unitName: z.string().trim().min(1, "Oddělení je povinné"),
+  noticeFiled: z.string().trim().min(1, "Datum podání výpovědi je povinné"),
+  plannedEnd: z
+    .string()
+    .optional()
+    .refine(
+      (v) => !v || !Number.isNaN(new Date(v).getTime()),
+      "Neplatné datum"
+    ),
+  actualEnd: z
+    .string()
+    .optional()
+    .refine(
+      (v) => !v || !Number.isNaN(new Date(v).getTime()),
+      "Neplatné datum"
+    ),
   notes: z.string().optional(),
   status: z.enum(["NEW", "IN_PROGRESS", "COMPLETED"]).optional(),
 })
 
-/* --------------------------------- UI ----------------------------------- */
 export function OffboardingFormUnified({
-  positions,
   id,
   initial,
-  defaultCreateMode = "create-planned",
+  mode,
+  defaultCreateMode,
   prefillDate,
   editContext,
-  submitLabel,
+  excludePersonalNumbers = [],
   onSuccess,
 }: Props) {
-  const mode = defaultCreateMode
+  const effectiveMode: Mode = useMemo(
+    () => mode ?? defaultCreateMode ?? "create-planned",
+    [mode, defaultCreateMode]
+  )
+  const isEdit = Boolean(id) || effectiveMode === "edit"
+  const isActualMode = useMemo(
+    () => effectiveMode === "create-actual" || editContext === "actual",
+    [effectiveMode, editContext]
+  )
 
-  const normalizedInitial: Partial<FormValues> = useMemo(() => {
-    if (!initial) return {}
-    const dateOnly = (s?: string | null) =>
-      typeof s === "string" && s ? s.slice(0, 10) : undefined
-    return {
-      titleBefore: trimOrEmpty(initial.titleBefore),
-      name: trimOrEmpty(initial.name),
-      surname: trimOrEmpty(initial.surname),
-      titleAfter: trimOrEmpty(initial.titleAfter),
-      userEmail: trimOrEmpty(initial.userEmail),
-      positionNum: toPosNumString(initial.positionNum),
-      positionName: trimOrEmpty(initial.positionName),
-      department: trimOrEmpty(initial.department),
-      unitName: trimOrEmpty(initial.unitName),
-      plannedEnd: dateOnly(initial.plannedEnd),
-      actualEnd: dateOnly(initial.actualEnd),
-      userName: trimOrEmpty(initial.userName),
-      personalNumber: trimOrEmpty(initial.personalNumber),
-      notes: trimOrEmpty(initial.notes),
-      status: initial.status ?? undefined,
-    }
-  }, [initial])
+  const [selectedFromEos, setSelectedFromEos] = useState<boolean>(() =>
+    Boolean(isEdit || initial?.personalNumber?.trim())
+  )
 
-  const defaults: FormValues = useMemo(
-    () => ({
+  const [manualDates, setManualDates] = useState<boolean>(() =>
+    Boolean(initial?.hasCustomDates)
+  )
+  useEffect(() => {
+    setManualDates(Boolean(initial?.hasCustomDates))
+  }, [id, initial?.hasCustomDates])
+
+  const lastEditedRef = useRef<"notice" | "end" | null>(null)
+
+  const [openSuccess, setOpenSuccess] = useState(false)
+  const [openError, setOpenError] = useState(false)
+  const [successName, setSuccessName] = useState("")
+  const [errorMsg, setErrorMsg] = useState("")
+
+  // ----- DEFAULTS -----
+  const defaults: FormValues = useMemo(() => {
+    const base: FormValues = {
       titleBefore: "",
       name: "",
       surname: "",
       titleAfter: "",
+      personalNumber: "",
       userEmail: "",
-      positionNum: normalizedInitial.positionNum ?? "",
-      positionName: normalizedInitial.positionName ?? "",
-      department: normalizedInitial.department ?? "",
-      unitName: normalizedInitial.unitName ?? "",
-      plannedEnd:
-        normalizedInitial.plannedEnd ??
-        (mode === "create-planned" ? (prefillDate ?? "") : ""),
-      actualEnd:
-        normalizedInitial.actualEnd ??
-        (mode === "create-actual" ? (prefillDate ?? "") : ""),
-      userName: normalizedInitial.userName ?? "",
-      personalNumber: normalizedInitial.personalNumber ?? "",
-      notes: normalizedInitial.notes ?? "",
-      status: normalizedInitial.status ?? "NEW",
-    }),
-    [normalizedInitial, mode, prefillDate]
-  )
+      positionNum: "",
+      positionName: "",
+      department: "",
+      unitName: "",
+      noticeFiled: "",
+      plannedEnd: "",
+      actualEnd: "",
+      notes: "",
+      status: "NEW",
+      hasCustomDates: initial?.hasCustomDates ?? false,
+    }
 
-  const schema = useMemo(() => {
-    const isCreatePlanned = !id && mode === "create-planned"
-    const isCreateActual = !id && mode === "create-actual"
-    const isEditPlanned = !!id && editContext === "planned"
-    return baseSchema.superRefine((vals, ctx) => {
-      if (isCreatePlanned || isEditPlanned) {
-        if (!vals.plannedEnd) {
+    if (initial) {
+      Object.assign(base, initial)
+      // server vrací noticeEnd (začátek výpovědi), do formuláře patří noticeFiled (YMD)
+      if (isEdit && initial.noticeEnd)
+        base.noticeFiled = initial.noticeEnd.slice(0, 10)
+    }
+
+    // Nový záznam z přehledu: prefill konce + dopočet notice = end - 2M
+    if (!isEdit && prefillDate) {
+      if (isActualMode) base.actualEnd = prefillDate
+      else base.plannedEnd = prefillDate
+
+      const endStr = isActualMode ? base.actualEnd : base.plannedEnd
+      if (!base.noticeFiled && endStr) {
+        const end = new Date(endStr)
+        if (!isNaN(end.getTime())) base.noticeFiled = toYMD(subMonths(end, 2))
+      }
+    }
+
+    // Fallback (edit), když není noticeFiled, odvoď z konce
+    if (isEdit && !base.noticeFiled) {
+      const endStr = base.actualEnd || base.plannedEnd
+      if (endStr) {
+        const end = new Date(endStr)
+        if (!isNaN(end.getTime())) base.noticeFiled = toYMD(subMonths(end, 2))
+      }
+    }
+
+    return base
+  }, [initial, isActualMode, prefillDate, isEdit])
+
+  const schema = useMemo(
+    () =>
+      baseSchema.superRefine((vals, ctx) => {
+        if (!isEdit && !selectedFromEos) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
-            path: ["plannedEnd"],
-            message: "Datum plánovaného odchodu je povinné.",
+            path: ["personalNumber"],
+            message: "Musíte vybrat zaměstnance z EOS systému.",
           })
         }
-      }
-      if (isCreateActual) {
-        if (!vals.actualEnd) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["actualEnd"],
-            message: "Datum skutečného odchodu je povinné.",
-          })
+        if (isActualMode) {
+          if (!vals.actualEnd) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["actualEnd"],
+              message: "Datum skutečného odchodu je povinné.",
+            })
+          }
+        } else {
+          if (!vals.plannedEnd) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["plannedEnd"],
+              message: "Datum předpokládaného odchodu je povinné.",
+            })
+          }
         }
-      }
-    })
-  }, [id, mode, editContext])
+      }),
+    [isEdit, selectedFromEos, isActualMode]
+  )
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: defaults,
-    mode: "onSubmit",
+    mode: "onChange",
   })
+
+  useEffect(() => {
+    form.reset(defaults)
+    lastEditedRef.current = null
+  }, [defaults, form])
+
   const isSubmitting = form.formState.isSubmitting
+  const watchPersonal = form.watch("personalNumber")
 
-  // initial → form
   useEffect(() => {
-    if (!initial) return
-    form.reset({ ...defaults, ...normalizedInitial })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [normalizedInitial])
+    const ok = Boolean(watchPersonal && watchPersonal.trim() !== "")
+    setSelectedFromEos(ok || isEdit)
+    if (ok) form.clearErrors("personalNumber")
+  }, [watchPersonal, form, isEdit])
 
-  // dorovnat positionNum po načtení pozic NEBO změně initial
+  const endField: "plannedEnd" | "actualEnd" = isActualMode
+    ? "actualEnd"
+    : "plannedEnd"
+
+  // Jednosměrné efekty řízené lastEditedRef (jen když NENÍ manualDates):
+  const noticeWatch = form.watch("noticeFiled")
+  const endWatch = form.watch(endField)
+
+  // notice -> end
   useEffect(() => {
-    const initPos = normalizedInitial.positionNum
-    if (initPos && form.getValues("positionNum") !== initPos) {
-      form.setValue("positionNum", toPosNumString(initPos), {
-        shouldValidate: false,
-        shouldDirty: false,
-      })
+    if (manualDates) return
+    if (lastEditedRef.current !== "notice") return
+    if (!noticeWatch) {
+      lastEditedRef.current = null
+      return
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [positions.length, normalizedInitial.positionNum])
-
-  // auto-doplnění názvů dle pozice
-  const watchPositionNum = form.watch("positionNum")
-  const selected = useMemo(
-    () => positions.find((p) => toPosNumString(p.num) === watchPositionNum),
-    [positions, watchPositionNum]
-  )
-  useEffect(() => {
-    if (selected) {
-      form.setValue("positionName", selected.name ?? "", { shouldDirty: true })
-      form.setValue("department", selected.dept_name ?? "", {
+    const base = new Date(noticeWatch)
+    if (isNaN(base.getTime())) {
+      lastEditedRef.current = null
+      return
+    }
+    const nextEnd = toYMD(addMonths(base, 2))
+    const curEnd = form.getValues(endField) || ""
+    if (curEnd !== nextEnd) {
+      form.setValue(endField, nextEnd, {
+        shouldValidate: true,
         shouldDirty: true,
       })
-      form.setValue("unitName", selected.unit_name ?? "", { shouldDirty: true })
     }
-  }, [selected, form])
+    lastEditedRef.current = null
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [noticeWatch, endField, manualDates])
 
-  const onInvalid = (errors: FieldErrors<FormValues>) => {
-    alert(
-      firstErrorMessage(errors) ?? "Zkontrolujte zvýrazněná pole ve formuláři."
-    )
-  }
+  // end -> notice
+  useEffect(() => {
+    if (manualDates) return
+    if (lastEditedRef.current !== "end") return
+    if (!endWatch) {
+      lastEditedRef.current = null
+      return
+    }
+    const d = new Date(endWatch)
+    if (isNaN(d.getTime())) {
+      lastEditedRef.current = null
+      return
+    }
+    const nextNotice = toYMD(subMonths(d, 2))
+    const curNotice = form.getValues("noticeFiled") || ""
+    if (curNotice !== nextNotice) {
+      form.setValue("noticeFiled", nextNotice, {
+        shouldValidate: true,
+        shouldDirty: true,
+      })
+    }
+    lastEditedRef.current = null
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endWatch, manualDates])
+
+  // Když se manuál VYPNE, dorovnej jednorázově na konzistentní stav
+  useEffect(() => {
+    if (manualDates) return
+    const e = form.getValues(endField)
+    const n = form.getValues("noticeFiled")
+    if (e) {
+      const d = new Date(e)
+      if (!isNaN(d.getTime())) {
+        form.setValue("noticeFiled", toYMD(subMonths(d, 2)), {
+          shouldValidate: true,
+        })
+        return
+      }
+    }
+    if (n) {
+      const d = new Date(n)
+      if (!isNaN(d.getTime())) {
+        form.setValue(endField, toYMD(addMonths(d, 2)), {
+          shouldValidate: true,
+        })
+      }
+    }
+  }, [manualDates, endField, form])
 
   async function onSubmit(values: FormValues) {
     try {
-      if (id) {
-        const dirty = form.formState.dirtyFields as DirtyFlags<FormValues>
-        const body = pickDirty(values, dirty)
-
-        if ("userEmail" in body) body.userEmail = nullIfEmpty(values.userEmail)
-        if ("plannedEnd" in body && !values.plannedEnd) delete body.plannedEnd
-        if ("actualEnd" in body && !values.actualEnd) delete body.actualEnd
-
-        if (dirty.positionNum) {
-          const pos = positions.find(
-            (p) => toPosNumString(p.num) === values.positionNum
+      // vypočítej noticeMonths (jen informativní/uložení)
+      let noticeMonths = 2
+      if (values.noticeFiled && (values.plannedEnd || values.actualEnd)) {
+        const noticeDate = new Date(values.noticeFiled)
+        const endDate = new Date(values.actualEnd || values.plannedEnd || "")
+        if (!isNaN(noticeDate.getTime()) && !isNaN(endDate.getTime())) {
+          const daysDiff = Math.round(
+            (endDate.getTime() - noticeDate.getTime()) / 86400000
           )
-          body.positionName = pos?.name ?? values.positionName ?? ""
-          body.department = pos?.dept_name ?? values.department ?? ""
-          body.unitName = pos?.unit_name ?? values.unitName ?? ""
+          const monthsDiff = Math.round(daysDiff / 30.44)
+          noticeMonths = Math.max(1, monthsDiff)
         }
-
-        const res = await fetch(`/api/odchody/${id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        })
-        const j = await res.json().catch(() => null)
-        if (!res.ok) throw new Error(j?.message ?? "Uložení se nezdařilo.")
-
-        if (j?.data) {
-          const next = apiToForm(j.data as ApiRow)
-          form.reset(next)
-        }
-        onSuccess?.()
-        return
       }
 
-      // CREATE
-      const isCreateActual = mode === "create-actual"
-      const pos = positions.find(
-        (p) => toPosNumString(p.num) === values.positionNum
-      )
       const body = {
-        titleBefore: nullIfEmpty(values.titleBefore),
-        name: values.name,
-        surname: values.surname,
-        titleAfter: nullIfEmpty(values.titleAfter),
-        positionNum: values.positionNum, // string
-        positionName: pos?.name ?? values.positionName ?? "",
-        department: pos?.dept_name ?? values.department ?? "",
-        unitName: pos?.unit_name ?? values.unitName ?? "",
-        plannedEnd:
-          mode === "create-planned"
-            ? nn(values.plannedEnd)
-            : nn(values.actualEnd),
-        actualEnd: isCreateActual ? nn(values.actualEnd) : undefined,
-        userEmail: nullIfEmpty(values.userEmail),
-        userName: nullIfEmpty(values.userName),
-        personalNumber: nullIfEmpty(values.personalNumber),
-        notes: nullIfEmpty(values.notes),
-        status: values.status ?? (isCreateActual ? "COMPLETED" : "NEW"),
+        ...values,
+        titleBefore: undefIfEmpty(values.titleBefore),
+        titleAfter: undefIfEmpty(values.titleAfter),
+        userEmail: undefIfEmpty(values.userEmail),
+        plannedEnd: undefIfEmpty(values.plannedEnd),
+        actualEnd: undefIfEmpty(values.actualEnd),
+        notes: undefIfEmpty(values.notes),
+        status: values.status ?? (isActualMode ? "COMPLETED" : "NEW"),
+        noticeEnd: values.noticeFiled || undefined,
+        noticeMonths,
+        hasCustomDates: manualDates, // <<< uložit stav checkboxu
       }
 
-      const res = await fetch(`/api/odchody`, {
-        method: "POST",
+      const url = id ? `/api/odchody/${id}` : `/api/odchody`
+      const method = id ? "PATCH" : "POST"
+
+      const res = await fetch(url, {
+        method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       })
-      const j = await res.json().catch(() => null)
-      if (!res.ok) throw new Error(j?.message ?? "Vytvoření se nezdařilo.")
-      if (j?.data) form.reset(apiToForm(j.data as ApiRow))
-      onSuccess?.(j?.data?.id)
+
+      const json = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(json?.message ?? "Operace se nezdařila.")
+
+      setSuccessName(`${values.name} ${values.surname}`)
+      await onSuccess?.(json?.data?.id)
+      setOpenSuccess(true)
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Operace se nezdařila.")
+      setErrorMsg(err instanceof Error ? err.message : "Operace se nezdařila.")
+      setOpenError(true)
     }
   }
 
-  const isEdit = Boolean(id) || mode === "edit"
-  const showPlanned = isEdit
-    ? editContext !== "actual"
-    : mode !== "create-actual"
-  const showActual = isEdit
-    ? editContext !== "planned"
-    : mode !== "create-planned"
+  async function onDelete() {
+    if (!id) return
+    try {
+      const res = await fetch(`/api/odchody/${id}`, { method: "DELETE" })
+      const json = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(json?.message ?? "Smazání se nezdařilo.")
+      setSuccessName(form.getValues("name") + " " + form.getValues("surname"))
+      await onSuccess?.()
+      setOpenSuccess(true)
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Smazání se nezdařilo.")
+      setOpenError(true)
+    }
+  }
 
-  const submitDisabled =
-    isSubmitting ||
-    !form.getValues("positionNum") ||
-    (positions.length > 0 &&
-      !positions.some(
-        (p) => toPosNumString(p.num) === form.getValues("positionNum")
-      ))
-
-  const btnClass = "inline-flex w-full items-center justify-center gap-2"
+  const submitDisabled = isSubmitting || (!selectedFromEos && !isEdit)
 
   return (
     <Form {...form}>
       <form
         noValidate
-        onSubmit={form.handleSubmit(onSubmit, onInvalid)}
-        className="space-y-5"
+        onSubmit={form.handleSubmit(onSubmit)}
+        className="space-y-6"
       >
-        {/* Identita */}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {(
-            [
-              ["titleBefore", "Titul před"],
-              ["name", "Jméno *"],
-              ["surname", "Příjmení *"],
-              ["titleAfter", "Titul za"],
-            ] as const
-          ).map(([field, label]) => (
-            <FormField
-              key={field}
-              name={field as keyof FormValues}
-              control={form.control}
-              render={({ field: f }) => (
-                <FormItem>
-                  <FormLabel>{label}</FormLabel>
-                  <FormControl>
-                    <Input
-                      {...f}
-                      type="text"
-                      value={typeof f.value === "string" ? f.value : ""}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
+        {/* Výběr zaměstnance (jen při vytváření) */}
+        {!isEdit && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <User className="size-5" />
+                Vybrat zaměstnance z EOS systému
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <EmployeeCombobox
+                formFields={{
+                  personalNumber: "personalNumber",
+                  name: "name",
+                  surname: "surname",
+                  titleBefore: "titleBefore",
+                  titleAfter: "titleAfter",
+                  userEmail: "userEmail",
+                  positionNum: "positionNum",
+                  positionName: "positionName",
+                  department: "department",
+                  unitName: "unitName",
+                }}
+                placeholder="Vyberte zaměstnance…"
+                fetchLimit={500}
+                excludePersonalNumbers={excludePersonalNumbers}
+                onSelect={async () => {
+                  setSelectedFromEos(true)
+                  form.clearErrors("personalNumber")
+                  await form.trigger()
+                }}
+              />
+              {!selectedFromEos && (
+                <Alert className="mt-4">
+                  <AlertCircle className="size-4" />
+                  <AlertDescription>
+                    Pro vytvoření záznamu musíte vybrat existujícího zaměstnance
+                    z EOS systému.
+                  </AlertDescription>
+                </Alert>
               )}
-            />
-          ))}
-        </div>
+            </CardContent>
+          </Card>
+        )}
 
-        {/* Pozice */}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <FormField
-            name="positionNum"
-            control={form.control}
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Číslo pozice *</FormLabel>
-                <FormControl>
-                  <>
-                    <PositionCombobox
-                      positions={positions}
-                      fields={{
-                        num: "positionNum",
-                        name: "positionName",
-                        dept: "department",
-                        unit: "unitName",
-                      }}
-                      placeholder="Napiš číslo nebo název…"
-                      className="inline-flex items-center justify-center gap-2"
-                    />
-                    <input {...field} className="hidden" />
-                  </>
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          {(["positionName", "department", "unitName"] as const).map(
-            (fname) => (
+        {/* Read-only EOS pole */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <User className="size-5" />
+              Osobní a organizační údaje (z EOS)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {(
+                [
+                  ["personalNumber", "Osobní číslo *"],
+                  ["titleBefore", "Titul před"],
+                  ["name", "Jméno *"],
+                  ["surname", "Příjmení *"],
+                  ["titleAfter", "Titul za"],
+                  ["positionNum", "Číslo pozice *"],
+                  ["positionName", "Pozice *"],
+                  ["department", "Odbor *"],
+                  ["unitName", "Oddělení *"],
+                  ["userEmail", "Firemní e-mail"],
+                ] as const
+              ).map(([name, label]) => (
+                <FormField
+                  key={name}
+                  name={name as keyof FormValues}
+                  control={form.control}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{label}</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          type={name === "userEmail" ? "email" : "text"}
+                          value={
+                            typeof field.value === "string" ? field.value : ""
+                          }
+                          className={`bg-muted ${name === "positionNum" || name === "personalNumber" ? "font-mono" : ""}`}
+                          readOnly
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Termíny */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Calendar className="size-5" />
+              Termíny odchodu
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="manualDates"
+                checked={manualDates}
+                onCheckedChange={(v) => setManualDates(Boolean(v))}
+              />
+              <label htmlFor="manualDates" className="text-sm">
+                Upravit vlastní datumy (vypnout automatický výpočet ±2 měsíce)
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <FormField
-                key={fname}
-                name={fname}
+                name="noticeFiled"
                 control={form.control}
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>
-                      {fname === "positionName"
-                        ? "Pozice"
-                        : fname === "department"
-                          ? "Odbor"
-                          : "Oddělení"}
-                    </FormLabel>
+                    <FormLabel>Datum podání výpovědi *</FormLabel>
                     <FormControl>
                       <Input
+                        type="date"
                         {...field}
+                        onChange={(e) => {
+                          lastEditedRef.current = "notice"
+                          field.onChange(e)
+                        }}
                         value={
                           typeof field.value === "string" ? field.value : ""
                         }
-                        disabled
                       />
                     </FormControl>
+                    <FormDescription>
+                      {manualDates
+                        ? "Automatika vypnutá."
+                        : "Změna přepočítá datum konce (+2 měsíce)."}
+                    </FormDescription>
+                    <FormMessage />
                   </FormItem>
                 )}
               />
-            )
-          )}
-        </div>
 
-        {/* Plánovaný odchod */}
-        {showPlanned && (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <FormField
-              name="plannedEnd"
-              control={form.control}
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>
-                    Datum <span className="font-medium">plánovaného</span>{" "}
-                    odchodu
-                    {!isEdit && mode === "create-planned" ? " *" : ""}
-                  </FormLabel>
-                  <FormControl>
-                    <Input
-                      type="date"
-                      {...field}
-                      value={typeof field.value === "string" ? field.value : ""}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
+              {!isActualMode ? (
+                <FormField
+                  name="plannedEnd"
+                  control={form.control}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Datum předpokládaného odchodu *</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="date"
+                          {...field}
+                          onChange={(e) => {
+                            lastEditedRef.current = "end"
+                            field.onChange(e)
+                          }}
+                          value={
+                            typeof field.value === "string" ? field.value : ""
+                          }
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {manualDates
+                          ? "Automatika vypnutá."
+                          : "Změna přepočítá datum podání výpovědi (−2 měsíce)."}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              ) : (
+                <FormField
+                  name="actualEnd"
+                  control={form.control}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Datum skutečného odchodu *</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="date"
+                          {...field}
+                          onChange={(e) => {
+                            lastEditedRef.current = "end"
+                            field.onChange(e)
+                          }}
+                          value={
+                            typeof field.value === "string" ? field.value : ""
+                          }
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {manualDates
+                          ? "Automatika vypnutá."
+                          : "Změna přepočítá datum podání výpovědi (−2 měsíce)."}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               )}
-            />
-          </div>
-        )}
+            </div>
+          </CardContent>
+        </Card>
 
-        {/* Skutečný odchod + firemní údaje */}
-        {showActual && (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        {/* Poznámky */}
+        <Card>
+          <CardContent className="pt-6">
             <FormField
-              name="actualEnd"
+              name="notes"
               control={form.control}
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>
-                    Datum <span className="font-medium">skutečného</span>{" "}
-                    odchodu
-                    {!isEdit && mode === "create-actual" ? " *" : ""}
-                  </FormLabel>
+                  <FormLabel>Poznámky</FormLabel>
                   <FormControl>
-                    <Input
-                      type="date"
-                      {...field}
-                      value={typeof field.value === "string" ? field.value : ""}
-                    />
+                    <Textarea {...field} rows={3} />
                   </FormControl>
-                  <FormMessage />
+                  <FormDescription>
+                    Další informace k odchodu zaměstnance
+                  </FormDescription>
                 </FormItem>
               )}
             />
-            <FormField
-              name="userEmail"
-              control={form.control}
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Firemní účet (e-mail, nepovinné)</FormLabel>
-                  <FormControl>
-                    <Input
-                      type="email"
-                      {...field}
-                      value={typeof field.value === "string" ? field.value : ""}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              name="userName"
-              control={form.control}
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Uživatelské jméno</FormLabel>
-                  <FormControl>
-                    <Input
-                      {...field}
-                      value={typeof field.value === "string" ? field.value : ""}
-                    />
-                  </FormControl>
-                </FormItem>
-              )}
-            />
-            <FormField
-              name="personalNumber"
-              control={form.control}
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Osobní číslo</FormLabel>
-                  <FormControl>
-                    <Input
-                      {...field}
-                      value={typeof field.value === "string" ? field.value : ""}
-                    />
-                  </FormControl>
-                </FormItem>
-              )}
-            />
-          </div>
-        )}
+          </CardContent>
+        </Card>
 
-        {/* Poznámka */}
-        <FormField
-          name="notes"
-          control={form.control}
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Poznámka</FormLabel>
-              <FormControl>
-                <Textarea {...field} />
-              </FormControl>
-            </FormItem>
-          )}
-        />
-
-        <div className="pt-1">
-          <Button type="submit" className={btnClass} disabled={submitDisabled}>
-            {submitLabel ??
-              (id
-                ? "Uložit změny"
-                : mode === "create-actual"
-                  ? "Zapsat skutečný odchod"
-                  : "Přidat plánovaný odchod")}
+        {/* Akce */}
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <Button
+            type="submit"
+            className="inline-flex w-full items-center justify-center gap-2"
+            disabled={submitDisabled}
+          >
+            {isSubmitting && (
+              <div className="mr-2 size-4 animate-spin rounded-full border-2 border-background border-t-transparent" />
+            )}
+            {id
+              ? "Uložit změny"
+              : isActualMode
+                ? "Zapsat skutečný odchod"
+                : "Přidat předpokládaný odchod"}
           </Button>
+
+          {id && (
+            <Button
+              type="button"
+              variant="destructive"
+              className="inline-flex w-full items-center justify-center gap-2"
+              onClick={onDelete}
+            >
+              <Trash2 className="size-4" />
+              Smazat záznam
+            </Button>
+          )}
         </div>
+
+        {/* Fallback dialogy */}
+        <Dialog open={openSuccess} onOpenChange={setOpenSuccess}>
+          <DialogContent>
+            <DialogTitle>Hotovo</DialogTitle>
+            <p className="text-sm text-muted-foreground">
+              {id
+                ? `Změny byly úspěšně uloženy pro ${successName}.`
+                : `Záznam byl úspěšně zpracován pro ${successName}.`}
+            </p>
+            <div className="mt-4 flex justify-end">
+              <Button onClick={() => setOpenSuccess(false)}>OK</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={openError} onOpenChange={setOpenError}>
+          <DialogContent>
+            <DialogTitle>Nepodařilo se</DialogTitle>
+            <p className="text-sm text-muted-foreground">{errorMsg}</p>
+            <div className="mt-4 flex justify-end">
+              <Button variant="outline" onClick={() => setOpenError(false)}>
+                Zavřít
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </form>
     </Form>
   )

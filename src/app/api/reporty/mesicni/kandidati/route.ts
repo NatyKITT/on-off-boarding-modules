@@ -35,7 +35,10 @@ export async function GET(req: NextRequest) {
     const [onbPlanned, onbActual, offPlanned, offActual] = await Promise.all([
       include !== "actual"
         ? prisma.employeeOnboarding.findMany({
-            where: { deletedAt: null, plannedStart: { gte: from, lt: to } },
+            where: {
+              deletedAt: null,
+              plannedStart: { gte: from, lt: to },
+            },
             orderBy: { plannedStart: "asc" },
             select: {
               id: true,
@@ -50,7 +53,10 @@ export async function GET(req: NextRequest) {
         : Promise.resolve([]),
       include !== "planned"
         ? prisma.employeeOnboarding.findMany({
-            where: { deletedAt: null, actualStart: { gte: from, lt: to } },
+            where: {
+              deletedAt: null,
+              actualStart: { gte: from, lt: to },
+            },
             orderBy: { actualStart: "asc" },
             select: {
               id: true,
@@ -65,7 +71,10 @@ export async function GET(req: NextRequest) {
         : Promise.resolve([]),
       include !== "actual"
         ? prisma.employeeOffboarding.findMany({
-            where: { deletedAt: null, plannedEnd: { gte: from, lt: to } },
+            where: {
+              deletedAt: null,
+              plannedEnd: { gte: from, lt: to },
+            },
             orderBy: { plannedEnd: "asc" },
             select: {
               id: true,
@@ -80,7 +89,10 @@ export async function GET(req: NextRequest) {
         : Promise.resolve([]),
       include !== "planned"
         ? prisma.employeeOffboarding.findMany({
-            where: { deletedAt: null, actualEnd: { gte: from, lt: to } },
+            where: {
+              deletedAt: null,
+              actualEnd: { gte: from, lt: to },
+            },
             orderBy: { actualEnd: "asc" },
             select: {
               id: true,
@@ -95,22 +107,43 @@ export async function GET(req: NextRequest) {
         : Promise.resolve([]),
     ])
 
-    const sentOnb = await prisma.onboardingChangeLog.findMany({
-      where: { action: "MAIL_SENT", field: "MONTHLY_SUMMARY" },
-      select: { employeeId: true, newValue: true, createdAt: true },
-    })
-    const sentOff = await prisma.offboardingChangeLog.findMany({
-      where: { action: "MAIL_SENT", field: "MONTHLY_SUMMARY" },
-      select: { employeeId: true, newValue: true, createdAt: true },
-    })
+    // OPRAVENO: Používáme ActionType enum a kontrolujeme existující reporty
+    const [sentOnb, sentOff, existingReports] = await Promise.all([
+      prisma.onboardingChangeLog.findMany({
+        where: {
+          action: "MAIL_SENT", // ActionType enum hodnota
+          field: "MONTHLY_SUMMARY",
+        },
+        select: { employeeId: true, newValue: true, createdAt: true },
+      }),
+      prisma.offboardingChangeLog.findMany({
+        where: {
+          action: "MAIL_SENT", // ActionType enum hodnota
+          field: "MONTHLY_SUMMARY",
+        },
+        select: { employeeId: true, newValue: true, createdAt: true },
+      }),
+      // Také kontrolujeme MonthlyReport tabulku
+      prisma.monthlyReport.findMany({
+        where: {
+          month: `${year}-${String(month).padStart(2, "0")}`,
+        },
+        select: { reportType: true, sentAt: true },
+      }),
+    ])
+
     const sentOnbIds = new Set(sentOnb.map((r) => r.employeeId))
     const sentOffIds = new Set(sentOff.map((r) => r.employeeId))
+
+    // Kontrola zda už byl report pro tento měsíc odeslán
+    const monthlyReportSent = existingReports.some((r) => r.sentAt !== null)
 
     return NextResponse.json({
       status: "success",
       data: {
         year,
         month,
+        monthlyReportSent, // Nové pole
         planned: {
           onboardings: onbPlanned.map((r) => ({
             ...r,

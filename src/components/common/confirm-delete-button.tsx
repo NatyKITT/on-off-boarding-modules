@@ -1,8 +1,11 @@
 "use client"
 
 import * as React from "react"
+import { type ComponentProps } from "react"
 import { useRouter } from "next/navigation"
 import { Trash2 } from "lucide-react"
+
+import { cn } from "@/lib/utils"
 
 import {
   AlertDialog,
@@ -16,6 +19,8 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 
+type ButtonVariant = ComponentProps<typeof Button>["variant"]
+
 type Props = {
   endpoint: string
   successEvent?: string
@@ -24,6 +29,10 @@ type Props = {
   description?: string
   className?: string
   size?: "sm" | "default" | "icon"
+  /** NOVĚ: dovolí změnit vzhled (outline, destructive, …) */
+  variant?: ButtonVariant
+  /** NOVĚ: text v tlačítku */
+  label?: string
 }
 
 export function ConfirmDeleteButton({
@@ -34,6 +43,8 @@ export function ConfirmDeleteButton({
   description = "Opravdu chcete smazat tento záznam?",
   className,
   size = "sm",
+  variant = "destructive",
+  label = "Smazat",
 }: Props) {
   const router = useRouter()
   const [open, setOpen] = React.useState(false)
@@ -67,12 +78,15 @@ export function ConfirmDeleteButton({
       <AlertDialogTrigger asChild>
         <Button
           size={size}
-          variant="destructive"
-          className={className}
-          title="Smazat"
+          variant={variant}
+          className={cn(
+            "inline-flex items-center justify-center gap-1",
+            className
+          )}
+          title={label}
         >
-          <Trash2 className="mr-2 size-4" />
-          Smazat
+          <Trash2 className="size-4" />
+          <span className="hidden pt-1.5 sm:inline">{label}</span>
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
@@ -83,7 +97,7 @@ export function ConfirmDeleteButton({
         <AlertDialogFooter>
           <AlertDialogCancel disabled={busy}>Zrušit</AlertDialogCancel>
           <AlertDialogAction onClick={handleConfirm} disabled={busy}>
-            {busy ? "Mažu…" : "Smazat"}
+            {busy ? "Mažu…" : label}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

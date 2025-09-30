@@ -5,9 +5,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "dev": "pnpm run dev",
+    "build": "pnpm run build",
+    "start": "pnpm run start",
     "postinstall": "pnpm prisma generate",
     "db:generate": "pnpm prisma generate",
     "db:migrate": "pnpm prisma migrate dev",
@@ -15,6 +15,7 @@
     "db:pull": "npx prisma db pull",
     "db:reset": "npx prisma migrate reset",
     "db:studio": "npx prisma studio",
+    "db:seed": "npx prisma db seed",
     "shadcn:add": "pnpm dlx shadcn-ui@latest add",
     "packages:update-all": "pnpm update --latest",
     "prettier:format": "prettier --write \"**/*.{ts,tsx,mdx}\" --cache",
@@ -22,7 +23,10 @@
     "email": "email dev --dir emails --port 3333",
     "typecheck": "tsc --noEmit",
     "lint": "next lint",
-    "lint:fix": "next lint --fix"
+    "lint:fix": "next lint --fix",
+    "email:process": "curl -X GET http://localhost:3000/api/cron/mail-worker",
+    "email:stats": "curl -X PUT http://localhost:3000/api/cron/mail-worker",
+    "probation:check": "curl -X POST http://localhost:3000/api/cron/probation-check"
   },
   "dependencies": {
     "@auth/core": "0.30.0",
@@ -33,7 +37,7 @@
     "@neondatabase/serverless": "^1.0.1",
     "@next-auth/prisma-adapter": "^1.0.7",
     "@prisma/adapter-neon": "^6.15.0",
-    "@prisma/client": "^5.13.0",
+    "@prisma/client": "^6.16.2",
     "@radix-ui/react-accordion": "^1.1.2",
     "@radix-ui/react-alert-dialog": "^1.0.5",
     "@radix-ui/react-aspect-ratio": "^1.0.3",
@@ -91,6 +95,7 @@
     "react-dom": "^18.3.1",
     "react-email": "^2.1.2",
     "react-hook-form": "^7.51.4",
+    "react-hot-toast": "^2.6.0",
     "react-wrap-balancer": "^1.1.0",
     "recharts": "^3.1.0",
     "resend": "^3.2.0",
@@ -99,6 +104,7 @@
     "tailwindcss-animate": "^1.0.7",
     "vaul": "^1.1.2",
     "ws": "^8.17.0",
+    "xlsx": "^0.18.5",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -124,7 +130,7 @@
     "postcss": "^8.4.38",
     "prettier": "^3.2.5",
     "prettier-plugin-tailwindcss": "^0.5.14",
-    "prisma": "^5.13.0",
+    "prisma": "^6.16.2",
     "rehype": "^13.0.1",
     "rehype-autolink-headings": "^7.1.0",
     "rehype-pretty-code": "^0.13.1",
@@ -133,6 +139,9 @@
     "remark-gfm": "^4.0.0",
     "tailwindcss": "^3.4.3",
     "typescript": "^5.4.5"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.mjs"
   },
   "engine": {
     "node": ">=20.10.0"

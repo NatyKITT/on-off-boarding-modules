@@ -16,9 +16,6 @@ export const env = createEnv({
 
     REPORT_RECIPIENTS_PLANNED: z.string().optional(),
     REPORT_RECIPIENTS_ACTUAL: z.string().optional(),
-
-    EOS_API_BASE: z.string().url().optional(),
-    EOS_API_TOKEN: z.string().optional(),
   },
   client: {
     NEXT_PUBLIC_APP_URL: z.string().url(),
@@ -39,8 +36,5 @@ export const env = createEnv({
 
     REPORT_RECIPIENTS_PLANNED: process.env.REPORT_RECIPIENTS_PLANNED,
     REPORT_RECIPIENTS_ACTUAL: process.env.REPORT_RECIPIENTS_ACTUAL,
-
-    EOS_API_BASE: process.env.EOS_API_BASE,
-    EOS_API_TOKEN: process.env.EOS_API_TOKEN,
   },
 })

@@ -5,7 +5,10 @@ import { cs } from "date-fns/locale"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
-import { OffboardingFormUnified } from "@/components/forms/offboarding-form"
+import {
+  OffboardingFormUnified,
+  type FormValues,
+} from "@/components/forms/offboarding-form"
 import { HistoryDialog } from "@/components/history/history-dialog"
 
 type OffboardingDetail = {
@@ -13,6 +16,9 @@ type OffboardingDetail = {
   status: "NEW" | "IN_PROGRESS" | "COMPLETED"
   plannedEnd: string
   actualEnd?: string | null
+  noticeEnd?: string | null
+  noticeMonths?: number | null
+  hasCustomDates?: boolean
 
   titleBefore?: string | null
   name: string
@@ -32,6 +38,32 @@ type OffboardingDetail = {
 
 interface PageProps {
   params: { id: string }
+}
+
+/** Převod detailu z API do tvaru, který chce formulář (Partial<FormValues>) */
+function toInitial(d: OffboardingDetail): Partial<FormValues> {
+  return {
+    titleBefore: d.titleBefore ?? "",
+    name: d.name ?? "",
+    surname: d.surname ?? "",
+    titleAfter: d.titleAfter ?? "",
+    personalNumber: d.personalNumber ?? "",
+    positionNum: d.positionNum ?? "",
+    positionName: d.positionName ?? "",
+    department: d.department ?? "",
+    unitName: d.unitName ?? "",
+    userEmail: d.userEmail ?? "",
+    noticeFiled: d.noticeEnd ? d.noticeEnd.slice(0, 10) : "",
+    noticeEnd: d.noticeEnd ? d.noticeEnd.slice(0, 10) : undefined,
+    noticeMonths: d.noticeMonths ?? undefined,
+    hasCustomDates: d.hasCustomDates ?? false,
+
+    plannedEnd: d.plannedEnd ? d.plannedEnd.slice(0, 10) : "",
+    actualEnd: d.actualEnd ? d.actualEnd.slice(0, 10) : "",
+
+    notes: d.notes ?? "",
+    status: d.status,
+  }
 }
 
 export default async function OffboardingDetailPage({ params }: PageProps) {
@@ -111,9 +143,9 @@ export default async function OffboardingDetailPage({ params }: PageProps) {
         <HistoryDialog id={Number(params.id)} kind="offboarding" />
         <Button
           variant="outline"
-          onClick={() =>
-            (window.location.href = `/odchody/${params.id}/editovat`)
-          }
+          onClick={() => {
+            window.location.href = `/odchody/${params.id}/editovat`
+          }}
         >
           Upravit
         </Button>
@@ -125,8 +157,11 @@ export default async function OffboardingDetailPage({ params }: PageProps) {
                 const resDel = await fetch(`/api/odchody/${params.id}`, {
                   method: "DELETE",
                 })
-                if (resDel.ok) window.location.href = "/odchody"
-                else alert("Chyba při mazání (nelze mazat skutečné odchody).")
+                if (resDel.ok) {
+                  window.location.href = "/odchody"
+                } else {
+                  alert("Chyba při mazání.")
+                }
               }
             }}
           >
@@ -143,18 +178,13 @@ export default async function OffboardingDetailPage({ params }: PageProps) {
               Potvrdit skutečný odchod
             </h2>
             <OffboardingFormUnified
-              positions={[]}
               id={data.id}
-              initial={{
-                actualEnd: undefined,
-                userEmail: data.userEmail ?? undefined,
-                userName: data.userName ?? undefined,
-                personalNumber: data.personalNumber ?? undefined,
-                notes: data.notes ?? undefined,
-              }}
-              defaultCreateMode="edit"
+              initial={toInitial(data)}
+              mode="edit"
               editContext="actual"
-              onSuccess={() => (window.location.href = `/odchody/${params.id}`)}
+              onSuccess={() => {
+                window.location.href = `/odchody/${params.id}`
+              }}
             />
           </div>
         </>

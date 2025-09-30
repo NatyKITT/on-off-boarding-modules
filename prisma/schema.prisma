@@ -30,6 +30,13 @@ enum OffboardingStatus {
 enum MailJobType {
   EMPLOYEE_INFO
   MONTHLY_SUMMARY
+  PROBATION_WARNING // 10 dní před koncem zkušební doby
+  PROBATION_REMINDER // Připomínka zaměstnanci
+  PROBATION_ENDING // Poslední den zkušební doby
+  NOTICE_WARNING // Připomínka výpovědní lhůty
+  NOTICE_ENDING // Konec výpovědní lhůty
+  MANUAL_EMAIL // Ručně odeslaný email
+  SYSTEM_NOTIFICATION // Systémové notifikace
 }
 
 enum MailJobStatus {
@@ -37,6 +44,20 @@ enum MailJobStatus {
   PROCESSING
   SENT
   FAILED
+  CANCELLED
+}
+
+enum ActionType {
+  CREATED
+  UPDATED
+  DELETED
+  RESTORED
+  MAIL_SENT
+  MAIL_ENQUEUED
+  MAIL_FAILED
+  STATUS_CHANGED
+  PROBATION_REMINDER_SENT
+  NOTICE_REMINDER_SENT
 }
 
 model User {
@@ -97,11 +118,13 @@ model EmployeeOnboarding {
   status          OnboardingStatus @default(NEW)
   plannedStart    DateTime
   actualStart     DateTime?
+  startTime       String?          @default("08:00")
   titleBefore     String?
   name            String
   surname         String
   titleAfter      String?
   email           String?
+  phone           String?
   userName        String?
   userEmail       String?
   positionNum     String
@@ -112,15 +135,24 @@ model EmployeeOnboarding {
   itStatus        String?
   notes           String?
   createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
   deletedAt       DateTime?
+  deletedBy       String?
+  deleteReason    String?
   isManager       Boolean          @default(false)
   probationMonths Int?             @default(3)
   probationEnd    DateTime?
 
+  lastProbationReminder  DateTime?
+  probationRemindersSent Int       @default(0)
+
   OnboardingChangeLog OnboardingChangeLog[]
+  EmailHistory        EmailHistory[]
 
   @@index([plannedStart])
   @@index([actualStart])
+  @@index([deletedAt])
+  @@index([probationEnd])
 }
 
 model EmployeeOffboarding {
@@ -135,7 +167,8 @@ model EmployeeOffboarding {
   surname        String
   titleAfter     String?
   userName       String?
-  userEmail      String? // nepovinné
+  userEmail      String?
+  phone          String?
   positionNum    String
   positionName   String
   department     String
@@ -144,14 +177,24 @@ model EmployeeOffboarding {
   itStatus       String?
   notes          String?
   createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
   deletedAt      DateTime?
+  deletedBy      String?
+  deleteReason   String?
   noticeMonths   Int?              @default(2)
   noticeEnd      DateTime?
+  hasCustomDates Boolean           @default(false)
+
+  lastNoticeReminder  DateTime?
+  noticeRemindersSent Int       @default(0)
 
   OffboardingChangeLog OffboardingChangeLog[]
+  EmailHistory         EmailHistory[]
 
   @@index([plannedEnd])
   @@index([actualEnd])
+  @@index([deletedAt])
+  @@index([noticeEnd])
 }
 
 model OnboardingChangeLog {
@@ -159,13 +202,16 @@ model OnboardingChangeLog {
   employee   EmployeeOnboarding @relation(fields: [employeeId], references: [id])
   employeeId Int
   userId     String
-  action     String
+  action     ActionType
   field      String
   oldValue   String?
   newValue   String?
   createdAt  DateTime           @default(now())
+  ipAddress  String?
+  userAgent  String?
 
   @@index([employeeId, createdAt])
+  @@index([action])
 }
 
 model OffboardingChangeLog {
@@ -173,25 +219,88 @@ model OffboardingChangeLog {
   employee   EmployeeOffboarding @relation(fields: [employeeId], references: [id])
   employeeId Int
   userId     String
-  action     String
+  action     ActionType
   field      String
   oldValue   String?
   newValue   String?
   createdAt  DateTime            @default(now())
+  ipAddress  String?
+  userAgent  String?
 
   @@index([employeeId, createdAt])
+  @@index([action])
+}
+
+model EmailHistory {
+  id          Int        @id @default(autoincrement())
+  mailQueueId Int?
+  mailQueue   MailQueue? @relation(fields: [mailQueueId], references: [id])
+
+  onboardingEmployeeId  Int?
+  onboardingEmployee    EmployeeOnboarding?  @relation(fields: [onboardingEmployeeId], references: [id])
+  offboardingEmployeeId Int?
+  offboardingEmployee   EmployeeOffboarding? @relation(fields: [offboardingEmployeeId], references: [id])
+
+  emailType  MailJobType
+  recipients Json
+  subject    String
+  content    String?       @db.Text
+  status     MailJobStatus
+  sentAt     DateTime?
+  error      String?       @db.Text
+  createdBy  String
+  createdAt  DateTime      @default(now())
+
+  @@index([emailType])
+  @@index([status])
+  @@index([sentAt])
+  @@index([onboardingEmployeeId])
+  @@index([offboardingEmployeeId])
 }
 
 model MailQueue {
-  id        Int           @id @default(autoincrement())
-  type      MailJobType
-  payload   Json
-  sendAt    DateTime?
-  status    MailJobStatus @default(QUEUED)
-  error     String?
-  createdAt DateTime      @default(now())
-  sentAt    DateTime?
-  createdBy String?
+  id         Int           @id @default(autoincrement())
+  type       MailJobType
+  payload    Json
+  sendAt     DateTime?     @default(now())
+  status     MailJobStatus @default(QUEUED)
+  error      String?       @db.Text
+  createdAt  DateTime      @default(now())
+  sentAt     DateTime?
+  createdBy  String?
+  priority   Int           @default(5)
+  retryCount Int           @default(0)
+  maxRetries Int           @default(3)
+
+  EmailHistory EmailHistory[]
 
   @@map("mail_jobs")
+  @@index([status, sendAt])
+  @@index([type])
+  @@index([priority])
+}
+
+model MonthlyReport {
+  id          Int       @id @default(autoincrement())
+  month       String
+  reportType  String
+  recipients  Json
+  generatedBy String
+  sentAt      DateTime?
+  createdAt   DateTime  @default(now())
+  data        Json
+
+  @@unique([month, reportType])
+  @@index([month])
+  @@index([sentAt])
+}
+
+model SystemSettings {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+  updatedBy String
+
+  @@index([key])
 }

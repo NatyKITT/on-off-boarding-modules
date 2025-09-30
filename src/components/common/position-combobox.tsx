@@ -1,23 +1,28 @@
 "use client"
 
 import * as React from "react"
-import { useEffect, useMemo, useState } from "react"
-import { Check, X } from "lucide-react"
+import { useMemo, useState } from "react"
+import { Check, Search } from "lucide-react"
 import { useFormContext } from "react-hook-form"
 
 import type { Position } from "@/types/position"
 
 import { cn } from "@/lib/utils"
 
+import { Button } from "@/components/ui/button"
 import {
   Command,
   CommandEmpty,
   CommandGroup,
   CommandInput,
   CommandItem,
+  CommandList,
 } from "@/components/ui/command"
-import { Input } from "@/components/ui/input"
-import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 
 type Props = {
   positions: Position[]
@@ -35,142 +40,141 @@ type Props = {
 const toStr = (v: unknown) =>
   typeof v === "number" ? String(v) : typeof v === "string" ? v : ""
 
+const stripAccents = (s: string) =>
+  s
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+
 export function PositionCombobox({
   positions,
   fields,
-  placeholder = "Napiš číslo nebo název…",
+  placeholder = "Vyhledejte číslo nebo název pozice...",
   disabled,
   className,
 }: Props) {
   const form = useFormContext()
   const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState("")
 
   const currentNum = toStr(form.getValues(fields.num))
+  const currentName = toStr(form.getValues(fields.name))
+
   const selected = useMemo(
     () => positions.find((p) => toStr(p.num) === currentNum) ?? null,
     [positions, currentNum]
   )
 
-  const selectedLabel = selected
-    ? `${toStr(selected.num)} — ${selected.name ?? ""}`
-    : ""
+  const positionsForSearch = useMemo(() => {
+    return positions.map((p) => ({
+      ...p,
+      _key: `${p.num} ${p.name}`,
+      _normNum: stripAccents(toStr(p.num)),
+      _normName: stripAccents(p.name || ""),
+    }))
+  }, [positions])
 
-  useEffect(() => {
-    if (!open) setQuery("")
-  }, [open])
-
-  const items = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return positions
-    return positions.filter((p) => {
-      const hay =
-        `${toStr(p.num)} ${p.name ?? ""} ${p.dept_name ?? ""} ${p.unit_name ?? ""}`.toLowerCase()
-      return hay.includes(q)
-    })
-  }, [positions, query])
-
-  function apply(
-    p: Pick<Position, "num" | "name" | "dept_name" | "unit_name">
-  ) {
+  function apply(p: Position) {
     form.setValue(fields.num, toStr(p.num), {
       shouldDirty: true,
       shouldValidate: true,
     })
-    form.setValue(fields.name, p.name ?? "", { shouldDirty: true })
-    form.setValue(fields.dept, p.dept_name ?? "", { shouldDirty: true })
-    form.setValue(fields.unit, p.unit_name ?? "", { shouldDirty: true })
-    setOpen(false)
-  }
-
-  function clear() {
-    form.setValue(fields.num, "", { shouldDirty: true, shouldValidate: true })
-    form.setValue(fields.name, "", { shouldDirty: true })
-    form.setValue(fields.dept, "", { shouldDirty: true })
-    form.setValue(fields.unit, "", { shouldDirty: true })
-    setQuery("")
+    form.setValue(fields.name, p.name ?? "", {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
+    form.setValue(fields.dept, p.dept_name ?? "", {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
+    form.setValue(fields.unit, p.unit_name ?? "", {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
     setOpen(false)
   }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverAnchor asChild>
-        <div className={cn("relative", className)}>
-          <Input
-            readOnly
-            value={selectedLabel}
-            placeholder={placeholder}
-            disabled={disabled}
-            onClick={() => setOpen(true)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === "ArrowDown") {
-                setOpen(true)
-              }
-              if (e.key === "Escape") setOpen(false)
-            }}
-          />
-          {Boolean(currentNum) && (
-            <button
-              type="button"
-              title="Vymazat výběr"
-              aria-label="Vymazat výběr"
-              className="absolute inset-y-0 right-2 my-auto inline-flex size-5 items-center justify-center text-muted-foreground hover:text-foreground"
-              onMouseDown={(ev) => ev.preventDefault()}
-              onClick={(ev) => {
-                ev.preventDefault()
-                clear()
-              }}
-            >
-              <X className="size-4" />
-            </button>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          disabled={disabled}
+          className={cn(
+            "w-full justify-between font-normal",
+            !currentNum && "text-muted-foreground",
+            className
           )}
-        </div>
-      </PopoverAnchor>
+        >
+          <span className="truncate text-left">
+            {currentNum ? (
+              <span>
+                <span className="font-mono text-muted-foreground">
+                  {currentNum}
+                </span>
+                {" — "}
+                <span>{currentName}</span>
+              </span>
+            ) : (
+              placeholder
+            )}
+          </span>
+          <Search className="ml-2 size-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
 
       <PopoverContent
         className="w-[--radix-popover-trigger-width] p-0"
-        sideOffset={4}
         align="start"
-        data-lenis-prevent
-        data-lenis-prevent-wheel
+        sideOffset={4}
       >
-        <Command shouldFilter={false}>
-          <CommandInput
-            placeholder="Hledej číslem nebo názvem…"
-            value={query}
-            onValueChange={setQuery}
-            autoFocus
-          />
-          <CommandEmpty>Nic nenalezeno.</CommandEmpty>
-          <CommandGroup
-            className="max-h-80 overflow-auto overscroll-contain"
-            data-lenis-prevent
-            data-lenis-prevent-wheel
-            data-lenis-prevent-touch
-            onWheelCapture={(e) => e.stopPropagation()}
-            onTouchMoveCapture={(e) => e.stopPropagation()}
+        <Command
+          filter={(val, search) => {
+            const s = stripAccents(search)
+            const v = stripAccents(val)
+            return v.includes(s) ? 1 : 0
+          }}
+        >
+          <CommandInput placeholder="Hledat číslo nebo název pozice..." />
+          <CommandEmpty>Žádná pozice nenalezena</CommandEmpty>
+          <CommandList
+            className="max-h-80 overflow-y-auto overscroll-contain"
+            onWheel={(e) => {
+              e.stopPropagation()
+            }}
           >
-            {items.map((p) => {
-              const isSelected = selected?.num === p.num
-              return (
-                <CommandItem
-                  key={String(p.id ?? p.num)}
-                  value={toStr(p.num)}
-                  onSelect={() => apply(p)}
-                >
-                  <Check
-                    className={cn(
-                      "mr-2 size-4",
-                      isSelected ? "opacity-100" : "opacity-0"
-                    )}
-                  />
-                  <div className="truncate">
-                    {toStr(p.num)} — {p.name}
-                  </div>
-                </CommandItem>
-              )
-            })}
-          </CommandGroup>
+            <CommandGroup>
+              {positionsForSearch.map((p) => {
+                const isSelected = selected?.num === p.num
+                return (
+                  <CommandItem
+                    key={p.id}
+                    value={`${p.num} ${p.name}`}
+                    onSelect={() => apply(p)}
+                    className="flex items-start gap-3 py-3"
+                  >
+                    <span className="min-w-[80px] rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
+                      {p.num}
+                    </span>
+                    <div className="flex-1">
+                      <div className="text-sm font-medium">{p.name}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {p.dept_name} • {p.unit_name}
+                      </div>
+                    </div>
+                    <Check
+                      className={cn(
+                        "size-4 shrink-0",
+                        isSelected ? "opacity-100" : "opacity-0"
+                      )}
+                    />
+                  </CommandItem>
+                )
+              })}
+            </CommandGroup>
+          </CommandList>
         </Command>
       </PopoverContent>
     </Popover>

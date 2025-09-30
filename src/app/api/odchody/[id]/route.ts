@@ -1,46 +1,87 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
-import { z, ZodError, ZodIssue } from "zod"
+import { z, ZodError } from "zod"
 
-import { makeDiff } from "@/lib/audit"
 import { prisma } from "@/lib/db"
-import { snapshotOffboarding } from "@/lib/snapshot"
+
+type RouteParams = { params: { id: string } }
 
 const emptyToUndefined = (v: unknown) =>
   typeof v === "string" && v.trim() === "" ? undefined : v
 
-const optStr = z.union([z.string(), z.null()]).optional()
-const optionalDate = z
-  .preprocess(emptyToUndefined, z.coerce.date())
-  .refine((d) => !isNaN(d.getTime()), { message: "Neplatné datum." })
-  .optional()
-
+/** ---- Validace PATCH payloadu ---- */
 const updateSchema = z.object({
-  titleBefore: optStr,
-  name: z.string().optional(),
-  surname: z.string().optional(),
-  titleAfter: optStr,
+  titleBefore: z.union([z.string(), z.null()]).optional(),
+  name: z.string().min(1).optional(),
+  surname: z.string().min(1).optional(),
+  titleAfter: z.union([z.string(), z.null()]).optional(),
+  phone: z.union([z.string(), z.null()]).optional(),
   positionNum: z.string().optional(),
-  positionName: optStr,
-  department: optStr,
-  unitName: optStr,
-  plannedEnd: optionalDate,
-  actualEnd: optionalDate,
+  positionName: z.string().optional(),
+  department: z.string().optional(),
+  unitName: z.string().optional(),
+
+  plannedEnd: z.preprocess(emptyToUndefined, z.coerce.date()).optional(),
+  actualEnd: z.preprocess(emptyToUndefined, z.coerce.date()).optional(),
+  noticePeriodEnd: z.preprocess(emptyToUndefined, z.coerce.date()).optional(),
+  noticeEnd: z.preprocess(emptyToUndefined, z.coerce.date()).optional(),
+
+  noticeMonths: z.number().optional(),
+  hasCustomDates: z.boolean().optional(),
+
   userEmail: z
     .preprocess(emptyToUndefined, z.string().email())
-    .nullable()
-    .optional(),
-  userName: optStr,
-  personalNumber: optStr,
-  notes: optStr,
+    .optional()
+    .nullable(),
+  userName: z.union([z.string(), z.null()]).optional(),
+  personalNumber: z.union([z.string(), z.null()]).optional(),
+  notes: z.union([z.string(), z.null()]).optional(),
   status: z.enum(["NEW", "IN_PROGRESS", "COMPLETED"]).optional(),
 })
 
-interface Params {
-  params: { id: string }
+/** ---- Typ pro update do Prisma (zarovnaný s DB schématem) ---- */
+type UpdateData = {
+  updatedAt: Date
+  titleBefore?: string | null
+  name?: string
+  surname?: string
+  titleAfter?: string | null
+  phone?: string | null
+  positionNum?: string
+  positionName?: string
+  department?: string
+  unitName?: string
+
+  plannedEnd?: Date
+  actualEnd?: Date | null
+  noticeEnd?: Date | null
+  noticeMonths?: number | null
+  hasCustomDates?: boolean
+
+  userEmail?: string | null
+  userName?: string | null
+  personalNumber?: string | null
+  notes?: string | null
+  status?: "NEW" | "IN_PROGRESS" | "COMPLETED"
 }
 
-export async function GET(_: NextRequest, { params }: Params) {
+/** Pomocník na převod pro porovnání změn */
+const toStr = (v: unknown) => {
+  if (v === null || v === undefined) return ""
+  if (v instanceof Date) return v.toISOString()
+  if (typeof v === "boolean") return v ? "true" : "false"
+  return String(v)
+}
+
+export async function GET(_: NextRequest, { params }: RouteParams) {
+  const session = await auth()
+  if (!session?.user) {
+    return NextResponse.json(
+      { status: "error", message: "Nejste přihlášeni." },
+      { status: 401 }
+    )
+  }
+
   const id = Number(params.id)
   if (!Number.isFinite(id)) {
     return NextResponse.json(
@@ -48,24 +89,50 @@ export async function GET(_: NextRequest, { params }: Params) {
       { status: 400 }
     )
   }
-  const record = await prisma.employeeOffboarding.findUnique({ where: { id } })
-  if (!record) {
+
+  try {
+    const record = await prisma.employeeOffboarding.findUnique({
+      where: { id, deletedAt: null },
+    })
+
+    if (!record) {
+      return NextResponse.json(
+        { status: "error", message: "Záznam nenalezen." },
+        { status: 404 }
+      )
+    }
+
+    return NextResponse.json({
+      status: "success",
+      data: {
+        ...record,
+        plannedEnd: record.plannedEnd?.toISOString() ?? null,
+        actualEnd: record.actualEnd?.toISOString() ?? null,
+        noticeEnd: record.noticeEnd?.toISOString() ?? null,
+        noticeMonths: record.noticeMonths ?? 2,
+        hasCustomDates: record.hasCustomDates ?? false,
+        createdAt: record.createdAt.toISOString(),
+        updatedAt: record.updatedAt.toISOString(),
+      },
+    })
+  } catch (error) {
+    console.error("GET /odchody/[id] error:", error)
     return NextResponse.json(
-      { status: "error", message: "Nenalezeno." },
-      { status: 404 }
+      { status: "error", message: "Nepodařilo se načíst záznam." },
+      { status: 500 }
     )
   }
-  return NextResponse.json({ status: "success", data: record })
 }
 
-export async function PATCH(request: NextRequest, { params }: Params) {
+export async function PATCH(request: NextRequest, { params }: RouteParams) {
   const session = await auth()
   if (!session?.user) {
     return NextResponse.json(
-      { status: "error", message: "Musíte být přihlášeni." },
+      { status: "error", message: "Nejste přihlášeni." },
       { status: 401 }
     )
   }
+
   const id = Number(params.id)
   if (!Number.isFinite(id)) {
     return NextResponse.json(
@@ -78,9 +145,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const raw = await request.json()
     const data = updateSchema.parse(raw)
 
+    const userKey =
+      (session.user as { id?: string; email?: string }).id ??
+      session.user.email ??
+      "unknown"
+
     const before = await prisma.employeeOffboarding.findUnique({
-      where: { id },
+      where: { id, deletedAt: null },
     })
+
     if (!before) {
       return NextResponse.json(
         { status: "error", message: "Záznam nenalezen." },
@@ -88,96 +161,142 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       )
     }
 
-    const updateData: Record<string, unknown> = {}
-
-    // mapping do updateData: jen co přijde, bez default "" !
-    if (data.titleBefore !== undefined)
-      updateData.titleBefore = data.titleBefore
-    if (data.name !== undefined) updateData.name = data.name
-    if (data.surname !== undefined) updateData.surname = data.surname
-    if (data.titleAfter !== undefined) updateData.titleAfter = data.titleAfter
-    if (data.positionNum !== undefined)
-      updateData.positionNum = data.positionNum
-    if (data.positionName !== undefined)
-      updateData.positionName = data.positionName ?? ""
-    if (data.department !== undefined)
-      updateData.department = data.department ?? ""
-    if (data.unitName !== undefined) updateData.unitName = data.unitName ?? ""
-    if (data.plannedEnd !== undefined) updateData.plannedEnd = data.plannedEnd
-
-    if (data.actualEnd !== undefined) updateData.actualEnd = data.actualEnd
-    if (data.userEmail !== undefined) updateData.userEmail = data.userEmail
-    if (data.userName !== undefined) updateData.userName = data.userName
-    if (data.personalNumber !== undefined)
-      updateData.personalNumber = data.personalNumber
-
-    if (data.notes !== undefined) updateData.notes = data.notes ?? null
-    if (data.status !== undefined) updateData.status = data.status
-
     const updated = await prisma.$transaction(async (tx) => {
-      const u = await tx.employeeOffboarding.update({
+      const updateData: UpdateData = { updatedAt: new Date() }
+
+      for (const [key, value] of Object.entries(data)) {
+        if (value === undefined) continue
+
+        switch (key) {
+          case "noticePeriodEnd": {
+            updateData.noticeEnd = value as Date
+            break
+          }
+          case "noticeEnd": {
+            if (!("noticePeriodEnd" in data)) {
+              updateData.noticeEnd = value as Date
+            }
+            break
+          }
+          case "plannedEnd": {
+            if (value !== null) {
+              updateData.plannedEnd = value as Date
+            }
+            break
+          }
+          case "actualEnd": {
+            updateData.actualEnd = value as Date
+            break
+          }
+          case "hasCustomDates": {
+            updateData.hasCustomDates = Boolean(value)
+            break
+          }
+          default: {
+            ;(updateData as Record<string, unknown>)[key] = value
+          }
+        }
+      }
+
+      const completingNow =
+        updateData.actualEnd !== undefined &&
+        before.actualEnd === null &&
+        updateData.actualEnd !== null
+
+      if (completingNow) {
+        updateData.status = "COMPLETED"
+      }
+
+      const updatedRecord = await tx.employeeOffboarding.update({
         where: { id },
         data: updateData,
       })
 
-      const fieldsToLog = [
-        "titleBefore",
-        "name",
-        "surname",
-        "titleAfter",
-        "positionNum",
-        "positionName",
-        "department",
-        "unitName",
-        "plannedEnd",
-        "actualEnd",
-        "userEmail",
-        "userName",
-        "personalNumber",
-        "notes",
-        "status",
-      ] as const
+      const beforeRec: Record<string, unknown> = before as unknown as Record<
+        string,
+        unknown
+      >
+      const updateRec: Record<string, unknown> =
+        updateData as unknown as Record<string, unknown>
 
-      const diffs = makeDiff(before, u, fieldsToLog)
-      if (diffs.length) {
-        await tx.offboardingChangeLog.createMany({
-          data: diffs.map((d) => ({
-            employeeId: u.id,
-            userId:
-              (session.user as { id?: string; email?: string }).id ??
-              session.user.email ??
-              "unknown",
-            action: "UPDATE",
-            field: d.field,
-            oldValue: d.oldValue ?? undefined,
-            newValue: d.newValue ?? undefined,
-          })),
+      const changes: Array<{
+        field: string
+        oldValue: string
+        newValue: string
+      }> = []
+
+      for (const [k, newVal] of Object.entries(updateRec)) {
+        if (k === "updatedAt") continue
+        const oldVal = beforeRec[k]
+        const oldStr = toStr(oldVal)
+        const newStr = toStr(newVal)
+        if (oldStr !== newStr) {
+          changes.push({ field: k, oldValue: oldStr, newValue: newStr })
+        }
+      }
+
+      for (const change of changes) {
+        await tx.offboardingChangeLog.create({
+          data: {
+            employeeId: id,
+            userId: userKey,
+            action: completingNow ? "STATUS_CHANGED" : "UPDATED",
+            field: change.field,
+            oldValue: change.oldValue || null,
+            newValue: change.newValue || null,
+          },
         })
       }
 
-      return u
+      if (completingNow) {
+        await tx.offboardingChangeLog.create({
+          data: {
+            employeeId: id,
+            userId: userKey,
+            action: "STATUS_CHANGED",
+            field: "status",
+            oldValue: before.status,
+            newValue: "COMPLETED",
+          },
+        })
+      }
+
+      return updatedRecord
     })
 
-    return NextResponse.json({ status: "success", data: updated })
+    return NextResponse.json({
+      status: "success",
+      message: "Záznam byl úspěšně aktualizován.",
+      data: {
+        ...updated,
+        plannedEnd: updated.plannedEnd?.toISOString() ?? null,
+        actualEnd: updated.actualEnd?.toISOString() ?? null,
+        noticeEnd: updated.noticeEnd?.toISOString() ?? null,
+        noticeMonths: updated.noticeMonths ?? 2,
+        hasCustomDates: updated.hasCustomDates ?? false,
+        createdAt: updated.createdAt.toISOString(),
+        updatedAt: updated.updatedAt.toISOString(),
+      },
+    })
   } catch (err) {
     if (err instanceof ZodError) {
       const msg = err.issues
-        .map((i: ZodIssue) => `${i.path.join(".")}: ${i.message}`)
+        .map((i) => `${i.path.join(".")}: ${i.message}`)
         .join("; ")
       return NextResponse.json(
         { status: "error", message: `Formulář obsahuje chyby: ${msg}` },
         { status: 400 }
       )
     }
-    console.error("PATCH chyba:", err)
+    console.error("PATCH /odchody/[id] error:", err)
     return NextResponse.json(
-      { status: "error", message: "Nelze aktualizovat." },
+      { status: "error", message: "Chyba při aktualizaci záznamu." },
       { status: 500 }
     )
   }
 }
 
-export async function DELETE(_: NextRequest, { params }: Params) {
+export async function DELETE(_: NextRequest, { params }: RouteParams) {
   const session = await auth()
   if (!session?.user) {
     return NextResponse.json(
@@ -194,16 +313,26 @@ export async function DELETE(_: NextRequest, { params }: Params) {
     )
   }
 
-  const before = await prisma.employeeOffboarding.findUnique({ where: { id } })
+  const before = await prisma.employeeOffboarding.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      name: true,
+      surname: true,
+      actualEnd: true,
+      deletedAt: true,
+    },
+  })
+
   if (!before) {
     return NextResponse.json(
       { status: "error", message: "Záznam nenalezen." },
       { status: 404 }
     )
   }
-  if (before.actualEnd) {
+  if (before.deletedAt) {
     return NextResponse.json(
-      { status: "error", message: "Skutečné odchody nelze mazat." },
+      { status: "error", message: "Záznam už je smazán." },
       { status: 409 }
     )
   }
@@ -213,24 +342,58 @@ export async function DELETE(_: NextRequest, { params }: Params) {
     session.user.email ??
     "unknown"
 
-  const oldValue = JSON.stringify({ data: snapshotOffboarding(before) })
+  const now = new Date()
 
   await prisma.$transaction(async (tx) => {
+    await tx.employeeOffboarding.update({
+      where: { id },
+      data: {
+        deletedAt: now,
+        deletedBy: userKey,
+        deleteReason: "Smazáno uživatelem",
+      },
+    })
+
     await tx.offboardingChangeLog.create({
       data: {
         employeeId: before.id,
         userId: userKey,
-        action: "DELETE",
-        field: "*",
-        oldValue, // <<< normalizovaný snapshot
-        newValue: null,
+        action: "DELETED",
+        field: "deleted_at",
+        oldValue: null,
+        newValue: now.toISOString(),
       },
     })
-    await tx.employeeOffboarding.update({
-      where: { id },
-      data: { deletedAt: new Date() },
-    })
+
+    try {
+      await tx.mailQueue.create({
+        data: {
+          type: "SYSTEM_NOTIFICATION",
+          payload: {
+            type: "employee_offboarding_deleted",
+            employeeId: before.id,
+            employeeName: `${before.name} ${before.surname}`,
+            deletedBy: userKey,
+            recipients: ["hr@company.com"],
+            subject: `Smazán záznam odchodu - ${before.name} ${before.surname}`,
+          },
+          priority: 5,
+          createdBy: userKey,
+        },
+      })
+    } catch (mailErr) {
+      console.warn("Warning: Could not create mail queue entry:", mailErr)
+    }
   })
 
-  return new NextResponse(null, { status: 204 })
+  return NextResponse.json({
+    status: "success",
+    message: "Záznam byl úspěšně smazán.",
+    data: {
+      id: before.id,
+      name: `${before.name} ${before.surname}`,
+      deletedAt: new Date().toISOString(),
+      deletedBy: userKey,
+    },
+  })
 }

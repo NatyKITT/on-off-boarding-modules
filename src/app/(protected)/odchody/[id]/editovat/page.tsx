@@ -3,13 +3,11 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import { format } from "date-fns"
-
-import { type Position } from "@/types/position"
-
-import { useToast } from "@/hooks/use-toast"
+import { CheckCircle, XCircle } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { OffboardingFormUnified } from "@/components/forms/offboarding-form"
 
 type OffRow = {
@@ -18,17 +16,15 @@ type OffRow = {
   name: string
   surname: string
   titleAfter?: string | null
-
   department: string
   unitName: string
-
   positionNum: string | null
   positionName: string
-
   plannedEnd: string
   actualEnd?: string | null
-
-  userName?: string | null
+  noticeEnd?: string | null
+  noticeMonths?: number | null
+  hasCustomDates?: boolean
   userEmail?: string | null
   personalNumber?: string | null
   notes?: string | null
@@ -39,50 +35,95 @@ interface PageProps {
   params: { id: string }
 }
 
-function normalizePositions(api: unknown): Position[] {
-  const isRecord = (v: unknown): v is Record<string, unknown> =>
-    typeof v === "object" && v !== null
-
-  const src: unknown[] = Array.isArray(api)
-    ? api
-    : isRecord(api) && Array.isArray((api as { data?: unknown }).data)
-      ? (api as { data: unknown[] }).data
-      : []
-
-  const out: Position[] = []
-  for (const it of src) {
-    if (
-      isRecord(it) &&
-      typeof it.num === "string" &&
-      typeof it.name === "string"
-    ) {
-      out.push({
-        id: String(
-          typeof it.id === "string" || typeof it.id === "number"
-            ? it.id
-            : it.num
-        ),
-        num: it.num,
-        name: it.name,
-        dept_name: typeof it.dept_name === "string" ? it.dept_name : "",
-        unit_name: typeof it.unit_name === "string" ? it.unit_name : "",
-      })
-    }
-  }
-  return out
+/* ----------------------- Modal Components ----------------------- */
+interface SuccessModalProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  title: string
+  message: string
 }
+
+const SuccessModal: React.FC<SuccessModalProps> = ({
+  open,
+  onOpenChange,
+  title,
+  message,
+}) => (
+  <Dialog open={open} onOpenChange={onOpenChange}>
+    <DialogContent className="sm:max-w-md">
+      <div className="flex items-center gap-4">
+        <CheckCircle className="size-12 text-green-500" />
+        <div className="space-y-2">
+          <DialogTitle className="text-lg font-semibold">{title}</DialogTitle>
+          <p className="text-sm text-muted-foreground">{message}</p>
+        </div>
+      </div>
+      <div className="flex justify-end">
+        <Button onClick={() => onOpenChange(false)}>OK</Button>
+      </div>
+    </DialogContent>
+  </Dialog>
+)
+
+interface ErrorModalProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  title: string
+  message: string
+}
+
+const ErrorModal: React.FC<ErrorModalProps> = ({
+  open,
+  onOpenChange,
+  title,
+  message,
+}) => (
+  <Dialog open={open} onOpenChange={onOpenChange}>
+    <DialogContent className="sm:max-w-md">
+      <div className="flex items-center gap-4">
+        <XCircle className="size-12 text-red-500" />
+        <div className="space-y-2">
+          <DialogTitle className="text-lg font-semibold">{title}</DialogTitle>
+          <p className="text-sm text-muted-foreground">{message}</p>
+        </div>
+      </div>
+      <div className="flex justify-end">
+        <Button variant="outline" onClick={() => onOpenChange(false)}>
+          Zavřít
+        </Button>
+      </div>
+    </DialogContent>
+  </Dialog>
+)
 
 export default function OffboardingEditPage({ params }: PageProps) {
   const router = useRouter()
-  const { toast } = useToast()
 
   const [loading, setLoading] = React.useState(true)
-  const [positions, setPositions] = React.useState<Position[]>([])
   const [row, setRow] = React.useState<OffRow | null>(null)
+
+  const [successModal, setSuccessModal] = React.useState({
+    open: false,
+    title: "",
+    message: "",
+  })
+  const [errorModal, setErrorModal] = React.useState({
+    open: false,
+    title: "",
+    message: "",
+  })
 
   const editContext: "planned" | "actual" = row?.actualEnd
     ? "actual"
     : "planned"
+
+  const showSuccess = (title: string, message: string) => {
+    setSuccessModal({ open: true, title, message })
+  }
+
+  const showError = (title: string, message: string) => {
+    setErrorModal({ open: true, title, message })
+  }
 
   React.useEffect(() => {
     let cancelled = false
@@ -91,35 +132,24 @@ export default function OffboardingEditPage({ params }: PageProps) {
       try {
         setLoading(true)
 
-        const [posRes, recRes] = await Promise.all([
-          fetch("/api/systematizace", { cache: "no-store" }),
-          fetch(`/api/odchody/${params.id}`, { cache: "no-store" }),
-        ])
+        const recRes = await fetch(`/api/odchody/${params.id}`, {
+          cache: "no-store",
+        })
 
-        const posJson = await posRes.json().catch(() => null)
         const recJson = await recRes.json().catch(() => null)
 
         if (cancelled) return
 
-        setPositions(normalizePositions(posJson))
-
         if (recRes.ok && recJson?.status === "success" && recJson.data) {
           setRow(recJson.data as OffRow)
         } else {
-          toast({
-            title: "Nenalezeno",
-            description: "Záznam odchodu se nepodařilo načíst.",
-            variant: "destructive",
-          })
+          showError("Nenalezeno", "Záznam odchodu se nepodařilo načíst.")
           router.replace("/odchody")
         }
-      } catch {
+      } catch (error) {
+        console.error("Error loading edit data:", error)
         if (!cancelled) {
-          toast({
-            title: "Chyba",
-            description: "Nepodařilo se načíst data.",
-            variant: "destructive",
-          })
+          showError("Chyba", "Nepodařilo se načíst data.")
           router.replace("/odchody")
         }
       } finally {
@@ -130,7 +160,7 @@ export default function OffboardingEditPage({ params }: PageProps) {
     return () => {
       cancelled = true
     }
-  }, [params.id, router, toast])
+  }, [params.id, router])
 
   return (
     <div className="mx-auto w-full max-w-5xl p-4">
@@ -147,39 +177,40 @@ export default function OffboardingEditPage({ params }: PageProps) {
             <p className="text-sm text-muted-foreground">Načítám…</p>
           ) : (
             <OffboardingFormUnified
-              key={`edit-${row.id}-${editContext}-${positions.length}`}
-              positions={positions}
+              key={`edit-${row.id}-${editContext}`}
               id={row.id}
               initial={{
-                titleBefore: row.titleBefore ?? "",
+                titleBefore: row.titleBefore || undefined,
                 name: row.name,
                 surname: row.surname,
-                titleAfter: row.titleAfter ?? "",
-
-                userEmail: row.userEmail ?? "",
-
-                positionNum: row.positionNum ?? "",
-                positionName: row.positionName ?? "",
-                department: row.department ?? "",
-                unitName: row.unitName ?? "",
-
-                plannedEnd: row.plannedEnd ? row.plannedEnd.slice(0, 10) : null,
-                actualEnd: row.actualEnd ? row.actualEnd.slice(0, 10) : null,
-
-                userName: row.userName ?? "",
-                personalNumber: row.personalNumber ?? "",
-                notes: row.notes ?? "",
-                status: row.status ?? null,
+                titleAfter: row.titleAfter || undefined,
+                userEmail: row.userEmail || undefined,
+                positionNum: row.positionNum || undefined,
+                positionName: row.positionName || undefined,
+                department: row.department || undefined,
+                unitName: row.unitName || undefined,
+                plannedEnd: row.plannedEnd
+                  ? row.plannedEnd.slice(0, 10)
+                  : undefined,
+                actualEnd: row.actualEnd
+                  ? row.actualEnd.slice(0, 10)
+                  : undefined,
+                personalNumber: row.personalNumber || undefined,
+                notes: row.notes || undefined,
+                status: row.status || undefined,
+                noticeFiled: row.noticeEnd ? row.noticeEnd.slice(0, 10) : "",
+                noticeEnd: row.noticeEnd
+                  ? row.noticeEnd.slice(0, 10)
+                  : undefined,
+                noticeMonths: row.noticeMonths ?? undefined,
               }}
-              defaultCreateMode="edit"
+              mode="edit"
               editContext={editContext}
-              submitLabel="Uložit změny"
               onSuccess={() => {
-                toast({
-                  title: "Uloženo",
-                  description: "Změny byly úspěšně uloženy.",
-                })
-                router.push("/odchody")
+                showSuccess("Změny uloženy", "Záznam byl úspěšně upraven.")
+                setTimeout(() => {
+                  router.push("/odchody")
+                }, 1500)
               }}
             />
           )}
@@ -200,6 +231,22 @@ export default function OffboardingEditPage({ params }: PageProps) {
             : null}
         </p>
       )}
+
+      {/* Success Modal */}
+      <SuccessModal
+        open={successModal.open}
+        onOpenChange={(open) => setSuccessModal((prev) => ({ ...prev, open }))}
+        title={successModal.title}
+        message={successModal.message}
+      />
+
+      {/* Error Modal */}
+      <ErrorModal
+        open={errorModal.open}
+        onOpenChange={(open) => setErrorModal((prev) => ({ ...prev, open }))}
+        title={errorModal.title}
+        message={errorModal.message}
+      />
     </div>
   )
 }

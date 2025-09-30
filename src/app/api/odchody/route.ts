@@ -27,6 +27,9 @@ const base = z.object({
   department: z.string().optional(),
   unitName: z.string().optional(),
   notes: z.union([z.string(), z.null()]).optional(),
+  noticeEnd: z.preprocess(emptyToUndefined, z.coerce.date()).optional(),
+  noticeMonths: z.number().optional(),
+  hasCustomDates: z.boolean().optional(),
 })
 
 const createPlannedSchema = base.extend({
@@ -94,6 +97,9 @@ export async function POST(request: NextRequest) {
 
           plannedEnd: planned,
           actualEnd: data.actualEnd,
+          noticeEnd: data.noticeEnd ?? null,
+          noticeMonths: data.noticeMonths ?? 2,
+          hasCustomDates: data.hasCustomDates ?? false,
 
           positionNum: data.positionNum,
           positionName: data.positionName ?? "",
@@ -121,6 +127,9 @@ export async function POST(request: NextRequest) {
 
         plannedEnd: d.plannedEnd,
         actualEnd: d.actualEnd ?? null,
+        noticeEnd: d.noticeEnd ?? null,
+        noticeMonths: d.noticeMonths ?? 2,
+        hasCustomDates: d.hasCustomDates ?? false,
 
         positionNum: d.positionNum,
         positionName: d.positionName ?? "",

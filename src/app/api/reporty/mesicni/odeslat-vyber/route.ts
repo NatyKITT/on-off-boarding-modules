@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
+import { auth } from "@/auth"
 import { z } from "zod"
 
 import { prisma } from "@/lib/db"
-import { recipientsFor, sendMail } from "@/lib/email"
 
 const bodySchema = z.object({
   year: z.number().int().min(2000).max(3000),
@@ -11,9 +11,18 @@ const bodySchema = z.object({
   includeOnbIds: z.array(z.number().int()).default([]),
   includeOffIds: z.array(z.number().int()).default([]),
   allowResendForAlreadySent: z.boolean().default(false),
+  customRecipients: z.array(z.string().email()).optional(), // Nové pole
 })
 
 export async function POST(req: NextRequest) {
+  const session = await auth()
+  if (!session?.user) {
+    return NextResponse.json(
+      { status: "error", message: "Nejste přihlášeni." },
+      { status: 401 }
+    )
+  }
+
   try {
     const {
       year,
@@ -22,29 +31,35 @@ export async function POST(req: NextRequest) {
       includeOnbIds,
       includeOffIds,
       allowResendForAlreadySent,
+      customRecipients,
     } = bodySchema.parse(await req.json())
 
     const [onbs, offs] = await Promise.all([
       includeOnbIds.length
         ? prisma.employeeOnboarding.findMany({
-            where: { id: { in: includeOnbIds }, deletedAt: null },
+            where: {
+              id: { in: includeOnbIds },
+              deletedAt: null,
+            },
             orderBy: { actualStart: "asc" },
           })
-        : Promise.resolve([] as const),
+        : Promise.resolve([]),
       includeOffIds.length
         ? prisma.employeeOffboarding.findMany({
-            where: { id: { in: includeOffIds }, deletedAt: null },
+            where: {
+              id: { in: includeOffIds },
+              deletedAt: null,
+            },
             orderBy: { actualEnd: "asc" },
           })
-        : Promise.resolve([] as const),
+        : Promise.resolve([]),
     ])
 
-    // už dříve odeslané (kvůli varování/skipu)
     const [sentOnb, sentOff] = await Promise.all([
       prisma.onboardingChangeLog.findMany({
         where: {
           action: "MAIL_SENT",
-          //  field: "MONTHLY_SUMMARY", // necháš-li pole, tak i přidej do modelu/seedů
+          field: "MONTHLY_SUMMARY",
           employeeId: { in: includeOnbIds },
         },
         select: { employeeId: true },
@@ -52,7 +67,7 @@ export async function POST(req: NextRequest) {
       prisma.offboardingChangeLog.findMany({
         where: {
           action: "MAIL_SENT",
-          //  field: "MONTHLY_SUMMARY",
+          field: "MONTHLY_SUMMARY",
           employeeId: { in: includeOffIds },
         },
         select: { employeeId: true },
@@ -69,56 +84,92 @@ export async function POST(req: NextRequest) {
       (r) => allowResendForAlreadySent || !sentOffIds.has(r.id)
     )
 
-    // email
-    const subject = `Měsíční přehled – ${month}.${year}${group === "planned" ? " (předpoklady)" : ""}`
-    const to = recipientsFor(group)
-    const fmt = (d?: Date | null) =>
-      d ? new Date(d).toLocaleDateString("cs-CZ") : ""
+    if (filteredOnb.length === 0 && filteredOff.length === 0) {
+      return NextResponse.json({
+        status: "success",
+        message: "Žádní kandidáti k odeslání (všichni už mají report odeslán).",
+        sent: { onboardings: 0, offboardings: 0 },
+        skipped: { onboardings: onbs.length, offboardings: offs.length },
+      })
+    }
 
-    const html = `
-      <h2 style="margin:0 0 12px 0">${subject}</h2>
-      <h3 style="margin:16px 0 8px 0">Nástupy (${filteredOnb.length})</h3>
-      <ul style="margin:0 0 16px 18px">
-        ${filteredOnb
-          .map(
-            (r) =>
-              `<li>${r.titleBefore ?? ""} ${r.name} ${r.surname} ${r.titleAfter ?? ""} — ${r.positionName} — ${
-                group === "planned" ? fmt(r.plannedStart) : fmt(r.actualStart)
-              }</li>`
-          )
-          .join("")}
-      </ul>
-      <h3 style="margin:16px 0 8px 0">Odchody (${filteredOff.length})</h3>
-      <ul style="margin:0 0 16px 18px">
-        ${filteredOff
-          .map(
-            (r) =>
-              `<li>${r.titleBefore ?? ""} ${r.name} ${r.surname} ${r.titleAfter ?? ""} — ${r.positionName} — ${
-                group === "planned" ? fmt(r.plannedEnd) : fmt(r.actualEnd)
-              }</li>`
-          )
-          .join("")}
-      </ul>
-      ${
-        allowResendForAlreadySent
-          ? `<p style="color:#777;margin:8px 0 0 0">Pozn.: některé položky již dříve odeslány – zahrnuto na žádost.</p>`
-          : ""
-      }
-    `
+    const createdBy =
+      (session.user as { id?: string; email?: string }).id ??
+      session.user.email ??
+      "unknown"
 
-    await sendMail({ to, subject, html })
+    const subject = `Měsíční přehled – ${month}/${year}${group === "planned" ? " (plánované)" : " (skutečné)"}`
 
-    // Zápis do changelogů – bez NOOP, čistě callback verze
+    const defaultRecipients = ["hr@company.com"] // TODO: konfigurovatelné
+    const recipients =
+      customRecipients && customRecipients.length > 0
+        ? customRecipients
+        : defaultRecipients
+
+    const mailJob = await prisma.mailQueue.create({
+      data: {
+        type: "MONTHLY_SUMMARY",
+        payload: {
+          year,
+          month,
+          group,
+          onboardings: filteredOnb.map((emp) => ({
+            id: emp.id,
+            name: `${emp.titleBefore || ""} ${emp.name} ${emp.surname} ${emp.titleAfter || ""}`.trim(),
+            position: emp.positionName,
+            department: emp.department,
+            date:
+              group === "planned"
+                ? emp.plannedStart?.toISOString()
+                : emp.actualStart?.toISOString(),
+          })),
+          offboardings: filteredOff.map((emp) => ({
+            id: emp.id,
+            name: `${emp.titleBefore || ""} ${emp.name} ${emp.surname} ${emp.titleAfter || ""}`.trim(),
+            position: emp.positionName,
+            department: emp.department,
+            date:
+              group === "planned"
+                ? emp.plannedEnd?.toISOString()
+                : emp.actualEnd?.toISOString(),
+          })),
+          recipients,
+          subject,
+          allowResendForAlreadySent,
+        },
+        priority: 4,
+        createdBy,
+      },
+    })
+
+    await prisma.emailHistory.create({
+      data: {
+        mailQueueId: mailJob.id,
+        emailType: "MONTHLY_SUMMARY",
+        recipients,
+        subject,
+        content: `Měsíční report obsahuje ${filteredOnb.length} nástupů a ${filteredOff.length} odchodů`,
+        status: "QUEUED",
+        createdBy,
+      },
+    })
+
     await prisma.$transaction(async (tx) => {
       if (filteredOnb.length) {
         await tx.onboardingChangeLog.createMany({
           data: filteredOnb.map((r) => ({
             employeeId: r.id,
-            userId: "system",
-            action: "MAIL_SENT",
+            userId: createdBy,
+            action: "MAIL_SENT", // ActionType enum
             field: "MONTHLY_SUMMARY",
             oldValue: null,
-            newValue: JSON.stringify({ year, month, group }),
+            newValue: JSON.stringify({
+              year,
+              month,
+              group,
+              mailJobId: mailJob.id,
+              recipients: recipients.length,
+            }),
           })),
         })
       }
@@ -126,11 +177,17 @@ export async function POST(req: NextRequest) {
         await tx.offboardingChangeLog.createMany({
           data: filteredOff.map((r) => ({
             employeeId: r.id,
-            userId: "system",
-            action: "MAIL_SENT",
+            userId: createdBy,
+            action: "MAIL_SENT", // ActionType enum
             field: "MONTHLY_SUMMARY",
             oldValue: null,
-            newValue: JSON.stringify({ year, month, group }),
+            newValue: JSON.stringify({
+              year,
+              month,
+              group,
+              mailJobId: mailJob.id,
+              recipients: recipients.length,
+            }),
           })),
         })
       }
@@ -138,6 +195,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       status: "success",
+      message: "Měsíční report byl zařazen do fronty k odeslání.",
       sent: {
         onboardings: filteredOnb.length,
         offboardings: filteredOff.length,
@@ -146,11 +204,17 @@ export async function POST(req: NextRequest) {
         onboardings: onbs.length - filteredOnb.length,
         offboardings: offs.length - filteredOff.length,
       },
+      mailJobId: mailJob.id,
+      recipients,
     })
   } catch (e) {
     console.error("POST /api/reporty/mesicni/odeslat-vyber error:", e)
     return NextResponse.json(
-      { status: "error", message: "Odeslání selhalo." },
+      {
+        status: "error",
+        message: "Odeslání selhalo.",
+        error: e instanceof Error ? e.message : "Unknown error",
+      },
       { status: 500 }
     )
   }

@@ -21,6 +21,7 @@ export interface SendEmailButtonProps {
   email?: string | null
   onDone?: () => void
   onEditRequest?: () => void
+  variant?: "default" | "outline" | "ghost"
   className?: string
 }
 
@@ -30,6 +31,7 @@ export function SendEmailButton({
   email,
   onDone,
   onEditRequest,
+  variant = "outline", // Default na outline
   className,
 }: SendEmailButtonProps) {
   const [open, setOpen] = React.useState(false)
@@ -66,8 +68,8 @@ export function SendEmailButton({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button
-          size="icon"
-          variant="ghost"
+          size="sm"
+          variant={variant}
           title="Odeslat e-mail"
           className={className}
         >

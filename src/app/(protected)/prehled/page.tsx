@@ -27,10 +27,15 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { OffboardingFormUnified } from "@/components/forms/offboarding-form"
-import { OnboardingFormUnified } from "@/components/forms/onboarding-form"
+import {
+  OffboardingFormUnified,
+  type FormValues as OffFormValues,
+} from "@/components/forms/offboarding-form"
+import {
+  OnboardingFormUnified,
+  type FormValues as OnbFormValues,
+} from "@/components/forms/onboarding-form"
 
-// ---- Mini calendar types
 type RCView = "month" | "year" | "decade" | "century"
 type RCValue = Date | Date[] | null
 type RCOnArgs = {
@@ -48,7 +53,6 @@ type RCOnArgs = {
 }
 type RCTileArgs = { date: Date; view: RCView }
 
-// ---- Localizer
 const localizer = dateFnsLocalizer({
   format: (date: Date, fmt: string) => dfFormat(date, fmt, { locale: cs }),
   parse: (dateString: string, fmt: string, ref: Date) =>
@@ -58,16 +62,20 @@ const localizer = dateFnsLocalizer({
   locales: { cs },
 })
 
-// ---- Domain
 type EventType = "plannedStart" | "actualStart" | "plannedEnd" | "actualEnd"
+
+type EntityKind = "onb" | "off" | "cluster"
+
 interface CalendarEvent {
-  id: string // "onb-12" | "off-34"
+  id: string
   title: string
   start: Date
   end: Date
   type: EventType
-  entity: "onb" | "off"
+  entity: EntityKind
   numericId: number
+  clusterItems?: CalendarEvent[]
+  hasCustomTime?: boolean
 }
 
 type OnbRow = {
@@ -83,6 +91,7 @@ type OnbRow = {
   positionName: string
   plannedStart: string
   actualStart?: string | null
+  startTime?: string | null
   userName?: string | null
   userEmail?: string | null
   personalNumber?: string | null
@@ -96,15 +105,17 @@ type OffRow = {
   name: string
   surname: string
   titleAfter?: string | null
-  email?: string | null // (kontaktní – může a nemusí být)
+  email?: string | null
   department: string
   unitName: string
   positionNum: string
   positionName: string
   plannedEnd: string
   actualEnd?: string | null
+  noticeFiled?: string | null
+  hasCustomDates?: boolean | null
   userName?: string | null
-  userEmail?: string | null // firemní
+  userEmail?: string | null
   personalNumber?: string | null
   notes?: string | null
   status?: "NEW" | "IN_PROGRESS" | "COMPLETED"
@@ -117,13 +128,7 @@ const COLORS: Record<EventType, string> = {
   actualEnd: "#ef4444",
 }
 
-type EditInitial = Partial<OnbRow & OffRow> & {
-  plannedStart?: string | null
-  actualStart?: string | null
-  plannedEnd?: string | null
-  actualEnd?: string | null
-}
-
+/* ----------------------- Utils ----------------------- */
 const isSameDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() &&
   a.getMonth() === b.getMonth() &&
@@ -134,9 +139,61 @@ const toISO = (d: Date | null) =>
     ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
     : ""
 
+const roundToHalfHourFloor = (d: Date) => {
+  const n = new Date(d)
+  const m = n.getMinutes()
+  n.setMinutes(m < 30 ? 0 : 30, 0, 0)
+  return n
+}
+
+const slotKey = (d: Date) =>
+  `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`
+
+/** převod null → undefined na stringových polích */
+const toUndef = (v?: string | null) => (v == null ? undefined : v)
+
+/** mapy initial → přesně pole formuláře (bez excess props) */
+const mapOnbInitial = (e: Partial<OnbRow>): Partial<OnbFormValues> => ({
+  titleBefore: toUndef(e.titleBefore),
+  name: toUndef(e.name),
+  surname: toUndef(e.surname),
+  titleAfter: toUndef(e.titleAfter),
+  email: toUndef(e.email),
+  positionNum: toUndef(e.positionNum) ?? "",
+  positionName: toUndef(e.positionName) ?? "",
+  department: toUndef(e.department) ?? "",
+  unitName: toUndef(e.unitName) ?? "",
+  plannedStart: e.plannedStart ? e.plannedStart.slice(0, 10) : undefined,
+  actualStart: e.actualStart ? e.actualStart.slice(0, 10) : undefined,
+  startTime: toUndef(e.startTime),
+  userEmail: toUndef(e.userEmail),
+  userName: toUndef(e.userName),
+  personalNumber: toUndef(e.personalNumber),
+  notes: toUndef(e.notes),
+})
+
+const mapOffInitial = (e: Partial<OffRow>): Partial<OffFormValues> => ({
+  titleBefore: toUndef(e.titleBefore),
+  name: toUndef(e.name) ?? "",
+  surname: toUndef(e.surname) ?? "",
+  titleAfter: toUndef(e.titleAfter),
+  personalNumber: toUndef(e.personalNumber) ?? "",
+  positionNum: toUndef(e.positionNum) ?? "",
+  positionName: toUndef(e.positionName) ?? "",
+  department: toUndef(e.department) ?? "",
+  unitName: toUndef(e.unitName) ?? "",
+  userEmail: toUndef(e.userEmail),
+  noticeFiled: e.noticeFiled ? e.noticeFiled.slice(0, 10) : undefined,
+  hasCustomDates: e.hasCustomDates ?? undefined,
+  plannedEnd: e.plannedEnd ? e.plannedEnd.slice(0, 10) : undefined,
+  actualEnd: e.actualEnd ? e.actualEnd.slice(0, 10) : undefined,
+  notes: toUndef(e.notes),
+})
+
 const dayKey = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
 
+/* ----------------------- Page ----------------------- */
 export default function DashboardPage(): JSX.Element {
   // Shared dates/views
   const [currentDate, setCurrentDate] = useState<Date>(new Date())
@@ -167,14 +224,16 @@ export default function DashboardPage(): JSX.Element {
   const [openNewOffPlanned, setOpenNewOffPlanned] = useState(false)
   const [openNewOffActual, setOpenNewOffActual] = useState(false)
 
-  // Edit modal (shared for onb/off; context planned/actual)
+  // Edit modal
   const [openEdit, setOpenEdit] = useState(false)
   const [editType, setEditType] = useState<"onb" | "off">("onb")
   const [editContext, setEditContext] = useState<"planned" | "actual">(
     "planned"
   )
   const [editId, setEditId] = useState<number | null>(null)
-  const [editInitial, setEditInitial] = useState<EditInitial | null>(null)
+  const [editInitial, setEditInitial] = useState<Partial<
+    OnbRow & OffRow
+  > | null>(null)
 
   // Confirm modals
   const [openConfirmOnb, setOpenConfirmOnb] = useState(false)
@@ -194,7 +253,7 @@ export default function DashboardPage(): JSX.Element {
   const [offEvidence, setOffEvidence] = useState("")
   const [offNotes, setOffNotes] = useState("")
 
-  // Load data
+  // First load
   useEffect(() => {
     ;(async () => {
       setLoading(true)
@@ -204,49 +263,72 @@ export default function DashboardPage(): JSX.Element {
           fetch("/api/nastupy", { cache: "no-store" }),
           fetch("/api/odchody", { cache: "no-store" }),
         ])
+
         const posJson = await posRes.json()
         setPositions(Array.isArray(posJson.data) ? posJson.data : [])
 
         const onbJson: { status: string; data?: OnbRow[] } = await onbRes.json()
         const offJson: { status: string; data?: OffRow[] } = await offRes.json()
 
-        const onbEvents: CalendarEvent[] = (onbJson.data ?? []).flatMap((e) => {
+        const onbEvents: CalendarEvent[] = (
+          onbJson.data ?? []
+        ).flatMap<CalendarEvent>((e) => {
           const full =
-            `${e.titleBefore ?? ""} ${e.name} ${e.surname} ${e.titleAfter ?? ""}`.trim()
-          const list: CalendarEvent[] = []
-          if (e.actualStart) {
-            const d = new Date(e.actualStart)
-            list.push({
-              id: `onb-${e.id}`,
-              numericId: e.id,
-              title: full,
-              start: d,
-              end: d,
-              type: "actualStart",
-              entity: "onb",
-            })
-          } else if (e.plannedStart) {
-            const d = new Date(e.plannedStart)
-            list.push({
-              id: `onb-${e.id}`,
-              numericId: e.id,
-              title: full,
-              start: d,
-              end: d,
-              type: "plannedStart",
-              entity: "onb",
-            })
+            `${e.titleBefore ?? ""} ${e.name} ${e.surname} ${e.titleAfter ?? ""}`
+              .replace(/\s+/g, " ")
+              .trim()
+          const makeDate = (iso?: string | null) => {
+            const d = iso ? new Date(iso) : new Date()
+            if (e.startTime) {
+              const [h = "0", m = "0"] = (e.startTime ?? "00:00").split(":")
+              d.setHours(parseInt(h, 10) || 0, parseInt(m, 10) || 0, 0, 0)
+            }
+            return d
           }
-          return list
+          if (e.actualStart) {
+            const d = makeDate(e.actualStart)
+            return [
+              {
+                id: `onb-${e.id}`,
+                numericId: e.id,
+                title: full,
+                start: d,
+                end: d,
+                type: "actualStart",
+                entity: "onb",
+                hasCustomTime: !!e.startTime,
+              },
+            ]
+          }
+          if (e.plannedStart) {
+            const d = makeDate(e.plannedStart)
+            return [
+              {
+                id: `onb-${e.id}`,
+                numericId: e.id,
+                title: full,
+                start: d,
+                end: d,
+                type: "plannedStart",
+                entity: "onb",
+                hasCustomTime: !!e.startTime,
+              },
+            ]
+          }
+          return []
         })
 
-        const offEvents: CalendarEvent[] = (offJson.data ?? []).flatMap((e) => {
+        const offEvents: CalendarEvent[] = (
+          offJson.data ?? []
+        ).flatMap<CalendarEvent>((e) => {
           const full =
-            `${e.titleBefore ?? ""} ${e.name} ${e.surname} ${e.titleAfter ?? ""}`.trim()
-          const list: CalendarEvent[] = []
+            `${e.titleBefore ?? ""} ${e.name} ${e.surname} ${e.titleAfter ?? ""}`
+              .replace(/\s+/g, " ")
+              .trim()
+          const out: CalendarEvent[] = []
           if (e.actualEnd) {
             const d = new Date(e.actualEnd)
-            list.push({
+            out.push({
               id: `off-${e.id}`,
               numericId: e.id,
               title: full,
@@ -257,7 +339,7 @@ export default function DashboardPage(): JSX.Element {
             })
           } else if (e.plannedEnd) {
             const d = new Date(e.plannedEnd)
-            list.push({
+            out.push({
               id: `off-${e.id}`,
               numericId: e.id,
               title: full,
@@ -267,7 +349,7 @@ export default function DashboardPage(): JSX.Element {
               entity: "off",
             })
           }
-          return list
+          return out
         })
 
         setEvents([...onbEvents, ...offEvents])
@@ -279,7 +361,6 @@ export default function DashboardPage(): JSX.Element {
     })()
   }, [])
 
-  // Outside clicks to reset selection/view
   useEffect(() => {
     const onPointerDown = (ev: PointerEvent) => {
       const target = ev.target as Node | null
@@ -298,7 +379,6 @@ export default function DashboardPage(): JSX.Element {
     return () => document.removeEventListener("pointerdown", onPointerDown)
   }, [])
 
-  // Navigation sync
   const handleBigNavigate = useCallback((date: Date) => {
     setCurrentDate(date)
     setMiniActiveStart(startOfMonth(date))
@@ -320,9 +400,148 @@ export default function DashboardPage(): JSX.Element {
     }
   }, [])
 
-  // Week/day event stacking
+  const SLOT_LEN_MIN = 30
+  const CLUSTER_THRESHOLD = 2
+
   const displayEvents = useMemo<CalendarEvent[]>(() => {
-    if (bigView === "month") return events
+    if (bigView === "month") {
+      const perDay = new Map<string, Map<EventType, CalendarEvent[]>>()
+
+      for (const ev of events) {
+        const k = dayKey(ev.start)
+        if (!perDay.has(k)) {
+          perDay.set(k, new Map())
+        }
+        const dayMap = perDay.get(k)!
+        const typeList = dayMap.get(ev.type)
+        if (typeList) typeList.push(ev)
+        else dayMap.set(ev.type, [ev])
+      }
+
+      const out: CalendarEvent[] = []
+      perDay.forEach((typeMap, day) => {
+        typeMap.forEach((items, type) => {
+          if (items.length >= 2) {
+            const sample = items[0]!
+            out.push({
+              id: `cluster-month-${day}-${type}`,
+              title: `${items.length} událostí`,
+              start: sample.start,
+              end: sample.end,
+              type: sample.type,
+              entity: "cluster",
+              numericId: -1,
+              clusterItems: items,
+            })
+          } else {
+            out.push(...items)
+          }
+        })
+      })
+
+      return out
+    }
+
+    if (bigView === "week" || bigView === "day") {
+      const perDay = new Map<string, CalendarEvent[]>()
+      for (const ev of events) {
+        const k = dayKey(ev.start)
+        const list = perDay.get(k)
+        if (list) list.push(ev)
+        else perDay.set(k, [ev])
+      }
+
+      const out: CalendarEvent[] = []
+
+      perDay.forEach((dayEvents) => {
+        const onbWithTime = dayEvents.filter(
+          (e) =>
+            e.entity === "onb" &&
+            (e.start.getHours() !== 0 || e.start.getMinutes() !== 0)
+        )
+        const onbNoTime = dayEvents.filter(
+          (e) =>
+            e.entity === "onb" &&
+            e.start.getHours() === 0 &&
+            e.start.getMinutes() === 0
+        )
+        const offs = dayEvents.filter((e) => e.entity === "off")
+
+        const slots = new Map<string, CalendarEvent[]>()
+        for (const ev of onbWithTime) {
+          const start = roundToHalfHourFloor(ev.start)
+          const key = slotKey(start)
+          const normalized: CalendarEvent = {
+            ...ev,
+            start,
+            end: addMinutes(start, SLOT_LEN_MIN),
+          }
+          const list = slots.get(key)
+          if (list) list.push(normalized)
+          else slots.set(key, [normalized])
+        }
+
+        const occupied = new Set<string>(Array.from(slots.keys()))
+        let curH = 8
+        let curM = 0
+        const assignIntoFreeSlot = (ev: CalendarEvent) => {
+          while (
+            curH < 18 &&
+            occupied.has(`${curH}:${String(curM).padStart(2, "0")}`)
+          ) {
+            curM += 30
+            if (curM >= 60) {
+              curH++
+              curM = 0
+            }
+          }
+          if (curH >= 18) {
+            curH = 8
+            curM = 0
+          }
+          const s = setMinutes(setHours(startOfDay(ev.start), curH), curM)
+          const key = slotKey(s)
+          const norm: CalendarEvent = {
+            ...ev,
+            start: s,
+            end: addMinutes(s, SLOT_LEN_MIN),
+          }
+          const list = slots.get(key)
+          if (list) list.push(norm)
+          else slots.set(key, [norm])
+          occupied.add(key)
+          curM += 30
+          if (curM >= 60) {
+            curH++
+            curM = 0
+          }
+        }
+
+        onbNoTime.forEach(assignIntoFreeSlot)
+        offs.forEach(assignIntoFreeSlot)
+
+        for (const [key, items] of slots) {
+          if (items.length >= CLUSTER_THRESHOLD) {
+            const sample = items[0]!
+            out.push({
+              id: `cluster-${dayKey(sample.start)}-${key}`,
+              title: `${items.length} události`,
+              start: sample.start,
+              end: sample.end,
+              type: sample.type,
+              entity: "cluster",
+              numericId: -1,
+              clusterItems: items,
+            })
+          } else {
+            out.push(...items)
+          }
+        }
+      })
+
+      return out
+    }
+
     const groups = new Map<string, CalendarEvent[]>()
     for (const ev of events) {
       const k = dayKey(ev.start)
@@ -330,24 +549,38 @@ export default function DashboardPage(): JSX.Element {
       if (arr) arr.push(ev)
       else groups.set(k, [ev])
     }
+
     const out: CalendarEvent[] = []
     groups.forEach((list) => {
       if (!list.length) return
       const baseDay = list[0]!.start
       const slotBase = setMinutes(setHours(startOfDay(baseDay), 8), 0)
-      const sorted = [...list].sort((a, b) =>
+
+      const hasOnbTime = (e: CalendarEvent) =>
+        e.entity === "onb" && e.start.getHours() + e.start.getMinutes() > 0
+
+      const withTimeOnb = list.filter(hasOnbTime)
+      const noTimeOnb = list.filter((e) => e.entity === "onb" && !hasOnbTime(e))
+      const noTimeOff = list.filter((e) => e.entity === "off")
+
+      const byTimeName = (a: CalendarEvent, b: CalendarEvent) =>
+        a.start.getTime() - b.start.getTime() ||
         a.title.localeCompare(b.title, "cs")
-      )
-      sorted.forEach((item, idx) => {
-        const start = addMinutes(slotBase, idx * 30)
-        const end = addMinutes(start, 25)
+
+      withTimeOnb.sort(byTimeName)
+      noTimeOnb.sort((a, b) => a.title.localeCompare(b.title, "cs"))
+      noTimeOff.sort((a, b) => a.title.localeCompare(b.title, "cs"))
+
+      const ordered = [...withTimeOnb, ...noTimeOnb, ...noTimeOff]
+      ordered.forEach((item, idx) => {
+        const start = addMinutes(slotBase, idx * SLOT_LEN_MIN)
+        const end = addMinutes(start, SLOT_LEN_MIN)
         out.push({ ...item, start, end })
       })
     })
     return out
   }, [events, bigView])
 
-  // Messages / formats
   const messages = useMemo(
     () => ({
       date: "Datum",
@@ -375,10 +608,11 @@ export default function DashboardPage(): JSX.Element {
       monthHeaderFormat: (date: Date) =>
         dfFormat(date, "LLLL yyyy", { locale: cs }),
       dayHeaderFormat: (date: Date) =>
-        dfFormat(date, "EEEE d. LLLL", { locale: cs }),
+        dfFormat(date, "EEEE d. LLLL", { locale: cs }), // vedle sebe
       dayRangeHeaderFormat: ({ start, end }: { start: Date; end: Date }) =>
         `${dfFormat(start, "d. LLLL", { locale: cs })} – ${dfFormat(end, "d. LLLL yyyy", { locale: cs })}`,
       weekdayFormat: (date: Date) => dfFormat(date, "EEEE", { locale: cs }),
+      dayFormat: (date: Date) => dfFormat(date, "EEEE d.", { locale: cs }), // sloupec ve week
       eventTimeRangeFormat: () => "",
       agendaTimeRangeFormat: () => "",
     }),
@@ -397,20 +631,23 @@ export default function DashboardPage(): JSX.Element {
     (target: "onb-planned" | "onb-actual" | "off-planned" | "off-actual") => {
       if (!slotDate) return
       setPlanOpen(false)
-      switch (target) {
-        case "onb-planned":
-          setOpenNewOnbPlanned(true)
-          break
-        case "onb-actual":
-          setOpenNewOnbActual(true)
-          break
-        case "off-planned":
-          setOpenNewOffPlanned(true)
-          break
-        case "off-actual":
-          setOpenNewOffActual(true)
-          break
-      }
+
+      setTimeout(() => {
+        switch (target) {
+          case "onb-planned":
+            setOpenNewOnbPlanned(true)
+            break
+          case "onb-actual":
+            setOpenNewOnbActual(true)
+            break
+          case "off-planned":
+            setOpenNewOffPlanned(true)
+            break
+          case "off-actual":
+            setOpenNewOffActual(true)
+            break
+        }
+      }, 100)
     },
     [slotDate]
   )
@@ -437,9 +674,18 @@ export default function DashboardPage(): JSX.Element {
     }
   }, [])
 
-  // Event click -> open proper modal (confirm/edit)
+  const [clusterOpen, setClusterOpen] = useState(false)
+  const [clusterItems, setClusterItems] = useState<CalendarEvent[] | null>(null)
+  const [clusterSlotLabel, setClusterSlotLabel] = useState("")
+
   const onSelectEvent = useCallback(
     async (ev: CalendarEvent) => {
+      if (ev.entity === "cluster" && ev.clusterItems?.length) {
+        setClusterItems(ev.clusterItems)
+        setClusterSlotLabel(dfFormat(ev.start, "d. M. yyyy"))
+        setClusterOpen(true)
+        return
+      }
       if (ev.entity === "onb") {
         const d = await fetchOnb(ev.numericId)
         if (!d) return alert("Nepodařilo se načíst záznam.")
@@ -452,19 +698,13 @@ export default function DashboardPage(): JSX.Element {
           setOnbNotes(d.notes ?? "")
           setOpenConfirmOnb(true)
         } else {
-          // actual -> edit actual
           setEditType("onb")
           setEditContext("actual")
           setEditId(d.id)
-          setEditInitial({
-            ...d,
-            plannedStart: d.plannedStart?.slice(0, 10),
-            actualStart: d.actualStart?.slice(0, 10),
-          })
+          setEditInitial(d)
           setOpenEdit(true)
         }
       } else {
-        // offboarding
         const d = await fetchOff(ev.numericId)
         if (!d) return alert("Nepodařilo se načíst záznam.")
         if (ev.type === "plannedEnd") {
@@ -476,15 +716,10 @@ export default function DashboardPage(): JSX.Element {
           setOffNotes(d.notes ?? "")
           setOpenConfirmOff(true)
         } else {
-          // actual -> edit actual
           setEditType("off")
           setEditContext("actual")
           setEditId(d.id)
-          setEditInitial({
-            ...d,
-            plannedEnd: d.plannedEnd?.slice(0, 10),
-            actualEnd: d.actualEnd?.slice(0, 10),
-          })
+          setEditInitial(d)
           setOpenEdit(true)
         }
       }
@@ -492,7 +727,100 @@ export default function DashboardPage(): JSX.Element {
     [fetchOnb, fetchOff]
   )
 
-  // Confirm handlers
+  const reloadAll = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [onbRes, offRes] = await Promise.all([
+        fetch("/api/nastupy", { cache: "no-store" }),
+        fetch("/api/odchody", { cache: "no-store" }),
+      ])
+      const onbJson: { status: string; data?: OnbRow[] } = await onbRes.json()
+      const offJson: { status: string; data?: OffRow[] } = await offRes.json()
+
+      const onbEvents: CalendarEvent[] = (
+        onbJson.data ?? []
+      ).flatMap<CalendarEvent>((e) => {
+        const full =
+          `${e.titleBefore ?? ""} ${e.name} ${e.surname} ${e.titleAfter ?? ""}`
+            .replace(/\s+/g, " ")
+            .trim()
+        const makeDate = (iso?: string | null) => {
+          const d = iso ? new Date(iso) : new Date()
+          if (e.startTime) {
+            const [h = "0", m = "0"] = (e.startTime ?? "00:00").split(":")
+            d.setHours(parseInt(h, 10) || 0, parseInt(m, 10) || 0, 0, 0)
+          }
+          return d
+        }
+        if (e.actualStart) {
+          const d = makeDate(e.actualStart)
+          return [
+            {
+              id: `onb-${e.id}`,
+              numericId: e.id,
+              title: full,
+              start: d,
+              end: d,
+              type: "actualStart",
+              entity: "onb",
+            },
+          ]
+        } else if (e.plannedStart) {
+          const d = makeDate(e.plannedStart)
+          return [
+            {
+              id: `onb-${e.id}`,
+              numericId: e.id,
+              title: full,
+              start: d,
+              end: d,
+              type: "plannedStart",
+              entity: "onb",
+            },
+          ]
+        }
+        return []
+      })
+
+      const offEvents: CalendarEvent[] = (
+        offJson.data ?? []
+      ).flatMap<CalendarEvent>((e) => {
+        const full =
+          `${e.titleBefore ?? ""} ${e.name} ${e.surname} ${e.titleAfter ?? ""}`
+            .replace(/\s+/g, " ")
+            .trim()
+        const out: CalendarEvent[] = []
+        if (e.actualEnd) {
+          const d = new Date(e.actualEnd)
+          out.push({
+            id: `off-${e.id}`,
+            numericId: e.id,
+            title: full,
+            start: d,
+            end: d,
+            type: "actualEnd",
+            entity: "off",
+          })
+        } else if (e.plannedEnd) {
+          const d = new Date(e.plannedEnd)
+          out.push({
+            id: `off-${e.id}`,
+            numericId: e.id,
+            title: full,
+            start: d,
+            end: d,
+            type: "plannedEnd",
+            entity: "off",
+          })
+        }
+        return out
+      })
+      setEvents([...onbEvents, ...offEvents])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
   const confirmOnboarding = useCallback(async () => {
     if (!confirmOnbRow) return
     if (!onbActualStart) return alert("Vyplňte datum skutečného nástupu.")
@@ -526,6 +854,7 @@ export default function DashboardPage(): JSX.Element {
     onbUserName,
     onbEvidence,
     onbNotes,
+    reloadAll,
   ])
 
   const confirmOffboarding = useCallback(async () => {
@@ -561,82 +890,8 @@ export default function DashboardPage(): JSX.Element {
     offUserName,
     offEvidence,
     offNotes,
+    reloadAll,
   ])
-
-  // Reload helper
-  const reloadAll = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [onbRes, offRes] = await Promise.all([
-        fetch("/api/nastupy", { cache: "no-store" }),
-        fetch("/api/odchody", { cache: "no-store" }),
-      ])
-      const onbJson: { status: string; data?: OnbRow[] } = await onbRes.json()
-      const offJson: { status: string; data?: OffRow[] } = await offRes.json()
-
-      const onbEvents: CalendarEvent[] = (onbJson.data ?? []).flatMap((e) => {
-        const full =
-          `${e.titleBefore ?? ""} ${e.name} ${e.surname} ${e.titleAfter ?? ""}`.trim()
-        const list: CalendarEvent[] = []
-        if (e.actualStart) {
-          const d = new Date(e.actualStart)
-          list.push({
-            id: `onb-${e.id}`,
-            numericId: e.id,
-            title: full,
-            start: d,
-            end: d,
-            type: "actualStart",
-            entity: "onb",
-          })
-        } else if (e.plannedStart) {
-          const d = new Date(e.plannedStart)
-          list.push({
-            id: `onb-${e.id}`,
-            numericId: e.id,
-            title: full,
-            start: d,
-            end: d,
-            type: "plannedStart",
-            entity: "onb",
-          })
-        }
-        return list
-      })
-      const offEvents: CalendarEvent[] = (offJson.data ?? []).flatMap((e) => {
-        const full =
-          `${e.titleBefore ?? ""} ${e.name} ${e.surname} ${e.titleAfter ?? ""}`.trim()
-        const list: CalendarEvent[] = []
-        if (e.actualEnd) {
-          const d = new Date(e.actualEnd)
-          list.push({
-            id: `off-${e.id}`,
-            numericId: e.id,
-            title: full,
-            start: d,
-            end: d,
-            type: "actualEnd",
-            entity: "off",
-          })
-        } else if (e.plannedEnd) {
-          const d = new Date(e.plannedEnd)
-          list.push({
-            id: `off-${e.id}`,
-            numericId: e.id,
-            title: full,
-            start: d,
-            end: d,
-            type: "plannedEnd",
-            entity: "off",
-          })
-        }
-        return list
-      })
-      setEvents([...onbEvents, ...offEvents])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
 
   // Mini calendar marker
   const miniTileContent = useCallback(
@@ -661,6 +916,64 @@ export default function DashboardPage(): JSX.Element {
     [events]
   )
 
+  const getEventTooltip = useCallback((event: CalendarEvent) => {
+    if (event.entity === "cluster") {
+      return event.clusterItems?.map((e) => e.title).join(", ") || ""
+    }
+
+    const typeText = {
+      plannedStart: "Předpokládaný nástup",
+      actualStart: "Skutečný nástup",
+      plannedEnd: "Plánovaný odchod",
+      actualEnd: "Skutečný odchod",
+    }[event.type]
+
+    if (event.hasCustomTime) {
+      const timeStr = dfFormat(event.start, "HH:mm", { locale: cs })
+      return `${typeText} ${event.title} (${timeStr})`
+    }
+
+    return `${typeText} ${event.title}`
+  }, [])
+
+  const EventCell = useCallback(({ event }: { event: CalendarEvent }) => {
+    let tooltipText = ""
+
+    if (event.entity === "cluster") {
+      tooltipText = event.clusterItems?.map((e) => e.title).join(", ") || ""
+      return (
+        <div
+          className="rbc-event-inner font-bold"
+          style={{ textAlign: "center" }}
+          title={tooltipText}
+        >
+          {event.title}
+        </div>
+      )
+    }
+
+    const typeText = {
+      plannedStart: "Předpokládaný nástup",
+      actualStart: "Skutečný nástup",
+      plannedEnd: "Plánovaný odchod",
+      actualEnd: "Skutečný odchod",
+    }[event.type]
+
+    if (event.hasCustomTime) {
+      const timeStr = dfFormat(event.start, "HH:mm", { locale: cs })
+      tooltipText = `${typeText}: ${event.title} (${timeStr})`
+    } else {
+      tooltipText = `${typeText}: ${event.title}`
+    }
+
+    return (
+      <div className="rbc-event-inner font-bold" title={tooltipText}>
+        {event.title}
+      </div>
+    )
+  }, [])
+
+  /* ----------------------- Render ----------------------- */
   return (
     <div className="flex h-[calc(100vh-1rem)] gap-6 overflow-hidden p-6">
       {/* LEFT: Mini calendar */}
@@ -737,19 +1050,23 @@ export default function DashboardPage(): JSX.Element {
           timeslots={2}
           min={minTime}
           max={maxTime}
+          components={{ event: EventCell }}
+          tooltipAccessor={null}
           eventPropGetter={(event) => {
             const bg = COLORS[event.type]
             return {
               style: {
                 backgroundColor: bg,
                 color: "white",
-                borderRadius: 10,
+                borderRadius: 12,
                 border: "none",
-                padding: "2px 8px",
+                padding: "6px 8px",
                 boxShadow: "0 1px 2px rgba(0,0,0,0.12)",
                 whiteSpace: "normal",
+                overflowWrap: "anywhere",
                 lineHeight: 1.15,
-                fontSize: 12,
+                fontSize: bigView === "month" ? 12 : 13,
+                fontWeight: 700,
               },
             }
           }}
@@ -757,10 +1074,10 @@ export default function DashboardPage(): JSX.Element {
         />
       </section>
 
-      {/* Slot planning modal (choose create type) */}
+      {/* OPRAVA 2: Slot planning modal s vyšším z-index */}
       {planOpen && (
         <div
-          className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
+          className="fixed inset-0 z-[200] grid place-items-center bg-black/40 p-4"
           onClick={() => setPlanOpen(false)}
         >
           <div
@@ -769,7 +1086,12 @@ export default function DashboardPage(): JSX.Element {
           >
             <h3 className="mb-2 text-lg font-semibold">Naplánovat akci</h3>
             <p className="mb-4 text-sm text-neutral-600">
-              Datum: <strong>{toISO(slotDate)}</strong>
+              Datum:{" "}
+              <strong>
+                {dfFormat(slotDate ?? new Date(), "d. M. yyyy", { locale: cs })}
+              </strong>
+              , čas:{" "}
+              <strong>{dfFormat(slotDate ?? new Date(), "HH:mm")}</strong>
             </p>
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -813,78 +1135,104 @@ export default function DashboardPage(): JSX.Element {
         </div>
       )}
 
-      {/* Create modals (onb/off planned/actual) */}
+      {/* Create modals */}
       <Dialog open={openNewOnbPlanned} onOpenChange={setOpenNewOnbPlanned}>
-        <DialogContent className="max-h-[90vh] max-w-4xl overflow-hidden p-0">
-          <DialogTitle className="px-6 pt-6">
-            Nový předpokládaný nástup
-          </DialogTitle>
-          <div className="max-h-[80vh] overflow-y-auto p-6">
-            <OnboardingFormUnified
-              positions={positions}
-              defaultCreateMode="create-planned"
-              prefillDate={toISO(slotDate)}
-              onSuccess={async () => {
-                setOpenNewOnbPlanned(false)
-                await reloadAll()
-              }}
-            />
-          </div>
+        <DialogContent className="z-[300] max-w-4xl p-6">
+          <DialogTitle className="mb-4">Nový předpokládaný nástup</DialogTitle>
+          <OnboardingFormUnified
+            positions={positions}
+            mode="create-planned"
+            initial={{
+              plannedStart: toISO(slotDate) || undefined,
+              startTime: slotDate ? dfFormat(slotDate, "HH:mm") : undefined,
+            }}
+            onSuccess={async () => {
+              setOpenNewOnbPlanned(false)
+              await reloadAll()
+            }}
+          />
         </DialogContent>
       </Dialog>
 
       <Dialog open={openNewOnbActual} onOpenChange={setOpenNewOnbActual}>
-        <DialogContent className="max-h-[90vh] max-w-4xl overflow-hidden p-0">
-          <DialogTitle className="px-6 pt-6">Nový skutečný nástup</DialogTitle>
-          <div className="max-h-[80vh] overflow-y-auto p-6">
-            <OnboardingFormUnified
-              positions={positions}
-              defaultCreateMode="create-actual"
-              prefillDate={toISO(slotDate)}
-              onSuccess={async () => {
-                setOpenNewOnbActual(false)
-                await reloadAll()
-              }}
-            />
-          </div>
+        <DialogContent className="z-[300] max-w-4xl p-6">
+          <DialogTitle className="mb-4">Nový skutečný nástup</DialogTitle>
+          <OnboardingFormUnified
+            positions={positions}
+            mode="create-actual"
+            initial={{
+              actualStart: toISO(slotDate) || undefined,
+              startTime: slotDate ? dfFormat(slotDate, "HH:mm") : undefined,
+            }}
+            onSuccess={async () => {
+              setOpenNewOnbActual(false)
+              await reloadAll()
+            }}
+          />
         </DialogContent>
       </Dialog>
 
       <Dialog open={openNewOffPlanned} onOpenChange={setOpenNewOffPlanned}>
-        <DialogContent className="max-h-[90vh] max-w-4xl overflow-hidden p-0">
-          <DialogTitle className="px-6 pt-6">Nový plánovaný odchod</DialogTitle>
-          <div className="max-h-[80vh] overflow-y-auto p-6">
-            <OffboardingFormUnified
-              positions={positions}
-              defaultCreateMode="create-planned"
-              prefillDate={toISO(slotDate)}
-              onSuccess={async () => {
-                setOpenNewOffPlanned(false)
-                await reloadAll()
-              }}
-            />
-          </div>
+        <DialogContent className="z-[300] max-w-4xl p-6">
+          <DialogTitle className="mb-4">Nový plánovaný odchod</DialogTitle>
+          <OffboardingFormUnified
+            key={`new-off-planned-${toISO(slotDate) || "no-date"}`}
+            mode="create-planned"
+            prefillDate={toISO(slotDate) || undefined}
+            initial={{ hasCustomDates: false }}
+            onSuccess={async () => {
+              setOpenNewOffPlanned(false)
+              await reloadAll()
+            }}
+          />
         </DialogContent>
       </Dialog>
 
       <Dialog open={openNewOffActual} onOpenChange={setOpenNewOffActual}>
-        <DialogContent className="max-h-[90vh] max-w-4xl overflow-hidden p-0">
-          <DialogTitle className="px-6 pt-6">Nový skutečný odchod</DialogTitle>
-          <div className="max-h-[80vh] overflow-y-auto p-6">
-            <OffboardingFormUnified
-              positions={positions}
-              defaultCreateMode="create-actual"
-              prefillDate={toISO(slotDate)}
-              onSuccess={async () => {
-                setOpenNewOffActual(false)
-                await reloadAll()
-              }}
-            />
+        <DialogContent className="z-[300] max-w-4xl p-6">
+          <DialogTitle className="mb-4">Nový skutečný odchod</DialogTitle>
+          <OffboardingFormUnified
+            key={`new-off-actual-${toISO(slotDate) || "no-date"}`}
+            mode="create-actual"
+            prefillDate={toISO(slotDate) || undefined}
+            initial={{ hasCustomDates: false }}
+            onSuccess={async () => {
+              setOpenNewOffActual(false)
+              await reloadAll()
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={clusterOpen} onOpenChange={setClusterOpen}>
+        <DialogContent className="z-[300] max-w-md">
+          <DialogTitle>Události ve slotu {clusterSlotLabel}</DialogTitle>
+          <div className="mt-2 space-y-2">
+            {clusterItems?.map((e) => (
+              <button
+                key={e.id}
+                className="w-full rounded-md border px-3 py-2 text-left hover:bg-muted"
+                onClick={() => {
+                  setClusterOpen(false)
+                  void onSelectEvent({ ...e, entity: e.entity })
+                }}
+                title={getEventTooltip(e)}
+              >
+                <div className="font-semibold">{e.title}</div>
+                <div className="text-xs opacity-80">
+                  {dfFormat(e.start, "HH:mm")} •{" "}
+                  {e.type === "plannedStart" && "Předpokládaný nástup"}
+                  {e.type === "actualStart" && "Skutečný nástup"}
+                  {e.type === "plannedEnd" && "Plánovaný odchod"}
+                  {e.type === "actualEnd" && "Skutečný odchod"}
+                </div>
+              </button>
+            ))}
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Confirm ONB (Nastoupil) */}
+      {/* Confirm ONB */}
       <Dialog
         open={openConfirmOnb}
         onOpenChange={(o) => {
@@ -899,7 +1247,7 @@ export default function DashboardPage(): JSX.Element {
           }
         }}
       >
-        <DialogContent className="max-w-3xl overflow-hidden p-0">
+        <DialogContent className="z-[300] max-w-3xl overflow-hidden p-0">
           <DialogTitle className="px-6 pt-6">
             Potvrdit skutečný nástup
           </DialogTitle>
@@ -911,7 +1259,9 @@ export default function DashboardPage(): JSX.Element {
                   <div className="grid gap-y-1 md:grid-cols-2">
                     <div>
                       <strong>Jméno:</strong>{" "}
-                      {`${confirmOnbRow.titleBefore ?? ""} ${confirmOnbRow.name} ${confirmOnbRow.surname} ${confirmOnbRow.titleAfter ?? ""}`}
+                      {`${confirmOnbRow.titleBefore ?? ""} ${confirmOnbRow.name} ${confirmOnbRow.surname} ${confirmOnbRow.titleAfter ?? ""}`
+                        .replace(/\s+/g, " ")
+                        .trim()}
                     </div>
                     <div>
                       <strong>Pozice:</strong> {confirmOnbRow.positionName}
@@ -932,17 +1282,10 @@ export default function DashboardPage(): JSX.Element {
                       variant="outline"
                       onClick={() => {
                         setOpenConfirmOnb(false)
-                        // otevři edit PLANNED (stejný modal jako „Upravit“)
                         setEditType("onb")
                         setEditContext("planned")
                         setEditId(confirmOnbRow.id)
-                        setEditInitial({
-                          ...confirmOnbRow,
-                          plannedStart: confirmOnbRow.plannedStart?.slice(
-                            0,
-                            10
-                          ),
-                        })
+                        setEditInitial(confirmOnbRow)
                         setOpenEdit(true)
                       }}
                     >
@@ -1018,7 +1361,7 @@ export default function DashboardPage(): JSX.Element {
         </DialogContent>
       </Dialog>
 
-      {/* Confirm OFF (Odešel) */}
+      {/* Confirm OFF */}
       <Dialog
         open={openConfirmOff}
         onOpenChange={(o) => {
@@ -1033,7 +1376,7 @@ export default function DashboardPage(): JSX.Element {
           }
         }}
       >
-        <DialogContent className="max-w-3xl overflow-hidden p-0">
+        <DialogContent className="z-[300] max-w-3xl overflow-hidden p-0">
           <DialogTitle className="px-6 pt-6">
             Potvrdit skutečný odchod
           </DialogTitle>
@@ -1045,7 +1388,9 @@ export default function DashboardPage(): JSX.Element {
                   <div className="grid gap-y-1 md:grid-cols-2">
                     <div>
                       <strong>Jméno:</strong>{" "}
-                      {`${confirmOffRow.titleBefore ?? ""} ${confirmOffRow.name} ${confirmOffRow.surname} ${confirmOffRow.titleAfter ?? ""}`}
+                      {`${confirmOffRow.titleBefore ?? ""} ${confirmOffRow.name} ${confirmOffRow.surname} ${confirmOffRow.titleAfter ?? ""}`
+                        .replace(/\s+/g, " ")
+                        .trim()}
                     </div>
                     <div>
                       <strong>Pozice:</strong> {confirmOffRow.positionName}
@@ -1069,10 +1414,7 @@ export default function DashboardPage(): JSX.Element {
                         setEditType("off")
                         setEditContext("planned")
                         setEditId(confirmOffRow.id)
-                        setEditInitial({
-                          ...confirmOffRow,
-                          plannedEnd: confirmOffRow.plannedEnd?.slice(0, 10),
-                        })
+                        setEditInitial(confirmOffRow)
                         setOpenEdit(true)
                       }}
                     >
@@ -1147,7 +1489,8 @@ export default function DashboardPage(): JSX.Element {
           </div>
         </DialogContent>
       </Dialog>
-      {/* Edit (společný pro nástupy/odchody) */}
+
+      {/* Edit (shared) */}
       <Dialog
         open={openEdit}
         onOpenChange={(o) => {
@@ -1158,21 +1501,18 @@ export default function DashboardPage(): JSX.Element {
           }
         }}
       >
-        <DialogContent className="max-h-[90vh] max-w-4xl overflow-hidden p-0">
-          <DialogTitle className="px-6 pt-6">Upravit záznam</DialogTitle>
+        <DialogContent className="z-[300] max-w-4xl p-6">
+          <DialogTitle className="mb-4">Upravit záznam</DialogTitle>
           {editId != null && editInitial && (
-            <div className="max-h-[80vh] overflow-y-auto p-6">
+            <div>
               {editType === "onb" ? (
                 <OnboardingFormUnified
+                  key={`edit-onb-${editId}-${editContext}`}
                   positions={positions}
                   id={editId}
-                  initial={{
-                    ...editInitial,
-                    plannedStart: editInitial?.plannedStart?.slice(0, 10),
-                    actualStart: editInitial?.actualStart?.slice(0, 10),
-                  }}
-                  defaultCreateMode="edit"
-                  editContext={editContext} // "planned" | "actual"
+                  mode="edit"
+                  editContext={editContext}
+                  initial={mapOnbInitial(editInitial as Partial<OnbRow>)}
                   onSuccess={async () => {
                     setOpenEdit(false)
                     setEditId(null)
@@ -1182,15 +1522,11 @@ export default function DashboardPage(): JSX.Element {
                 />
               ) : (
                 <OffboardingFormUnified
-                  positions={positions}
+                  key={`edit-off-${editId}-${editContext}`}
                   id={editId}
-                  initial={{
-                    ...editInitial,
-                    plannedEnd: editInitial?.plannedEnd?.slice(0, 10),
-                    actualEnd: editInitial?.actualEnd?.slice(0, 10),
-                  }}
-                  defaultCreateMode="edit"
-                  editContext={editContext} // "planned" | "actual" – předej, pokud tvůj formulář podporuje
+                  mode="edit"
+                  editContext={editContext}
+                  initial={mapOffInitial(editInitial as Partial<OffRow>)}
                   onSuccess={async () => {
                     setOpenEdit(false)
                     setEditId(null)
@@ -1204,7 +1540,7 @@ export default function DashboardPage(): JSX.Element {
         </DialogContent>
       </Dialog>
 
-      {/* Globální styly pro oba kalendáře */}
+      {/* Globální styly */}
       <style jsx global>{`
         /* MINI calendar skin */
         .react-calendar {
@@ -1286,19 +1622,31 @@ export default function DashboardPage(): JSX.Element {
           border-radius: 14px;
           overflow: hidden;
         }
+        .rbc-month-view .rbc-event,
+        .rbc-month-view .rbc-event-content {
+          white-space: normal !important;
+          overflow-wrap: anywhere !important;
+          line-height: 1.15;
+          font-size: 11.5px;
+        }
         .rbc-month-row + .rbc-month-row {
           border-top: 1px dashed rgba(0, 0, 0, 0.06);
         }
         .rbc-header {
-          padding: 6px 0;
+          padding: 8px 0;
           font-weight: 600;
           background: transparent;
+          text-align: center;
+        }
+        .rbc-month-view {
+          font-size: 14px;
+        }
+        .rbc-off-range-bg {
+          background: rgba(0, 0, 0, 0.025);
         }
         .rbc-event {
           border: none;
-        }
-        .rbc-event-label {
-          display: none;
+          margin: 2px 0;
         }
         .rbc-event-content {
           white-space: normal;
@@ -1306,6 +1654,16 @@ export default function DashboardPage(): JSX.Element {
         .rbc-selected-cell,
         .rbc-slot-selection {
           background-color: transparent !important;
+        }
+        .rbc-day-slot .rbc-event,
+        .rbc-time-view .rbc-event {
+          padding: 8px 10px !important;
+          min-height: 36px;
+        }
+        .rbc-event-inner {
+          display: block;
+          font-weight: 700;
+          line-height: 1.25;
         }
       `}</style>
     </div>

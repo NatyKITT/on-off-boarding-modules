@@ -1,0 +1,33 @@
+version: "3.9"
+
+services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: onoff_db
+      MYSQL_USER: onoff_user
+      MYSQL_PASSWORD: strongpassword
+      MYSQL_ROOT_PASSWORD: rootpassword
+    ports:
+      - "3306:3306"   # volitelné, pro lokální přístup z hosta
+    volumes:
+      - dbdata:/var/lib/mysql
+    command: ["--default-authentication-plugin=caching_sha2_password"]
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      - db
+    ports:
+      - "3000:3000"
+    command: >
+      sh -c "
+        pnpm prisma migrate deploy &&
+        pnpm start
+      "
+
+volumes:
+  dbdata:

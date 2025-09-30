@@ -19,7 +19,7 @@ type OnbRow = {
   surname: string
   titleAfter?: string | null
 
-  email?: string | null // kontaktní (nepovinný)
+  email?: string | null
 
   positionNum: string | null
   positionName: string
@@ -152,32 +152,32 @@ export default function OnboardingEditPage({ params }: PageProps) {
               positions={positions}
               id={row.id}
               initial={{
-                titleBefore: row.titleBefore ?? "",
+                titleBefore: row.titleBefore || undefined,
                 name: row.name,
                 surname: row.surname,
-                titleAfter: row.titleAfter ?? "",
+                titleAfter: row.titleAfter || undefined,
 
-                email: row.email ?? "",
+                email: row.email || undefined,
 
-                positionNum: row.positionNum ?? "",
-                positionName: row.positionName ?? "",
-                department: row.department ?? "",
-                unitName: row.unitName ?? "",
+                positionNum: row.positionNum || undefined,
+                positionName: row.positionName || undefined,
+                department: row.department || undefined,
+                unitName: row.unitName || undefined,
 
                 plannedStart: row.plannedStart
                   ? row.plannedStart.slice(0, 10)
-                  : null,
+                  : undefined,
                 actualStart: row.actualStart
                   ? row.actualStart.slice(0, 10)
-                  : null,
+                  : undefined,
 
-                userName: row.userName ?? "",
-                userEmail: row.userEmail ?? "",
-                personalNumber: row.personalNumber ?? "",
-                notes: row.notes ?? "",
-                status: row.status ?? null,
+                userName: row.userName || undefined,
+                userEmail: row.userEmail || undefined,
+                personalNumber: row.personalNumber || undefined,
+                notes: row.notes || undefined,
+                status: row.status || undefined,
               }}
-              defaultCreateMode="edit"
+              mode="edit"
               editContext={editContext}
               onSuccess={() => {
                 toast({

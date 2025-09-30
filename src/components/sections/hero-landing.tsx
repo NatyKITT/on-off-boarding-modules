@@ -9,7 +9,7 @@ export default function HeroLanding() {
   return (
     <section className="space-y-6 py-12 sm:py-20 lg:py-24">
       <div className="container flex max-w-screen-md flex-col items-center gap-5 text-center">
-        <h1 className="text-balance font-satoshi text-[36px] font-black leading-[1.2] tracking-tight sm:text-5xl md:text-6xl md:leading-[1.15]">
+        <h1 className="font-satoshi text-balance text-[36px] font-black leading-[1.2] tracking-tight sm:text-5xl md:text-6xl md:leading-[1.15]">
           Jednoduchý onboarding systém{" "}
           <span className="bg-gradient-to-r from-green-600 via-blue-600 to-cyan-500 bg-clip-text text-transparent">
             pro váš tým

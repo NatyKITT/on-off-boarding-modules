@@ -5,7 +5,19 @@ import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { format } from "date-fns"
 import { cs } from "date-fns/locale"
-import { History as HistoryIcon } from "lucide-react"
+import {
+  AlertTriangle,
+  CalendarDays,
+  Check,
+  CheckCircle,
+  Clock,
+  Edit,
+  History as HistoryIcon,
+  Mail,
+  Trash2,
+  User,
+  XCircle,
+} from "lucide-react"
 
 import { type Position } from "@/types/position"
 
@@ -15,15 +27,21 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { ProbationProgressBar } from "@/components/ui/probation-progress-bar"
 import {
   Table,
   TableBody,
@@ -33,90 +51,230 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { ConfirmDeleteButton } from "@/components/common/confirm-delete-button"
 import { MonthlySummaryButton } from "@/components/emails/monthly-summary-button"
 import { SendEmailButton } from "@/components/emails/send-email-button"
-import { OnboardingFormUnified } from "@/components/forms/onboarding-form"
-import { DeletedPlannedDialog } from "@/components/history/deleted-planned-dialog"
+import {
+  FormValues,
+  OnboardingFormUnified,
+} from "@/components/forms/onboarding-form"
+import { DeletedRecordsDialog } from "@/components/history/deleted-records-dialog"
 import { HistoryDialog } from "@/components/history/history-dialog"
 
-type Employee = {
+/* ------------------------------ types ------------------------------- */
+type Arrival = {
   id: number
-  titleBefore?: string | null
   name: string
   surname: string
+  titleBefore?: string | null
   titleAfter?: string | null
-  email?: string | null
+  email: string
   department: string
   unitName: string
-  positionNum: string
   positionName: string
+  positionNum?: string | null
   plannedStart: string
   actualStart?: string | null
-  userName?: string | null
+  startTime?: string | null
+  probationEnd?: string | null
   userEmail?: string | null
+  userName?: string | null
   personalNumber?: string | null
   notes?: string | null
   status?: "NEW" | "IN_PROGRESS" | "COMPLETED"
 }
 
+function arrivalToInitial(d: Arrival): Partial<FormValues> {
+  return {
+    titleBefore: d.titleBefore ?? "",
+    name: d.name ?? "",
+    surname: d.surname ?? "",
+    titleAfter: d.titleAfter ?? "",
+    email: d.email ?? "",
+    positionNum: d.positionNum ?? "",
+    positionName: d.positionName ?? "",
+    department: d.department ?? "",
+    unitName: d.unitName ?? "",
+    plannedStart: d.plannedStart ? d.plannedStart.slice(0, 10) : "",
+    actualStart: d.actualStart ? d.actualStart.slice(0, 10) : "",
+    startTime: d.startTime ?? "",
+    probationEnd: d.probationEnd ? d.probationEnd.slice(0, 10) : "",
+    userEmail: d.userEmail ?? "",
+    userName: d.userName ?? "",
+    personalNumber: d.personalNumber ?? "",
+    notes: d.notes ?? "",
+    status: d.status,
+  }
+}
+
+/* ----------------------- Modal Components ----------------------- */
+interface SuccessModalProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  title: string
+  message: string
+  icon?: React.ReactNode
+}
+
+const SuccessModal: React.FC<SuccessModalProps> = ({
+  open,
+  onOpenChange,
+  title,
+  message,
+  icon,
+}) => (
+  <Dialog open={open} onOpenChange={onOpenChange}>
+    <DialogContent className="sm:max-w-md">
+      <div className="flex items-center gap-4">
+        {icon || <CheckCircle className="size-12 text-green-500" />}
+        <div className="space-y-2">
+          <DialogTitle className="text-lg font-semibold">{title}</DialogTitle>
+          <p className="text-sm text-muted-foreground">{message}</p>
+        </div>
+      </div>
+      <div className="flex justify-end">
+        <Button onClick={() => onOpenChange(false)}>OK</Button>
+      </div>
+    </DialogContent>
+  </Dialog>
+)
+
+interface ErrorModalProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  title: string
+  message: string
+}
+
+const ErrorModal: React.FC<ErrorModalProps> = ({
+  open,
+  onOpenChange,
+  title,
+  message,
+}) => (
+  <Dialog open={open} onOpenChange={onOpenChange}>
+    <DialogContent className="sm:max-w-md">
+      <div className="flex items-center gap-4">
+        <XCircle className="size-12 text-red-500" />
+        <div className="space-y-2">
+          <DialogTitle className="text-lg font-semibold">{title}</DialogTitle>
+          <p className="text-sm text-muted-foreground">{message}</p>
+        </div>
+      </div>
+      <div className="flex justify-end">
+        <Button variant="outline" onClick={() => onOpenChange(false)}>
+          Zavřít
+        </Button>
+      </div>
+    </DialogContent>
+  </Dialog>
+)
+
+/* ----------------------- Position Normalizer ----------------------- */
+type RawPos =
+  | {
+      id?: string | number
+      num?: unknown
+      name?: unknown
+      dept_name?: unknown
+      unit_name?: unknown
+    }
+  | null
+  | undefined
+
+function isRawPos(v: unknown): v is RawPos {
+  if (v == null || typeof v !== "object") return false
+  const o = v as Record<string, unknown>
+  return "num" in o
+}
+
+function toPosition(v: RawPos): Position | null {
+  if (!v || typeof v !== "object") return null
+  const o = v as Record<string, unknown>
+  const num = o.num
+  if (typeof num !== "string" && typeof num !== "number") return null
+  const id = o.id
+  const name = o.name
+  const dept = o.dept_name
+  const unit = o.unit_name
+  return {
+    id: String(id ?? num),
+    num: String(num),
+    name: typeof name === "string" ? name : "",
+    dept_name: typeof dept === "string" ? dept : "",
+    unit_name: typeof unit === "string" ? unit : "",
+  }
+}
+
+function normalizePositions(payload: unknown): Position[] {
+  const arr = Array.isArray((payload as { data?: unknown })?.data)
+    ? (payload as { data: unknown[] }).data
+    : Array.isArray(payload)
+      ? (payload as unknown[])
+      : []
+
+  return arr
+    .filter(isRawPos)
+    .map(toPosition)
+    .filter((x): x is Position => Boolean(x))
+}
+
+/* ----------------------------- Main Page ----------------------------- */
 export default function OnboardingPage() {
   const sp = useSearchParams()
 
-  const [planned, setPlanned] = useState<Employee[]>([])
-  const [actual, setActual] = useState<Employee[]>([])
+  const [planned, setPlanned] = useState<Arrival[]>([])
+  const [actual, setActual] = useState<Arrival[]>([])
   const [positions, setPositions] = useState<Position[]>([])
   const [loading, setLoading] = useState(true)
 
-  // nové záznamy
+  // dialogy pro formuláře
   const [openNewPlanned, setOpenNewPlanned] = useState(false)
   const [openNewActual, setOpenNewActual] = useState(false)
-
-  // potvrzení „Nastoupil“
-  const [openConfirm, setOpenConfirm] = useState(false)
-  const [confirmRow, setConfirmRow] = useState<Employee | null>(null)
-  const [confirmActualStart, setConfirmActualStart] = useState("")
-  const [confirmUserEmail, setConfirmUserEmail] = useState("")
-  const [confirmUserName, setConfirmUserName] = useState("")
-  const [confirmEvidence, setConfirmEvidence] = useState("")
-  const [confirmNotes, setConfirmNotes] = useState("")
-
-  // editace
   const [openEdit, setOpenEdit] = useState(false)
-  const [editId, setEditId] = useState<number | null>(null)
-  const [editInitial, setEditInitial] = useState<Partial<Employee> | null>(null)
-  const [editContext, setEditContext] = useState<"planned" | "actual">(
-    "planned"
-  )
-  const [editLoading, setEditLoading] = useState(false)
+  const [editData, setEditData] = useState<{
+    id: number
+    initial: Partial<FormValues>
+    context: "planned" | "actual"
+  } | null>(null)
+
+  // dialogy pro akce
+  const [confirmDialog, setConfirmDialog] = useState<{
+    open: boolean
+    arrival: Arrival | null
+    loading: boolean
+  }>({ open: false, arrival: null, loading: false })
+
+  const [deleteDialog, setDeleteDialog] = useState<{
+    open: boolean
+    arrival: Arrival | null
+    loading: boolean
+  }>({ open: false, arrival: null, loading: false })
+
+  // Stavy pro modaly
+  const [successModal, setSuccessModal] = useState({
+    open: false,
+    title: "",
+    message: "",
+  })
+  const [errorModal, setErrorModal] = useState({
+    open: false,
+    title: "",
+    message: "",
+  })
 
   const qpMode = sp.get("new") as "create-planned" | "create-actual" | null
   const qpDate = sp.get("date") || undefined
 
-  function normalizePositionsPayload(payload: unknown): Position[] {
-    if (!Array.isArray(payload)) return []
-    return payload
-      .map((p) => {
-        const o = p as Partial<Position> & {
-          id?: string | number
-          num?: unknown
-          name?: unknown
-          dept_name?: unknown
-          unit_name?: unknown
-        }
-        if (!o?.num) return null
-        return {
-          id: String(o.id ?? o.num),
-          num: String(o.num),
-          name: typeof o.name === "string" ? o.name : "",
-          dept_name: typeof o.dept_name === "string" ? o.dept_name : "",
-          unit_name: typeof o.unit_name === "string" ? o.unit_name : "",
-        } as Position
-      })
-      .filter(Boolean) as Position[]
+  // Callbacks pro modaly
+  const showSuccess = (title: string, message: string) => {
+    setSuccessModal({ open: true, title, message })
   }
 
-  async function reload() {
+  const showError = (title: string, message: string) => {
+    setErrorModal({ open: true, title, message })
+  }
+
+  const reload = React.useCallback(async () => {
     setLoading(true)
     try {
       const [posRes, onbRes] = await Promise.all([
@@ -126,31 +284,29 @@ export default function OnboardingPage() {
       const posJson = await posRes.json().catch(() => null)
       const onbJson = await onbRes.json().catch(() => null)
 
-      setPositions(
-        normalizePositionsPayload(
-          Array.isArray(posJson?.data) ? posJson.data : []
-        )
-      )
+      setPositions(normalizePositions(posJson))
 
       if (onbJson?.status === "success" && Array.isArray(onbJson.data)) {
-        const rows = onbJson.data as Employee[]
+        const rows = onbJson.data as Arrival[]
         setPlanned(rows.filter((e) => !e.actualStart))
-        setActual(rows.filter((e) => !!e.actualStart))
+        setActual(rows.filter((e) => e.actualStart))
       } else {
         setPlanned([])
         setActual([])
       }
-    } catch {
+    } catch (error) {
+      console.error("Error loading data:", error)
+      showError("Chyba při načítání", "Nepodařilo se načíst data")
       setPlanned([])
       setActual([])
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
     void reload()
-  }, [])
+  }, [reload])
 
   useEffect(() => {
     if (!qpMode) return
@@ -164,9 +320,10 @@ export default function OnboardingPage() {
     }
     window.addEventListener("onboarding:deleted", handler)
     return () => window.removeEventListener("onboarding:deleted", handler)
-  }, [])
+  }, [reload])
 
   const thisMonth = format(new Date(), "yyyy-MM")
+
   const defaultPlannedMonth = useMemo(() => {
     const has = planned.find((e) => e.plannedStart?.slice(0, 7) === thisMonth)
     return (
@@ -176,13 +333,18 @@ export default function OnboardingPage() {
     )
   }, [planned, thisMonth])
 
+  const plannedMonths = useMemo(
+    () => Array.from(new Set(planned.map((e) => e.plannedStart.slice(0, 7)))),
+    [planned]
+  )
+
   const actualMonths = useMemo(
     () =>
       Array.from(
         new Set(
           actual
-            .filter((e) => !!e.actualStart)
-            .map((e) => e.actualStart!.slice(0, 7))
+            .map((e) => e.actualStart?.slice(0, 7))
+            .filter(Boolean) as string[]
         )
       ),
     [actual]
@@ -193,620 +355,958 @@ export default function OnboardingPage() {
     return has?.actualStart?.slice(0, 7) ?? actualMonths[0] ?? ""
   }, [actual, actualMonths, thisMonth])
 
-  function openConfirmFromPlanned(e: Employee) {
-    setConfirmRow(e)
-    setConfirmActualStart(e.plannedStart?.slice(0, 10) ?? "")
-    setConfirmUserEmail(e.userEmail ?? "")
-    setConfirmUserName(e.userName ?? "")
-    setConfirmEvidence(e.personalNumber ?? "")
-    setConfirmNotes(e.notes ?? "")
-    setOpenConfirm(true)
+  // editace záznamu
+  async function handleEdit(arrival: Arrival, context: "planned" | "actual") {
+    try {
+      const response = await fetch(`/api/nastupy/${arrival.id}`, {
+        cache: "no-store",
+      })
+
+      if (!response.ok) {
+        throw new Error("Nepodařilo se načíst data záznamu")
+      }
+
+      const json = await response.json()
+      const currentData = json?.data as Arrival
+      if (!currentData) throw new Error("Nepodařilo se načíst data záznamu")
+
+      setEditData({
+        id: arrival.id,
+        initial: arrivalToInitial(currentData),
+        context,
+      })
+      setOpenEdit(true)
+    } catch (error) {
+      console.error("Error loading edit data:", error)
+      showError("Chyba při načítání", "Nepodařilo se načíst data pro editaci")
+    }
   }
 
-  async function confirmActual() {
-    if (!confirmRow) return
-    if (!confirmActualStart) return alert("Vyplňte datum skutečného nástupu.")
+  // potvrzení nástupu (přesun z plánovaného do skutečného)
+  async function handleConfirmArrival(actualStartDate: string) {
+    const arrival = confirmDialog.arrival
+    if (!arrival) return
+
+    setConfirmDialog((prev) => ({ ...prev, loading: true }))
+
     try {
-      const res = await fetch(`/api/nastupy/${confirmRow.id}`, {
+      const response = await fetch(`/api/nastupy/${arrival.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          actualStart: confirmActualStart,
-          userEmail: confirmUserEmail.trim() || null,
-          userName: confirmUserName.trim() || null,
-          personalNumber: confirmEvidence.trim() || null,
-          notes: confirmNotes.trim() || null,
+          actualStart: actualStartDate,
           status: "COMPLETED",
         }),
       })
-      if (!res.ok) {
-        const j = await res.json().catch(() => null)
-        throw new Error(j?.message ?? "Potvrzení nástupu se nezdařilo.")
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null)
+        throw new Error(errorData?.message ?? "Potvrzení se nezdařilo")
       }
-      setOpenConfirm(false)
-      setConfirmRow(null)
-      setConfirmActualStart("")
-      setConfirmUserEmail("")
-      setConfirmUserName("")
-      setConfirmEvidence("")
-      setConfirmNotes("")
+
+      setConfirmDialog({ open: false, arrival: null, loading: false })
+      showSuccess(
+        "Nástup potvrzen",
+        `Skutečný nástup pro ${arrival.name} ${arrival.surname} byl úspěšně zaznamenán a přesunut do skutečných nástupů.`
+      )
       await reload()
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "Potvrzení nástupu se nezdařilo.")
+    } catch (error) {
+      console.error("Error confirming arrival:", error)
+      showError(
+        "Chyba při potvrzování",
+        error instanceof Error ? error.message : "Potvrzení se nezdařilo"
+      )
+      setConfirmDialog((prev) => ({ ...prev, loading: false }))
     }
   }
 
-  async function openEditDialog(id: number, ctx: "planned" | "actual") {
-    setEditContext(ctx)
-    setEditLoading(true)
-    setEditId(id)
+  // smazání záznamu
+  async function handleDelete() {
+    const arrival = deleteDialog.arrival
+    if (!arrival) return
 
-    if (!positions.length) {
-      try {
-        const posRes = await fetch("/api/systematizace", { cache: "no-store" })
-        const posJson = await posRes.json().catch(() => null)
-        setPositions(
-          normalizePositionsPayload(
-            Array.isArray(posJson?.data) ? posJson.data : []
-          )
-        )
-      } catch {}
-    }
+    setDeleteDialog((prev) => ({ ...prev, loading: true }))
 
     try {
-      const res = await fetch(`/api/nastupy/${id}`, { cache: "no-store" })
-      if (!res.ok) throw new Error("Fetch failed")
-      const json = await res.json()
-      const d = json?.data as Employee
-      setEditInitial({
-        titleBefore: d.titleBefore ?? "",
-        name: d.name,
-        surname: d.surname,
-        titleAfter: d.titleAfter ?? "",
-        email: d.email ?? "",
-        positionNum: d.positionNum,
-        positionName: d.positionName,
-        department: d.department,
-        unitName: d.unitName,
-        plannedStart: d.plannedStart?.slice(0, 10),
-        actualStart: d.actualStart?.slice(0, 10),
-        userName: d.userName ?? "",
-        userEmail: d.userEmail ?? "",
-        personalNumber: d.personalNumber ?? "",
-        notes: d.notes ?? "",
-        status: d.status,
+      const response = await fetch(`/api/nastupy/${arrival.id}`, {
+        method: "DELETE",
       })
-      setOpenEdit(true)
-    } catch {
-      setEditInitial(null)
-      alert("Nepodařilo se načíst data záznamu.")
-    } finally {
-      setEditLoading(false)
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null)
+        throw new Error(errorData?.message ?? "Smazání se nezdařilo")
+      }
+
+      setDeleteDialog({ open: false, arrival: null, loading: false })
+      showSuccess(
+        "Záznam smazán",
+        `Záznam "${arrival.name} ${arrival.surname}" byl úspěšně smazán`
+      )
+
+      window.dispatchEvent(new CustomEvent("onboarding:deleted"))
+      await reload()
+    } catch (error) {
+      console.error("Error deleting arrival:", error)
+      showError(
+        "Chyba při mazání",
+        error instanceof Error ? error.message : "Smazání se nezdařilo"
+      )
+      setDeleteDialog((prev) => ({ ...prev, loading: false }))
     }
+  }
+
+  // sort podle data + času
+  const sortByStart = (a: Arrival, b: Arrival) => {
+    const dateA = new Date(a.actualStart || a.plannedStart).getTime()
+    const dateB = new Date(b.actualStart || b.plannedStart).getTime()
+    if (dateA !== dateB) return dateA - dateB
+    const tA = a.startTime || "00:00"
+    const tB = b.startTime || "00:00"
+    return tA.localeCompare(tB)
+  }
+
+  // řádek tabulky
+  const ArrivalTableRow = ({
+    arrival,
+    variant,
+  }: {
+    arrival: Arrival
+    variant: "planned" | "actual"
+  }) => {
+    const startLabelDate =
+      variant === "planned"
+        ? arrival.plannedStart
+        : arrival.actualStart || arrival.plannedStart
+
+    const showStartTime =
+      Boolean(arrival.startTime) && arrival.startTime!.trim() !== ""
+
+    const hasProbation =
+      Boolean(arrival.probationEnd) &&
+      Boolean(variant === "actual" ? startLabelDate : arrival.plannedStart)
+
+    const fullName = [
+      arrival.titleBefore,
+      arrival.name,
+      arrival.surname,
+      arrival.titleAfter,
+    ]
+      .filter(Boolean)
+      .join(" ")
+
+    return (
+      <TableRow key={arrival.id}>
+        {/* Zaměstnanec */}
+        <TableCell className="w-[220px]">
+          <div className="flex items-start gap-2">
+            <User className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+            <div className="min-w-0">
+              <div className="text-sm font-medium leading-tight">
+                {fullName}
+              </div>
+              {arrival.personalNumber && (
+                <div className="font-mono text-xs text-muted-foreground">
+                  #{arrival.personalNumber}
+                </div>
+              )}
+            </div>
+          </div>
+        </TableCell>
+
+        {/* Pozice */}
+        <TableCell className="w-[220px]">
+          <div className="flex flex-col">
+            <span
+              className="truncate text-sm font-medium"
+              title={arrival.positionName}
+            >
+              {arrival.positionName}
+            </span>
+            <span className="font-mono text-xs text-muted-foreground">
+              {arrival.positionNum}
+            </span>
+          </div>
+        </TableCell>
+
+        {/* Odbor / Oddělení */}
+        <TableCell className="w-[220px]">
+          <div className="flex flex-col">
+            <span
+              className="truncate text-sm font-medium"
+              title={arrival.department}
+            >
+              {arrival.department}
+            </span>
+            <span
+              className="truncate text-xs text-muted-foreground"
+              title={arrival.unitName}
+            >
+              {arrival.unitName}
+            </span>
+          </div>
+        </TableCell>
+
+        {/* (Plánovaný/Skutečný) nástup + čas */}
+        <TableCell className="w-[160px]">
+          <div className="flex items-center gap-2">
+            <Clock className="size-4 text-muted-foreground" />
+            <div className="flex flex-col">
+              <span className="text-sm">
+                {format(new Date(startLabelDate), "d.M.yyyy")}
+              </span>
+              {showStartTime && (
+                <span className="font-mono text-xs text-muted-foreground">
+                  {arrival.startTime}
+                </span>
+              )}
+            </div>
+          </div>
+        </TableCell>
+
+        {/* Zkušební doba */}
+        <TableCell className="w-[220px]">
+          {hasProbation ? (
+            <ProbationProgressBar
+              startDate={
+                variant === "planned"
+                  ? arrival.plannedStart
+                  : (arrival.actualStart as string)
+              }
+              probationEndDate={arrival.probationEnd as string}
+              variant={variant === "planned" ? "planned" : "actual"}
+              size="sm"
+              label="Zkušební doba"
+            />
+          ) : (
+            <span className="text-xs text-muted-foreground">–</span>
+          )}
+        </TableCell>
+
+        {/* Kontakt */}
+        <TableCell className="w-[220px]">
+          <div className="flex items-center gap-1">
+            <Mail className="size-4 text-muted-foreground" />
+            <span className="truncate text-sm" title={arrival.email}>
+              {arrival.email}
+            </span>
+          </div>
+        </TableCell>
+
+        {/* Firemní údaje */}
+        <TableCell className="w-[220px]">
+          <div className="flex flex-col space-y-0.5">
+            {arrival.personalNumber && (
+              <span className="font-mono text-xs text-muted-foreground">
+                #{arrival.personalNumber}
+              </span>
+            )}
+            {arrival.userName && (
+              <span className="truncate text-xs" title={arrival.userName}>
+                {arrival.userName}
+              </span>
+            )}
+            {arrival.userEmail && (
+              <span
+                className="truncate text-xs text-muted-foreground"
+                title={arrival.userEmail}
+              >
+                {arrival.userEmail}
+              </span>
+            )}
+          </div>
+        </TableCell>
+
+        {/* Akce */}
+        <TableCell className="w-[200px] text-right">
+          <div className="flex justify-end gap-1">
+            <HistoryDialog
+              id={arrival.id}
+              kind="onboarding"
+              trigger={
+                <Button
+                  size="sm"
+                  variant="outline"
+                  title="Historie změn"
+                  className="inline-flex items-center justify-center gap-1"
+                >
+                  <HistoryIcon className="size-4" />
+                  <span className="sr-only">Historie</span>
+                </Button>
+              }
+            />
+
+            <SendEmailButton
+              id={arrival.id}
+              kind="onboarding"
+              email={arrival.email}
+              onDone={() => void reload()}
+              onEditRequest={() => handleEdit(arrival, variant)}
+              className="inline-flex items-center justify-center gap-1"
+            />
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => handleEdit(arrival, variant)}
+              title="Upravit záznam"
+              className="inline-flex items-center justify-center gap-1"
+            >
+              <Edit className="size-4" />
+              <span className="hidden pt-1.5 sm:inline">Upravit</span>
+            </Button>
+
+            {variant === "planned" && (
+              <Button
+                size="sm"
+                variant="default"
+                onClick={() =>
+                  setConfirmDialog({
+                    open: true,
+                    arrival,
+                    loading: false,
+                  })
+                }
+                title="Potvrdit skutečný nástup"
+                className="inline-flex items-center justify-center gap-1 bg-green-600 text-white hover:bg-green-700"
+              >
+                <Check className="size-4" />
+                <span className="hidden pt-1.5 sm:inline">Nastoupil</span>
+              </Button>
+            )}
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                setDeleteDialog({
+                  open: true,
+                  arrival,
+                  loading: false,
+                })
+              }
+              title="Smazat záznam"
+              className="inline-flex items-center justify-center gap-1 text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950"
+            >
+              <Trash2 className="size-4" />
+              <span className="sr-only">Smazat</span>
+            </Button>
+          </div>
+        </TableCell>
+      </TableRow>
+    )
   }
 
   return (
     <div className="p-4">
-      <h1 className="mb-4 text-2xl font-bold">Nástupy zaměstnanců</h1>
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold tracking-tight">
+          Nástupy zaměstnanců
+        </h1>
+        <p className="text-muted-foreground">
+          Správa plánovaných a skutečných nástupů zaměstnanců
+        </p>
+      </div>
 
-      <Tabs defaultValue="planned">
-        <TabsList>
-          <TabsTrigger value="planned">Předpokládané</TabsTrigger>
-          <TabsTrigger value="actual">Skutečné</TabsTrigger>
+      <Tabs
+        defaultValue="planned"
+        className="flex h-[calc(100vh-160px)] flex-col"
+      >
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="planned" className="flex items-center gap-2">
+            <CalendarDays className="size-4" />
+            Plánované
+          </TabsTrigger>
+          <TabsTrigger value="actual" className="flex items-center gap-2">
+            <User className="size-4" />
+            Skutečné
+          </TabsTrigger>
         </TabsList>
 
-        {/* ---------- PLANNED ---------- */}
-        <TabsContent value="planned">
-          <div className="mb-4 flex items-center justify-between">
-            {/* Přidat planned */}
-            <Dialog open={openNewPlanned} onOpenChange={setOpenNewPlanned}>
-              <DialogTrigger asChild>
-                <Button onClick={() => setOpenNewPlanned(true)}>
-                  Přidat předpokládaný nástup
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-h-[90vh] max-w-4xl overflow-hidden p-0">
-                <DialogTitle className="px-6 pt-6">
-                  Nový předpokládaný nástup
-                </DialogTitle>
-                <div className="max-h-[80vh] overflow-y-auto p-6">
-                  <OnboardingFormUnified
-                    positions={positions}
-                    prefillDate={qpDate}
-                    defaultCreateMode="create-planned"
-                    onSuccess={async () => {
-                      setOpenNewPlanned(false)
-                      await reload()
-                    }}
-                  />
-                </div>
-              </DialogContent>
-            </Dialog>
-
-            {/* Smazané planned – nahoře vpravo */}
-            <DeletedPlannedDialog
-              kind="onboarding"
-              title="Smazané předpokládané nástupy"
-              successEvent="onboarding:deleted"
-              restoreButtonClassName="bg-blue-600 text-white hover:bg-blue-700"
-              triggerLabel="Smazané záznamy"
-            />
-          </div>
-
-          {loading ? (
-            <p className="text-sm text-muted-foreground">Načítám…</p>
-          ) : planned.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Žádné předpokládané nástupy.
-            </p>
-          ) : (
-            <Accordion
-              type="multiple"
-              defaultValue={defaultPlannedMonth ? [defaultPlannedMonth] : []}
-            >
-              {[...new Set(planned.map((e) => e.plannedStart.slice(0, 7)))].map(
-                (month) => (
-                  <AccordionItem
-                    key={month}
-                    value={month}
-                    className="rounded-xl border"
-                    style={{ backgroundColor: "#3b82f61A" }}
-                  >
-                    <AccordionTrigger className="rounded-xl px-4 data-[state=open]:bg-white/60 dark:data-[state=open]:bg-black/20">
-                      {format(new Date(`${month}-01`), "LLLL yyyy", {
-                        locale: cs,
-                      })}
-                    </AccordionTrigger>
-                    <AccordionContent>
-                      <Card className="border-muted shadow-sm">
-                        <CardContent className="px-0">
-                          <Table>
-                            <TableHeader className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-                              <TableRow>
-                                <TableHead>Jméno</TableHead>
-                                <TableHead>Pozice</TableHead>
-                                <TableHead>Odbor</TableHead>
-                                <TableHead>Oddělení</TableHead>
-                                <TableHead>Předpokládaný nástup</TableHead>
-                                <TableHead>E-mail</TableHead>
-                                <TableHead className="text-right">
-                                  Akce
-                                </TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {planned
-                                .filter((e) => e.plannedStart.startsWith(month))
-                                .map((e) => (
-                                  <TableRow key={e.id}>
-                                    <TableCell className="max-w-[360px] whitespace-normal break-words">
-                                      <span className="font-medium">
-                                        {[
-                                          e.titleBefore,
-                                          e.name,
-                                          e.surname,
-                                          e.titleAfter,
-                                        ]
-                                          .filter(Boolean)
-                                          .join(" ")}
-                                      </span>
-                                    </TableCell>
-                                    <TableCell>{e.positionName}</TableCell>
-                                    <TableCell>{e.department}</TableCell>
-                                    <TableCell>{e.unitName}</TableCell>
-                                    <TableCell>
-                                      {format(
-                                        new Date(e.plannedStart),
-                                        "d.M.yyyy"
-                                      )}
-                                    </TableCell>
-                                    <TableCell>{e.email ?? "–"}</TableCell>
-                                    <TableCell className="flex justify-end gap-2">
-                                      <HistoryDialog
-                                        id={e.id}
-                                        kind="onboarding"
-                                        trigger={
-                                          <Button
-                                            size="sm"
-                                            variant="ghost"
-                                            title="Historie změn"
-                                            aria-label="Historie změn"
-                                          >
-                                            <HistoryIcon
-                                              className="mr-1 size-4"
-                                              aria-hidden="true"
-                                            />
-                                          </Button>
-                                        }
-                                      />
-                                      <div
-                                        className="flex items-center gap-1"
-                                        title="Poslat e-mail"
-                                        aria-label="Poslat e-mail"
-                                      >
-                                        <SendEmailButton
-                                          id={e.id}
-                                          kind="onboarding"
-                                          email={e.email ?? undefined}
-                                          onDone={() => void reload()}
-                                          onEditRequest={() =>
-                                            void openEditDialog(e.id, "planned")
-                                          }
-                                          className="p-0"
-                                        />
-                                      </div>
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        title="Upravit záznam"
-                                        onClick={() =>
-                                          void openEditDialog(e.id, "planned")
-                                        }
-                                      >
-                                        Upravit
-                                      </Button>
-                                      <Button
-                                        size="sm"
-                                        title="Potvrdit skutečný nástup"
-                                        className="bg-emerald-600 text-white hover:bg-emerald-700"
-                                        onClick={() =>
-                                          openConfirmFromPlanned(e)
-                                        }
-                                      >
-                                        Nastoupil
-                                      </Button>
-
-                                      <div
-                                        title="Smazat záznam"
-                                        aria-label="Smazat záznam"
-                                      >
-                                        <ConfirmDeleteButton
-                                          size="sm"
-                                          endpoint={`/api/nastupy/${e.id}`}
-                                          successEvent="onboarding:deleted"
-                                        />
-                                      </div>
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                            </TableBody>
-                          </Table>
-                        </CardContent>
-                      </Card>
-                    </AccordionContent>
-                  </AccordionItem>
-                )
-              )}
-            </Accordion>
-          )}
-        </TabsContent>
-
-        {/* ---------- ACTUAL ---------- */}
-        <TabsContent value="actual">
-          <div className="mb-4 flex items-center justify-between">
-            <Dialog open={openNewActual} onOpenChange={setOpenNewActual}>
-              <DialogTrigger asChild>
-                <Button onClick={() => setOpenNewActual(true)}>
-                  Přidat skutečný nástup
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-h-[90vh] max-w-4xl overflow-hidden p-0">
-                <DialogTitle className="px-6 pt-6">Skutečný nástup</DialogTitle>
-                <div className="max-h-[80vh] overflow-y-auto p-6">
-                  <OnboardingFormUnified
-                    positions={positions}
-                    defaultCreateMode="create-actual"
-                    prefillDate={qpDate}
-                    onSuccess={async () => {
-                      setOpenNewActual(false)
-                      await reload()
-                    }}
-                  />
-                </div>
-              </DialogContent>
-            </Dialog>
-
-            <MonthlySummaryButton
-              candidateMonths={useMemo(() => actualMonths, [actualMonths])}
-              defaultMonth={defaultActualMonth || thisMonth}
-              label="Zaslat měsíční report"
-              className="bg-amber-600 text-white hover:bg-amber-700"
-              onDone={() => void reload()}
-            />
-          </div>
-
-          {loading ? (
-            <p className="text-sm text-muted-foreground">Načítám…</p>
-          ) : actual.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Žádné skutečné nástupy.
-            </p>
-          ) : (
-            <Accordion
-              type="multiple"
-              defaultValue={defaultActualMonth ? [defaultActualMonth] : []}
-            >
-              {actualMonths.map((month) => (
-                <AccordionItem
-                  key={month}
-                  value={month}
-                  className="rounded-xl border"
-                  style={{ backgroundColor: "#22c55e1A" }}
-                >
-                  <AccordionTrigger className="rounded-xl px-4 data-[state=open]:bg-white/60 dark:data-[state=open]:bg-black/20">
-                    {format(new Date(`${month}-01`), "LLLL yyyy", {
-                      locale: cs,
-                    })}
-                  </AccordionTrigger>
-                  <AccordionContent>
-                    <Card className="border-muted shadow-sm">
-                      <CardContent className="px-0">
-                        <Table>
-                          <TableHeader className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-                            <TableRow>
-                              <TableHead>Jméno</TableHead>
-                              <TableHead>Pozice</TableHead>
-                              <TableHead>Odbor</TableHead>
-                              <TableHead>Oddělení</TableHead>
-                              <TableHead>Skutečný nástup</TableHead>
-                              <TableHead>Uživatelské jméno</TableHead>
-                              <TableHead>Firemní účet</TableHead>
-                              <TableHead className="text-right">Akce</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {actual
-                              .filter((e) => e.actualStart?.startsWith(month))
-                              .map((e) => (
-                                <TableRow key={e.id}>
-                                  <TableCell className="max-w-[360px] whitespace-normal break-words">
-                                    <span className="font-medium">
-                                      {[
-                                        e.titleBefore,
-                                        e.name,
-                                        e.surname,
-                                        e.titleAfter,
-                                      ]
-                                        .filter(Boolean)
-                                        .join(" ")}
-                                    </span>
-                                  </TableCell>
-                                  <TableCell>{e.positionName}</TableCell>
-                                  <TableCell>{e.department}</TableCell>
-                                  <TableCell>{e.unitName}</TableCell>
-                                  <TableCell>
-                                    {format(
-                                      new Date(e.actualStart!),
-                                      "d.M.yyyy"
-                                    )}
-                                  </TableCell>
-                                  <TableCell>{e.userName ?? "–"}</TableCell>
-                                  <TableCell>{e.userEmail ?? "–"}</TableCell>
-                                  <TableCell className="flex justify-end gap-2">
-                                    <HistoryDialog
-                                      id={e.id}
-                                      kind="onboarding"
-                                      trigger={
-                                        <Button
-                                          size="sm"
-                                          variant="ghost"
-                                          title="Historie změn"
-                                          aria-label="Historie změn"
-                                        >
-                                          <HistoryIcon
-                                            className="mr-1 size-4"
-                                            aria-hidden="true"
-                                          />
-                                        </Button>
-                                      }
-                                    />
-                                    <div
-                                      className="flex items-center gap-1"
-                                      title="Poslat e-mail"
-                                      aria-label="Poslat e-mail"
-                                    >
-                                      <SendEmailButton
-                                        id={e.id}
-                                        kind="onboarding"
-                                        email={e.userEmail ?? undefined}
-                                        onDone={() => void reload()}
-                                        onEditRequest={() =>
-                                          void openEditDialog(e.id, "actual")
-                                        }
-                                        className="p-0"
-                                      />
-                                    </div>
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      title="Upravit záznam"
-                                      onClick={() =>
-                                        void openEditDialog(e.id, "actual")
-                                      }
-                                    >
-                                      Upravit
-                                    </Button>
-                                  </TableCell>
-                                </TableRow>
-                              ))}
-                          </TableBody>
-                        </Table>
-                      </CardContent>
-                    </Card>
-                  </AccordionContent>
-                </AccordionItem>
-              ))}
-            </Accordion>
-          )}
-        </TabsContent>
-      </Tabs>
-
-      {/* ---------- Potvrdit skutečný nástup ---------- */}
-      <Dialog
-        open={openConfirm}
-        onOpenChange={(o) => {
-          setOpenConfirm(o)
-          if (!o) {
-            setConfirmRow(null)
-            setConfirmActualStart("")
-            setConfirmUserEmail("")
-            setConfirmUserName("")
-            setConfirmEvidence("")
-            setConfirmNotes("")
-          }
-        }}
-      >
-        <DialogContent className="max-w-3xl overflow-hidden p-0">
-          <DialogTitle className="px-6 pt-6">
-            Potvrdit skutečný nástup
-          </DialogTitle>
-          <div className="max-h-[80vh] space-y-4 overflow-y-auto p-6">
-            {confirmRow && (
-              <>
-                <div className="rounded-lg border bg-muted/30 p-3 text-sm">
-                  <p className="mb-2 font-medium">Souhlasí ostatní údaje?</p>
-                  <div className="grid gap-y-1 md:grid-cols-2">
-                    <div>
-                      <strong>Jméno:</strong>{" "}
-                      {[
-                        confirmRow.titleBefore,
-                        confirmRow.name,
-                        confirmRow.surname,
-                        confirmRow.titleAfter,
-                      ]
-                        .filter(Boolean)
-                        .join(" ")}
-                    </div>
-                    <div>
-                      <strong>Pozice:</strong> {confirmRow.positionName}
-                    </div>
-                    <div>
-                      <strong>Odbor:</strong> {confirmRow.department}
-                    </div>
-                    <div>
-                      <strong>Oddělení:</strong> {confirmRow.unitName}
-                    </div>
-                    <div className="md:col-span-2">
-                      <strong>Poznámka:</strong> {confirmRow.notes ?? "–"}
-                    </div>
-                  </div>
-                  <div className="mt-3">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      title="Otevřít formulář k úpravě"
-                      onClick={() => {
-                        setOpenConfirm(false)
-                        void openEditDialog(confirmRow.id, "planned")
+        <div className="min-h-0 flex-1 overflow-auto">
+          {/* ---------- PLANNED TAB ---------- */}
+          <TabsContent value="planned" className="mt-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <Dialog open={openNewPlanned} onOpenChange={setOpenNewPlanned}>
+                <DialogTrigger asChild>
+                  <Button className="inline-flex items-center justify-center gap-2">
+                    Přidat plánovaný nástup
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
+                  <DialogTitle className="px-6 pt-6">
+                    Nový plánovaný nástup
+                  </DialogTitle>
+                  <div className="p-6">
+                    <OnboardingFormUnified
+                      positions={positions}
+                      mode="create-planned"
+                      prefillDate={qpDate}
+                      onSuccess={async () => {
+                        setOpenNewPlanned(false)
+                        showSuccess(
+                          "Záznam vytvořen",
+                          "Plánovaný nástup byl úspěšně přidán."
+                        )
+                        await reload()
                       }}
-                    >
-                      Nesouhlasí – upravit formulář
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="rounded-lg border bg-blue-50 p-3 text-sm dark:bg-blue-900/20">
-                  <label className="mb-1 block font-medium">
-                    Datum skutečného nástupu
-                  </label>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <Input
-                      type="date"
-                      value={confirmActualStart}
-                      onChange={(e) => setConfirmActualStart(e.target.value)}
-                      className="max-w-[220px]"
                     />
                   </div>
+                </DialogContent>
+              </Dialog>
 
-                  <div className="mt-3 grid gap-3 md:grid-cols-2">
-                    <div>
-                      <label className="mb-1 block text-xs font-medium">
-                        Firemní e-mail
-                      </label>
-                      <Input
-                        type="email"
-                        value={confirmUserEmail}
-                        onChange={(e) => setConfirmUserEmail(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-medium">
-                        Uživatelské jméno
-                      </label>
-                      <Input
-                        value={confirmUserName}
-                        onChange={(e) => setConfirmUserName(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-medium">
-                        Osobní číslo
-                      </label>
-                      <Input
-                        value={confirmEvidence}
-                        onChange={(e) => setConfirmEvidence(e.target.value)}
-                      />
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="mb-1 block text-xs font-medium">
-                        Poznámka
-                      </label>
-                      <Input
-                        value={confirmNotes}
-                        onChange={(e) => setConfirmNotes(e.target.value)}
-                      />
-                    </div>
-                  </div>
+              {/* 🔵 Jedno tlačítko: smazané záznamy (plánované i skutečné) */}
+              <DeletedRecordsDialog
+                kind="onboarding"
+                title="Smazané nástupy"
+                triggerLabel="Smazané záznamy"
+                successEvent="onboarding:deleted"
+                onRestore={() => void reload()}
+              />
+            </div>
 
-                  <div className="mt-4">
-                    <Button
-                      size="sm"
-                      className="bg-emerald-600 text-white hover:bg-emerald-700"
-                      title="Potvrdit skutečný nástup"
-                      onClick={() => void confirmActual()}
-                      disabled={!confirmActualStart}
+            {loading ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
+                <span className="ml-2 text-muted-foreground">
+                  Načítám data...
+                </span>
+              </div>
+            ) : planned.length === 0 ? (
+              <Card>
+                <CardContent className="flex flex-col items-center justify-center py-12">
+                  <CalendarDays className="mb-4 size-12 text-muted-foreground" />
+                  <p className="text-lg font-medium text-muted-foreground">
+                    Žádné plánované nástupy
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Přidejte první záznam pomocí tlačítka výše
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-4">
+                <Accordion
+                  type="multiple"
+                  defaultValue={
+                    defaultPlannedMonth ? [defaultPlannedMonth] : []
+                  }
+                >
+                  {[
+                    ...new Set(planned.map((e) => e.plannedStart.slice(0, 7))),
+                  ].map((month) => (
+                    <AccordionItem
+                      key={month}
+                      value={month}
+                      className="rounded-xl border"
+                      style={{ backgroundColor: "#3b82f61A" }}
                     >
-                      Souhlasí, potvrdit nástup
-                    </Button>
+                      <AccordionTrigger className="rounded-xl px-4 hover:no-underline data-[state=open]:bg-white/60 dark:data-[state=open]:bg-black/20">
+                        <div className="flex items-center gap-3">
+                          <CalendarDays className="size-5" />
+                          <span className="font-semibold">
+                            {format(new Date(`${month}-01`), "LLLL yyyy", {
+                              locale: cs,
+                            })}
+                          </span>
+                          <Badge variant="secondary" className="ml-auto">
+                            {
+                              planned.filter((e) =>
+                                e.plannedStart.startsWith(month)
+                              ).length
+                            }
+                          </Badge>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <Card className="border-muted shadow-sm">
+                          <CardContent className="px-0">
+                            <div className="overflow-x-auto">
+                              <Table className="min-w-[1600px]">
+                                <TableHeader className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+                                  <TableRow>
+                                    <TableHead className="w-[240px]">
+                                      Zaměstnanec
+                                    </TableHead>
+                                    <TableHead className="w-[180px]">
+                                      Pozice
+                                    </TableHead>
+                                    <TableHead className="w-[150px]">
+                                      Odbor / Oddělení
+                                    </TableHead>
+                                    <TableHead className="w-[120px]">
+                                      Plánovaný nástup
+                                    </TableHead>
+                                    <TableHead className="w-[100px]">
+                                      Zkušební doba
+                                    </TableHead>
+                                    <TableHead className="w-[140px]">
+                                      Kontakt
+                                    </TableHead>
+                                    <TableHead className="w-[140px]">
+                                      Firemní údaje
+                                    </TableHead>
+                                    <TableHead className="w-[200px]">
+                                      Akce
+                                    </TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {planned
+                                    .filter((e) =>
+                                      e.plannedStart.startsWith(month)
+                                    )
+                                    .sort(sortByStart)
+                                    .map((e) => (
+                                      <ArrivalTableRow
+                                        key={e.id}
+                                        arrival={e}
+                                        variant="planned"
+                                      />
+                                    ))}
+                                </TableBody>
+                              </Table>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </AccordionContent>
+                    </AccordionItem>
+                  ))}
+                </Accordion>
+              </div>
+            )}
+
+            {/* 🔵 Report plánovaných – dole vpravo (modré) */}
+            <div className="mt-6 flex justify-end">
+              <MonthlySummaryButton
+                candidateMonths={useMemo(() => plannedMonths, [plannedMonths])}
+                defaultMonth={defaultPlannedMonth || thisMonth}
+                label="Zaslat měsíční report"
+                className="inline-flex items-center justify-center gap-2 bg-blue-600 text-white hover:bg-blue-700"
+                onDone={() => {
+                  showSuccess(
+                    "Report odeslán",
+                    "Měsíční report plánovaných nástupů byl odeslán."
+                  )
+                  void reload()
+                }}
+              />
+            </div>
+          </TabsContent>
+
+          {/* ---------- ACTUAL TAB ---------- */}
+          <TabsContent value="actual" className="mt-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <Dialog open={openNewActual} onOpenChange={setOpenNewActual}>
+                <DialogTrigger asChild>
+                  <Button className="inline-flex items-center justify-center gap-2">
+                    Přidat skutečný nástup
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
+                  <DialogTitle className="px-6 pt-6">
+                    Skutečný nástup
+                  </DialogTitle>
+                  <div className="p-6">
+                    <OnboardingFormUnified
+                      positions={positions}
+                      mode="create-actual"
+                      prefillDate={qpDate}
+                      onSuccess={async () => {
+                        setOpenNewActual(false)
+                        showSuccess(
+                          "Záznam vytvořen",
+                          "Skutečný nástup byl úspěšně přidán."
+                        )
+                        await reload()
+                      }}
+                    />
                   </div>
+                </DialogContent>
+              </Dialog>
+
+              {/* 🟢 Stejné jediné tlačítko: smazané záznamy (plánované i skutečné) */}
+              <DeletedRecordsDialog
+                kind="onboarding"
+                title="Smazané nástupy"
+                triggerLabel="Smazané záznamy"
+                successEvent="onboarding:deleted"
+                onRestore={() => void reload()}
+              />
+            </div>
+
+            {loading ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
+                <span className="ml-2 text-muted-foreground">
+                  Načítám data...
+                </span>
+              </div>
+            ) : actual.length === 0 ? (
+              <Card>
+                <CardContent className="flex flex-col items-center justify-center py-12">
+                  <User className="mb-4 size-12 text-muted-foreground" />
+                  <p className="text-lg font-medium text-muted-foreground">
+                    Žádné skutečné nástupy
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Přidejte první záznam pomocí tlačítka výše
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-4">
+                <Accordion
+                  type="multiple"
+                  defaultValue={defaultActualMonth ? [defaultActualMonth] : []}
+                >
+                  {actualMonths.map((month) => (
+                    <AccordionItem
+                      key={month}
+                      value={month}
+                      className="rounded-xl border"
+                      style={{ backgroundColor: "#22c55e1A" }}
+                    >
+                      <AccordionTrigger className="rounded-xl px-4 hover:no-underline data-[state=open]:bg-white/60 dark:data-[state=open]:bg-black/20">
+                        <div className="flex items-center gap-3">
+                          <User className="size-5" />
+                          <span className="font-semibold">
+                            {format(new Date(`${month}-01`), "LLLL yyyy", {
+                              locale: cs,
+                            })}
+                          </span>
+                          <Badge variant="secondary" className="ml-auto">
+                            {
+                              actual.filter((e) =>
+                                e.actualStart?.startsWith(month)
+                              ).length
+                            }
+                          </Badge>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <Card className="border-muted shadow-sm">
+                          <CardContent className="px-0">
+                            <div className="overflow-x-auto">
+                              <Table className="min-w-[1600px]">
+                                <TableHeader className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+                                  <TableRow>
+                                    <TableHead className="w-[240px]">
+                                      Zaměstnanec
+                                    </TableHead>
+                                    <TableHead className="w-[180px]">
+                                      Pozice
+                                    </TableHead>
+                                    <TableHead className="w-[150px]">
+                                      Odbor / Oddělení
+                                    </TableHead>
+                                    <TableHead className="w-[120px]">
+                                      Skutečný nástup
+                                    </TableHead>
+                                    <TableHead className="w-[100px]">
+                                      Zkušební doba
+                                    </TableHead>
+                                    <TableHead className="w-[140px]">
+                                      Kontakt
+                                    </TableHead>
+                                    <TableHead className="w-[140px]">
+                                      Firemní údaje
+                                    </TableHead>
+                                    <TableHead className="w-[200px]">
+                                      Akce
+                                    </TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {actual
+                                    .filter((e) =>
+                                      e.actualStart?.startsWith(month)
+                                    )
+                                    .sort((a, b) => {
+                                      const da = new Date(
+                                        a.actualStart || ""
+                                      ).getTime()
+                                      const db = new Date(
+                                        b.actualStart || ""
+                                      ).getTime()
+                                      return db - da
+                                    })
+                                    .map((e) => (
+                                      <ArrivalTableRow
+                                        key={e.id}
+                                        arrival={e}
+                                        variant="actual"
+                                      />
+                                    ))}
+                                </TableBody>
+                              </Table>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </AccordionContent>
+                    </AccordionItem>
+                  ))}
+                </Accordion>
+              </div>
+            )}
+
+            <div className="mt-6 flex justify-end">
+              <MonthlySummaryButton
+                candidateMonths={useMemo(() => actualMonths, [actualMonths])}
+                defaultMonth={defaultActualMonth || thisMonth}
+                label="Zaslat měsíční report"
+                className="inline-flex items-center justify-center gap-2 bg-green-600 text-white hover:bg-green-700"
+                onDone={() => {
+                  showSuccess(
+                    "Report odeslán",
+                    "Měsíční report skutečných nástupů byl odeslán."
+                  )
+                  void reload()
+                }}
+              />
+            </div>
+          </TabsContent>
+        </div>
+      </Tabs>
+
+      {/* ---------- Dialog pro potvrzení nástupu ---------- */}
+      <Dialog
+        open={confirmDialog.open}
+        onOpenChange={(open) => setConfirmDialog((prev) => ({ ...prev, open }))}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex size-10 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/20">
+                <Check className="size-5 text-green-600 dark:text-green-400" />
+              </div>
+              <div>
+                <DialogTitle>Potvrdit skutečný nástup</DialogTitle>
+                <DialogDescription>
+                  Přenést z plánovaných do skutečných nástupů
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          {confirmDialog.arrival && (
+            <div className="space-y-4">
+              {/* Informace o zaměstnanci */}
+              <div className="rounded-lg border bg-muted/30 p-4">
+                <h4 className="mb-3 flex items-center gap-2 font-medium">
+                  <User className="size-4" />
+                  Informace o zaměstnanci
+                </h4>
+                <div className="grid gap-2 text-sm md:grid-cols-2">
+                  <div>
+                    <span className="font-medium text-muted-foreground">
+                      Jméno:
+                    </span>{" "}
+                    {[
+                      confirmDialog.arrival.titleBefore,
+                      confirmDialog.arrival.name,
+                      confirmDialog.arrival.surname,
+                      confirmDialog.arrival.titleAfter,
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                  </div>
+                  <div>
+                    <span className="font-medium text-muted-foreground">
+                      E-mail:
+                    </span>{" "}
+                    {confirmDialog.arrival.email}
+                  </div>
+                  <div>
+                    <span className="font-medium text-muted-foreground">
+                      Pozice:
+                    </span>{" "}
+                    {confirmDialog.arrival.positionName}
+                  </div>
+                  <div>
+                    <span className="font-medium text-muted-foreground">
+                      Odbor:
+                    </span>{" "}
+                    {confirmDialog.arrival.department}
+                  </div>
+                  <div>
+                    <span className="font-medium text-muted-foreground">
+                      Oddělení:
+                    </span>{" "}
+                    {confirmDialog.arrival.unitName}
+                  </div>
+                  <div>
+                    <span className="font-medium text-muted-foreground">
+                      Plánovaný nástup:
+                    </span>{" "}
+                    {format(
+                      new Date(confirmDialog.arrival.plannedStart),
+                      "d.M.yyyy"
+                    )}{" "}
+                    {confirmDialog.arrival.startTime || ""}
+                  </div>
+                  {confirmDialog.arrival.notes && (
+                    <div className="md:col-span-2">
+                      <span className="font-medium text-muted-foreground">
+                        Poznámka:
+                      </span>{" "}
+                      {confirmDialog.arrival.notes}
+                    </div>
+                  )}
                 </div>
-              </>
+              </div>
+
+              {/* Datum skutečného nástupu */}
+              <div className="space-y-3">
+                <Label htmlFor="actualStartDate">
+                  Datum skutečného nástupu
+                </Label>
+                <Input
+                  id="actualStartDate"
+                  type="date"
+                  defaultValue={confirmDialog.arrival.plannedStart.slice(0, 10)}
+                  className="max-w-[200px]"
+                />
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() =>
+                setConfirmDialog({ open: false, arrival: null, loading: false })
+              }
+              disabled={confirmDialog.loading}
+            >
+              Zrušit
+            </Button>
+            <Button
+              onClick={() => {
+                const input = document.getElementById(
+                  "actualStartDate"
+                ) as HTMLInputElement
+                const actualStartDate = input?.value
+                if (actualStartDate) {
+                  handleConfirmArrival(actualStartDate)
+                }
+              }}
+              disabled={confirmDialog.loading}
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700"
+            >
+              {confirmDialog.loading && (
+                <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              )}
+              <Check className="size-4" />
+              Potvrdit nástup
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ---------- Dialog pro smazání ---------- */}
+      <Dialog
+        open={deleteDialog.open}
+        onOpenChange={(open) => setDeleteDialog((prev) => ({ ...prev, open }))}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex size-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/20">
+                <AlertTriangle className="size-5 text-red-600 dark:text-red-400" />
+              </div>
+              <div>
+                <DialogTitle>Smazat záznam</DialogTitle>
+                {deleteDialog.arrival && (
+                  <DialogDescription className="font-medium">
+                    {[
+                      deleteDialog.arrival.titleBefore,
+                      deleteDialog.arrival.name,
+                      deleteDialog.arrival.surname,
+                      deleteDialog.arrival.titleAfter,
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                  </DialogDescription>
+                )}
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground">
+              Opravdu chcete smazat tento záznam? Tato akce je nevratná.
+            </p>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() =>
+                setDeleteDialog({ open: false, arrival: null, loading: false })
+              }
+              disabled={deleteDialog.loading}
+            >
+              Zrušit
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleteDialog.loading}
+              className="flex items-center gap-2"
+            >
+              {deleteDialog.loading && (
+                <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              )}
+              Smazat
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ---------- Dialog pro editaci ---------- */}
+      <Dialog open={openEdit} onOpenChange={setOpenEdit}>
+        <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
+          <DialogTitle className="px-6 pt-6">Upravit záznam</DialogTitle>
+          <div className="p-6">
+            {editData ? (
+              <OnboardingFormUnified
+                key={`edit-${editData.id}-${editData.context}`}
+                positions={positions}
+                id={editData.id}
+                initial={editData.initial}
+                mode="edit"
+                editContext={editData.context}
+                onSuccess={async () => {
+                  setOpenEdit(false)
+                  setEditData(null)
+                  showSuccess("Změny uloženy", "Záznam byl úspěšně upraven.")
+                  await reload()
+                }}
+              />
+            ) : (
+              <div className="flex items-center justify-center py-8 text-muted-foreground">
+                Načítám data pro editaci...
+              </div>
             )}
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* ---------- Edit ---------- */}
-      <Dialog open={openEdit} onOpenChange={setOpenEdit}>
-        <DialogContent className="max-h-[90vh] max-w-4xl overflow-hidden p-0">
-          <DialogTitle className="px-6 pt-6">
-            {editContext === "planned"
-              ? "Upravit předpokládaný nástup"
-              : "Upravit skutečný nástup"}
-          </DialogTitle>
-          {editLoading && (
-            <p className="px-6 pt-2 text-sm text-muted-foreground">Načítám…</p>
-          )}
-          {editId != null && editInitial && (
-            <div className="max-h-[80vh] overflow-y-auto p-6">
-              <OnboardingFormUnified
-                key={`${editId}-${editContext}`}
-                positions={positions}
-                id={editId}
-                initial={editInitial}
-                defaultCreateMode="edit"
-                editContext={editContext}
-                onSuccess={async () => {
-                  setOpenEdit(false)
-                  setEditId(null)
-                  setEditInitial(null)
-                  await reload()
-                }}
-              />
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* Success Modal */}
+      <SuccessModal
+        open={successModal.open}
+        onOpenChange={(open) => setSuccessModal((prev) => ({ ...prev, open }))}
+        title={successModal.title}
+        message={successModal.message}
+      />
+
+      {/* Error Modal */}
+      <ErrorModal
+        open={errorModal.open}
+        onOpenChange={(open) => setErrorModal((prev) => ({ ...prev, open }))}
+        title={errorModal.title}
+        message={errorModal.message}
+      />
     </div>
   )
 }
