@@ -4,7 +4,9 @@ import { z } from "zod"
 
 import { prisma } from "@/lib/db"
 
-export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
+export const fetchCache = "force-no-store"
+export const revalidate = 0
 
 const bodySchema = z.object({
   email: z.string().email().optional(),

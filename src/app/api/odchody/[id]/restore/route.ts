@@ -3,6 +3,10 @@ import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
 
+export const dynamic = "force-dynamic"
+export const fetchCache = "force-no-store"
+export const revalidate = 0
+
 type MaybeUser = { id?: string; email?: string } | null | undefined
 
 function getUserKey(u: MaybeUser): string {

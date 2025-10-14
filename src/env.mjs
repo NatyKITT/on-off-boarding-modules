@@ -4,18 +4,21 @@ import { z } from "zod"
 export const env = createEnv({
   server: {
     NODE_ENV: z.enum(["development", "test", "production"]),
-    DATABASE_URL: z.string(),
-    AUTH_SECRET: z.string(),
-    GOOGLE_CLIENT_ID: z.string(),
-    GOOGLE_CLIENT_SECRET: z.string(),
+    DATABASE_URL: z.string().min(1),
+    AUTH_SECRET: z.string().min(1),
+    GOOGLE_CLIENT_ID: z.string().min(1),
+    GOOGLE_CLIENT_SECRET: z.string().min(1),
 
-    RESEND_API_KEY: z.string(),
-    RESEND_EMAIL_FROM: z.string().email(),
-    RESEND_EMAIL_TO: z.string().email(),
-    RESEND_USERNAME: z.string(),
+    RESEND_API_KEY: z.string().optional(),
+    RESEND_EMAIL_FROM: z.string().email().optional(),
+    RESEND_EMAIL_TO: z.string().email().optional(),
+    RESEND_USERNAME: z.string().optional(),
 
     REPORT_RECIPIENTS_PLANNED: z.string().optional(),
     REPORT_RECIPIENTS_ACTUAL: z.string().optional(),
+
+    EOS_API_BASE: z.string().url().optional(),
+    EOS_API_TOKEN: z.string().optional(),
   },
   client: {
     NEXT_PUBLIC_APP_URL: z.string().url(),
@@ -36,5 +39,8 @@ export const env = createEnv({
 
     REPORT_RECIPIENTS_PLANNED: process.env.REPORT_RECIPIENTS_PLANNED,
     REPORT_RECIPIENTS_ACTUAL: process.env.REPORT_RECIPIENTS_ACTUAL,
+
+    EOS_API_BASE: process.env.EOS_API_BASE,
+    EOS_API_TOKEN: process.env.EOS_API_TOKEN,
   },
 })

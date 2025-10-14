@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server"
 
 import { getEmployees, type Employee } from "@/lib/eos-employees"
 
+export const dynamic = "force-dynamic"
+export const fetchCache = "force-no-store"
+export const revalidate = 0
+
 function employeeToOffboardingData(employee: Employee) {
   return {
     titleBefore: employee.titleBefore,

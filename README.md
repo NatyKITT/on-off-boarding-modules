@@ -28,7 +28,7 @@ pnpm install               # Instalace všech balíčků a dependencies
 pnpm prisma generate
 pnpm prisma migrate deploy
 pnpm run dev               # Spuštění vývoje
-pnpm build                 # Produkční build
+pnpm run build             # Produkční build
 pnpm db:push               # Deploy schématu do DB
 pnpm prisma migrate dev    # Deploy schématu do DB
 pnpm db:studio             # Admin rozhraní pro DB

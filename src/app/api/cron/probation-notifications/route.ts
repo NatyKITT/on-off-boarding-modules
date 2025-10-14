@@ -3,6 +3,10 @@ import { addDays, differenceInDays, isToday } from "date-fns"
 
 import { prisma } from "@/lib/db"
 
+export const dynamic = "force-dynamic"
+export const fetchCache = "force-no-store"
+export const revalidate = 0
+
 const HR_EMAILS = ["hr@company.com", "manager@company.com"]
 
 export async function POST() {

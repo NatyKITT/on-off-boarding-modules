@@ -4,6 +4,10 @@ import { auth } from "@/auth"
 import { prisma } from "@/lib/db"
 import { getEmployees } from "@/lib/eos-employees"
 
+export const dynamic = "force-dynamic"
+export const fetchCache = "force-no-store"
+export const revalidate = 0
+
 export async function POST(req: NextRequest) {
   const session = await auth()
   if (!session?.user) {

@@ -1,9 +1,11 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useId, useState } from "react"
 import Link from "next/link"
 import { Menu, X } from "lucide-react"
 import { signIn, useSession } from "next-auth/react"
+
+import { DEFAULT_SIGNIN_REDIRECT } from "@/config/defaults"
 
 import { cn } from "@/lib/utils"
 
@@ -12,20 +14,35 @@ import { ModeToggle } from "./mode-toggle"
 export function NavMobile() {
   const { data: session } = useSession()
   const [open, setOpen] = useState(false)
+  const panelId = useId()
 
   useEffect(() => {
+    const prev = document.body.style.overflow
     document.body.style.overflow = open ? "hidden" : "auto"
+    return () => {
+      document.body.style.overflow = prev
+    }
   }, [open])
+
+  const close = useCallback(() => setOpen(false), [])
+
+  const handleSignIn = useCallback(() => {
+    void signIn("google", { callbackUrl: DEFAULT_SIGNIN_REDIRECT })
+    setOpen(false)
+  }, [])
 
   return (
     <>
       <button
-        onClick={() => setOpen(!open)}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
         className={cn(
           "fixed right-2 top-2.5 z-50 rounded-full p-2 transition-colors duration-200 hover:bg-muted focus:outline-none active:bg-muted md:hidden",
           open && "hover:bg-muted active:bg-muted"
         )}
         aria-label={open ? "Zavřít menu" : "Otevřít menu"}
+        aria-expanded={open}
+        aria-controls={panelId}
       >
         {open ? (
           <X className="size-5 text-muted-foreground" />
@@ -35,6 +52,7 @@ export function NavMobile() {
       </button>
 
       <nav
+        id={panelId}
         className={cn(
           "fixed inset-0 z-20 hidden w-full overflow-auto bg-background px-5 py-16 lg:hidden",
           open && "block"
@@ -47,7 +65,7 @@ export function NavMobile() {
                 <li className="py-3">
                   <Link
                     href="/admin"
-                    onClick={() => setOpen(false)}
+                    onClick={close}
                     className="flex w-full font-medium capitalize"
                   >
                     Admin
@@ -58,7 +76,7 @@ export function NavMobile() {
                 <li className="py-3">
                   <Link
                     href="/nastupy"
-                    onClick={() => setOpen(false)}
+                    onClick={close}
                     className="flex w-full font-medium capitalize"
                   >
                     Nástupy
@@ -68,7 +86,7 @@ export function NavMobile() {
               <li className="py-3">
                 <Link
                   href="/prehled"
-                  onClick={() => setOpen(false)}
+                  onClick={close}
                   className="flex w-full font-medium capitalize"
                 >
                   Přehled
@@ -78,10 +96,8 @@ export function NavMobile() {
           ) : (
             <li className="py-3">
               <button
-                onClick={() => {
-                  signIn("google")
-                  setOpen(false)
-                }}
+                type="button"
+                onClick={handleSignIn}
                 className="flex w-full font-medium capitalize"
               >
                 Přihlásit se Googlem

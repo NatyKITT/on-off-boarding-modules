@@ -54,7 +54,12 @@ const config = {
       },
       fontFamily: {
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],
-        heading: ["var(--font-sans)", "system-ui", "sans-serif"],
+        heading: [
+          "var(--font-heading)",
+          "var(--font-sans)",
+          "system-ui",
+          "sans-serif",
+        ],
       },
       keyframes: {
         "accordion-down": {
@@ -68,12 +73,12 @@ const config = {
         "fade-up": {
           "0%": { opacity: "0", transform: "translateY(10px)" },
           "80%": { opacity: "0.7" },
-          "100%": { opacity: "1", transform: "translateY(0px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
         },
         "fade-down": {
           "0%": { opacity: "0", transform: "translateY(-10px)" },
           "80%": { opacity: "0.6" },
-          "100%": { opacity: "1", transform: "translateY(0px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
         },
         "fade-in": {
           "0%": { opacity: "0" },

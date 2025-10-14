@@ -13,37 +13,41 @@ import { Icons } from "@/components/shared/icons"
 export function OAuthButtons(): JSX.Element {
   const { toast } = useToast()
 
-  async function handleOAuthSignIn(provider: "google"): Promise<void> {
+  async function handleOAuthSignIn() {
     try {
-      await signIn(provider, {
-        callbackUrl: DEFAULT_SIGNIN_REDIRECT,
-      })
-
+      await signIn("google", { callbackUrl: DEFAULT_SIGNIN_REDIRECT })
       toast({
         title: "Přihlášení úspěšné",
         description: "Byli jste úspěšně přihlášeni přes Google účet.",
       })
     } catch (error) {
+      console.error(error)
       toast({
         title: "Chyba při přihlášení",
         description: "Zkuste to prosím znovu.",
         variant: "destructive",
       })
-
-      console.error(error)
-      throw new Error(`Chyba při přihlašování přes ${provider}`)
     }
   }
 
   return (
-    <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
+    <div className="space-y-3">
       <Button
-        aria-label="Přihlášení přes Google"
-        variant="outline"
-        onClick={() => void handleOAuthSignIn("google")}
-        className="w-full sm:w-auto"
+        type="button"
+        aria-label="Přihlásit se přes Google"
+        onClick={() => void handleOAuthSignIn()}
+        className="
+          w-full
+          justify-center
+          gap-2
+          rounded-lg
+          border
+          bg-white text-black
+          hover:bg-white/90
+          dark:bg-white dark:text-black dark:hover:bg-white/90
+        "
       >
-        <Icons.google className="mr-2 size-4" />
+        <Icons.google className="size-4" />
         Přihlásit se přes Google
       </Button>
     </div>

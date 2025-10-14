@@ -1,6 +1,6 @@
 "use server"
 
-import { type User } from "@prisma/client"
+import type { User } from "@prisma/client"
 
 import { prisma } from "@/lib/db"
 import {
@@ -10,38 +10,28 @@ import {
   type GetUserByIdInput,
 } from "@/lib/validations/user"
 
-export async function getUserByEmail(
-  rawInput: GetUserByEmailInput
+export async function getUserByEmailAction(
+  raw: GetUserByEmailInput
 ): Promise<User | null> {
+  const parsed = getUserByEmailSchema.safeParse(raw)
+  if (!parsed.success) return null
   try {
-    const validatedInput = getUserByEmailSchema.safeParse(rawInput)
-    if (!validatedInput.success) return null
-
-    return await prisma.user.findUnique({
-      where: {
-        email: validatedInput.data.email,
-      },
-    })
-  } catch (error) {
-    console.error("Chyba při načítání uživatele podle e-mailu:", error)
-    throw new Error("Nepodařilo se získat uživatele podle e-mailu.")
+    return await prisma.user.findUnique({ where: { email: parsed.data.email } })
+  } catch (e) {
+    console.error("getUserByEmailAction error:", e)
+    return null
   }
 }
 
-export async function getUserById(
-  rawInput: GetUserByIdInput
+export async function getUserByIdAction(
+  raw: GetUserByIdInput
 ): Promise<User | null> {
+  const parsed = getUserByIdSchema.safeParse(raw)
+  if (!parsed.success) return null
   try {
-    const validatedInput = getUserByIdSchema.safeParse(rawInput)
-    if (!validatedInput.success) return null
-
-    return await prisma.user.findUnique({
-      where: {
-        id: validatedInput.data.id,
-      },
-    })
-  } catch (error) {
-    console.error("Chyba při načítání uživatele podle ID:", error)
-    throw new Error("Nepodařilo se získat uživatele podle ID.")
+    return await prisma.user.findUnique({ where: { id: parsed.data.id } })
+  } catch (e) {
+    console.error("getUserByIdAction error:", e)
+    return null
   }
 }

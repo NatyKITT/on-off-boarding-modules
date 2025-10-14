@@ -4,6 +4,10 @@ import { z } from "zod"
 
 import { prisma } from "@/lib/db"
 
+export const dynamic = "force-dynamic"
+export const fetchCache = "force-no-store"
+export const revalidate = 0
+
 const bodySchema = z.object({
   recipients: z.array(z.string().email()).min(1),
   subject: z.string().min(1),

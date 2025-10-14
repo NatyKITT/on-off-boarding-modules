@@ -11,14 +11,18 @@ export default function NotFound() {
         width={400}
         height={400}
         className="pointer-events-none mb-5 mt-6 dark:invert"
+        priority
       />
       <p className="text-balance px-4 text-center text-2xl font-medium">
         Stránka nebyla nalezena. Zpět na{" "}
         <Link
-          href="/"
-          className="text-muted-foreground underline underline-offset-4 hover:text-blue-500"
-        ></Link>
-        přehled
+          href="/prehled"
+          className="text-muted-foreground underline underline-offset-4 hover:text-foreground"
+          aria-label="Zpět na přehled"
+        >
+          přehled
+        </Link>
+        .
       </p>
     </div>
   )

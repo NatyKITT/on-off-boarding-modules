@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server"
 
 import { prisma } from "@/lib/db"
 
+export const dynamic = "force-dynamic"
+export const fetchCache = "force-no-store"
+export const revalidate = 0
+
 function monthRange(year: number, month: number) {
   const from = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0))
   const to = new Date(Date.UTC(year, month, 1, 0, 0, 0))

@@ -30,6 +30,8 @@ import {
   SunMedium,
   Trash2,
   User,
+  UserMinus,
+  UserPlus,
   X,
 } from "lucide-react"
 
@@ -82,5 +84,7 @@ export const Icons = {
   sun: SunMedium,
   trash: Trash2,
   user: User,
+  userPlus: UserPlus,
+  userMinus: UserMinus,
   warning: AlertTriangle,
 }

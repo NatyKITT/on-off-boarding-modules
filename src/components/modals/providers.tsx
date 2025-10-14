@@ -1,26 +1,35 @@
-"use client";
+"use client"
 
-import { createContext, Dispatch, ReactNode, SetStateAction } from "react";
+import {
+  createContext,
+  useMemo,
+  type Dispatch,
+  type SetStateAction,
+} from "react"
 
-import { useSignInModal } from "@/components/modals//sign-in-modal";
+import { useSignInModal } from "@/components/modals/sign-in-modal"
 
 export const ModalContext = createContext<{
-  setShowSignInModal: Dispatch<SetStateAction<boolean>>;
+  setShowSignInModal: Dispatch<SetStateAction<boolean>>
 }>({
   setShowSignInModal: () => {},
-});
+})
 
-export default function ModalProvider({ children }: { children: ReactNode }) {
-  const { SignInModal, setShowSignInModal } = useSignInModal();
+ModalProvider.displayName = "ModalProvider"
+
+export default function ModalProvider({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  const { SignInModal, setShowSignInModal } = useSignInModal()
+
+  const value = useMemo(() => ({ setShowSignInModal }), [setShowSignInModal])
 
   return (
-    <ModalContext.Provider
-      value={{
-        setShowSignInModal,
-      }}
-    >
+    <ModalContext.Provider value={value}>
       <SignInModal />
       {children}
     </ModalContext.Provider>
-  );
+  )
 }

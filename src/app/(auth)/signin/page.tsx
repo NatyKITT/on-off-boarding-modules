@@ -1,46 +1,44 @@
-import type { Metadata } from "next"
-import Link from "next/link"
+import { redirect } from "next/navigation"
+import { auth } from "@/auth"
 
-import { env } from "@/env.mjs"
-
-import { cn } from "@/lib/utils"
-
-import { buttonVariants } from "@/components/ui/button"
 import { OAuthButtons } from "@/components/auth/oauth-buttons"
 import { Icons } from "@/components/shared/icons"
 
-export const metadata: Metadata = {
-  metadataBase: new URL(env.NEXT_PUBLIC_APP_URL),
-  title: "Přihlášení",
-  description: "Přihlaste se pomocí účtu Google KITT nebo Praha 6",
-}
+export const dynamic = "force-dynamic"
+export const fetchCache = "force-no-store"
+export const revalidate = 0
 
 export default async function SignInPage() {
-  return (
-    <div className="container flex h-screen w-screen flex-col items-center justify-center">
-      <Link
-        href="/"
-        className={cn(
-          buttonVariants({ variant: "outline", size: "sm" }),
-          "absolute left-4 top-4 md:left-8 md:top-8"
-        )}
-      >
-        <>
-          <Icons.chevronLeft className="mr-2 size-4" />
-          Zpět
-        </>
-      </Link>
+  const session = await auth()
+  if (session?.user) {
+    redirect("/prehled")
+  }
 
-      <div className="mx-auto flex w-full flex-col justify-center space-y-6 sm:w-[350px]">
-        <div className="flex flex-col space-y-2 text-center">
-          <Icons.logo className="mx-auto size-6" />
-          <h1 className="text-2xl font-semibold tracking-tight">Vítejte</h1>
-          <p className="text-sm text-muted-foreground">
-            Přihlaste se pomocí účtu Google KITT nebo Praha 6
+  return (
+    <div className="relative flex min-h-screen items-center justify-center px-4">
+      <div className="w-full max-w-sm">
+        <div className="mb-8 flex flex-col items-center text-center">
+          <Icons.logo className="mb-3 size-10" />
+          <h1 className="text-3xl font-semibold tracking-tight">Vítejte</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Přihlaste se pomocí účtu Google{" "}
+            <span className="font-mono">@kitt6.cz</span> nebo{" "}
+            <span className="font-mono">@praha6.cz</span>
           </p>
         </div>
 
-        <OAuthButtons />
+        <div className="relative">
+          <div className="pointer-events-none absolute -inset-0.5 -z-10 rounded-2xl bg-gradient-to-r from-[#00A86B] via-[#19B278] to-[#2E7D32] opacity-35 blur-md" />
+          <div className="rounded-2xl bg-gradient-to-r from-[#00A86B] via-[#19B278] to-[#2E7D32] p-px">
+            <div className="rounded-2xl border bg-card p-4 shadow-sm sm:p-5">
+              <OAuthButtons />
+            </div>
+          </div>
+        </div>
+
+        <p className="mt-6 text-center text-xs text-muted-foreground">
+          Nemáte přístup? Kontaktujte správce.
+        </p>
       </div>
     </div>
   )

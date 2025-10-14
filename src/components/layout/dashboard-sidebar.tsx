@@ -79,7 +79,11 @@ export function DashboardSidebar({ links }: DashboardSidebarProps) {
                 </Button>
               </div>
 
-              <nav className="flex flex-1 flex-col gap-8 px-4 pt-4">
+              <nav
+                role="navigation"
+                aria-label="Postranní navigace"
+                className="flex flex-1 flex-col gap-8 px-4 pt-4"
+              >
                 {links.map((section) => (
                   <section
                     key={section.title}
@@ -92,59 +96,63 @@ export function DashboardSidebar({ links }: DashboardSidebarProps) {
                     ) : (
                       <div className="h-4" />
                     )}
+
                     {section.items.map((item) => {
                       const Icon = Icons[item.icon || "arrowRight"]
+                      const isActive = path === item.href
+                      if (!item.href) return null
+
                       return (
-                        item.href && (
-                          <Fragment key={`link-fragment-${item.title}`}>
-                            {isSidebarExpanded ? (
-                              <Link
-                                key={`link-${item.title}`}
-                                href={item.disabled ? "#" : item.href}
-                                className={cn(
-                                  "flex items-center gap-3 rounded-md p-2 text-sm font-medium hover:bg-muted",
-                                  path === item.href
-                                    ? "bg-muted"
-                                    : "text-muted-foreground hover:text-accent-foreground",
-                                  item.disabled &&
-                                    "cursor-not-allowed opacity-80 hover:bg-transparent hover:text-muted-foreground"
-                                )}
-                              >
-                                <Icon className="size-5" />
+                        <Fragment key={`link-fragment-${item.title}`}>
+                          {isSidebarExpanded ? (
+                            <Link
+                              href={item.disabled ? "#" : item.href}
+                              prefetch={false}
+                              aria-current={isActive ? "page" : undefined}
+                              className={cn(
+                                "flex items-center gap-3 rounded-md p-2 text-sm font-medium hover:bg-muted",
+                                isActive
+                                  ? "bg-muted text-foreground"
+                                  : "text-muted-foreground hover:text-accent-foreground",
+                                item.disabled &&
+                                  "cursor-not-allowed opacity-80 hover:bg-transparent hover:text-muted-foreground"
+                              )}
+                            >
+                              <Icon className="size-5" />
+                              {item.title}
+                              {item.badge && (
+                                <Badge className="ml-auto flex size-5 shrink-0 items-center justify-center rounded-full">
+                                  {item.badge}
+                                </Badge>
+                              )}
+                            </Link>
+                          ) : (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Link
+                                  href={item.disabled ? "#" : item.href}
+                                  prefetch={false}
+                                  aria-current={isActive ? "page" : undefined}
+                                  className={cn(
+                                    "flex items-center gap-3 rounded-md py-2 text-sm font-medium hover:bg-muted",
+                                    isActive
+                                      ? "bg-muted text-foreground"
+                                      : "text-muted-foreground hover:text-accent-foreground",
+                                    item.disabled &&
+                                      "cursor-not-allowed opacity-80 hover:bg-transparent hover:text-muted-foreground"
+                                  )}
+                                >
+                                  <span className="flex size-full items-center justify-center">
+                                    <Icon className="size-5" />
+                                  </span>
+                                </Link>
+                              </TooltipTrigger>
+                              <TooltipContent side="right">
                                 {item.title}
-                                {item.badge && (
-                                  <Badge className="ml-auto flex size-5 shrink-0 items-center justify-center rounded-full">
-                                    {item.badge}
-                                  </Badge>
-                                )}
-                              </Link>
-                            ) : (
-                              <Tooltip key={`tooltip-${item.title}`}>
-                                <TooltipTrigger asChild>
-                                  <Link
-                                    key={`link-tooltip-${item.title}`}
-                                    href={item.disabled ? "#" : item.href}
-                                    className={cn(
-                                      "flex items-center gap-3 rounded-md py-2 text-sm font-medium hover:bg-muted",
-                                      path === item.href
-                                        ? "bg-muted"
-                                        : "text-muted-foreground hover:text-accent-foreground",
-                                      item.disabled &&
-                                        "cursor-not-allowed opacity-80 hover:bg-transparent hover:text-muted-foreground"
-                                    )}
-                                  >
-                                    <span className="flex size-full items-center justify-center">
-                                      <Icon className="size-5" />
-                                    </span>
-                                  </Link>
-                                </TooltipTrigger>
-                                <TooltipContent side="right">
-                                  {item.title}
-                                </TooltipContent>
-                              </Tooltip>
-                            )}
-                          </Fragment>
-                        )
+                              </TooltipContent>
+                            </Tooltip>
+                          )}
+                        </Fragment>
                       )
                     })}
                   </section>
@@ -202,11 +210,14 @@ export function MobileSheetSidebar({ links }: DashboardSidebarProps) {
                         item.href && (
                           <Fragment key={`link-fragment-${item.title}`}>
                             <Link
-                              key={`link-${item.title}`}
                               onClick={() => {
                                 if (!item.disabled) setOpen(false)
                               }}
                               href={item.disabled ? "#" : item.href}
+                              prefetch={false}
+                              aria-current={
+                                path === item.href ? "page" : undefined
+                              }
                               className={cn(
                                 "flex items-center gap-3 rounded-md p-2 text-sm font-medium hover:bg-muted",
                                 path === item.href

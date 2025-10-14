@@ -4,6 +4,10 @@ import { z, ZodError } from "zod"
 
 import { prisma } from "@/lib/db"
 
+export const dynamic = "force-dynamic"
+export const fetchCache = "force-no-store"
+export const revalidate = 0
+
 interface Params {
   params: { id: string }
 }

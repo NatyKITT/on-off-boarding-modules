@@ -3,6 +3,10 @@ import { z } from "zod"
 
 import { prisma } from "@/lib/db"
 
+export const dynamic = "force-dynamic"
+export const fetchCache = "force-no-store"
+export const revalidate = 0
+
 // Validace vstupu
 const bodySchema = z.object({
   ids: z.array(z.string().min(1)).max(100), // max 100 IDs najednou

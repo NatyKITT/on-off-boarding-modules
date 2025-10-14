@@ -14,15 +14,13 @@ export const sidebarLinks: SidebarNavItem[] = [
       { href: "/prehled", icon: "dashboard", title: "Přehled" },
       {
         href: "/nastupy",
-        icon: "user",
+        icon: "userPlus",
         title: "Nástupy",
-        /*authorizeOnly: Role.ADMIN && Role.HR,*/
       },
       {
         href: "/odchody",
-        icon: "user",
+        icon: "userMinus",
         title: "Odchody",
-        /*authorizeOnly: Role.ADMIN && Role.HR,*/
       },
     ],
   },

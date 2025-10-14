@@ -4,6 +4,10 @@ import { z } from "zod"
 
 import { prisma } from "@/lib/db"
 
+export const dynamic = "force-dynamic"
+export const fetchCache = "force-no-store"
+export const revalidate = 0
+
 const bodySchema = z.object({
   year: z.number().int().min(2000).max(3000),
   month: z.number().int().min(1).max(12),

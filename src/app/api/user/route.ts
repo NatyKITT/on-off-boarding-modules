@@ -3,6 +3,10 @@ import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
 
+export const dynamic = "force-dynamic"
+export const fetchCache = "force-no-store"
+export const revalidate = 0
+
 type Role = "USER" | "HR" | "IT" | "ADMIN" | undefined
 
 const ADMIN_ROLES = new Set<Role>(["ADMIN", "IT"])

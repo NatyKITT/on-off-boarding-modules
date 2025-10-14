@@ -1,33 +1,49 @@
-code[data-theme*=" "],
-code[data-theme*=" "] span {
-  color: var(--shiki-light);
-  background-color: var(--shiki-light-bg);
+/* ---------------------------
+   MDX + Shiki (rehype-pretty-code)
+   --------------------------- */
+:root {
+  --shiki-light: #0a0a0a;
+  --shiki-light-bg: #fafafa;
+  --shiki-dark: #e5e7eb;
+  --shiki-dark-bg: #0b0b0b;
 }
 
-@media (prefers-color-scheme: dark) {
+code[data-theme],
+code[data-theme] span {
+  color: var(--shiki-light, #0a0a0a);
+  background-color: var(--shiki-light-bg, #fafafa);
+}
 
-  code[data-theme*=" "],
-  code[data-theme*=" "] span {
-    color: var(--shiki-dark);
-    background-color: var(--shiki-dark-bg);
-  }
+.dark code[data-theme],
+.dark code[data-theme] span {
+  color: var(--shiki-dark, #e5e7eb);
+  background-color: var(--shiki-dark-bg, #0b0b0b);
 }
 
 [data-rehype-pretty-code-figure] {
   @apply relative mt-6 mb-4;
 }
 
+[data-rehype-pretty-code-title] {
+  @apply mt-3 py-2 px-4 text-sm font-medium bg-muted text-foreground rounded-t-md border border-b-0;
+}
+
+[data-rehype-pretty-code-figure] pre {
+  @apply overflow-x-auto rounded-md border bg-card;
+  background: transparent;
+}
+
 [data-rehype-pretty-code-figure] code {
-  @apply grid min-w-full break-words rounded-none border-0 bg-transparent p-0;
+  @apply grid min-w-full break-words rounded-none border-0 bg-transparent p-0 text-sm leading-7;
   counter-reset: line;
   box-decoration-break: clone;
 }
 
 [data-line] {
-  @apply px-4 min-h-[1rem] py-0.5 w-full inline-block;
+  @apply inline-block w-full min-h-[1rem] px-4 py-0.5;
 }
 
-[data-line-numbers]>[data-line]::before {
+[data-line-numbers] > [data-line]::before {
   @apply text-muted-foreground text-xs;
   counter-increment: line;
   content: counter(line);
@@ -38,25 +54,13 @@ code[data-theme*=" "] span {
 }
 
 [data-highlighted-line] {
-  @apply bg-zinc-600/50;
+  @apply bg-muted/50;
 }
 
-[data-highlighted-chars] span {
-  @apply relative;
-}
-
+[data-highlighted-chars] span { @apply relative; }
 [data-highlighted-chars] {
-  @apply rounded-sm bg-zinc-600/50 text-foreground p-1;
+  @apply rounded-sm bg-muted/60 text-foreground px-1;
 }
 
-[data-rehype-pretty-code-title] {
-  @apply mt-3 py-2 px-4 text-sm font-medium;
-}
-
-.mdx>.steps:first-child>h3:first-child {
-  @apply mt-0;
-}
-
-.steps>h3 {
-  @apply mt-8 mb-4 text-base font-semibold;
-}
+.mdx > .steps:first-child > h3:first-child { @apply mt-0; }
+.steps > h3 { @apply mt-8 mb-4 text-base font-semibold; }

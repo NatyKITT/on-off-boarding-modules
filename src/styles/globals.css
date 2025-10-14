@@ -30,6 +30,10 @@
     --chart-3: 216 92% 60%;
     --chart-4: 210 98% 78%;
     --chart-5: 212 97% 87%;
+
+    --brand-kitt: 152 60% 42%;
+    --brand-p6:   145 50% 38%;
+    --brand-mix:  150 55% 40%;
   }
 
   .dark {
@@ -59,6 +63,9 @@
     --chart-4: 210 98% 78%;
     --chart-5: 212 97% 87%;
   }
+
+  :root { color-scheme: light; }
+  .dark { color-scheme: dark; }
 }
 
 @layer base {
@@ -70,6 +77,8 @@
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
+
+  h1, h2, h3, h4, h5, h6 { @apply font-heading; }
 }
 
 @layer utilities {

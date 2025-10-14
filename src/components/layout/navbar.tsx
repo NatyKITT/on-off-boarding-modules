@@ -30,6 +30,7 @@ export function NavBar({ scroll = false }: NavBarProps) {
 
   return (
     <header
+      role="banner"
       className={`sticky top-0 z-40 flex w-full justify-center bg-background/60 backdrop-blur-xl transition-all ${
         scroll ? (scrolled ? "border-b" : "bg-transparent") : "border-b"
       }`}

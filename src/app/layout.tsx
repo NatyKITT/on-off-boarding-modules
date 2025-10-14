@@ -1,21 +1,16 @@
-// app/layout.tsx
 import "@/styles/globals.css"
 import "@/styles/mdx.css"
 
 import * as React from "react"
 import type { Metadata, Viewport } from "next"
-import { Inter } from "next/font/google"
+import { fontHeading, fontSans } from "@/fonts"
 
 import { env } from "@/env.mjs"
 import { siteConfig } from "@/config/site"
 
-import { ClientLayout } from "@/components/layout/client-layout"
+import { cn } from "@/lib/utils"
 
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-sans",
-  display: "swap",
-})
+import { ClientLayout } from "@/components/layout/client-layout"
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -55,7 +50,11 @@ export default function RootLayout({
   return (
     <html lang="cs" suppressHydrationWarning>
       <body
-        className={`${inter.variable} overflow-x-hidden overflow-y-scroll font-sans`}
+        className={cn(
+          "overflow-x-hidden overflow-y-scroll bg-background font-sans text-foreground",
+          fontSans.variable,
+          fontHeading.variable
+        )}
       >
         <ClientLayout>{children}</ClientLayout>
       </body>

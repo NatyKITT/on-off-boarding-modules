@@ -1,18 +1,19 @@
 import { redirect } from "next/navigation"
 
 import { getCurrentUser } from "@/lib/session"
-import { constructMetadata } from "@/lib/utils"
 
 import { DashboardHeader } from "@/components/dashboard/header"
 
-export const metadata = constructMetadata({
-  title: "Administrace – Onboarding",
-  description: "Stránka pro správu přístupná pouze administrátorům.",
-})
-
 export default async function AdminPage() {
   const user = await getCurrentUser()
-  if (!user || user.role !== "ADMIN") redirect("/signin")
+
+  if (!user) {
+    redirect("/signin")
+  }
+
+  if (user.role !== "ADMIN") {
+    redirect("/prehled")
+  }
 
   return (
     <>

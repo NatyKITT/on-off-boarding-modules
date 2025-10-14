@@ -1,11 +1,11 @@
-// app/api/cron/mail-worker/route.ts
 import { NextResponse } from "next/server"
 import { Resend } from "resend"
 
 import { prisma } from "@/lib/db"
 
 export const dynamic = "force-dynamic"
-export const runtime = "nodejs"
+export const fetchCache = "force-no-store"
+export const revalidate = 0
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || "system@company.com"

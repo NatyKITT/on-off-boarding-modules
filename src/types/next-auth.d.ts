@@ -1,5 +1,5 @@
-import { Role } from "@prisma/client"
-import { User } from "next-auth"
+import type { Role } from "@prisma/client"
+import type { User } from "next-auth"
 
 export type ExtendedUser = User & {
   role: Role

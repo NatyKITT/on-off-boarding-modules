@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server"
 
 import { getEmployees } from "@/lib/eos-employees"
 
+export const dynamic = "force-dynamic"
+export const fetchCache = "force-no-store"
+export const revalidate = 0
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)

@@ -1,6 +1,6 @@
 "use client"
 
-import { fontSans } from "@/fonts"
+import { fontHeading, fontSans } from "@/fonts"
 import { Analytics } from "@vercel/analytics/react"
 import { SessionProvider } from "next-auth/react"
 
@@ -9,6 +9,7 @@ import { ThemeProvider } from "@/providers/theme-provider"
 import { cn } from "@/lib/utils"
 
 import { Toaster } from "@/components/ui/toaster"
+import ModalProvider from "@/components/modals/providers"
 import { TailwindIndicator } from "@/components/tailwind-indicator"
 
 export function ClientLayout({ children }: { children: React.ReactNode }) {
@@ -17,17 +18,19 @@ export function ClientLayout({ children }: { children: React.ReactNode }) {
       <div
         className={cn(
           "w-full bg-background font-sans antialiased",
-          fontSans.variable
+          fontSans.variable,
+          fontHeading.variable
         )}
       >
         <SmoothScrollProvider>
           <ThemeProvider
             attribute="class"
             defaultTheme="light"
-            enableSystem={false}
+            enableSystem
             disableTransitionOnChange
+            storageKey="kitt6-theme"
           >
-            {children}
+            <ModalProvider>{children}</ModalProvider>
             <Toaster />
             <Analytics />
             <TailwindIndicator />

@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button"
 import { Modal } from "@/components/ui/modal"
 import { Icons } from "@/components/shared/icons"
 
+const DEFAULT_SIGNIN_REDIRECT = "/prehled"
+
 function SignInModal({
   showSignInModal,
   setShowSignInModal,
@@ -16,7 +18,26 @@ function SignInModal({
   showSignInModal: boolean
   setShowSignInModal: Dispatch<SetStateAction<boolean>>
 }) {
-  const [signInClicked, setSignInClicked] = useState(false)
+  const [loading, setLoading] = useState(false)
+
+  async function handleSignIn() {
+    try {
+      setLoading(true)
+      const res = await signIn("google", {
+        callbackUrl: DEFAULT_SIGNIN_REDIRECT,
+        redirect: false,
+      })
+      if (res?.ok && res.url) {
+        window.location.assign(res.url)
+      } else {
+        setLoading(false)
+      }
+    } catch {
+      setLoading(false)
+    } finally {
+      setShowSignInModal(false)
+    }
+  }
 
   return (
     <Modal showModal={showSignInModal} setShowModal={setShowSignInModal}>
@@ -27,26 +48,14 @@ function SignInModal({
           </a>
           <h3 className="font-satoshi text-2xl font-black">Přihlášení</h3>
           <p className="text-sm text-muted-foreground">
-            Pro přístup do systému se přihlaste pomocí Google účtu organizace
-            <br />
-            (např. <span className="font-mono">jmeno@praha6.cz</span>)
+            Přihlaste se Google účtem organizace (např.{" "}
+            <span className="font-mono">jmeno@praha6.cz</span>)
           </p>
         </div>
 
         <div className="flex flex-col space-y-4 bg-secondary/50 px-4 py-8 md:px-16">
-          <Button
-            variant="default"
-            disabled={signInClicked}
-            onClick={() => {
-              setSignInClicked(true)
-              signIn("google", { redirect: false }).then(() =>
-                setTimeout(() => {
-                  setShowSignInModal(false)
-                }, 400)
-              )
-            }}
-          >
-            {signInClicked ? (
+          <Button variant="default" disabled={loading} onClick={handleSignIn}>
+            {loading ? (
               <Icons.spinner className="mr-2 size-4 animate-spin" />
             ) : (
               <Icons.google className="mr-2 size-4" />
@@ -61,21 +70,17 @@ function SignInModal({
 
 export function useSignInModal() {
   const [showSignInModal, setShowSignInModal] = useState(false)
-
-  const SignInModalCallback = useCallback(() => {
-    return (
+  const SignInModalCallback = useCallback(
+    () => (
       <SignInModal
         showSignInModal={showSignInModal}
         setShowSignInModal={setShowSignInModal}
       />
-    )
-  }, [showSignInModal, setShowSignInModal])
-
+    ),
+    [showSignInModal, setShowSignInModal]
+  )
   return useMemo(
-    () => ({
-      setShowSignInModal,
-      SignInModal: SignInModalCallback,
-    }),
+    () => ({ setShowSignInModal, SignInModal: SignInModalCallback }),
     [setShowSignInModal, SignInModalCallback]
   )
 }
