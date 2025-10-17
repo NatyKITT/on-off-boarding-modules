@@ -1,6 +1,6 @@
 import { PrismaAdapter } from "@auth/prisma-adapter"
 import type { Role } from "@prisma/client"
-import NextAuth, { type NextAuthConfig, type Session } from "next-auth"
+import NextAuth, { type NextAuthConfig } from "next-auth"
 import GoogleProvider from "next-auth/providers/google"
 
 import { env } from "@/env.mjs"
@@ -15,7 +15,7 @@ const authConfig: NextAuthConfig = {
 
   session: {
     strategy: "jwt",
-    maxAge: 8 * 60 * 60,
+    maxAge: 8 * 60 * 60, // 8h
     updateAge: 0,
   },
 
@@ -35,45 +35,68 @@ const authConfig: NextAuthConfig = {
     }),
   ],
 
-  callbacks: {
-    async signIn({ profile }) {
-      const email = profile?.email ?? ""
-      const domain = email.split("@")[1]?.toLowerCase() ?? ""
-      return ALLOWED_DOMAINS.has(domain)
+  events: {
+    async signIn({ user }) {
+      try {
+        const email = user.email?.toLowerCase() ?? ""
+        if (email.endsWith("@kitt6.cz")) {
+          await prisma.user.update({
+            where: { id: user.id as string },
+            data: { role: "ADMIN" },
+          })
+        }
+      } catch (e) {
+        console.warn("signIn role sync (non-fatal):", e)
+      }
     },
+  },
 
+  callbacks: {
     authorized({ auth, request }) {
       const { pathname } = request.nextUrl
       if (pathname.startsWith("/signin")) return true
       return !!auth
     },
 
-    async jwt({ token, user }) {
-      if (user && "id" in user) token.id = user.id as string
+    async signIn({ profile }) {
+      const email = profile?.email ?? ""
+      const domain = email.split("@")[1]?.toLowerCase() ?? ""
+      return ALLOWED_DOMAINS.has(domain)
+    },
+
+    async jwt({ token, user, profile }) {
+      if (user && "id" in user) token.id = String(user.id)
+
+      const email =
+        (typeof token.email === "string" && token.email) ||
+        (typeof user?.email === "string" && user.email) ||
+        (typeof profile?.email === "string" && profile.email) ||
+        null
 
       if (!token.role && token.sub) {
         const dbUser = await getUserById(token.sub)
         if (dbUser?.role) token.role = dbUser.role as Role
       }
+
+      if (email && email.toLowerCase().endsWith("@kitt6.cz")) {
+        token.role = "ADMIN"
+      }
+
+      if (!token.role) token.role = "USER"
+
       return token
     },
 
     async session({ session, token }) {
-      if (session.user && typeof token.id === "string") {
-        ;(session.user as { id: string; role?: Role }).id = token.id
-        if (token.role)
-          (session.user as { role?: Role }).role = token.role as Role
+      if (session.user) {
+        session.user.id = String(token.id)
+        session.user.role = token.role as Role
       }
-      return session as Session
+      return session
     },
   },
 
   debug: process.env.NODE_ENV === "development",
 }
 
-export const {
-  auth,
-  signIn,
-  signOut,
-  handlers: { GET, POST },
-} = NextAuth(authConfig)
+export const { handlers, auth, signIn, signOut } = NextAuth(authConfig)

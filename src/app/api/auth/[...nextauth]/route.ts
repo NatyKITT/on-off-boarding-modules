@@ -1,5 +1,3 @@
-export const dynamic = "force-dynamic"
-export const fetchCache = "force-no-store"
-export const revalidate = 0
+import { handlers } from "@/auth"
 
-export { GET, POST } from "@/auth"
+export const { GET, POST } = handlers

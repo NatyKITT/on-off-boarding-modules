@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation"
-import { auth } from "@/auth"
+
+import { getSession } from "@/lib/session"
 
 import { OAuthButtons } from "@/components/auth/oauth-buttons"
 import { Icons } from "@/components/shared/icons"
@@ -9,7 +10,7 @@ export const fetchCache = "force-no-store"
 export const revalidate = 0
 
 export default async function SignInPage() {
-  const session = await auth()
+  const session = await getSession()
   if (session?.user) {
     redirect("/prehled")
   }

@@ -2,6 +2,8 @@ import { notFound } from "next/navigation"
 import { format } from "date-fns"
 import { cs } from "date-fns/locale"
 
+import { absoluteUrl } from "@/lib/utils"
+
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -37,8 +39,7 @@ interface PageProps {
 }
 
 export default async function OnboardingDetailPage({ params }: PageProps) {
-  const base = process.env.NEXT_PUBLIC_APP_URL ?? ""
-  const res = await fetch(`${base}/api/nastupy/${params.id}`, {
+  const res = await fetch(absoluteUrl(`/api/nastupy/${params.id}`), {
     cache: "no-store",
   })
   if (!res.ok) return notFound()

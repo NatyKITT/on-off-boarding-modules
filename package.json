@@ -5,9 +5,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3001",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 3001",
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
@@ -24,13 +24,13 @@
     "typecheck": "tsc --noEmit",
     "lint": "next lint",
     "lint:fix": "next lint --fix",
-    "email:process": "curl -X GET http://localhost:3000/api/cron/mail-worker",
-    "email:stats": "curl -X PUT http://localhost:3000/api/cron/mail-worker",
-    "probation:check": "curl -X POST http://localhost:3000/api/cron/probation-check"
+    "email:process": "curl -X GET http://localhost:3001/api/cron/mail-worker",
+    "email:stats": "curl -X PUT http://localhost:3001/api/cron/mail-worker",
+    "probation:check": "curl -X POST http://localhost:3001/api/cron/probation-check"
   },
   "dependencies": {
     "@auth/core": "0.30.0",
-    "@auth/prisma-adapter": "2.0.0",
+    "@auth/prisma-adapter": "^2.11.0",
     "@hookform/resolvers": "^3.3.4",
     "@mantine/core": "^8.2.2",
     "@mantine/dates": "^8.2.2",
@@ -84,7 +84,7 @@
     "moment": "^2.30.1",
     "ms": "^2.1.3",
     "next": "14.2.3",
-    "next-auth": "5.0.0-beta.11",
+    "next-auth": "5.0.0-beta.25",
     "next-contentlayer": "^0.3.4",
     "next-themes": "^0.3.0",
     "react": "^18.3.1",

@@ -22,20 +22,19 @@ export function UserAccountNav() {
   const user = session?.user
 
   const [open, setOpen] = useState(false)
-  const closeDrawer = () => {
-    setOpen(false)
-  }
+  const closeDrawer = () => setOpen(false)
 
   const { isMobile } = useMediaQuery()
 
-  if (!user)
+  if (!user) {
     return <div className="size-8 animate-pulse rounded-full border bg-muted" />
+  }
 
   if (isMobile) {
     return (
       <Drawer.Root open={open} onClose={closeDrawer}>
-        <Drawer.Trigger onClick={() => setOpen(true)} asChild>
-          <button type="button">
+        <Drawer.Trigger asChild>
+          <button type="button" onClick={() => setOpen(true)}>
             <UserAvatar
               user={{ name: user.name || null, image: user.image || null }}
               className="size-9 border"
@@ -61,7 +60,7 @@ export function UserAccountNav() {
                 {user.name && <p className="font-medium">{user.name}</p>}
                 {user.email && (
                   <p className="w-[200px] truncate text-muted-foreground">
-                    {user?.email}
+                    {user.email}
                   </p>
                 )}
               </div>
@@ -107,9 +106,7 @@ export function UserAccountNav() {
                 className="rounded-lg text-foreground hover:bg-muted"
                 onClick={(event) => {
                   event.preventDefault()
-                  signOut({
-                    callbackUrl: `${window.location.origin}/`,
-                  })
+                  signOut({ callbackUrl: `${window.location.origin}/` })
                 }}
               >
                 <div className="flex w-full items-center gap-3 px-2.5 py-2">
@@ -126,20 +123,28 @@ export function UserAccountNav() {
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger>
-        <UserAvatar
-          user={{ name: user.name || null, image: user.image || null }}
-          className="size-8 border"
-          aria-label="Uživatelské menu"
-        />
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          className="rounded-full"
+        >
+          <UserAvatar
+            user={{ name: user.name || null, image: user.image || null }}
+            className="size-8 border"
+            aria-label="Uživatelské menu"
+          />
+        </button>
       </DropdownMenuTrigger>
+
       <DropdownMenuContent align="end">
         <div className="flex items-center justify-start gap-2 p-2">
           <div className="flex flex-col space-y-1 leading-none">
             {user.name && <p className="font-medium">{user.name}</p>}
             {user.email && (
               <p className="w-[200px] truncate text-sm text-muted-foreground">
-                {user?.email}
+                {user.email}
               </p>
             )}
           </div>
@@ -168,14 +173,14 @@ export function UserAccountNav() {
             <p className="text-sm">Nastavení</p>
           </Link>
         </DropdownMenuItem>
+
         <DropdownMenuSeparator />
+
         <DropdownMenuItem
           className="cursor-pointer"
-          onSelect={(event) => {
-            event.preventDefault()
-            signOut({
-              callbackUrl: `${window.location.origin}/`,
-            })
+          onSelect={(e) => {
+            e.preventDefault()
+            signOut({ callbackUrl: `${window.location.origin}/` })
           }}
         >
           <div className="flex items-center space-x-2.5">

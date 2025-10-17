@@ -1,7 +1,6 @@
 "use client"
 
 import { fontHeading, fontSans } from "@/fonts"
-import { Analytics } from "@vercel/analytics/react"
 import { SessionProvider } from "next-auth/react"
 
 import { SmoothScrollProvider } from "@/providers/smooth-scroll-provider"
@@ -32,7 +31,6 @@ export function ClientLayout({ children }: { children: React.ReactNode }) {
           >
             <ModalProvider>{children}</ModalProvider>
             <Toaster />
-            <Analytics />
             <TailwindIndicator />
           </ThemeProvider>
         </SmoothScrollProvider>

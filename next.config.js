@@ -4,6 +4,7 @@ void import("./src/env.mjs")
 const nextConfig = {
   reactStrictMode: true,
   pageExtensions: ["tsx", "ts", "js"],
+
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "avatars.githubusercontent.com" },
@@ -11,8 +12,32 @@ const nextConfig = {
       { protocol: "https", hostname: "uploadthing.com" },
     ],
   },
+
   experimental: {
     serverComponentsExternalPackages: ["@prisma/client"],
+  },
+  compress: true,
+  poweredByHeader: false,
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          {
+            key: "X-DNS-Prefetch-Control",
+            value: "on",
+          },
+          {
+            key: "X-Frame-Options",
+            value: "SAMEORIGIN",
+          },
+          {
+            key: "X-Content-Type-Options",
+            value: "nosniff",
+          },
+        ],
+      },
+    ]
   },
 }
 

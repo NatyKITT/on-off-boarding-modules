@@ -62,6 +62,7 @@ const CZ_FIELD_LABEL: Record<string, string> = {
   plannedEnd: "Plánovaný odchod",
   actualEnd: "Skutečný odchod",
   noticePeriodEnd: "Konec výpovědní lhůty",
+  noticeEnd: "Konec výpovědní lhůty",
   deleted_at: "Smazání",
   "*": "Záznam",
 }

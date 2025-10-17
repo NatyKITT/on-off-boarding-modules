@@ -1,47 +1,41 @@
 {
   "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
+    "target": "ES2022",
     "lib": [
-      "dom",
-      "dom.iterable",
-      "ESNext"
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
     ],
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
     "strict": true,
     "noEmit": true,
     "esModuleInterop": true,
-    "moduleResolution": "bundler",
+    "allowJs": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "preserve",
     "incremental": true,
-    "noUncheckedIndexedAccess": true,
+    "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
-    "typeRoots": [
-      "./types",
-      "./node_modules/@types"
-    ],
     "paths": {
       "@/*": [
         "./src/*"
       ]
     },
+    "skipLibCheck": true,
     "plugins": [
       {
         "name": "next"
       }
-    ],
-    "strictNullChecks": true,
-    "allowJs": true
+    ]
   },
   "include": [
     "next-env.d.ts",
-    "src",
-    "types",
-    ".next/types/**/*.ts",
-    "tailwind.config.ts"
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.d.ts",
+    ".next/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

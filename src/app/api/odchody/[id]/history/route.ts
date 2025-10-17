@@ -7,6 +7,13 @@ export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
 export const revalidate = 0
 
+function normalizeAction(a: string) {
+  if (a === "CREATED") return "CREATE"
+  if (a === "UPDATED") return "UPDATE"
+  if (a === "DELETED") return "DELETE"
+  return a
+}
+
 export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
@@ -57,7 +64,6 @@ export async function GET(
       },
     })
 
-    // Načtení uživatelů pro čitelné zobrazení
     const userKeys = Array.from(
       new Set(rows.map((r) => r.userId).filter((v): v is string => Boolean(v)))
     )
@@ -81,9 +87,15 @@ export async function GET(
     }
 
     const data = rows.map((r) => ({
-      ...r,
+      id: r.id,
+      employeeId: r.employeeId,
+      userId: r.userId,
       displayUser:
         (r.userId && nameByKey.get(r.userId)) || r.userId || "Neznámý uživatel",
+      action: normalizeAction(r.action), // <<< tady
+      field: r.field ?? null,
+      oldValue: r.oldValue ?? null,
+      newValue: r.newValue ?? null,
       createdAt: r.createdAt.toISOString(),
     }))
 
