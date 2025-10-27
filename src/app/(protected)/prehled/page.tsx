@@ -36,6 +36,15 @@ import {
   type FormValues as OnbFormValues,
 } from "@/components/forms/onboarding-form"
 
+/* ----------------------- Types ----------------------- */
+
+/* ----------------------- Types ----------------------- */
+
+/* ----------------------- Types ----------------------- */
+
+/* ----------------------- Types ----------------------- */
+
+/* ----------------------- Types ----------------------- */
 type RCView = "month" | "year" | "decade" | "century"
 type RCValue = Date | Date[] | null
 type RCOnArgs = {
@@ -63,7 +72,6 @@ const localizer = dateFnsLocalizer({
 })
 
 type EventType = "plannedStart" | "actualStart" | "plannedEnd" | "actualEnd"
-
 type EntityKind = "onb" | "off" | "cluster"
 
 interface CalendarEvent {
@@ -139,13 +147,21 @@ const toISO = (d: Date | null) =>
     ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
     : ""
 
+/** začátek pracovního dne 08:00 */
+const setToWorkStart = (d: Date) => setMinutes(setHours(new Date(d), 8), 0)
+
+/** 00:00 (měsíční klik) -> 08:00; jinak zachovat */
+const withDefaultWorkTime = (d: Date) => {
+  const nd = new Date(d)
+  return nd.getHours() === 0 && nd.getMinutes() === 0 ? setToWorkStart(nd) : nd
+}
+
 const roundToHalfHourFloor = (d: Date) => {
   const n = new Date(d)
   const m = n.getMinutes()
   n.setMinutes(m < 30 ? 0 : 30, 0, 0)
   return n
 }
-
 const slotKey = (d: Date) =>
   `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`
 
@@ -278,12 +294,12 @@ export default function DashboardPage(): JSX.Element {
               .replace(/\s+/g, " ")
               .trim()
           const makeDate = (iso?: string | null) => {
-            const d = iso ? new Date(iso) : new Date()
+            const base = iso ? new Date(iso) : new Date()
             if (e.startTime) {
               const [h = "0", m = "0"] = (e.startTime ?? "00:00").split(":")
-              d.setHours(parseInt(h, 10) || 0, parseInt(m, 10) || 0, 0, 0)
+              base.setHours(parseInt(h, 10) || 0, parseInt(m, 10) || 0, 0, 0)
             }
-            return d
+            return base
           }
           if (e.actualStart) {
             const d = makeDate(e.actualStart)
@@ -406,18 +422,14 @@ export default function DashboardPage(): JSX.Element {
   const displayEvents = useMemo<CalendarEvent[]>(() => {
     if (bigView === "month") {
       const perDay = new Map<string, Map<EventType, CalendarEvent[]>>()
-
       for (const ev of events) {
         const k = dayKey(ev.start)
-        if (!perDay.has(k)) {
-          perDay.set(k, new Map())
-        }
+        if (!perDay.has(k)) perDay.set(k, new Map())
         const dayMap = perDay.get(k)!
         const typeList = dayMap.get(ev.type)
         if (typeList) typeList.push(ev)
         else dayMap.set(ev.type, [ev])
       }
-
       const out: CalendarEvent[] = []
       perDay.forEach((typeMap, day) => {
         typeMap.forEach((items, type) => {
@@ -433,12 +445,9 @@ export default function DashboardPage(): JSX.Element {
               numericId: -1,
               clusterItems: items,
             })
-          } else {
-            out.push(...items)
-          }
+          } else out.push(...items)
         })
       })
-
       return out
     }
 
@@ -450,9 +459,7 @@ export default function DashboardPage(): JSX.Element {
         if (list) list.push(ev)
         else perDay.set(k, [ev])
       }
-
       const out: CalendarEvent[] = []
-
       perDay.forEach((dayEvents) => {
         const onbWithTime = dayEvents.filter(
           (e) =>
@@ -533,12 +540,9 @@ export default function DashboardPage(): JSX.Element {
               numericId: -1,
               clusterItems: items,
             })
-          } else {
-            out.push(...items)
-          }
+          } else out.push(...items)
         }
       })
-
       return out
     }
 
@@ -608,11 +612,11 @@ export default function DashboardPage(): JSX.Element {
       monthHeaderFormat: (date: Date) =>
         dfFormat(date, "LLLL yyyy", { locale: cs }),
       dayHeaderFormat: (date: Date) =>
-        dfFormat(date, "EEEE d. LLLL", { locale: cs }), // vedle sebe
+        dfFormat(date, "EEEE d. LLLL", { locale: cs }),
       dayRangeHeaderFormat: ({ start, end }: { start: Date; end: Date }) =>
         `${dfFormat(start, "d. LLLL", { locale: cs })} – ${dfFormat(end, "d. LLLL yyyy", { locale: cs })}`,
       weekdayFormat: (date: Date) => dfFormat(date, "EEEE", { locale: cs }),
-      dayFormat: (date: Date) => dfFormat(date, "EEEE d.", { locale: cs }), // sloupec ve week
+      dayFormat: (date: Date) => dfFormat(date, "EEEE d.", { locale: cs }),
       eventTimeRangeFormat: () => "",
       agendaTimeRangeFormat: () => "",
     }),
@@ -622,16 +626,22 @@ export default function DashboardPage(): JSX.Element {
   const minTime = useMemo(() => new Date(1970, 0, 1, 8, 0, 0), [])
   const maxTime = useMemo(() => new Date(1970, 0, 1, 18, 0, 0), [])
 
-  // Slot click -> open create modals
-  const handleSelectSlot = useCallback(({ start }: { start: Date }) => {
-    setSlotDate(start)
-    setPlanOpen(true)
-  }, [])
+  /** ⬇️ FIX: respektuj vybranou hodinu v week/day; 08:00 jen pro month/00:00 */
+  const handleSelectSlot = useCallback(
+    ({ start }: { start: Date }) => {
+      const isMidnight = start.getHours() === 0 && start.getMinutes() === 0
+      const normalized =
+        bigView === "month" || isMidnight ? setToWorkStart(start) : start
+      setSlotDate(normalized)
+      setPlanOpen(true)
+    },
+    [bigView]
+  )
+
   const openCreate = useCallback(
     (target: "onb-planned" | "onb-actual" | "off-planned" | "off-actual") => {
       if (!slotDate) return
       setPlanOpen(false)
-
       setTimeout(() => {
         switch (target) {
           case "onb-planned":
@@ -920,27 +930,23 @@ export default function DashboardPage(): JSX.Element {
     if (event.entity === "cluster") {
       return event.clusterItems?.map((e) => e.title).join(", ") || ""
     }
-
     const typeText = {
       plannedStart: "Předpokládaný nástup",
       actualStart: "Skutečný nástup",
       plannedEnd: "Plánovaný odchod",
       actualEnd: "Skutečný odchod",
     }[event.type]
-
     if (event.hasCustomTime) {
       const timeStr = dfFormat(event.start, "HH:mm", { locale: cs })
       return `${typeText} ${event.title} (${timeStr})`
     }
-
     return `${typeText} ${event.title}`
   }, [])
 
   const EventCell = useCallback(({ event }: { event: CalendarEvent }) => {
-    let tooltipText = ""
-
     if (event.entity === "cluster") {
-      tooltipText = event.clusterItems?.map((e) => e.title).join(", ") || ""
+      const tooltipText =
+        event.clusterItems?.map((e) => e.title).join(", ") || ""
       return (
         <div
           className="rbc-event-inner font-bold"
@@ -951,21 +957,15 @@ export default function DashboardPage(): JSX.Element {
         </div>
       )
     }
-
     const typeText = {
       plannedStart: "Předpokládaný nástup",
       actualStart: "Skutečný nástup",
       plannedEnd: "Plánovaný odchod",
       actualEnd: "Skutečný odchod",
     }[event.type]
-
-    if (event.hasCustomTime) {
-      const timeStr = dfFormat(event.start, "HH:mm", { locale: cs })
-      tooltipText = `${typeText}: ${event.title} (${timeStr})`
-    } else {
-      tooltipText = `${typeText}: ${event.title}`
-    }
-
+    const tooltipText = event.hasCustomTime
+      ? `${typeText}: ${event.title} (${dfFormat(event.start, "HH:mm", { locale: cs })})`
+      : `${typeText}: ${event.title}`
     return (
       <div className="rbc-event-inner font-bold" title={tooltipText}>
         {event.title}
@@ -1067,6 +1067,7 @@ export default function DashboardPage(): JSX.Element {
                 lineHeight: 1.15,
                 fontSize: bigView === "month" ? 12 : 13,
                 fontWeight: 700,
+                textShadow: "0 1px 1px rgba(0,0,0,0.35)",
               },
             }
           }}
@@ -1074,24 +1075,31 @@ export default function DashboardPage(): JSX.Element {
         />
       </section>
 
-      {/* OPRAVA 2: Slot planning modal s vyšším z-index */}
+      {/* Slot planning modal */}
       {planOpen && (
         <div
           className="fixed inset-0 z-[200] grid place-items-center bg-black/40 p-4"
           onClick={() => setPlanOpen(false)}
         >
           <div
-            className="w-full max-w-[460px] rounded-2xl bg-white p-5 shadow-xl ring-1 ring-black/5"
+            className="w-full max-w-[460px] rounded-2xl bg-white p-5 text-neutral-800 shadow-xl ring-1 ring-black/5 dark:bg-neutral-900 dark:text-neutral-100"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="mb-2 text-lg font-semibold">Naplánovat akci</h3>
-            <p className="mb-4 text-sm text-neutral-600">
+            <p className="mb-4 text-sm text-neutral-600 dark:text-neutral-300">
               Datum:{" "}
               <strong>
                 {dfFormat(slotDate ?? new Date(), "d. M. yyyy", { locale: cs })}
               </strong>
               , čas:{" "}
-              <strong>{dfFormat(slotDate ?? new Date(), "HH:mm")}</strong>
+              <strong>
+                {dfFormat(
+                  slotDate
+                    ? withDefaultWorkTime(slotDate)
+                    : setToWorkStart(new Date()),
+                  "HH:mm"
+                )}
+              </strong>
             </p>
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -1125,7 +1133,7 @@ export default function DashboardPage(): JSX.Element {
             </div>
             <div className="mt-4 flex justify-end">
               <button
-                className="rounded-md px-3 py-2 text-sm text-gray-600 hover:bg-gray-100"
+                className="rounded-md px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 dark:text-neutral-300 dark:hover:bg-white/10"
                 onClick={() => setPlanOpen(false)}
               >
                 Zavřít
@@ -1144,7 +1152,9 @@ export default function DashboardPage(): JSX.Element {
             mode="create-planned"
             initial={{
               plannedStart: toISO(slotDate) || undefined,
-              startTime: slotDate ? dfFormat(slotDate, "HH:mm") : undefined,
+              startTime: slotDate
+                ? dfFormat(withDefaultWorkTime(slotDate), "HH:mm")
+                : "08:00",
             }}
             onSuccess={async () => {
               setOpenNewOnbPlanned(false)
@@ -1162,7 +1172,9 @@ export default function DashboardPage(): JSX.Element {
             mode="create-actual"
             initial={{
               actualStart: toISO(slotDate) || undefined,
-              startTime: slotDate ? dfFormat(slotDate, "HH:mm") : undefined,
+              startTime: slotDate
+                ? dfFormat(withDefaultWorkTime(slotDate), "HH:mm")
+                : "08:00",
             }}
             onSuccess={async () => {
               setOpenNewOnbActual(false)
@@ -1560,7 +1572,7 @@ export default function DashboardPage(): JSX.Element {
           background: transparent !important;
         }
         .react-calendar__tile:enabled:hover {
-          background: rgba(0, 0, 0, 0.04) !important;
+          background: rgba(0, 0, 0, 0.03) !important;
         }
         .react-calendar__tile--active,
         .react-calendar__tile--hasActive {
@@ -1580,21 +1592,21 @@ export default function DashboardPage(): JSX.Element {
           border-radius: 8px;
         }
         .mini-today abbr {
-          box-shadow: inset 0 0 0 2px rgba(17, 24, 39, 0.6);
+          box-shadow: inset 0 0 0 2px rgba(17, 24, 39, 0.35);
         }
         .mini-selected abbr {
           background: rgba(59, 130, 246, 0.12);
         }
         .mini-weekend {
-          background: rgba(107, 114, 128, 0.08);
+          background: rgba(107, 114, 128, 0.06);
           border-radius: 10px;
         }
         .mini-outside {
-          background: rgba(0, 0, 0, 0.06);
+          background: rgba(0, 0, 0, 0.04);
           border-radius: 10px;
         }
         .mini-outside-weekend {
-          background: rgba(0, 0, 0, 0.1);
+          background: rgba(0, 0, 0, 0.06);
           border-radius: 10px;
         }
         .mini-marker {
@@ -1607,6 +1619,19 @@ export default function DashboardPage(): JSX.Element {
           border-radius: 9999px;
           opacity: 0.35;
           z-index: 1;
+        }
+        .rbc-toolbar button:focus,
+        .rbc-toolbar button:focus-visible,
+        .react-calendar__navigation button:focus,
+        .react-calendar__navigation button:focus-visible,
+        .rbc-event:focus,
+        .rbc-event:focus-visible {
+          outline: none !important;
+          box-shadow: none !important;
+        }
+        .rbc-toolbar button:focus-visible,
+        .react-calendar__navigation button:focus-visible {
+          box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18) !important;
         }
 
         /* BIG calendar skin */
@@ -1629,9 +1654,6 @@ export default function DashboardPage(): JSX.Element {
           line-height: 1.15;
           font-size: 11.5px;
         }
-        .rbc-month-row + .rbc-month-row {
-          border-top: 1px dashed rgba(0, 0, 0, 0.06);
-        }
         .rbc-header {
           padding: 8px 0;
           font-weight: 600;
@@ -1642,7 +1664,7 @@ export default function DashboardPage(): JSX.Element {
           font-size: 14px;
         }
         .rbc-off-range-bg {
-          background: rgba(0, 0, 0, 0.025);
+          background: rgba(0, 0, 0, 0.02);
         }
         .rbc-event {
           border: none;
@@ -1655,6 +1677,28 @@ export default function DashboardPage(): JSX.Element {
         .rbc-slot-selection {
           background-color: transparent !important;
         }
+        .rbc-month-row + .rbc-month-row {
+          border-top: 1px dashed rgba(0, 0, 0, 0.06);
+        }
+        .rbc-month-view .rbc-day-bg + .rbc-day-bg {
+          border-left: 1px solid rgba(0, 0, 0, 0.08) !important;
+        }
+        .rbc-time-header,
+        .rbc-time-content,
+        .rbc-timeslot-group,
+        .rbc-time-slot,
+        .rbc-day-bg + .rbc-day-bg {
+          border-color: rgba(0, 0, 0, 0.08) !important;
+        }
+        .rbc-time-content > * + * {
+          border-left: 1px solid rgba(0, 0, 0, 0.08) !important;
+        }
+        .rbc-time-content > .rbc-time-gutter {
+          border-right: 1px solid rgba(0, 0, 0, 0.08) !important;
+        }
+        .rbc-time-slot {
+          border-top: 1px solid rgba(0, 0, 0, 0.06) !important;
+        }
         .rbc-day-slot .rbc-event,
         .rbc-time-view .rbc-event {
           padding: 8px 10px !important;
@@ -1664,6 +1708,144 @@ export default function DashboardPage(): JSX.Element {
           display: block;
           font-weight: 700;
           line-height: 1.25;
+        }
+        .rbc-today {
+          background: rgba(59, 130, 246, 0.06) !important;
+        }
+        html.dark .rbc-toolbar {
+          color: rgba(255, 255, 255, 0.92);
+        }
+        html.dark .rbc-toolbar button {
+          color: rgba(255, 255, 255, 0.9);
+          background: rgba(255, 255, 255, 0.05);
+          border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+        html.dark .rbc-toolbar button:hover,
+        html.dark .rbc-toolbar button:focus {
+          background: rgba(255, 255, 255, 0.08);
+          border-color: rgba(255, 255, 255, 0.1);
+        }
+        html.dark .rbc-toolbar .rbc-btn-group > button.rbc-active {
+          background: rgba(255, 255, 255, 0.14);
+          border-color: rgba(255, 255, 255, 0.16);
+          color: #fff;
+        }
+        html.dark .rbc-month-view,
+        html.dark .rbc-time-view,
+        html.dark .rbc-agenda-view {
+          background: #0f1115 !important;
+          color: rgba(255, 255, 255, 0.92);
+          border-color: rgba(255, 255, 255, 0.08) !important;
+        }
+        html.dark .rbc-header {
+          color: rgba(255, 255, 255, 0.9) !important;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+        }
+        html.dark .rbc-month-row + .rbc-month-row {
+          border-top: 1px dashed rgba(255, 255, 255, 0.06) !important;
+        }
+        html.dark .rbc-month-view .rbc-day-bg + .rbc-day-bg {
+          border-left: 1px solid rgba(255, 255, 255, 0.06) !important;
+        }
+        html.dark .rbc-time-header,
+        html.dark .rbc-time-content,
+        html.dark .rbc-timeslot-group,
+        html.dark .rbc-time-slot,
+        html.dark .rbc-day-bg + .rbc-day-bg {
+          border-color: rgba(255, 255, 255, 0.06) !important;
+        }
+        html.dark .rbc-time-content > * + * {
+          border-left: 1px solid rgba(255, 255, 255, 0.06) !important;
+        }
+        html.dark .rbc-time-content > .rbc-time-gutter {
+          border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
+        }
+        html.dark .rbc-time-slot {
+          border-top: 1px solid rgba(255, 255, 255, 0.05) !important;
+        }
+
+        html.dark .rbc-today {
+          background: rgba(59, 130, 246, 0.1) !important;
+        }
+        html.dark .rbc-date-cell.rbc-now,
+        html.dark .rbc-header.rbc-today {
+          color: #fff !important;
+        }
+        html.dark .rbc-event {
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.45) !important;
+          color: #fff !important;
+          text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+        }
+        html.dark .rbc-off-range-bg {
+          background: rgba(255, 255, 255, 0.04) !important;
+        }
+        html.dark .react-calendar__tile:enabled:hover {
+          background: rgba(255, 255, 255, 0.06) !important;
+        }
+        html.dark .react-calendar__navigation button {
+          color: rgba(255, 255, 255, 0.9);
+          background: transparent;
+        }
+        html.dark .react-calendar__navigation button:hover {
+          background: rgba(255, 255, 255, 0.07) !important;
+        }
+        html.dark .mini-weekend {
+          background: rgba(255, 255, 255, 0.05) !important;
+        }
+        html.dark .mini-outside {
+          background: rgba(255, 255, 255, 0.04) !important;
+        }
+        html.dark .mini-outside-weekend {
+          background: rgba(255, 255, 255, 0.06) !important;
+        }
+        html.dark .mini-today abbr {
+          box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.35) !important;
+        }
+        html.dark .mini-selected abbr {
+          background: rgba(59, 130, 246, 0.18) !important;
+        }
+        html.dark .mini-marker {
+          opacity: 0.55 !important;
+        }
+        .react-calendar__tile:focus {
+          outline: none;
+          background: rgba(59, 130, 246, 0.08) !important;
+          box-shadow: inset 0 0 0 2px rgba(59, 130, 246, 0.25);
+        }
+        .react-calendar__tile--active,
+        .react-calendar__tile--active:focus {
+          background: rgba(59, 130, 246, 0.12) !important;
+          box-shadow: inset 0 0 0 2px rgba(59, 130, 246, 0.25);
+        }
+        .react-calendar__year-view .react-calendar__tile:focus,
+        .react-calendar__decade-view .react-calendar__tile:focus,
+        .react-calendar__century-view .react-calendar__tile:focus {
+          background: rgba(59, 130, 246, 0.08) !important;
+          box-shadow: inset 0 0 0 2px rgba(59, 130, 246, 0.25);
+        }
+        .react-calendar__navigation button:focus {
+          outline: none;
+          box-shadow: inset 0 0 0 2px rgba(59, 130, 246, 0.25);
+        }
+        html.dark .react-calendar__tile:focus {
+          background: rgba(59, 130, 246, 0.14) !important;
+          box-shadow: inset 0 0 0 2px rgba(59, 130, 246, 0.35);
+        }
+        html.dark .react-calendar__tile--active,
+        html.dark .react-calendar__tile--active:focus {
+          background: rgba(59, 130, 246, 0.18) !important;
+          box-shadow: inset 0 0 0 2px rgba(59, 130, 246, 0.35);
+        }
+        html.dark .react-calendar__navigation button:focus {
+          box-shadow: inset 0 0 0 2px rgba(59, 130, 246, 0.28);
+        }
+        html.dark .rbc-toolbar button:focus-visible,
+        html.dark .react-calendar__navigation button:focus-visible {
+          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2) !important;
+        }
+        html.dark .rbc-calendar *,
+        html.dark .react-calendar * {
+          border-color: hsl(0 0% 14.9%) !important;
         }
       `}</style>
     </div>

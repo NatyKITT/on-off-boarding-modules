@@ -115,6 +115,7 @@ CREATE TABLE `EmployeeOffboarding` (
     `deleteReason` VARCHAR(191) NULL,
     `noticeMonths` INTEGER NULL DEFAULT 2,
     `noticeEnd` DATETIME(3) NULL,
+    `hasCustomDates` BOOLEAN NOT NULL DEFAULT false,
     `lastNoticeReminder` DATETIME(3) NULL,
     `noticeRemindersSent` INTEGER NOT NULL DEFAULT 0,
 
@@ -130,7 +131,7 @@ CREATE TABLE `OnboardingChangeLog` (
     `id` INTEGER NOT NULL AUTO_INCREMENT,
     `employeeId` INTEGER NOT NULL,
     `userId` VARCHAR(191) NOT NULL,
-    `action` ENUM('CREATED', 'UPDATED', 'DELETED', 'RESTORED', 'MAIL_SENT', 'MAIL_FAILED', 'STATUS_CHANGED', 'PROBATION_REMINDER_SENT', 'NOTICE_REMINDER_SENT') NOT NULL,
+    `action` ENUM('CREATED', 'UPDATED', 'DELETED', 'RESTORED', 'MAIL_SENT', 'MAIL_ENQUEUED', 'MAIL_FAILED', 'STATUS_CHANGED', 'PROBATION_REMINDER_SENT', 'NOTICE_REMINDER_SENT') NOT NULL,
     `field` VARCHAR(191) NOT NULL,
     `oldValue` VARCHAR(191) NULL,
     `newValue` VARCHAR(191) NULL,
@@ -148,7 +149,7 @@ CREATE TABLE `OffboardingChangeLog` (
     `id` INTEGER NOT NULL AUTO_INCREMENT,
     `employeeId` INTEGER NOT NULL,
     `userId` VARCHAR(191) NOT NULL,
-    `action` ENUM('CREATED', 'UPDATED', 'DELETED', 'RESTORED', 'MAIL_SENT', 'MAIL_FAILED', 'STATUS_CHANGED', 'PROBATION_REMINDER_SENT', 'NOTICE_REMINDER_SENT') NOT NULL,
+    `action` ENUM('CREATED', 'UPDATED', 'DELETED', 'RESTORED', 'MAIL_SENT', 'MAIL_ENQUEUED', 'MAIL_FAILED', 'STATUS_CHANGED', 'PROBATION_REMINDER_SENT', 'NOTICE_REMINDER_SENT') NOT NULL,
     `field` VARCHAR(191) NOT NULL,
     `oldValue` VARCHAR(191) NULL,
     `newValue` VARCHAR(191) NULL,
@@ -203,6 +204,21 @@ CREATE TABLE `mail_jobs` (
     INDEX `mail_jobs_status_sendAt_idx`(`status`, `sendAt`),
     INDEX `mail_jobs_type_idx`(`type`),
     INDEX `mail_jobs_priority_idx`(`priority`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `MonthlyReportRecord` (
+    `id` INTEGER NOT NULL AUTO_INCREMENT,
+    `monthlyReportId` INTEGER NULL,
+    `recordType` VARCHAR(191) NOT NULL,
+    `recordId` INTEGER NOT NULL,
+    `sentAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `sentBy` VARCHAR(191) NOT NULL,
+
+    INDEX `MonthlyReportRecord_monthlyReportId_idx`(`monthlyReportId`),
+    INDEX `MonthlyReportRecord_sentAt_idx`(`sentAt`),
+    UNIQUE INDEX `MonthlyReportRecord_recordType_recordId_monthlyReportId_key`(`recordType`, `recordId`, `monthlyReportId`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -262,4 +278,7 @@ ALTER TABLE `EmailHistory` ADD CONSTRAINT `EmailHistory_onboardingEmployeeId_fke
 
 -- AddForeignKey
 ALTER TABLE `EmailHistory` ADD CONSTRAINT `EmailHistory_offboardingEmployeeId_fkey` FOREIGN KEY (`offboardingEmployeeId`) REFERENCES `EmployeeOffboarding`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `MonthlyReportRecord` ADD CONSTRAINT `MonthlyReportRecord_monthlyReportId_fkey` FOREIGN KEY (`monthlyReportId`) REFERENCES `MonthlyReport`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 

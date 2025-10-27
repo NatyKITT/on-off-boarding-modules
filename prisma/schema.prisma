@@ -29,7 +29,7 @@ enum OffboardingStatus {
 
 enum MailJobType {
   EMPLOYEE_INFO
-  MONTHLY_SUMMARY
+  MONTHLY_SUMMARY // měsíční shrnutí
   PROBATION_WARNING // 10 dní před koncem zkušební doby
   PROBATION_REMINDER // Připomínka zaměstnanci
   PROBATION_ENDING // Poslední den zkušební doby
@@ -274,10 +274,25 @@ model MailQueue {
 
   EmailHistory EmailHistory[]
 
-  @@map("mail_jobs")
   @@index([status, sendAt])
   @@index([type])
   @@index([priority])
+  @@map("mail_jobs")
+}
+
+model MonthlyReportRecord {
+  id              Int            @id @default(autoincrement())
+  monthlyReportId Int?
+  monthlyReport   MonthlyReport? @relation(fields: [monthlyReportId], references: [id])
+
+  recordType String
+  recordId   Int
+  sentAt     DateTime @default(now())
+  sentBy     String
+
+  @@unique([recordType, recordId, monthlyReportId])
+  @@index([monthlyReportId])
+  @@index([sentAt])
 }
 
 model MonthlyReport {
@@ -289,6 +304,8 @@ model MonthlyReport {
   sentAt      DateTime?
   createdAt   DateTime  @default(now())
   data        Json
+
+  records MonthlyReportRecord[]
 
   @@unique([month, reportType])
   @@index([month])

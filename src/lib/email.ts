@@ -16,7 +16,7 @@ export async function sendMail({
   if (!to?.length) throw new Error("Prázdní příjemci.")
   const resend = new Resend(env.RESEND_API_KEY)
   const { error } = await resend.emails.send({
-    from: env.RESEND_EMAIL_FROM, // např. "Onboarding <onboarding@resend.dev>"
+    from: env.RESEND_EMAIL_FROM,
     to,
     subject,
     html,

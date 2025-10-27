@@ -1078,10 +1078,10 @@ export default function OffboardingPage() {
         <div className="min-h-0 flex-1 overflow-auto">
           {/* ---------- PLANNED TAB ---------- */}
           <TabsContent value="planned" className="mt-4 space-y-4">
-            <div className="mb-4">
+            <div className="mb-4 flex items-center justify-between gap-2">
               <Dialog open={openNewPlanned} onOpenChange={setOpenNewPlanned}>
                 <DialogTrigger asChild>
-                  <Button className="inline-flex items-center justify-center gap-2">
+                  <Button className="btn-brand-planned inline-flex items-center justify-center gap-2">
                     Přidat předpokládaný odchod
                   </Button>
                 </DialogTrigger>
@@ -1106,6 +1106,14 @@ export default function OffboardingPage() {
                   </div>
                 </DialogContent>
               </Dialog>
+
+              <DeletedRecordsDialog
+                kind="offboarding"
+                title="Smazané odchody"
+                triggerLabel="Smazané záznamy"
+                successEvent="offboarding:deleted"
+                onRestore={() => void reload()}
+              />
             </div>
 
             {loading ? (
@@ -1129,15 +1137,6 @@ export default function OffboardingPage() {
               </Card>
             ) : (
               <div className="space-y-4">
-                <div className="flex justify-end">
-                  <DeletedRecordsDialog
-                    kind="offboarding"
-                    title="Smazané odchody"
-                    triggerLabel="Smazané záznamy"
-                    successEvent="offboarding:deleted"
-                    onRestore={() => void reload()}
-                  />
-                </div>
                 <Accordion
                   type="multiple"
                   defaultValue={
@@ -1258,10 +1257,11 @@ export default function OffboardingPage() {
 
           {/* ---------- ACTUAL TAB ---------- */}
           <TabsContent value="actual" className="mt-4 space-y-4">
-            <div className="mb-4">
+            {/* horní řádka: vlevo přidat, vpravo smazané */}
+            <div className="mb-4 flex items-center justify-between gap-2">
               <Dialog open={openNewActual} onOpenChange={setOpenNewActual}>
                 <DialogTrigger asChild>
-                  <Button className="inline-flex items-center justify-center gap-2">
+                  <Button className="btn-brand-actual inline-flex items-center justify-center gap-2">
                     Přidat skutečný odchod
                   </Button>
                 </DialogTrigger>
@@ -1286,6 +1286,14 @@ export default function OffboardingPage() {
                   </div>
                 </DialogContent>
               </Dialog>
+
+              <DeletedRecordsDialog
+                kind="offboarding"
+                title="Smazané odchody"
+                triggerLabel="Smazané záznamy"
+                successEvent="offboarding:deleted"
+                onRestore={() => void reload()}
+              />
             </div>
 
             {loading ? (
@@ -1309,15 +1317,6 @@ export default function OffboardingPage() {
               </Card>
             ) : (
               <div className="space-y-4">
-                <div className="flex justify-end">
-                  <DeletedRecordsDialog
-                    kind="offboarding"
-                    title="Smazané odchody"
-                    triggerLabel="Smazané záznamy"
-                    successEvent="offboarding:deleted"
-                    onRestore={() => void reload()}
-                  />
-                </div>
                 <Accordion
                   type="multiple"
                   defaultValue={defaultActualMonth ? [defaultActualMonth] : []}
@@ -1622,6 +1621,56 @@ export default function OffboardingPage() {
         title={errorModal.title}
         message={errorModal.message}
       />
+
+      <style jsx>{`
+        .btn-brand-planned {
+          background: linear-gradient(
+            90deg,
+            var(--brand-kitt),
+            var(--brand-p6)
+          );
+          color: #fff;
+          border: 0;
+          box-shadow:
+            0 1px 2px rgba(0, 0, 0, 0.08),
+            inset 0 -8px 20px rgba(255, 255, 255, 0.08);
+        }
+        .btn-brand-planned:hover {
+          filter: brightness(1.05);
+        }
+        .btn-brand-planned:focus {
+          outline: none;
+          box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.25);
+        }
+
+        .btn-brand-actual {
+          background: linear-gradient(
+            90deg,
+            var(--brand-p6),
+            var(--brand-kitt)
+          );
+          color: #fff;
+          border: 0;
+          box-shadow:
+            0 1px 2px rgba(0, 0, 0, 0.08),
+            inset 0 -8px 20px rgba(255, 255, 255, 0.08);
+        }
+        .btn-brand-actual:hover {
+          filter: brightness(1.05);
+        }
+        .btn-brand-actual:focus {
+          outline: none;
+          box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.25);
+        }
+
+        /* Dark mode jemnější focus (bez “bílé blikající” aureoly) */
+        html.dark .btn-brand-planned:focus {
+          box-shadow: 0 0 0 2px hsl(var(--border));
+        }
+        html.dark .btn-brand-actual:focus {
+          box-shadow: 0 0 0 2px hsl(var(--border));
+        }
+      `}</style>
     </div>
   )
 }

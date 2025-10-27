@@ -43,7 +43,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { Textarea } from "@/components/ui/textarea" /* ----------------------------- types ----------------------------- */
+import { Textarea } from "@/components/ui/textarea"
 
 /* ----------------------------- types ----------------------------- */
 type Mode = "create-planned" | "create-actual" | "edit"
