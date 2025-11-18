@@ -37,14 +37,6 @@ import {
 } from "@/components/forms/onboarding-form"
 
 /* ----------------------- Types ----------------------- */
-
-/* ----------------------- Types ----------------------- */
-
-/* ----------------------- Types ----------------------- */
-
-/* ----------------------- Types ----------------------- */
-
-/* ----------------------- Types ----------------------- */
 type RCView = "month" | "year" | "decade" | "century"
 type RCValue = Date | Date[] | null
 type RCOnArgs = {
@@ -72,7 +64,7 @@ const localizer = dateFnsLocalizer({
 })
 
 type EventType = "plannedStart" | "actualStart" | "plannedEnd" | "actualEnd"
-type EntityKind = "onb" | "off" | "cluster"
+type EntityKind = "onb" | "off" | "cluster" | "combo"
 
 interface CalendarEvent {
   id: string
@@ -84,6 +76,7 @@ interface CalendarEvent {
   numericId: number
   clusterItems?: CalendarEvent[]
   hasCustomTime?: boolean
+  comboTypes?: EventType[]
 }
 
 type OnbRow = {
@@ -100,6 +93,7 @@ type OnbRow = {
   plannedStart: string
   actualStart?: string | null
   startTime?: string | null
+  hasCustomDates?: boolean | null
   userName?: string | null
   userEmail?: string | null
   personalNumber?: string | null
@@ -136,6 +130,13 @@ const COLORS: Record<EventType, string> = {
   actualEnd: "#ef4444",
 }
 
+const TYPE_LABEL: Record<EventType, string> = {
+  plannedStart: "Plánovaný nástup",
+  actualStart: "Skutečný nástup",
+  plannedEnd: "Plánovaný odchod",
+  actualEnd: "Skutečný odchod",
+}
+
 /* ----------------------- Utils ----------------------- */
 const isSameDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() &&
@@ -147,28 +148,34 @@ const toISO = (d: Date | null) =>
     ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
     : ""
 
-/** začátek pracovního dne 08:00 */
 const setToWorkStart = (d: Date) => setMinutes(setHours(new Date(d), 8), 0)
 
-/** 00:00 (měsíční klik) -> 08:00; jinak zachovat */
 const withDefaultWorkTime = (d: Date) => {
   const nd = new Date(d)
   return nd.getHours() === 0 && nd.getMinutes() === 0 ? setToWorkStart(nd) : nd
 }
 
+const normalizeSlotStart = (d: Date) => {
+  const n = new Date(d)
+  if (n.getHours() === 0 && n.getMinutes() === 0) {
+    n.setHours(8, 0, 0, 0)
+  }
+  return roundToHalfHourFloor(n)
+}
+
 const roundToHalfHourFloor = (d: Date) => {
   const n = new Date(d)
+  n.setSeconds(0, 0)
   const m = n.getMinutes()
   n.setMinutes(m < 30 ? 0 : 30, 0, 0)
   return n
 }
+
 const slotKey = (d: Date) =>
   `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`
 
-/** převod null → undefined na stringových polích */
 const toUndef = (v?: string | null) => (v == null ? undefined : v)
 
-/** mapy initial → přesně pole formuláře (bez excess props) */
 const mapOnbInitial = (e: Partial<OnbRow>): Partial<OnbFormValues> => ({
   titleBefore: toUndef(e.titleBefore),
   name: toUndef(e.name),
@@ -387,9 +394,6 @@ export default function DashboardPage(): JSX.Element {
       ) {
         setMiniSelected(null)
       }
-      if (target && bigRef.current && !bigRef.current.contains(target)) {
-        setBigView("month")
-      }
     }
     document.addEventListener("pointerdown", onPointerDown)
     return () => document.removeEventListener("pointerdown", onPointerDown)
@@ -421,6 +425,7 @@ export default function DashboardPage(): JSX.Element {
 
   const displayEvents = useMemo<CalendarEvent[]>(() => {
     if (bigView === "month") {
+      // Měsíční pohled - clustering podle typu
       const perDay = new Map<string, Map<EventType, CalendarEvent[]>>()
       for (const ev of events) {
         const k = dayKey(ev.start)
@@ -433,11 +438,11 @@ export default function DashboardPage(): JSX.Element {
       const out: CalendarEvent[] = []
       perDay.forEach((typeMap, day) => {
         typeMap.forEach((items, type) => {
-          if (items.length >= 2) {
+          if (items.length >= CLUSTER_THRESHOLD) {
             const sample = items[0]!
             out.push({
               id: `cluster-month-${day}-${type}`,
-              title: `${items.length} událostí`,
+              title: `${items.length} × ${TYPE_LABEL[type]}`,
               start: sample.start,
               end: sample.end,
               type: sample.type,
@@ -445,107 +450,232 @@ export default function DashboardPage(): JSX.Element {
               numericId: -1,
               clusterItems: items,
             })
-          } else out.push(...items)
+          } else {
+            out.push(...items)
+          }
         })
       })
       return out
     }
 
     if (bigView === "week" || bigView === "day") {
+      const out: CalendarEvent[] = []
       const perDay = new Map<string, CalendarEvent[]>()
+
       for (const ev of events) {
         const k = dayKey(ev.start)
         const list = perDay.get(k)
-        if (list) list.push(ev)
-        else perDay.set(k, [ev])
+        list ? list.push(ev) : perDay.set(k, [ev])
       }
-      const out: CalendarEvent[] = []
+
       perDay.forEach((dayEvents) => {
-        const onbWithTime = dayEvents.filter(
-          (e) =>
-            e.entity === "onb" &&
-            (e.start.getHours() !== 0 || e.start.getMinutes() !== 0)
-        )
-        const onbNoTime = dayEvents.filter(
-          (e) =>
-            e.entity === "onb" &&
-            e.start.getHours() === 0 &&
-            e.start.getMinutes() === 0
-        )
-        const offs = dayEvents.filter((e) => e.entity === "off")
+        const slots = new Map<string, Map<EventType, CalendarEvent[]>>()
 
-        const slots = new Map<string, CalendarEvent[]>()
-        for (const ev of onbWithTime) {
-          const start = roundToHalfHourFloor(ev.start)
-          const key = slotKey(start)
-          const normalized: CalendarEvent = {
+        // Zpracuj nástupy (onboarding)
+        const onbEvents = dayEvents.filter((e) => e.entity === "onb")
+        onbEvents.forEach((ev) => {
+          const slotStart = normalizeSlotStart(ev.start)
+          const key = slotKey(slotStart)
+
+          if (!slots.has(key)) slots.set(key, new Map())
+          const typeMap = slots.get(key)!
+          if (!typeMap.has(ev.type)) typeMap.set(ev.type, [])
+
+          typeMap.get(ev.type)!.push({
             ...ev,
-            start,
-            end: addMinutes(start, SLOT_LEN_MIN),
-          }
-          const list = slots.get(key)
-          if (list) list.push(normalized)
-          else slots.set(key, [normalized])
-        }
+            start: slotStart,
+            end: addMinutes(slotStart, SLOT_LEN_MIN),
+          })
+        })
 
-        const occupied = new Set<string>(Array.from(slots.keys()))
-        let curH = 8
-        let curM = 0
-        const assignIntoFreeSlot = (ev: CalendarEvent) => {
+        // Najdi obsazené sloty nástupy
+        const occupiedSlots = new Set<string>()
+        slots.forEach((_, key) => occupiedSlots.add(key))
+
+        // Zpracuj odchody (offboarding) - řaď na další volné sloty
+        const offEvents = dayEvents.filter((e) => e.entity === "off")
+        let currentH = 8
+        let currentM = 0
+
+        offEvents.forEach((ev) => {
+          // Najdi další volný slot
           while (
-            curH < 18 &&
-            occupied.has(`${curH}:${String(curM).padStart(2, "0")}`)
+            occupiedSlots.has(
+              `${currentH}:${String(currentM).padStart(2, "0")}`
+            ) &&
+            currentH < 18
           ) {
-            curM += 30
-            if (curM >= 60) {
-              curH++
-              curM = 0
+            currentM += 30
+            if (currentM >= 60) {
+              currentH++
+              currentM = 0
             }
           }
-          if (curH >= 18) {
-            curH = 8
-            curM = 0
+
+          if (currentH >= 18) {
+            // Reset pokud jsme za pracovní dobou
+            currentH = 8
+            currentM = 0
+            while (
+              occupiedSlots.has(
+                `${currentH}:${String(currentM).padStart(2, "0")}`
+              )
+            ) {
+              currentM += 30
+              if (currentM >= 60) {
+                currentH++
+                currentM = 0
+              }
+            }
           }
-          const s = setMinutes(setHours(startOfDay(ev.start), curH), curM)
-          const key = slotKey(s)
-          const norm: CalendarEvent = {
+
+          const slotStart = setMinutes(
+            setHours(startOfDay(ev.start), currentH),
+            currentM
+          )
+          const key = slotKey(slotStart)
+
+          if (!slots.has(key)) slots.set(key, new Map())
+          const typeMap = slots.get(key)!
+          if (!typeMap.has(ev.type)) typeMap.set(ev.type, [])
+
+          typeMap.get(ev.type)!.push({
             ...ev,
-            start: s,
-            end: addMinutes(s, SLOT_LEN_MIN),
-          }
-          const list = slots.get(key)
-          if (list) list.push(norm)
-          else slots.set(key, [norm])
-          occupied.add(key)
-          curM += 30
-          if (curM >= 60) {
-            curH++
-            curM = 0
-          }
-        }
+            start: slotStart,
+            end: addMinutes(slotStart, SLOT_LEN_MIN),
+          })
 
-        onbNoTime.forEach(assignIntoFreeSlot)
-        offs.forEach(assignIntoFreeSlot)
+          occupiedSlots.add(key)
+          currentM += 30
+          if (currentM >= 60) {
+            currentH++
+            currentM = 0
+          }
+        })
 
-        for (const [key, items] of slots) {
-          if (items.length >= CLUSTER_THRESHOLD) {
-            const sample = items[0]!
+        // Vytvoř výstupní události
+        slots.forEach((typeMap) => {
+          const plannedStart = typeMap.get("plannedStart") ?? []
+          const actualStart = typeMap.get("actualStart") ?? []
+          const plannedEnd = typeMap.get("plannedEnd") ?? []
+          const actualEnd = typeMap.get("actualEnd") ?? []
+
+          // Pro týdenní pohled - kombinuj nástupy
+          if (
+            bigView === "week" &&
+            (plannedStart.length > 0 || actualStart.length > 0)
+          ) {
+            const allStarts = [...plannedStart, ...actualStart]
+            if (allStarts.length >= CLUSTER_THRESHOLD) {
+              const sample = allStarts[0]!
+              if (plannedStart.length > 0 && actualStart.length > 0) {
+                // Kombinovaný cluster
+                out.push({
+                  id: `combo-${dayKey(sample.start)}-${slotKey(sample.start)}`,
+                  title: `${plannedStart.length}× Předpokl. + ${actualStart.length}× Skutečný`,
+                  start: sample.start,
+                  end: sample.end,
+                  type: "actualStart",
+                  entity: "combo",
+                  numericId: -1,
+                  clusterItems: allStarts,
+                  comboTypes: ["plannedStart", "actualStart"],
+                })
+              } else {
+                // Jednotypový cluster
+                const type =
+                  plannedStart.length > 0 ? "plannedStart" : "actualStart"
+                out.push({
+                  id: `cluster-${dayKey(sample.start)}-${slotKey(sample.start)}-${type}`,
+                  title: `${allStarts.length} × ${TYPE_LABEL[type]}`,
+                  start: sample.start,
+                  end: sample.end,
+                  type,
+                  entity: "cluster",
+                  numericId: -1,
+                  clusterItems: allStarts,
+                })
+              }
+            } else {
+              out.push(...allStarts)
+            }
+          } else {
+            // Pro denní pohled nebo jednotlivé události
+
+            // Plánované nástupy
+            if (plannedStart.length >= CLUSTER_THRESHOLD) {
+              const sample = plannedStart[0]!
+              out.push({
+                id: `cluster-${dayKey(sample.start)}-${slotKey(sample.start)}-plannedStart`,
+                title: `${plannedStart.length} × Plánovaný nástup`,
+                start: sample.start,
+                end: sample.end,
+                type: "plannedStart",
+                entity: "cluster",
+                numericId: -1,
+                clusterItems: plannedStart,
+              })
+            } else {
+              out.push(...plannedStart)
+            }
+
+            // Skutečné nástupy
+            if (actualStart.length >= CLUSTER_THRESHOLD) {
+              const sample = actualStart[0]!
+              out.push({
+                id: `cluster-${dayKey(sample.start)}-${slotKey(sample.start)}-actualStart`,
+                title: `${actualStart.length} × Skutečný nástup`,
+                start: sample.start,
+                end: sample.end,
+                type: "actualStart",
+                entity: "cluster",
+                numericId: -1,
+                clusterItems: actualStart,
+              })
+            } else {
+              out.push(...actualStart)
+            }
+          }
+
+          // Odchody - vždy samostatně
+          if (plannedEnd.length >= CLUSTER_THRESHOLD) {
+            const sample = plannedEnd[0]!
             out.push({
-              id: `cluster-${dayKey(sample.start)}-${key}`,
-              title: `${items.length} události`,
+              id: `cluster-${dayKey(sample.start)}-${slotKey(sample.start)}-plannedEnd`,
+              title: `${plannedEnd.length} × Plánovaný odchod`,
               start: sample.start,
               end: sample.end,
-              type: sample.type,
+              type: "plannedEnd",
               entity: "cluster",
               numericId: -1,
-              clusterItems: items,
+              clusterItems: plannedEnd,
             })
-          } else out.push(...items)
-        }
+          } else {
+            out.push(...plannedEnd)
+          }
+
+          if (actualEnd.length >= CLUSTER_THRESHOLD) {
+            const sample = actualEnd[0]!
+            out.push({
+              id: `cluster-${dayKey(sample.start)}-${slotKey(sample.start)}-actualEnd`,
+              title: `${actualEnd.length} × Skutečný odchod`,
+              start: sample.start,
+              end: sample.end,
+              type: "actualEnd",
+              entity: "cluster",
+              numericId: -1,
+              clusterItems: actualEnd,
+            })
+          } else {
+            out.push(...actualEnd)
+          }
+        })
       })
+
       return out
     }
 
+    // Ostatní pohledy (agenda atd.)
     const groups = new Map<string, CalendarEvent[]>()
     for (const ev of events) {
       const k = dayKey(ev.start)
@@ -626,7 +756,6 @@ export default function DashboardPage(): JSX.Element {
   const minTime = useMemo(() => new Date(1970, 0, 1, 8, 0, 0), [])
   const maxTime = useMemo(() => new Date(1970, 0, 1, 18, 0, 0), [])
 
-  /** ⬇️ FIX: respektuj vybranou hodinu v week/day; 08:00 jen pro month/00:00 */
   const handleSelectSlot = useCallback(
     ({ start }: { start: Date }) => {
       const isMidnight = start.getHours() === 0 && start.getMinutes() === 0
@@ -690,9 +819,12 @@ export default function DashboardPage(): JSX.Element {
 
   const onSelectEvent = useCallback(
     async (ev: CalendarEvent) => {
-      if (ev.entity === "cluster" && ev.clusterItems?.length) {
+      if (
+        (ev.entity === "cluster" || ev.entity === "combo") &&
+        ev.clusterItems?.length
+      ) {
         setClusterItems(ev.clusterItems)
-        setClusterSlotLabel(dfFormat(ev.start, "d. M. yyyy"))
+        setClusterSlotLabel(dfFormat(ev.start, "d. M. yyyy HH:mm"))
         setClusterOpen(true)
         return
       }
@@ -773,6 +905,7 @@ export default function DashboardPage(): JSX.Element {
               end: d,
               type: "actualStart",
               entity: "onb",
+              hasCustomTime: !!e.startTime,
             },
           ]
         } else if (e.plannedStart) {
@@ -786,6 +919,7 @@ export default function DashboardPage(): JSX.Element {
               end: d,
               type: "plannedStart",
               entity: "onb",
+              hasCustomTime: !!e.startTime,
             },
           ]
         }
@@ -844,6 +978,7 @@ export default function DashboardPage(): JSX.Element {
           userName: onbUserName.trim() || undefined,
           personalNumber: onbEvidence.trim() || undefined,
           notes: onbNotes.trim() || undefined,
+          hasCustomDates: confirmOnbRow?.hasCustomDates ?? undefined,
           status: "COMPLETED",
         }),
       })
@@ -880,6 +1015,7 @@ export default function DashboardPage(): JSX.Element {
           userName: offUserName.trim() || undefined,
           personalNumber: offEvidence.trim() || undefined,
           notes: offNotes.trim() || undefined,
+          hasCustomDates: confirmOffRow?.hasCustomDates ?? undefined,
           status: "COMPLETED",
         }),
       })
@@ -927,7 +1063,7 @@ export default function DashboardPage(): JSX.Element {
   )
 
   const getEventTooltip = useCallback((event: CalendarEvent) => {
-    if (event.entity === "cluster") {
+    if (event.entity === "cluster" || event.entity === "combo") {
       return event.clusterItems?.map((e) => e.title).join(", ") || ""
     }
     const typeText = {
@@ -943,41 +1079,91 @@ export default function DashboardPage(): JSX.Element {
     return `${typeText} ${event.title}`
   }, [])
 
-  const EventCell = useCallback(({ event }: { event: CalendarEvent }) => {
-    if (event.entity === "cluster") {
-      const tooltipText =
-        event.clusterItems?.map((e) => e.title).join(", ") || ""
+  const EventCell = useCallback(
+    ({ event }: { event: CalendarEvent }) => {
+      const fontSize =
+        bigView === "month" ? "10px" : bigView === "week" ? "11px" : "12px"
+
+      if (event.entity === "combo") {
+        const plannedCount =
+          event.clusterItems?.filter((e) => e.type === "plannedStart").length ??
+          0
+        const actualCount =
+          event.clusterItems?.filter((e) => e.type === "actualStart").length ??
+          0
+        const tooltipText =
+          event.clusterItems?.map((e) => e.title).join(", ") || ""
+
+        return (
+          <div
+            className="rbc-event-inner"
+            style={{
+              fontWeight: 700,
+              fontSize,
+              lineHeight: 1.2,
+              padding: "2px 4px",
+            }}
+            title={tooltipText}
+          >
+            {plannedCount > 0 && `${plannedCount}× Předpokl.`}
+            {plannedCount > 0 && actualCount > 0 && " + "}
+            {actualCount > 0 && `${actualCount}× Skutečný`}
+          </div>
+        )
+      }
+
+      if (event.entity === "cluster") {
+        const tooltipText =
+          event.clusterItems?.map((e) => e.title).join(", ") || ""
+        return (
+          <div
+            className="rbc-event-inner"
+            style={{
+              fontWeight: 700,
+              fontSize,
+              lineHeight: 1.2,
+              padding: "2px 4px",
+            }}
+            title={tooltipText}
+          >
+            {event.title}
+          </div>
+        )
+      }
+
+      const typeText = {
+        plannedStart: "Předpokládaný nástup",
+        actualStart: "Skutečný nástup",
+        plannedEnd: "Plánovaný odchod",
+        actualEnd: "Skutečný odchod",
+      }[event.type]
+      const tooltipText = event.hasCustomTime
+        ? `${typeText}: ${event.title} (${dfFormat(event.start, "HH:mm", { locale: cs })})`
+        : `${typeText}: ${event.title}`
+
       return (
         <div
-          className="rbc-event-inner font-bold"
-          style={{ textAlign: "center" }}
+          className="rbc-event-inner"
+          style={{
+            fontWeight: 700,
+            fontSize,
+            lineHeight: 1.2,
+            padding: "2px 4px",
+          }}
           title={tooltipText}
         >
           {event.title}
         </div>
       )
-    }
-    const typeText = {
-      plannedStart: "Předpokládaný nástup",
-      actualStart: "Skutečný nástup",
-      plannedEnd: "Plánovaný odchod",
-      actualEnd: "Skutečný odchod",
-    }[event.type]
-    const tooltipText = event.hasCustomTime
-      ? `${typeText}: ${event.title} (${dfFormat(event.start, "HH:mm", { locale: cs })})`
-      : `${typeText}: ${event.title}`
-    return (
-      <div className="rbc-event-inner font-bold" title={tooltipText}>
-        {event.title}
-      </div>
-    )
-  }, [])
+    },
+    [bigView]
+  )
 
   /* ----------------------- Render ----------------------- */
   return (
-    <div className="flex h-[calc(100vh-1rem)] gap-6 overflow-hidden p-6">
+    <div className="flex h-[calc(100vh-1rem)] flex-col gap-4 p-4 lg:flex-row lg:gap-6 lg:p-6">
       {/* LEFT: Mini calendar */}
-      <aside className="w-[320px] shrink-0 rounded-2xl bg-white/90 p-4 shadow-md ring-1 ring-black/5 dark:bg-neutral-900">
+      <aside className="w-full shrink-0 rounded-2xl bg-white/90 p-3 shadow-md ring-1 ring-black/5 dark:bg-neutral-900 lg:w-[280px] lg:p-4">
         <div ref={miniCalRef}>
           <MiniCalendar
             locale="cs-CZ"
@@ -1016,7 +1202,7 @@ export default function DashboardPage(): JSX.Element {
         </div>
 
         {/* Legend */}
-        <div className="mt-4 space-y-2 text-sm">
+        <div className="mt-4 space-y-2 text-xs lg:text-sm">
           <div className="mb-1 font-semibold">Legenda</div>
           <Legend color={COLORS.plannedStart} label="Plánovaný nástup" />
           <Legend color={COLORS.actualStart} label="Skutečný nástup" />
@@ -1028,7 +1214,7 @@ export default function DashboardPage(): JSX.Element {
       {/* RIGHT: Big calendar */}
       <section
         ref={bigRef}
-        className="flex-1 overflow-hidden rounded-2xl bg-white p-4 shadow-lg ring-1 ring-black/5 dark:bg-neutral-900"
+        className="flex-1 overflow-hidden rounded-2xl bg-white p-3 shadow-lg ring-1 ring-black/5 dark:bg-neutral-900 lg:p-4"
       >
         <Calendar<CalendarEvent>
           localizer={localizer}
@@ -1053,21 +1239,31 @@ export default function DashboardPage(): JSX.Element {
           components={{ event: EventCell }}
           tooltipAccessor={null}
           eventPropGetter={(event) => {
-            const bg = COLORS[event.type]
+            const bg = (() => {
+              if (event.entity === "combo") {
+                return `linear-gradient(90deg, ${COLORS.plannedStart} 0%, ${COLORS.plannedStart} 50%, ${COLORS.actualStart} 50%, ${COLORS.actualStart} 100%)`
+              }
+              return COLORS[event.type]
+            })()
+
             return {
               style: {
-                backgroundColor: bg,
+                background: bg,
                 color: "white",
-                borderRadius: 12,
+                borderRadius: 8,
                 border: "none",
-                padding: "6px 8px",
+                padding: bigView === "month" ? "4px 6px" : "6px 8px",
                 boxShadow: "0 1px 2px rgba(0,0,0,0.12)",
                 whiteSpace: "normal",
+                wordBreak: "break-word",
                 overflowWrap: "anywhere",
                 lineHeight: 1.15,
-                fontSize: bigView === "month" ? 12 : 13,
-                fontWeight: 700,
-                textShadow: "0 1px 1px rgba(0,0,0,0.35)",
+                fontSize: bigView === "month" ? 10 : 11,
+                fontWeight: 600,
+                textShadow: "0 1px 1px rgba(0,0,0,0.25)",
+                overflow: "visible",
+                height: "auto",
+                minHeight: bigView === "month" ? "24px" : "28px",
               },
             }
           }}
@@ -1565,11 +1761,25 @@ export default function DashboardPage(): JSX.Element {
         }
         .react-calendar__navigation button {
           border-radius: 8px;
+          font-size: 14px;
+        }
+        @media (max-width: 1024px) {
+          .react-calendar__navigation button {
+            font-size: 12px;
+            padding: 4px;
+          }
         }
         .react-calendar__tile {
           position: relative;
           padding: 6px 0 !important;
           background: transparent !important;
+          font-size: 14px;
+        }
+        @media (max-width: 1024px) {
+          .react-calendar__tile {
+            padding: 4px 0 !important;
+            font-size: 12px;
+          }
         }
         .react-calendar__tile:enabled:hover {
           background: rgba(0, 0, 0, 0.03) !important;
@@ -1581,15 +1791,27 @@ export default function DashboardPage(): JSX.Element {
         }
         .react-calendar__month-view__weekdays {
           text-transform: none;
+          font-size: 12px;
+        }
+        @media (max-width: 1024px) {
+          .react-calendar__month-view__weekdays {
+            font-size: 10px;
+          }
         }
         .react-calendar__month-view__days__day abbr {
           position: relative;
           z-index: 2;
           display: inline-grid;
           place-items: center;
-          min-width: 28px;
-          min-height: 28px;
-          border-radius: 8px;
+          min-width: 24px;
+          min-height: 24px;
+          border-radius: 6px;
+        }
+        @media (max-width: 1024px) {
+          .react-calendar__month-view__days__day abbr {
+            min-width: 20px;
+            min-height: 20px;
+          }
         }
         .mini-today abbr {
           box-shadow: inset 0 0 0 2px rgba(17, 24, 39, 0.35);
@@ -1614,11 +1836,17 @@ export default function DashboardPage(): JSX.Element {
           top: 50%;
           left: 50%;
           transform: translate(-50%, -50%);
-          width: 22px;
-          height: 22px;
+          width: 18px;
+          height: 18px;
           border-radius: 9999px;
           opacity: 0.35;
           z-index: 1;
+        }
+        @media (max-width: 1024px) {
+          .mini-marker {
+            width: 14px;
+            height: 14px;
+          }
         }
         .rbc-toolbar button:focus,
         .rbc-toolbar button:focus-visible,
@@ -1637,6 +1865,17 @@ export default function DashboardPage(): JSX.Element {
         /* BIG calendar skin */
         .rbc-toolbar {
           margin-bottom: 8px;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+        @media (max-width: 640px) {
+          .rbc-toolbar {
+            font-size: 12px;
+          }
+          .rbc-toolbar button {
+            padding: 4px 8px;
+            font-size: 12px;
+          }
         }
         .rbc-toolbar button {
           border-radius: 10px;
@@ -1652,23 +1891,69 @@ export default function DashboardPage(): JSX.Element {
           white-space: normal !important;
           overflow-wrap: anywhere !important;
           line-height: 1.15;
-          font-size: 11.5px;
         }
+        .rbc-month-view .rbc-event {
+          display: flex;
+          align-items: center;
+        }
+        .rbc-month-view .rbc-event .rbc-event-inner {
+          width: 100%;
+        }
+
+        /* Responzivní velikosti události */
+        @media (max-width: 640px) {
+          .rbc-event {
+            font-size: 10px !important;
+            padding: 2px 4px !important;
+            min-height: 20px !important;
+          }
+        }
+
+        /* Oprava zobrazení textu v týdenním a denním view */
+        .rbc-day-slot .rbc-event,
+        .rbc-time-view .rbc-event {
+          overflow: visible !important;
+        }
+
+        .rbc-day-slot .rbc-events-container {
+          margin-right: 0;
+        }
+
+        .rbc-day-slot .rbc-event-content,
+        .rbc-time-view .rbc-event-content {
+          white-space: normal !important;
+          word-wrap: break-word !important;
+          overflow-wrap: anywhere !important;
+          display: block !important;
+          width: 100% !important;
+        }
+
         .rbc-header {
           padding: 8px 0;
           font-weight: 600;
           background: transparent;
           text-align: center;
         }
+        @media (max-width: 640px) {
+          .rbc-header {
+            padding: 4px 0;
+            font-size: 12px;
+          }
+        }
         .rbc-month-view {
           font-size: 14px;
+        }
+        @media (max-width: 640px) {
+          .rbc-month-view {
+            font-size: 11px;
+          }
         }
         .rbc-off-range-bg {
           background: rgba(0, 0, 0, 0.02);
         }
         .rbc-event {
           border: none;
-          margin: 2px 0;
+          margin: 1px 0;
         }
         .rbc-event-content {
           white-space: normal;
@@ -1699,11 +1984,6 @@ export default function DashboardPage(): JSX.Element {
         .rbc-time-slot {
           border-top: 1px solid rgba(0, 0, 0, 0.06) !important;
         }
-        .rbc-day-slot .rbc-event,
-        .rbc-time-view .rbc-event {
-          padding: 8px 10px !important;
-          min-height: 36px;
-        }
         .rbc-event-inner {
           display: block;
           font-weight: 700;
@@ -1712,6 +1992,8 @@ export default function DashboardPage(): JSX.Element {
         .rbc-today {
           background: rgba(59, 130, 246, 0.06) !important;
         }
+
+        /* Dark mode styles */
         html.dark .rbc-toolbar {
           color: rgba(255, 255, 255, 0.92);
         }

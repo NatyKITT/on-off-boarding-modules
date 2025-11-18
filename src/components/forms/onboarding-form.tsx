@@ -49,6 +49,7 @@ import { Textarea } from "@/components/ui/textarea"
 type Mode = "create-planned" | "create-actual" | "edit"
 
 export type FormValues = {
+  hasCustomDates?: boolean
   titleBefore?: string
   name: string
   surname: string
@@ -84,9 +85,16 @@ type Props = {
   onSuccess?: (newId?: number) => void
 }
 
+type SearchablePosition = Position & {
+  _key: string
+  _hay: string
+}
+
 /* --------------------------- helpers ---------------------------- */
 const nullIfEmpty = (v?: string | null) =>
   v == null || String(v).trim() === "" ? null : v
+const ensure = (v?: string | null, fb = "NEUVEDENO") => (v ?? "").trim() || fb
+
 const fmt = (d: Date) => format(d, "yyyy-MM-dd")
 const todayStr = () => fmt(new Date())
 
@@ -96,9 +104,33 @@ const stripAccents = (s: string) =>
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "")
     .toLowerCase()
-const isManagerialPosition = (positionName: string): boolean => {
+const isManagerialPosition = (positionName?: string): boolean => {
+  if (!positionName) return false
   const low = stripAccents(positionName)
   return managerialKeywords.some((kw) => low.includes(stripAccents(kw)))
+}
+
+const computeProbationEnd = (
+  start?: string,
+  positionName?: string
+): string | null => {
+  if (!start) return null
+  const d = new Date(start)
+  if (Number.isNaN(d.getTime())) return null
+  const monthsToAdd = isManagerialPosition(positionName) ? 6 : 3
+  return fmt(addMonths(d, monthsToAdd))
+}
+
+const inferManualDates = (
+  init: Partial<FormValues> | undefined,
+  isActual: boolean
+): boolean => {
+  if (!init) return false
+  if (typeof init.hasCustomDates === "boolean") return init.hasCustomDates
+  const start = isActual ? init.actualStart : init.plannedStart
+  const computed = computeProbationEnd(start, init.positionName)
+  if (!start || !init.probationEnd || !computed) return false
+  return init.probationEnd !== computed
 }
 
 /* ---------------------------- schema ---------------------------- */
@@ -119,11 +151,7 @@ const baseSchema = z.object({
   startTime: z.string().optional(),
   probationEnd: z.string().optional(),
 
-  userEmail: z
-    .string()
-    .email("Neplatný firemní e-mail")
-    .or(z.literal(""))
-    .optional(),
+  userEmail: z.string().email("Neplatný e-mail").or(z.literal("")).optional(),
   userName: z.string().optional(),
   personalNumber: z.string().optional(),
 
@@ -159,127 +187,14 @@ function ClearableTimeInput({
           type="button"
           aria-label="Vymazat čas"
           onClick={() => onChange("")}
-          className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-1 text-muted-foreground hover:text-foreground"
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-1 text-muted-foreground hover:text-foreground
+                     focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
           title="Vymazat čas"
         >
           <X className="size-3" />
         </button>
       )}
     </div>
-  )
-}
-
-/* --------- window-safe úložiště newId --------- */
-declare global {
-  interface Window {
-    __lastCreatedId?: number
-  }
-}
-
-/* --------- body scroll lock při otevřených modalech --------- */
-function useBodyScrollLock(locked: boolean) {
-  useEffect(() => {
-    const el = document.documentElement
-    const body = document.body
-    if (locked) {
-      const prevHtml = el.style.overflow
-      const prevBody = body.style.overflow
-      el.style.overflow = "hidden"
-      body.style.overflow = "hidden"
-      return () => {
-        el.style.overflow = prevHtml
-        body.style.overflow = prevBody
-      }
-    }
-  }, [locked])
-}
-
-/* ------------------- Success Modal Component ------------------- */
-interface SuccessModalProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  mode: "create" | "edit"
-  employeeName: string
-  isActualMode: boolean
-}
-
-function SuccessModal({
-  open,
-  onOpenChange,
-  mode,
-  employeeName,
-  isActualMode,
-}: SuccessModalProps) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <div className="flex items-center gap-3">
-            <div className="flex size-10 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/20">
-              <CheckCircle className="size-5 text-green-600 dark:text-green-400" />
-            </div>
-            <div>
-              <DialogTitle>Úspěšně dokončeno</DialogTitle>
-              <DialogDescription>
-                {mode === "create"
-                  ? `${isActualMode ? "Skutečný" : "Plánovaný"} nástup byl založen`
-                  : "Změny byly uloženy"}
-              </DialogDescription>
-            </div>
-          </div>
-        </DialogHeader>
-
-        <div className="py-4">
-          <p className="text-sm">
-            <span className="font-medium">{employeeName}</span>
-            {mode === "create"
-              ? ` byl${isActualMode ? "" : "a"} úspěšně ${isActualMode ? "zapsán jako skutečný nástup" : "přidán do plánovaných nástupů"}.`
-              : " - změny byly úspěšně uloženy."}
-          </p>
-        </div>
-
-        <div className="flex justify-end">
-          <Button onClick={() => onOpenChange(false)}>Pokračovat</Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-/* ------------------- Error Modal Component ------------------- */
-interface ErrorModalProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  message: string
-}
-
-function ErrorModal({ open, onOpenChange, message }: ErrorModalProps) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <div className="flex items-center gap-3">
-            <div className="flex size-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/20">
-              <X className="size-5 text-red-600 dark:text-red-400" />
-            </div>
-            <div>
-              <DialogTitle>Chyba při ukládání</DialogTitle>
-              <DialogDescription>Operace se nepodařila</DialogDescription>
-            </div>
-          </div>
-        </DialogHeader>
-
-        <div className="py-4">
-          <p className="text-sm text-muted-foreground">{message}</p>
-        </div>
-
-        <div className="flex justify-end">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Zkusit znovu
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
   )
 }
 
@@ -303,7 +218,11 @@ export function OnboardingFormUnified({
     [effectiveMode, editContext]
   )
 
-  // Modální okna pro feedback
+  const inferredManualFlag = useMemo(
+    () => inferManualDates(initial, isActualMode),
+    [initial, isActualMode]
+  )
+
   const [successModal, setSuccessModal] = useState<{
     open: boolean
     mode: "create" | "edit"
@@ -315,16 +234,43 @@ export function OnboardingFormUnified({
     message: string
   }>({ open: false, message: "" })
 
-  // zamkni pozadí, když je otevřený modal
-  useBodyScrollLock(successModal.open || errorModal.open)
+  const [manualDates, setManualDates] = useState<boolean>(
+    () => inferredManualFlag
+  )
+  useEffect(() => {
+    setManualDates(inferredManualFlag)
+  }, [inferredManualFlag, id])
+  const [positionPickerOpen, setPositionPickerOpen] = useState(false)
+  const positionTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const [searchQuery, setSearchQuery] = useState("")
 
-  const [manualDates, setManualDates] = useState<boolean>(false)
-  const [posOpen, setPosOpen] = useState(false)
-
-  // bezpečné defaulty + merge s initial + prefillDate
   const defaults: FormValues = useMemo(() => {
     const isEdit = Boolean(id) || effectiveMode === "edit"
-    const base: FormValues = {
+    const basePlanned = isActualMode ? undefined : todayStr()
+    const baseActual = isActualMode ? todayStr() : undefined
+    const basePosition = initial?.positionName
+
+    const plannedStart = isEdit
+      ? initial?.plannedStart
+      : prefillDate && !isActualMode
+        ? prefillDate
+        : basePlanned
+    const actualStart = isEdit
+      ? initial?.actualStart
+      : prefillDate && isActualMode
+        ? prefillDate
+        : baseActual
+
+    const initialProbation =
+      (inferredManualFlag
+        ? initial?.probationEnd
+        : computeProbationEnd(
+            isActualMode ? actualStart : plannedStart,
+            basePosition
+          )) ?? ""
+
+    return {
+      hasCustomDates: inferredManualFlag,
       titleBefore: "",
       name: "",
       surname: "",
@@ -334,10 +280,10 @@ export function OnboardingFormUnified({
       positionName: "",
       department: "",
       unitName: "",
-      plannedStart: isActualMode ? undefined : todayStr(),
-      actualStart: isActualMode ? todayStr() : undefined,
+      plannedStart,
+      actualStart,
       startTime: "",
-      probationEnd: "",
+      probationEnd: initialProbation,
       userEmail: "",
       userName: "",
       personalNumber: "",
@@ -345,12 +291,14 @@ export function OnboardingFormUnified({
       status: "NEW",
       ...initial,
     }
-    if (prefillDate && !isEdit) {
-      if (isActualMode) base.actualStart = prefillDate
-      else base.plannedStart = prefillDate
-    }
-    return base
-  }, [id, initial, isActualMode, prefillDate, effectiveMode])
+  }, [
+    id,
+    initial,
+    isActualMode,
+    prefillDate,
+    effectiveMode,
+    inferredManualFlag,
+  ])
 
   const schema = useMemo(
     () =>
@@ -389,22 +337,46 @@ export function OnboardingFormUnified({
   const watchPlannedStart = form.watch("plannedStart")
   const watchActualStart = form.watch("actualStart")
 
-  const syncingRef = useRef(false)
-
-  // automatický výpočet zkušebky (3M/6M)
   useEffect(() => {
-    if (manualDates || syncingRef.current) return
-    const startDate = isActualMode ? watchActualStart : watchPlannedStart
-    if (!startDate || !watchPositionName) return
-    const date = new Date(startDate)
-    if (Number.isNaN(date.getTime())) return
-    const monthsToAdd = isManagerialPosition(watchPositionName) ? 6 : 3
-    const probationEndDate = fmt(addMonths(date, monthsToAdd))
-    const currentProbationEnd = form.getValues("probationEnd") ?? ""
-    if (currentProbationEnd !== probationEndDate) {
-      syncingRef.current = true
-      form.setValue("probationEnd", probationEndDate, { shouldValidate: true })
-      syncingRef.current = false
+    if (form.getValues("hasCustomDates") !== manualDates) {
+      form.setValue("hasCustomDates", manualDates, { shouldDirty: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manualDates])
+
+  useEffect(() => {
+    if (manualDates) return
+    const start = isActualMode
+      ? form.getValues("actualStart")
+      : form.getValues("plannedStart")
+    const computed = computeProbationEnd(start, form.getValues("positionName"))
+    if (computed && (form.getValues("probationEnd") || "") !== computed) {
+      form.setValue("probationEnd", computed, { shouldValidate: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    const start = isActualMode
+      ? form.getValues("actualStart")
+      : form.getValues("plannedStart")
+    const computed = computeProbationEnd(start, form.getValues("positionName"))
+    if (!computed) return
+    if (manualDates && !form.getValues("probationEnd")) {
+      form.setValue("probationEnd", computed, { shouldValidate: true })
+    }
+    if (!manualDates) {
+      form.setValue("probationEnd", computed, { shouldValidate: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manualDates])
+
+  useEffect(() => {
+    if (manualDates) return
+    const start = isActualMode ? watchActualStart : watchPlannedStart
+    const computed = computeProbationEnd(start, watchPositionName)
+    if (computed && (form.getValues("probationEnd") || "") !== computed) {
+      form.setValue("probationEnd", computed, { shouldValidate: true })
     }
   }, [
     watchPlannedStart,
@@ -415,31 +387,72 @@ export function OnboardingFormUnified({
     form,
   ])
 
-  useBodyScrollLock(true)
-
-  // doplnění názvu/oddělení po výběru čísla pozice
   useEffect(() => {
     if (!watchPositionNum || !positions.length) return
     const pos = positions.find((p) => p.num === watchPositionNum)
     if (pos) {
-      form.setValue("positionName", pos.name)
-      form.setValue("department", pos.dept_name)
-      form.setValue("unitName", pos.unit_name)
+      form.setValue("positionName", ensure(pos.name, "(nezjištěno)"))
+      form.setValue("department", ensure(pos.dept_name, "(doplnit)"))
+      form.setValue("unitName", ensure(pos.unit_name, "(doplnit)"))
     }
   }, [watchPositionNum, positions, form])
 
+  const positionsForSearch: SearchablePosition[] = useMemo(
+    () =>
+      positions.map((p) => ({
+        ...p,
+        _key: `${p.num} ${p.name}`,
+        _hay: stripAccents(`${p.num} ${p.name} ${p.dept_name} ${p.unit_name}`),
+      })),
+    [positions]
+  )
+  const filteredPositions: SearchablePosition[] = useMemo(() => {
+    const q = stripAccents(searchQuery)
+    if (!q) return positionsForSearch
+    return positionsForSearch.filter((p) => p._hay.includes(q))
+  }, [positionsForSearch, searchQuery])
+
+  const pickPosition = (p: Position) => {
+    form.setValue("positionNum", p.num, { shouldValidate: true })
+    form.setValue("positionName", ensure(p.name, "(nezjištěno)"), {
+      shouldValidate: true,
+    })
+    form.setValue("department", ensure(p.dept_name, "(doplnit)"), {
+      shouldValidate: true,
+    })
+    form.setValue("unitName", ensure(p.unit_name, "(doplnit)"), {
+      shouldValidate: true,
+    })
+
+    if (!manualDates) {
+      const start = isActualMode
+        ? form.getValues("actualStart")
+        : form.getValues("plannedStart")
+      const computed = computeProbationEnd(start, p.name)
+      if (computed)
+        form.setValue("probationEnd", computed, { shouldValidate: true })
+    }
+    setPositionPickerOpen(false)
+    requestAnimationFrame(() => positionTriggerRef.current?.focus())
+  }
+
   async function onSubmit(values: FormValues) {
     try {
+      const safePositionName = ensure(values.positionName, "(nezjištěno)")
+      const safeDepartment = ensure(values.department, "(doplnit)")
+      const safeUnitName = ensure(values.unitName, "(doplnit)")
+
       const payload: Record<string, unknown> = {
+        hasCustomDates: manualDates,
         titleBefore: nullIfEmpty(values.titleBefore),
         titleAfter: nullIfEmpty(values.titleAfter),
         name: values.name,
         surname: values.surname,
         email: values.email,
-        positionNum: values.positionNum,
-        positionName: values.positionName,
-        department: values.department,
-        unitName: values.unitName,
+        positionNum: ensure(values.positionNum),
+        positionName: safePositionName,
+        department: safeDepartment,
+        unitName: safeUnitName,
         startTime: nullIfEmpty(values.startTime),
         probationEnd: nullIfEmpty(values.probationEnd),
         userEmail: nullIfEmpty(values.userEmail),
@@ -448,7 +461,6 @@ export function OnboardingFormUnified({
         notes: nullIfEmpty(values.notes),
       }
 
-      // PŘESNĚ jeden datum podle režimu
       if (isActualMode) {
         if (values.actualStart) payload.actualStart = values.actualStart
         if (!id) payload.status = "COMPLETED"
@@ -468,8 +480,6 @@ export function OnboardingFormUnified({
       const json = await res.json().catch(() => null)
       if (!res.ok) throw new Error(json?.message ?? "Operace se nezdařila.")
 
-      if (!id && json?.data?.id) window.__lastCreatedId = Number(json.data.id)
-
       const fullName = `${values.name} ${values.surname}`
       setSuccessModal({
         open: true,
@@ -477,8 +487,7 @@ export function OnboardingFormUnified({
         name: fullName,
       })
 
-      // Po úspěchu zavřeme formulář
-      onSuccess?.(window.__lastCreatedId)
+      onSuccess?.(json?.data?.id)
     } catch (err) {
       setErrorModal({
         open: true,
@@ -490,29 +499,13 @@ export function OnboardingFormUnified({
     }
   }
 
-  const positionsForSearch = useMemo(() => {
-    return positions.map((p) => ({
-      ...p,
-      _key: `${p.num} ${p.name}`,
-      _normNum: stripAccents(p.num),
-      _normName: stripAccents(p.name),
-    }))
-  }, [positions])
-
-  const pickPosition = (p: Position) => {
-    form.setValue("positionNum", p.num, { shouldValidate: true })
-    form.setValue("positionName", p.name, { shouldValidate: true })
-    form.setValue("department", p.dept_name, { shouldValidate: true })
-    form.setValue("unitName", p.unit_name, { shouldValidate: true })
-    setPosOpen(false)
-  }
-
   const handleSuccessModalClose = (open: boolean) => {
     setSuccessModal((prev) => ({ ...prev, open }))
-    if (!open) {
-      window.__lastCreatedId = undefined
-    }
   }
+
+  const focusRing =
+    "focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/55 focus:ring-offset-2 focus:ring-offset-background " +
+    "focus-visible:outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/55 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
 
   return (
     <>
@@ -541,10 +534,8 @@ export function OnboardingFormUnified({
                       <FormControl>
                         <Input
                           {...field}
-                          value={
-                            typeof field.value === "string" ? field.value : ""
-                          }
-                          placeholder="např. Ing."
+                          placeholder="Např. Ing."
+                          className={focusRing}
                         />
                       </FormControl>
                       <FormMessage />
@@ -560,10 +551,8 @@ export function OnboardingFormUnified({
                       <FormControl>
                         <Input
                           {...field}
-                          value={
-                            typeof field.value === "string" ? field.value : ""
-                          }
-                          placeholder="např. Ph.D."
+                          placeholder="Např. Ph.D."
+                          className={focusRing}
                         />
                       </FormControl>
                       <FormMessage />
@@ -579,10 +568,8 @@ export function OnboardingFormUnified({
                       <FormControl>
                         <Input
                           {...field}
-                          value={
-                            typeof field.value === "string" ? field.value : ""
-                          }
                           placeholder="Křestní jméno"
+                          className={focusRing}
                         />
                       </FormControl>
                       <FormMessage />
@@ -598,10 +585,8 @@ export function OnboardingFormUnified({
                       <FormControl>
                         <Input
                           {...field}
-                          value={
-                            typeof field.value === "string" ? field.value : ""
-                          }
-                          placeholder="Rodinné příjmení"
+                          placeholder="Příjmení"
+                          className={focusRing}
                         />
                       </FormControl>
                       <FormMessage />
@@ -613,20 +598,16 @@ export function OnboardingFormUnified({
                   control={form.control}
                   render={({ field }) => (
                     <FormItem className="md:col-span-2">
-                      <FormLabel>Osobní e-mail *</FormLabel>
+                      <FormLabel>E-mail *</FormLabel>
                       <FormControl>
                         <Input
                           type="email"
                           {...field}
-                          value={
-                            typeof field.value === "string" ? field.value : ""
-                          }
-                          placeholder="osobni@email.com"
+                          placeholder="jprijmeni@email.com"
+                          className={focusRing}
                         />
                       </FormControl>
-                      <FormDescription>
-                        E-mail pro komunikaci před nástupem
-                      </FormDescription>
+                      <FormDescription>E-mail pro komunikaci</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -651,11 +632,19 @@ export function OnboardingFormUnified({
                     <FormItem className="md:col-span-2">
                       <FormLabel>Pozice *</FormLabel>
                       <FormControl>
-                        <Popover open={posOpen} onOpenChange={setPosOpen}>
+                        <Popover
+                          open={positionPickerOpen}
+                          onOpenChange={(open) => {
+                            setPositionPickerOpen(open)
+                            if (!open) setSearchQuery("")
+                          }}
+                        >
                           <PopoverTrigger asChild>
                             <button
+                              ref={positionTriggerRef}
                               type="button"
-                              className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1"
+                              className={`flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground [&>span]:line-clamp-1 ${focusRing} data-[state=open]:ring-2 data-[state=open]:ring-primary/55 data-[state=open]:ring-offset-2 data-[state=open]:ring-offset-background`}
+                              onClick={() => setPositionPickerOpen((s) => !s)}
                             >
                               <span className="truncate text-left">
                                 {field.value ? (
@@ -680,27 +669,30 @@ export function OnboardingFormUnified({
                             align="start"
                             sideOffset={4}
                             onOpenAutoFocus={(e) => e.preventDefault()}
+                            onWheelCapture={(e) => e.stopPropagation()}
                           >
-                            <Command
-                              filter={(val, search) => {
-                                const s = stripAccents(search)
-                                const v = stripAccents(val)
-                                return v.includes(s) ? 1 : 0
-                              }}
-                            >
-                              <CommandInput placeholder="Hledat číslo nebo název pozice..." />
+                            <Command>
+                              <CommandInput
+                                placeholder="Hledat číslo nebo název pozice..."
+                                value={searchQuery}
+                                onValueChange={setSearchQuery}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault()
+                                    const first = filteredPositions[0]
+                                    if (first) pickPosition(first)
+                                    else setPositionPickerOpen(false)
+                                  }
+                                }}
+                              />
                               <CommandEmpty>
                                 Žádná pozice nenalezena
                               </CommandEmpty>
-
-                              <CommandList
-                                className="max-h-80 overflow-y-auto overscroll-contain"
-                                onWheel={(e) => e.stopPropagation()}
-                              >
+                              <CommandList className="max-h-[min(60vh,420px)] overflow-y-auto overscroll-contain">
                                 <CommandGroup>
-                                  {positionsForSearch.map((p) => (
+                                  {filteredPositions.map((p) => (
                                     <CommandItem
-                                      key={p.id}
+                                      key={p.id ?? p.num}
                                       value={`${p.num} ${p.name}`}
                                       onSelect={() => pickPosition(p)}
                                       className="flex items-start gap-3 py-3"
@@ -741,16 +733,9 @@ export function OnboardingFormUnified({
                     <FormItem>
                       <FormLabel>Název pozice *</FormLabel>
                       <FormControl>
-                        <Input
-                          {...field}
-                          value={
-                            typeof field.value === "string" ? field.value : ""
-                          }
-                          className="bg-muted"
-                          readOnly
-                        />
+                        <Input {...field} className="bg-muted" readOnly />
                       </FormControl>
-                      <FormDescription>Automaticky vyplněno</FormDescription>
+                      <FormDescription>Automaticky doplněno</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -762,16 +747,9 @@ export function OnboardingFormUnified({
                     <FormItem>
                       <FormLabel>Odbor *</FormLabel>
                       <FormControl>
-                        <Input
-                          {...field}
-                          value={
-                            typeof field.value === "string" ? field.value : ""
-                          }
-                          className="bg-muted"
-                          readOnly
-                        />
+                        <Input {...field} className="bg-muted" readOnly />
                       </FormControl>
-                      <FormDescription>Automaticky vyplněno</FormDescription>
+                      <FormDescription>Automaticky doplněno</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -783,16 +761,9 @@ export function OnboardingFormUnified({
                     <FormItem className="md:col-span-2">
                       <FormLabel>Oddělení *</FormLabel>
                       <FormControl>
-                        <Input
-                          {...field}
-                          value={
-                            typeof field.value === "string" ? field.value : ""
-                          }
-                          className="bg-muted"
-                          readOnly
-                        />
+                        <Input {...field} className="bg-muted" readOnly />
                       </FormControl>
-                      <FormDescription>Automaticky vyplněno</FormDescription>
+                      <FormDescription>Automaticky doplněno</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -813,7 +784,27 @@ export function OnboardingFormUnified({
                 <Checkbox
                   id="manualDates"
                   checked={manualDates}
-                  onCheckedChange={(v) => setManualDates(Boolean(v))}
+                  onCheckedChange={(v) => {
+                    const b = Boolean(v)
+                    setManualDates(b)
+                    form.setValue("hasCustomDates", b, { shouldDirty: true })
+
+                    const start = isActualMode
+                      ? form.getValues("actualStart")
+                      : form.getValues("plannedStart")
+                    const computed = computeProbationEnd(
+                      start,
+                      form.getValues("positionName")
+                    )
+                    if (
+                      computed &&
+                      (!manualDates || !form.getValues("probationEnd"))
+                    ) {
+                      form.setValue("probationEnd", computed, {
+                        shouldValidate: true,
+                      })
+                    }
+                  }}
                 />
                 <label htmlFor="manualDates" className="text-sm">
                   Upravit vlastní datumy (vypnout automatický výpočet zkušební
@@ -834,16 +825,12 @@ export function OnboardingFormUnified({
                             <Input
                               type="date"
                               {...field}
-                              value={
-                                typeof field.value === "string"
-                                  ? field.value
-                                  : ""
-                              }
+                              className={focusRing}
                             />
                           </FormControl>
                           <FormDescription>
                             {manualDates
-                              ? "Automatika vypnutá"
+                              ? "Automatický výpočet vypnut"
                               : "Zkušební doba se počítá automaticky od tohoto data"}
                           </FormDescription>
                           <FormMessage />
@@ -880,16 +867,12 @@ export function OnboardingFormUnified({
                             <Input
                               type="date"
                               {...field}
-                              value={
-                                typeof field.value === "string"
-                                  ? field.value
-                                  : ""
-                              }
+                              className={focusRing}
                             />
                           </FormControl>
                           <FormDescription>
                             {manualDates
-                              ? "Automatika vypnutá"
+                              ? "Automatický výpočet vypnut"
                               : "Zkušební doba se počítá automaticky od tohoto data"}
                           </FormDescription>
                           <FormMessage />
@@ -926,20 +909,19 @@ export function OnboardingFormUnified({
                         <Input
                           type="date"
                           {...field}
-                          value={
-                            typeof field.value === "string" ? field.value : ""
-                          }
-                          className={manualDates ? "" : "bg-muted"}
+                          className={`${manualDates ? "" : "bg-muted"} ${focusRing}`}
                           readOnly={!manualDates}
                         />
                       </FormControl>
                       <FormDescription>
                         {manualDates
                           ? "Můžete upravit ručně"
-                          : watchPositionName &&
-                              isManagerialPosition(watchPositionName)
-                            ? "Automaticky (6 měsíců pro manažerské pozice)"
-                            : "Automaticky (3 měsíce pro standardní pozice)"}
+                          : form.getValues("positionName") &&
+                              isManagerialPosition(
+                                form.getValues("positionName")
+                              )
+                            ? "Automatický výpočet (6 měsíců pro manažerské pozice)"
+                            : "Automatický výpočet (3 měsíce pro standardní pozice)"}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -968,14 +950,12 @@ export function OnboardingFormUnified({
                         <Input
                           type="email"
                           {...field}
-                          value={
-                            typeof field.value === "string" ? field.value : ""
-                          }
                           placeholder="jmeno.prijmeni@firma.cz"
+                          className={focusRing}
                         />
                       </FormControl>
                       <FormDescription>
-                        Nepovinné – vygeneruje se po nástupu
+                        Nepovinné – vygeneruje IT oddělení po nástupu
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -990,10 +970,7 @@ export function OnboardingFormUnified({
                       <FormControl>
                         <Input
                           {...field}
-                          value={
-                            typeof field.value === "string" ? field.value : ""
-                          }
-                          className="font-mono"
+                          className={`font-mono ${focusRing}`}
                           placeholder="jprijmeni"
                         />
                       </FormControl>
@@ -1013,15 +990,12 @@ export function OnboardingFormUnified({
                       <FormControl>
                         <Input
                           {...field}
-                          value={
-                            typeof field.value === "string" ? field.value : ""
-                          }
-                          className="font-mono"
+                          className={`font-mono ${focusRing}`}
                           placeholder="123456"
                         />
                       </FormControl>
                       <FormDescription>
-                        Bude přiděleno po nástupu
+                        Bude přiděleno při nástupu
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -1045,10 +1019,11 @@ export function OnboardingFormUnified({
                         {...field}
                         rows={3}
                         placeholder="Další informace k nástupu zaměstnance..."
+                        className={focusRing}
                       />
                     </FormControl>
                     <FormDescription>
-                      Další informace k nástupu zaměstnanca
+                      Další informace k nástupu zaměstnance
                     </FormDescription>
                   </FormItem>
                 )}
@@ -1060,7 +1035,7 @@ export function OnboardingFormUnified({
           <div className="space-y-3">
             <Button
               type="submit"
-              className="inline-flex w-full items-center justify-center gap-2"
+              className={`inline-flex w-full items-center justify-center gap-2 ${focusRing}`}
               disabled={isSubmitting}
             >
               {isSubmitting && (
@@ -1074,24 +1049,21 @@ export function OnboardingFormUnified({
             </Button>
           </div>
 
-          {/* CSS pro date/time inputy */}
-          <style jsx>{`
-            :global(input[type="date"]),
-            :global(input[type="time"]) {
-              outline: none !important;
-              box-shadow: none !important;
-              border: 1px solid hsl(var(--border)) !important;
+          {/* Minimalní globální úpravy nativních date/time vstupů */}
+          <style jsx global>{`
+            input[type="date"],
+            input[type="time"] {
               appearance: none;
               -webkit-appearance: none;
               -moz-appearance: textfield;
             }
-            :global(input[type="date"]::-webkit-inner-spin-button),
-            :global(input[type="time"]::-webkit-inner-spin-button),
-            :global(input[type="time"]::-webkit-clear-button) {
+            input[type="date"]::-webkit-inner-spin-button,
+            input[type="time"]::-webkit-inner-spin-button,
+            input[type="time"]::-webkit-clear-button {
               display: none;
             }
-            :global(input[type="date"]::-webkit-calendar-picker-indicator),
-            :global(input[type="time"]::-webkit-calendar-picker-indicator) {
+            input[type="date"]::-webkit-calendar-picker-indicator,
+            input[type="time"]::-webkit-calendar-picker-indicator {
               opacity: 0.6;
             }
           `}</style>
@@ -1099,20 +1071,75 @@ export function OnboardingFormUnified({
       </Form>
 
       {/* Success Modal */}
-      <SuccessModal
-        open={successModal.open}
-        onOpenChange={handleSuccessModalClose}
-        mode={successModal.mode}
-        employeeName={successModal.name}
-        isActualMode={isActualMode}
-      />
+      <Dialog open={successModal.open} onOpenChange={handleSuccessModalClose}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex size-10 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/20">
+                <CheckCircle className="size-5 text-green-600 dark:text-green-400" />
+              </div>
+              <div>
+                <DialogTitle>Úspěšně dokončeno</DialogTitle>
+                <DialogDescription>
+                  {successModal.mode === "create"
+                    ? `${isActualMode ? "Skutečný" : "Plánovaný"} nástup byl založen`
+                    : "Změny byly uloženy"}
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="py-4">
+            <p className="text-sm">
+              <span className="font-medium">{successModal.name}</span>
+              {successModal.mode === "create"
+                ? ` byl${isActualMode ? "" : "a"} úspěšně ${isActualMode ? "zapsán jako skutečný nástup" : "přidán do plánovaných nástupů"}.`
+                : " - změny byly úspěšně uloženy."}
+            </p>
+          </div>
+
+          <div className="flex justify-end">
+            <Button onClick={() => handleSuccessModalClose(false)}>
+              Pokračovat
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Error Modal */}
-      <ErrorModal
+      <Dialog
         open={errorModal.open}
         onOpenChange={(open) => setErrorModal((prev) => ({ ...prev, open }))}
-        message={errorModal.message}
-      />
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex size-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/20">
+                <X className="size-5 text-red-600 dark:text-red-400" />
+              </div>
+              <div>
+                <DialogTitle>Chyba při ukládání</DialogTitle>
+                <DialogDescription>Operace se nepodařila</DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground">
+              {errorModal.message}
+            </p>
+          </div>
+
+          <div className="flex justify-end">
+            <Button
+              variant="outline"
+              onClick={() => setErrorModal((p) => ({ ...p, open: false }))}
+            >
+              Zkusit znovu
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }

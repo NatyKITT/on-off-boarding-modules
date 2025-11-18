@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { format } from "date-fns"
+import { format, parseISO } from "date-fns"
 import { cs } from "date-fns/locale"
 import {
   AlertTriangle,
@@ -40,7 +40,6 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { ProbationProgressBar } from "@/components/ui/probation-progress-bar"
 import {
   Table,
@@ -51,7 +50,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { MonthlySummaryButton } from "@/components/emails/monthly-summary-button"
+import { MonthlyReportLauncher } from "@/components/emails/monthly-report-launcher"
 import { SendEmailButton } from "@/components/emails/send-email-button"
 import {
   FormValues,
@@ -227,7 +226,6 @@ export default function OnboardingPage() {
   const [positions, setPositions] = useState<Position[]>([])
   const [loading, setLoading] = useState(true)
 
-  // dialogy pro formuláře
   const [openNewPlanned, setOpenNewPlanned] = useState(false)
   const [openNewActual, setOpenNewActual] = useState(false)
   const [openEdit, setOpenEdit] = useState(false)
@@ -236,13 +234,9 @@ export default function OnboardingPage() {
     initial: Partial<FormValues>
     context: "planned" | "actual"
   } | null>(null)
-
-  // dialogy pro akce
-  const [confirmDialog, setConfirmDialog] = useState<{
-    open: boolean
-    arrival: Arrival | null
-    loading: boolean
-  }>({ open: false, arrival: null, loading: false })
+  const [openStart, setOpenStart] = useState(false)
+  const [activeRow, setActiveRow] = useState<Arrival | null>(null)
+  const [actualStartInput, setActualStartInput] = useState<string>("")
 
   const [deleteDialog, setDeleteDialog] = useState<{
     open: boolean
@@ -250,7 +244,6 @@ export default function OnboardingPage() {
     loading: boolean
   }>({ open: false, arrival: null, loading: false })
 
-  // Stavy pro modaly
   const [successModal, setSuccessModal] = useState({
     open: false,
     title: "",
@@ -265,7 +258,6 @@ export default function OnboardingPage() {
   const qpMode = sp.get("new") as "create-planned" | "create-actual" | null
   const qpDate = sp.get("date") || undefined
 
-  // Callbacks pro modaly
   const showSuccess = (title: string, message: string) => {
     setSuccessModal({ open: true, title, message })
   }
@@ -333,11 +325,6 @@ export default function OnboardingPage() {
     )
   }, [planned, thisMonth])
 
-  const plannedMonths = useMemo(
-    () => Array.from(new Set(planned.map((e) => e.plannedStart.slice(0, 7)))),
-    [planned]
-  )
-
   const actualMonths = useMemo(
     () =>
       Array.from(
@@ -355,7 +342,43 @@ export default function OnboardingPage() {
     return has?.actualStart?.slice(0, 7) ?? actualMonths[0] ?? ""
   }, [actual, actualMonths, thisMonth])
 
-  // editace záznamu
+  function openStartDialogFromPlanned(row: Arrival) {
+    setActiveRow(row)
+    setActualStartInput(row.plannedStart.slice(0, 10))
+    setOpenStart(true)
+  }
+
+  async function confirmStartWithInput() {
+    if (!activeRow || !actualStartInput) return
+    try {
+      const res = await fetch(`/api/nastupy/${activeRow.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          actualStart: actualStartInput,
+          status: "COMPLETED",
+        }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => null)
+        throw new Error(j?.message ?? "Potvrzení se nezdařilo")
+      }
+      setOpenStart(false)
+      setActiveRow(null)
+      setActualStartInput("")
+      showSuccess(
+        "Nástup potvrzen",
+        `Skutečný nástup pro ${activeRow.name} ${activeRow.surname} byl zaznamenán.`
+      )
+      await reload()
+    } catch (e) {
+      showError(
+        "Chyba při potvrzování",
+        e instanceof Error ? e.message : "Potvrzení se nezdařilo"
+      )
+    }
+  }
+
   async function handleEdit(arrival: Arrival, context: "planned" | "actual") {
     try {
       const response = await fetch(`/api/nastupy/${arrival.id}`, {
@@ -382,45 +405,6 @@ export default function OnboardingPage() {
     }
   }
 
-  // potvrzení nástupu (přesun z plánovaného do skutečného)
-  async function handleConfirmArrival(actualStartDate: string) {
-    const arrival = confirmDialog.arrival
-    if (!arrival) return
-
-    setConfirmDialog((prev) => ({ ...prev, loading: true }))
-
-    try {
-      const response = await fetch(`/api/nastupy/${arrival.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          actualStart: actualStartDate,
-          status: "COMPLETED",
-        }),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => null)
-        throw new Error(errorData?.message ?? "Potvrzení se nezdařilo")
-      }
-
-      setConfirmDialog({ open: false, arrival: null, loading: false })
-      showSuccess(
-        "Nástup potvrzen",
-        `Skutečný nástup pro ${arrival.name} ${arrival.surname} byl úspěšně zaznamenán a přesunut do skutečných nástupů.`
-      )
-      await reload()
-    } catch (error) {
-      console.error("Error confirming arrival:", error)
-      showError(
-        "Chyba při potvrzování",
-        error instanceof Error ? error.message : "Potvrzení se nezdařilo"
-      )
-      setConfirmDialog((prev) => ({ ...prev, loading: false }))
-    }
-  }
-
-  // smazání záznamu
   async function handleDelete() {
     const arrival = deleteDialog.arrival
     if (!arrival) return
@@ -455,7 +439,6 @@ export default function OnboardingPage() {
     }
   }
 
-  // sort podle data + času
   const sortByStart = (a: Arrival, b: Arrival) => {
     const dateA = new Date(a.actualStart || a.plannedStart).getTime()
     const dateB = new Date(b.actualStart || b.plannedStart).getTime()
@@ -465,7 +448,6 @@ export default function OnboardingPage() {
     return tA.localeCompare(tB)
   }
 
-  // řádek tabulky
   const ArrivalTableRow = ({
     arrival,
     variant,
@@ -496,7 +478,6 @@ export default function OnboardingPage() {
 
     return (
       <TableRow key={arrival.id}>
-        {/* Zaměstnanec */}
         <TableCell className="w-[220px]">
           <div className="flex items-start gap-2">
             <User className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
@@ -513,7 +494,6 @@ export default function OnboardingPage() {
           </div>
         </TableCell>
 
-        {/* Pozice */}
         <TableCell className="w-[220px]">
           <div className="flex flex-col">
             <span
@@ -528,7 +508,6 @@ export default function OnboardingPage() {
           </div>
         </TableCell>
 
-        {/* Odbor / Oddělení */}
         <TableCell className="w-[220px]">
           <div className="flex flex-col">
             <span
@@ -546,7 +525,6 @@ export default function OnboardingPage() {
           </div>
         </TableCell>
 
-        {/* (Plánovaný/Skutečný) nástup + čas */}
         <TableCell className="w-[160px]">
           <div className="flex items-center gap-2">
             <Clock className="size-4 text-muted-foreground" />
@@ -563,7 +541,6 @@ export default function OnboardingPage() {
           </div>
         </TableCell>
 
-        {/* Zkušební doba */}
         <TableCell className="w-[220px]">
           {hasProbation ? (
             <ProbationProgressBar
@@ -582,7 +559,6 @@ export default function OnboardingPage() {
           )}
         </TableCell>
 
-        {/* Kontakt */}
         <TableCell className="w-[220px]">
           <div className="flex items-center gap-1">
             <Mail className="size-4 text-muted-foreground" />
@@ -592,7 +568,6 @@ export default function OnboardingPage() {
           </div>
         </TableCell>
 
-        {/* Firemní údaje */}
         <TableCell className="w-[220px]">
           <div className="flex flex-col space-y-0.5">
             {arrival.personalNumber && (
@@ -616,7 +591,6 @@ export default function OnboardingPage() {
           </div>
         </TableCell>
 
-        {/* Akce */}
         <TableCell className="w-[200px] text-right">
           <div className="flex justify-end gap-1">
             <HistoryDialog
@@ -659,13 +633,7 @@ export default function OnboardingPage() {
               <Button
                 size="sm"
                 variant="default"
-                onClick={() =>
-                  setConfirmDialog({
-                    open: true,
-                    arrival,
-                    loading: false,
-                  })
-                }
+                onClick={() => openStartDialogFromPlanned(arrival)}
                 title="Potvrdit skutečný nástup"
                 className="inline-flex items-center justify-center gap-1 bg-green-600 text-white hover:bg-green-700"
               >
@@ -754,7 +722,6 @@ export default function OnboardingPage() {
                 </DialogContent>
               </Dialog>
 
-              {/* 🔵 Jedno tlačítko: smazané záznamy (plánované i skutečné) */}
               <DeletedRecordsDialog
                 kind="onboarding"
                 title="Smazané nástupy"
@@ -875,20 +842,11 @@ export default function OnboardingPage() {
               </div>
             )}
 
-            {/* 🔵 Report plánovaných – dole vpravo (modré) */}
             <div className="mt-6 flex justify-end">
-              <MonthlySummaryButton
-                candidateMonths={useMemo(() => plannedMonths, [plannedMonths])}
+              <MonthlyReportLauncher
+                initialType="nastupy"
+                kind="planned"
                 defaultMonth={defaultPlannedMonth || thisMonth}
-                label="Zaslat měsíční report"
-                className="inline-flex items-center justify-center gap-2 bg-blue-600 text-white hover:bg-blue-700"
-                onDone={() => {
-                  showSuccess(
-                    "Report odeslán",
-                    "Měsíční report plánovaných nástupů byl odeslán."
-                  )
-                  void reload()
-                }}
               />
             </div>
           </TabsContent>
@@ -924,7 +882,6 @@ export default function OnboardingPage() {
                 </DialogContent>
               </Dialog>
 
-              {/* 🟢 Stejné jediné tlačítko: smazané záznamy (plánované i skutečné) */}
               <DeletedRecordsDialog
                 kind="onboarding"
                 title="Smazané nástupy"
@@ -1050,160 +1007,155 @@ export default function OnboardingPage() {
             )}
 
             <div className="mt-6 flex justify-end">
-              <MonthlySummaryButton
-                candidateMonths={useMemo(() => actualMonths, [actualMonths])}
+              <MonthlyReportLauncher
+                initialType="nastupy"
+                kind="actual"
                 defaultMonth={defaultActualMonth || thisMonth}
-                label="Zaslat měsíční report"
-                className="inline-flex items-center justify-center gap-2 bg-green-600 text-white hover:bg-green-700"
-                onDone={() => {
-                  showSuccess(
-                    "Report odeslán",
-                    "Měsíční report skutečných nástupů byl odeslán."
-                  )
-                  void reload()
-                }}
               />
             </div>
           </TabsContent>
         </div>
       </Tabs>
 
-      {/* ---------- Dialog pro potvrzení nástupu ---------- */}
       <Dialog
-        open={confirmDialog.open}
-        onOpenChange={(open) => setConfirmDialog((prev) => ({ ...prev, open }))}
+        open={openStart}
+        onOpenChange={(o) => {
+          setOpenStart(o)
+          if (!o) {
+            setActiveRow(null)
+            setActualStartInput("")
+          }
+        }}
       >
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <div className="flex items-center gap-3">
-              <div className="flex size-10 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/20">
-                <Check className="size-5 text-green-600 dark:text-green-400" />
-              </div>
-              <div>
-                <DialogTitle>Potvrdit skutečný nástup</DialogTitle>
-                <DialogDescription>
-                  Přenést z plánovaných do skutečných nástupů
-                </DialogDescription>
-              </div>
-            </div>
-          </DialogHeader>
+        <DialogContent className="max-w-3xl p-0">
+          <DialogTitle className="px-6 pt-6">
+            Potvrdit skutečný nástup
+          </DialogTitle>
+          <div className="max-h-[80vh] space-y-4 overflow-y-auto p-6">
+            {activeRow && (
+              <>
+                <div className="rounded-lg border bg-muted/30 p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h4 className="flex items-center gap-2 font-medium">
+                      <User className="size-4" />
+                      Informace o zaměstnanci
+                    </h4>
+                  </div>
 
-          {confirmDialog.arrival && (
-            <div className="space-y-4">
-              {/* Informace o zaměstnanci */}
-              <div className="rounded-lg border bg-muted/30 p-4">
-                <h4 className="mb-3 flex items-center gap-2 font-medium">
-                  <User className="size-4" />
-                  Informace o zaměstnanci
-                </h4>
-                <div className="grid gap-2 text-sm md:grid-cols-2">
-                  <div>
-                    <span className="font-medium text-muted-foreground">
-                      Jméno:
-                    </span>{" "}
-                    {[
-                      confirmDialog.arrival.titleBefore,
-                      confirmDialog.arrival.name,
-                      confirmDialog.arrival.surname,
-                      confirmDialog.arrival.titleAfter,
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                  </div>
-                  <div>
-                    <span className="font-medium text-muted-foreground">
-                      E-mail:
-                    </span>{" "}
-                    {confirmDialog.arrival.email}
-                  </div>
-                  <div>
-                    <span className="font-medium text-muted-foreground">
-                      Pozice:
-                    </span>{" "}
-                    {confirmDialog.arrival.positionName}
-                  </div>
-                  <div>
-                    <span className="font-medium text-muted-foreground">
-                      Odbor:
-                    </span>{" "}
-                    {confirmDialog.arrival.department}
-                  </div>
-                  <div>
-                    <span className="font-medium text-muted-foreground">
-                      Oddělení:
-                    </span>{" "}
-                    {confirmDialog.arrival.unitName}
-                  </div>
-                  <div>
-                    <span className="font-medium text-muted-foreground">
-                      Plánovaný nástup:
-                    </span>{" "}
-                    {format(
-                      new Date(confirmDialog.arrival.plannedStart),
-                      "d.M.yyyy"
-                    )}{" "}
-                    {confirmDialog.arrival.startTime || ""}
-                  </div>
-                  {confirmDialog.arrival.notes && (
-                    <div className="md:col-span-2">
+                  <div className="mb-4 grid gap-y-2 text-sm md:grid-cols-2">
+                    <div>
                       <span className="font-medium text-muted-foreground">
-                        Poznámka:
+                        Jméno:
                       </span>{" "}
-                      {confirmDialog.arrival.notes}
+                      {[
+                        activeRow.titleBefore,
+                        activeRow.name,
+                        activeRow.surname,
+                        activeRow.titleAfter,
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
                     </div>
-                  )}
+                    <div>
+                      <span className="font-medium text-muted-foreground">
+                        E-mail:
+                      </span>{" "}
+                      {activeRow.email}
+                    </div>
+                    <div>
+                      <span className="font-medium text-muted-foreground">
+                        Pozice:
+                      </span>{" "}
+                      {activeRow.positionName}
+                    </div>
+                    <div>
+                      <span className="font-medium text-muted-foreground">
+                        Odbor:
+                      </span>{" "}
+                      {activeRow.department}
+                    </div>
+                    <div>
+                      <span className="font-medium text-muted-foreground">
+                        Oddělení:
+                      </span>{" "}
+                      {activeRow.unitName}
+                    </div>
+                    <div>
+                      <span className="font-medium text-muted-foreground">
+                        Plánovaný nástup:
+                      </span>{" "}
+                      {format(parseISO(activeRow.plannedStart), "d.M.yyyy")}{" "}
+                      {activeRow.startTime || ""}
+                    </div>
+                    {activeRow.personalNumber && (
+                      <div>
+                        <span className="font-medium text-muted-foreground">
+                          Osobní číslo:
+                        </span>{" "}
+                        <span className="font-mono">
+                          {activeRow.personalNumber}
+                        </span>
+                      </div>
+                    )}
+                    {activeRow.notes && (
+                      <div className="md:col-span-2">
+                        <span className="font-medium text-muted-foreground">
+                          Poznámka:
+                        </span>{" "}
+                        {activeRow.notes}
+                      </div>
+                    )}
+                  </div>
+
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="inline-flex items-center justify-center gap-2"
+                    title="Otevřít formulář k úpravě"
+                    onClick={() => {
+                      setOpenStart(false)
+                      void handleEdit(activeRow, "planned")
+                    }}
+                  >
+                    <Edit className="size-4" />
+                    Upravit údaje
+                  </Button>
                 </div>
-              </div>
 
-              {/* Datum skutečného nástupu */}
-              <div className="space-y-3">
-                <Label htmlFor="actualStartDate">
-                  Datum skutečného nástupu
-                </Label>
-                <Input
-                  id="actualStartDate"
-                  type="date"
-                  defaultValue={confirmDialog.arrival.plannedStart.slice(0, 10)}
-                  className="max-w-[200px]"
-                />
-              </div>
-            </div>
-          )}
-
-          <DialogFooter className="gap-2">
-            <Button
-              variant="outline"
-              onClick={() =>
-                setConfirmDialog({ open: false, arrival: null, loading: false })
-              }
-              disabled={confirmDialog.loading}
-            >
-              Zrušit
-            </Button>
-            <Button
-              onClick={() => {
-                const input = document.getElementById(
-                  "actualStartDate"
-                ) as HTMLInputElement
-                const actualStartDate = input?.value
-                if (actualStartDate) {
-                  handleConfirmArrival(actualStartDate)
-                }
-              }}
-              disabled={confirmDialog.loading}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-700"
-            >
-              {confirmDialog.loading && (
-                <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-              )}
-              <Check className="size-4" />
-              Potvrdit nástup
-            </Button>
-          </DialogFooter>
+                <Card className="border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20">
+                  <CardContent className="p-4">
+                    <h4 className="mb-3 flex items-center gap-2 font-medium">
+                      <CalendarDays className="size-4" />
+                      Datum skutečného nástupu
+                    </h4>
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-3">
+                        <Input
+                          type="date"
+                          value={actualStartInput}
+                          onChange={(e) => setActualStartInput(e.target.value)}
+                          className="max-w-[200px]"
+                        />
+                        <Button
+                          size="sm"
+                          className="inline-flex items-center justify-center gap-2 bg-green-600 text-white hover:bg-green-700"
+                          title="Potvrdit skutečný nástup"
+                          onClick={() => void confirmStartWithInput()}
+                          disabled={!actualStartInput}
+                        >
+                          <Check className="size-4" />
+                          Potvrdit nástup
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
 
-      {/* ---------- Dialog pro smazání ---------- */}
       <Dialog
         open={deleteDialog.open}
         onOpenChange={(open) => setDeleteDialog((prev) => ({ ...prev, open }))}
@@ -1292,7 +1244,6 @@ export default function OnboardingPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Success Modal */}
       <SuccessModal
         open={successModal.open}
         onOpenChange={(open) => setSuccessModal((prev) => ({ ...prev, open }))}
@@ -1300,7 +1251,6 @@ export default function OnboardingPage() {
         message={successModal.message}
       />
 
-      {/* Error Modal */}
       <ErrorModal
         open={errorModal.open}
         onOpenChange={(open) => setErrorModal((prev) => ({ ...prev, open }))}

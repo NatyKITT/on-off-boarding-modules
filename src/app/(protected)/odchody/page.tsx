@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { format } from "date-fns"
+import { format, parseISO } from "date-fns"
 import { cs } from "date-fns/locale"
 import {
   CalendarDays,
@@ -46,14 +46,14 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { MonthlySummaryButton } from "@/components/emails/monthly-summary-button"
+import { MonthlyReportLauncher } from "@/components/emails/monthly-report-launcher"
 import { SendEmailButton } from "@/components/emails/send-email-button"
 import {
   FormValues,
   OffboardingFormUnified,
 } from "@/components/forms/offboarding-form"
 import { DeletedRecordsDialog } from "@/components/history/deleted-records-dialog"
-import { HistoryDialog } from "@/components/history/history-dialog" /* ------------------------------ types ------------------------------- */
+import { HistoryDialog } from "@/components/history/history-dialog"
 
 /* ------------------------------ types ------------------------------- */
 type Departure = {
@@ -69,6 +69,7 @@ type Departure = {
   personalNumber?: string | null
   plannedEnd: string
   actualEnd?: string | null
+  noticeFiled?: string | null
   noticeEnd?: string | null
   noticeMonths?: number | null
   hasCustomDates?: boolean
@@ -90,7 +91,7 @@ function departureToInitial(d: Departure): Partial<FormValues> {
     department: d.department ?? "",
     unitName: d.unitName ?? "",
     userEmail: d.userEmail ?? "",
-    noticeFiled: d.noticeEnd ? d.noticeEnd.slice(0, 10) : "",
+    noticeFiled: d.noticeFiled ? d.noticeFiled.slice(0, 10) : "",
     noticeEnd: d.noticeEnd ? d.noticeEnd.slice(0, 10) : undefined,
     noticeMonths: d.noticeMonths ?? undefined,
     hasCustomDates: d.hasCustomDates ?? false,
@@ -101,7 +102,7 @@ function departureToInitial(d: Departure): Partial<FormValues> {
   }
 }
 
-/* ----------------------- Modal Components ----------------------- */
+/* ----------------------- modály ----------------------- */
 interface SuccessModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -164,7 +165,279 @@ const ErrorModal: React.FC<ErrorModalProps> = ({
   </Dialog>
 )
 
-/* ----------------------- Confirm Delete Modal ----------------------- */
+/* ----------------------- normalizace pozic ----------------------- */
+type RawPos =
+  | {
+      id?: string | number
+      num?: unknown
+      name?: unknown
+      dept_name?: unknown
+      unit_name?: unknown
+    }
+  | null
+  | undefined
+
+function isRawPos(v: unknown): v is RawPos {
+  if (v == null || typeof v !== "object") return false
+  const o = v as Record<string, unknown>
+  return "num" in o
+}
+
+function toPosition(v: RawPos): Position | null {
+  if (!v || typeof v !== "object") return null
+  const o = v as Record<string, unknown>
+  const num = o.num
+  if (typeof num !== "string" && typeof num !== "number") return null
+  const id = o.id
+  const name = o.name
+  const dept = o.dept_name
+  const unit = o.unit_name
+  return {
+    id: String(id ?? num),
+    num: String(num),
+    name: typeof name === "string" ? name : "",
+    dept_name: typeof dept === "string" ? dept : "",
+    unit_name: typeof unit === "string" ? unit : "",
+  }
+}
+
+function normalizePositions(payload: unknown): Position[] {
+  const arr = Array.isArray((payload as { data?: unknown })?.data)
+    ? (payload as { data: unknown[] }).data
+    : Array.isArray(payload)
+      ? (payload as unknown[])
+      : []
+
+  return arr
+    .filter(isRawPos)
+    .map(toPosition)
+    .filter((x): x is Position => Boolean(x))
+}
+
+/* ------------------------- řádek tabulky ------------------------ */
+interface DepartureTableRowProps {
+  departure: Departure
+  variant: "planned" | "actual"
+  onEdit: () => void
+  onConfirm?: () => void
+  onReload: () => Promise<void>
+  onSuccessMessage: (title: string, message: string) => void
+  onErrorMessage: (title: string, message: string) => void
+}
+
+const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
+  departure,
+  variant,
+  onEdit,
+  onConfirm,
+  onReload,
+  onSuccessMessage,
+  onErrorMessage,
+}) => {
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+
+  const handleDelete = async () => {
+    try {
+      const res = await fetch(`/api/odchody/${departure.id}`, {
+        method: "DELETE",
+      })
+      if (!res.ok) {
+        const json = await res.json().catch(() => null)
+        throw new Error(json?.message ?? "Smazání se nezdařilo.")
+      }
+      window.dispatchEvent(new Event("offboarding:deleted"))
+      onSuccessMessage(
+        "Záznam smazán",
+        `Odchod pro ${departure.name} ${departure.surname} byl úspěšně smazán.`
+      )
+      await onReload()
+    } catch (err) {
+      onErrorMessage(
+        "Chyba při mazání",
+        err instanceof Error ? err.message : "Smazání se nezdařilo."
+      )
+    }
+  }
+
+  return (
+    <>
+      <TableRow>
+        <TableCell className="w-[200px]">
+          <div className="flex items-center gap-2">
+            <User className="size-4 shrink-0 text-muted-foreground" />
+            <div className="flex flex-col">
+              <span className="font-medium">
+                {[
+                  departure.titleBefore,
+                  departure.name,
+                  departure.surname,
+                  departure.titleAfter,
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+              </span>
+              <span className="font-mono text-xs text-muted-foreground">
+                {departure.personalNumber}
+              </span>
+            </div>
+          </div>
+        </TableCell>
+        <TableCell className="w-[180px]">
+          <div className="flex flex-col">
+            <span
+              className="text-sm font-medium"
+              title={departure.positionName}
+            >
+              {departure.positionName}
+            </span>
+            <span className="font-mono text-xs text-muted-foreground">
+              {departure.positionNum}
+            </span>
+          </div>
+        </TableCell>
+        <TableCell className="w-[150px]">
+          <div className="flex flex-col">
+            <span className="text-sm font-medium" title={departure.department}>
+              {departure.department}
+            </span>
+            <span
+              className="text-xs text-muted-foreground"
+              title={departure.unitName}
+            >
+              {departure.unitName}
+            </span>
+          </div>
+        </TableCell>
+        <TableCell className="w-[120px]">
+          <div className="flex items-center gap-2">
+            <Clock className="size-4 text-muted-foreground" />
+            <span className="text-sm">
+              {variant === "planned"
+                ? format(parseISO(departure.plannedEnd), "d.M.yyyy")
+                : departure.actualEnd
+                  ? format(parseISO(departure.actualEnd), "d.M.yyyy")
+                  : "–"}
+            </span>
+          </div>
+        </TableCell>
+        <TableCell className="w-[100px]">
+          <DepartureProgressBar
+            targetDate={
+              variant === "planned"
+                ? departure.plannedEnd
+                : (departure.actualEnd as string)
+            }
+            variant={variant}
+            label={
+              variant === "planned"
+                ? "Do plánovaného odchodu"
+                : "Od skutečného odchodu"
+            }
+          />
+        </TableCell>
+        <TableCell className="w-[150px]">
+          <div className="flex flex-col">
+            <span
+              className="truncate text-sm"
+              title={departure.userEmail || undefined}
+            >
+              {departure.userEmail ?? "–"}
+            </span>
+            <span className="font-mono text-xs text-muted-foreground">
+              {departure.userName ?? "–"}
+            </span>
+          </div>
+        </TableCell>
+        <TableCell className="w-[200px] text-right">
+          <div className="flex justify-end gap-1">
+            <HistoryDialog
+              id={departure.id}
+              kind="offboarding"
+              trigger={
+                <Button
+                  size="sm"
+                  variant="outline"
+                  title="Historie změn"
+                  className="inline-flex items-center justify-center gap-1"
+                >
+                  <HistoryIcon className="size-4" />
+                </Button>
+              }
+            />
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                window.open(
+                  `/api/odchody/${departure.id}/vystupni-list`,
+                  "_blank",
+                  "noopener,noreferrer"
+                )
+              }
+              className="inline-flex items-center gap-1"
+              title="Tisk výstupního listu"
+            >
+              <Printer className="size-4" />
+            </Button>
+
+            <SendEmailButton
+              id={departure.id}
+              kind="offboarding"
+              email={departure.userEmail ?? undefined}
+              onDone={onReload}
+              onEditRequest={onEdit}
+              className="inline-flex items-center justify-center gap-1"
+            />
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onEdit}
+              title="Upravit záznam"
+              className="inline-flex items-center justify-center gap-1"
+            >
+              <Edit className="size-4" />
+              <span className="hidden pt-1.5 sm:inline">Upravit</span>
+            </Button>
+
+            {variant === "planned" && onConfirm && (
+              <Button
+                size="sm"
+                variant="default"
+                onClick={onConfirm}
+                title="Potvrdit skutečný odchod"
+                className="inline-flex items-center justify-center gap-1 bg-orange-500 text-white hover:bg-orange-600"
+              >
+                <Check className="size-4" />
+                <span className="hidden pt-1.5 sm:inline">Odešel</span>
+              </Button>
+            )}
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowDeleteModal(true)}
+              title="Smazat záznam"
+              className="inline-flex items-center justify-center gap-1 text-red-600 hover:bg-red-50 hover:text-red-700"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          </div>
+        </TableCell>
+      </TableRow>
+
+      <ConfirmDeleteModal
+        open={showDeleteModal}
+        onOpenChange={setShowDeleteModal}
+        departure={departure}
+        onConfirm={handleDelete}
+      />
+    </>
+  )
+}
+
+/* ----------------------- confirm delete modal ----------------------- */
 interface ConfirmDeleteModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -246,578 +519,7 @@ const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
   )
 }
 
-/* ----------------------- Print Form Component ----------------------- */
-/* ----------------------- Print Form Component ----------------------- */
-interface PrintSingleFormProps {
-  departure: Departure
-  onPrintComplete?: () => void
-}
-
-const PrintSingleForm: React.FC<PrintSingleFormProps> = ({
-  departure,
-  onPrintComplete,
-}) => {
-  const [printing, setPrinting] = useState(false)
-
-  const handlePrint = async () => {
-    setPrinting(true)
-
-    try {
-      await fetch(`/api/odchody/${departure.id}/print`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          printedAt: new Date().toISOString(),
-          printedBy: "current-user",
-          documentType: "offboarding-form",
-        }),
-      })
-    } catch (error) {
-      console.error("Chyba při zaznamenání tisku:", error)
-    }
-
-    const fullName = [
-      departure.titleBefore,
-      departure.name,
-      departure.surname,
-      departure.titleAfter,
-    ]
-      .filter(Boolean)
-      .join(" ")
-
-    const printContent = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Výstupní formulář - ${departure.name} ${departure.surname}</title>
-          <meta charset="utf-8">
-          <style>
-            * { box-sizing: border-box; margin: 0; padding: 0; }
-            body { 
-              font-family: 'Segoe UI', Arial, sans-serif; 
-              padding: 20mm;
-              font-size: 11pt;
-              line-height: 1.5;
-              color: #000;
-            }
-            .container { max-width: 800px; margin: 0 auto; }
-            
-            .header { 
-              text-align: center; 
-              border-bottom: 3px solid #000; 
-              padding-bottom: 15px; 
-              margin-bottom: 30px;
-            }
-            .header h1 { 
-              font-size: 20pt; 
-              font-weight: bold;
-              margin-bottom: 5px;
-            }
-            .header h2 {
-              font-size: 14pt;
-              font-weight: normal;
-              color: #333;
-            }
-            
-            .section { 
-              margin: 25px 0; 
-              page-break-inside: avoid;
-            }
-            .section-title {
-              font-size: 13pt;
-              font-weight: bold;
-              margin-bottom: 12px;
-              padding-bottom: 5px;
-              border-bottom: 2px solid #666;
-            }
-            
-            .info-grid {
-              display: grid;
-              grid-template-columns: 1fr 1fr;
-              gap: 15px 30px;
-              margin-bottom: 20px;
-            }
-            
-            .info-row { 
-              display: flex;
-              flex-direction: column;
-              gap: 3px;
-            }
-            .info-label { 
-              font-size: 9pt;
-              font-weight: 600; 
-              color: #666;
-              text-transform: uppercase;
-            }
-            .info-value { 
-              border-bottom: 1px solid #333; 
-              min-height: 22px; 
-              padding: 3px 5px;
-              font-size: 11pt;
-            }
-            
-            .signature-grid {
-              display: grid;
-              grid-template-columns: 1fr 1fr;
-              gap: 40px 30px;
-              margin-top: 40px;
-            }
-            
-            .signature-box {
-              page-break-inside: avoid;
-            }
-            .signature-label {
-              font-size: 10pt;
-              font-weight: 600;
-              margin-bottom: 30px;
-              color: #333;
-            }
-            .signature-line {
-              border-top: 1px solid #000;
-              padding-top: 5px;
-              display: flex;
-              justify-content: space-between;
-              font-size: 9pt;
-              color: #666;
-            }
-            
-            .footer {
-              margin-top: 40px;
-              padding-top: 20px;
-              border-top: 1px solid #ccc;
-              text-align: center;
-              font-size: 9pt;
-              color: #666;
-            }
-            
-            @media print {
-              body { margin: 0; padding: 15mm; }
-              .no-print { display: none !important; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <!-- Hlavička -->
-            <div class="header">
-              <h1>VÝSTUPNÍ FORMULÁŘ</h1>
-              <h2>Ukončení pracovního poměru</h2>
-            </div>
-
-            <!-- Informace o zaměstnanci -->
-            <div class="section">
-              <div class="section-title">Údaje o zaměstnanci</div>
-              <div class="info-grid">
-                <div class="info-row">
-                  <div class="info-label">Jméno a příjmení</div>
-                  <div class="info-value">${fullName}</div>
-                </div>
-                <div class="info-row">
-                  <div class="info-label">Osobní číslo</div>
-                  <div class="info-value">${departure.personalNumber || "–"}</div>
-                </div>
-                <div class="info-row">
-                  <div class="info-label">Pozice</div>
-                  <div class="info-value">${departure.positionName}</div>
-                </div>
-                <div class="info-row">
-                  <div class="info-label">Číslo pozice</div>
-                  <div class="info-value">${departure.positionNum || "–"}</div>
-                </div>
-                <div class="info-row">
-                  <div class="info-label">Odbor</div>
-                  <div class="info-value">${departure.department}</div>
-                </div>
-                <div class="info-row">
-                  <div class="info-label">Oddělení</div>
-                  <div class="info-value">${departure.unitName}</div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Termíny -->
-            <div class="section">
-              <div class="section-title">Termíny odchodu</div>
-              <div class="info-grid">
-                <div class="info-row">
-                  <div class="info-label">Datum podání výpovědi</div>
-                  <div class="info-value">${departure.noticeEnd ? format(new Date(departure.noticeEnd), "d.M.yyyy") : "–"}</div>
-                </div>
-                <div class="info-row">
-                  <div class="info-label">Délka výpovědní lhůty</div>
-                  <div class="info-value">${departure.noticeMonths || 2} měsíce</div>
-                </div>
-                <div class="info-row">
-                  <div class="info-label">Plánovaný odchod</div>
-                  <div class="info-value">${format(new Date(departure.plannedEnd), "d.M.yyyy")}</div>
-                </div>
-                <div class="info-row">
-                  <div class="info-label">Skutečný odchod</div>
-                  <div class="info-value">${departure.actualEnd ? format(new Date(departure.actualEnd), "d.M.yyyy") : "–"}</div>
-                </div>
-                <div class="info-row">
-                  <div class="info-label">Firemní e-mail</div>
-                  <div class="info-value">${departure.userEmail || "–"}</div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Poznámky -->
-            ${
-              departure.notes
-                ? `
-            <div class="section">
-              <div class="section-title">Poznámky</div>
-              <div class="info-value" style="min-height: 60px; border: 1px solid #333; padding: 10px;">
-                ${departure.notes}
-              </div>
-            </div>
-            `
-                : ""
-            }
-
-            <!-- Podpisy -->
-            <div class="section">
-              <div class="section-title">Potvrzení a podpisy</div>
-              <div class="signature-grid">
-                <div class="signature-box">
-                  <div class="signature-label">HR oddělení</div>
-                  <div class="signature-line">
-                    <span>Podpis:</span>
-                    <span>Datum:</span>
-                  </div>
-                </div>
-                
-                <div class="signature-box">
-                  <div class="signature-label">KITT6 (IT systémy)</div>
-                  <div class="signature-line">
-                    <span>Podpis:</span>
-                    <span>Datum:</span>
-                  </div>
-                </div>
-                
-                <div class="signature-box">
-                  <div class="signature-label">Odbor bezpečnosti (kartička)</div>
-                  <div class="signature-line">
-                    <span>Podpis:</span>
-                    <span>Datum:</span>
-                  </div>
-                </div>
-                
-                <div class="signature-box">
-                  <div class="signature-label">Ředitel odboru</div>
-                  <div class="signature-line">
-                    <span>Podpis:</span>
-                    <span>Datum:</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Patička -->
-            <div class="footer">
-              Vytištěno: ${format(new Date(), "d.M.yyyy HH:mm")}
-            </div>
-          </div>
-        </body>
-      </html>
-    `
-
-    const printWindow = window.open("", "_blank")
-    if (printWindow) {
-      printWindow.document.write(printContent)
-      printWindow.document.close()
-      printWindow.focus()
-      setTimeout(() => {
-        printWindow.print()
-      }, 250)
-      onPrintComplete?.()
-    }
-
-    setPrinting(false)
-  }
-
-  return (
-    <Button
-      size="sm"
-      variant="outline"
-      onClick={handlePrint}
-      disabled={printing}
-      title="Vytisknout výstupní formulář"
-      className="inline-flex items-center justify-center gap-1"
-    >
-      <Printer className="size-4" />
-    </Button>
-  )
-}
-
-/* ----------------------- Position Normalizer ----------------------- */
-type RawPos =
-  | {
-      id?: string | number
-      num?: unknown
-      name?: unknown
-      dept_name?: unknown
-      unit_name?: unknown
-    }
-  | null
-  | undefined
-
-function isRawPos(v: unknown): v is RawPos {
-  if (v == null || typeof v !== "object") return false
-  const o = v as Record<string, unknown>
-  return "num" in o
-}
-
-function toPosition(v: RawPos): Position | null {
-  if (!v || typeof v !== "object") return null
-  const o = v as Record<string, unknown>
-  const num = o.num
-  if (typeof num !== "string" && typeof num !== "number") return null
-  const id = o.id
-  const name = o.name
-  const dept = o.dept_name
-  const unit = o.unit_name
-  return {
-    id: String(id ?? num),
-    num: String(num),
-    name: typeof name === "string" ? name : "",
-    dept_name: typeof dept === "string" ? dept : "",
-    unit_name: typeof unit === "string" ? unit : "",
-  }
-}
-
-function normalizePositions(payload: unknown): Position[] {
-  const arr = Array.isArray((payload as { data?: unknown })?.data)
-    ? (payload as { data: unknown[] }).data
-    : Array.isArray(payload)
-      ? (payload as unknown[])
-      : []
-
-  return arr
-    .filter(isRawPos)
-    .map(toPosition)
-    .filter((x): x is Position => Boolean(x))
-}
-
-/* ------------------------- Table Row Component ------------------------ */
-interface DepartureTableRowProps {
-  departure: Departure
-  variant: "planned" | "actual"
-  onEdit: () => void
-  onConfirm?: () => void
-  onReload: () => Promise<void>
-  onSuccessMessage: (title: string, message: string) => void
-  onErrorMessage: (title: string, message: string) => void
-}
-
-const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
-  departure,
-  variant,
-  onEdit,
-  onConfirm,
-  onReload,
-  onSuccessMessage,
-  onErrorMessage,
-}) => {
-  const [showDeleteModal, setShowDeleteModal] = useState(false)
-
-  const handleDelete = async () => {
-    try {
-      const res = await fetch(`/api/odchody/${departure.id}`, {
-        method: "DELETE",
-      })
-
-      if (!res.ok) {
-        const json = await res.json().catch(() => null)
-        throw new Error(json?.message ?? "Smazání se nezdařilo.")
-      }
-
-      // Dispatch event pro refresh
-      window.dispatchEvent(new Event("offboarding:deleted"))
-
-      onSuccessMessage(
-        "Záznam smazán",
-        `Odchod pro ${departure.name} ${departure.surname} byl úspěšně smazán.`
-      )
-
-      await onReload()
-    } catch (err) {
-      onErrorMessage(
-        "Chyba při mazání",
-        err instanceof Error ? err.message : "Smazání se nezdařilo."
-      )
-    }
-  }
-
-  return (
-    <>
-      <TableRow>
-        <TableCell className="w-[200px]">
-          <div className="flex items-center gap-2">
-            <User className="size-4 shrink-0 text-muted-foreground" />
-            <div className="flex flex-col">
-              <span className="font-medium">
-                {[
-                  departure.titleBefore,
-                  departure.name,
-                  departure.surname,
-                  departure.titleAfter,
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-              </span>
-              <span className="font-mono text-xs text-muted-foreground">
-                {departure.personalNumber}
-              </span>
-            </div>
-          </div>
-        </TableCell>
-        <TableCell className="w-[180px]">
-          <div className="flex flex-col">
-            <span
-              className="text-sm font-medium"
-              title={departure.positionName}
-            >
-              {departure.positionName}
-            </span>
-            <span className="font-mono text-xs text-muted-foreground">
-              {departure.positionNum}
-            </span>
-          </div>
-        </TableCell>
-        <TableCell className="w-[150px]">
-          <div className="flex flex-col">
-            <span className="text-sm font-medium" title={departure.department}>
-              {departure.department}
-            </span>
-            <span
-              className="text-xs text-muted-foreground"
-              title={departure.unitName}
-            >
-              {departure.unitName}
-            </span>
-          </div>
-        </TableCell>
-        <TableCell className="w-[120px]">
-          <div className="flex items-center gap-2">
-            <Clock className="size-4 text-muted-foreground" />
-            <span className="text-sm">
-              {variant === "planned"
-                ? format(new Date(departure.plannedEnd), "d.M.yyyy")
-                : departure.actualEnd
-                  ? format(new Date(departure.actualEnd), "d.M.yyyy")
-                  : "–"}
-            </span>
-          </div>
-        </TableCell>
-        <TableCell className="w-[100px]">
-          <DepartureProgressBar
-            targetDate={
-              variant === "planned"
-                ? departure.plannedEnd
-                : departure.actualEnd!
-            }
-            variant={variant}
-            label={
-              variant === "planned"
-                ? "Do plánovaného odchodu"
-                : "Od skutečného odchodu"
-            }
-          />
-        </TableCell>
-        <TableCell className="w-[150px]">
-          <div className="flex flex-col">
-            <span
-              className="truncate text-sm"
-              title={departure.userEmail || undefined}
-            >
-              {departure.userEmail ?? "–"}
-            </span>
-            <span className="font-mono text-xs text-muted-foreground">
-              {departure.userName ?? "–"}
-            </span>
-          </div>
-        </TableCell>
-        <TableCell className="w-[200px] text-right">
-          <div className="flex justify-end gap-1">
-            <HistoryDialog
-              id={departure.id}
-              kind="offboarding"
-              trigger={
-                <Button
-                  size="sm"
-                  variant="outline"
-                  title="Historie změn"
-                  className="inline-flex items-center justify-center gap-1"
-                >
-                  <HistoryIcon className="size-4" />
-                </Button>
-              }
-            />
-
-            <PrintSingleForm
-              departure={departure}
-              onPrintComplete={() => void onReload()}
-            />
-
-            <SendEmailButton
-              id={departure.id}
-              kind="offboarding"
-              email={departure.userEmail ?? undefined}
-              onDone={onReload}
-              onEditRequest={onEdit}
-              className="inline-flex items-center justify-center gap-1"
-            />
-
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={onEdit}
-              title="Upravit záznam"
-              className="inline-flex items-center justify-center gap-1"
-            >
-              <Edit className="size-4" />
-              <span className="hidden pt-1.5 sm:inline">Upravit</span>
-            </Button>
-
-            {variant === "planned" && onConfirm && (
-              <Button
-                size="sm"
-                variant="default"
-                onClick={onConfirm}
-                title="Potvrdit skutečný odchod"
-                className="inline-flex items-center justify-center gap-1 bg-orange-500 text-white hover:bg-orange-600"
-              >
-                <Check className="size-4" />
-                <span className="hidden pt-1.5 sm:inline">Odešel</span>
-              </Button>
-            )}
-
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setShowDeleteModal(true)}
-              title="Smazat záznam"
-              className="inline-flex items-center justify-center gap-1 text-red-600 hover:bg-red-50 hover:text-red-700"
-            >
-              <Trash2 className="size-4" />
-            </Button>
-          </div>
-        </TableCell>
-      </TableRow>
-
-      <ConfirmDeleteModal
-        open={showDeleteModal}
-        onOpenChange={setShowDeleteModal}
-        departure={departure}
-        onConfirm={handleDelete}
-      />
-    </>
-  )
-}
-
-/* ----------------------------- Main Page ----------------------------- */
+/* ----------------------------- hlavní stránka ----------------------------- */
 export default function OffboardingPage() {
   const sp = useSearchParams()
 
@@ -825,8 +527,6 @@ export default function OffboardingPage() {
   const [actual, setActual] = useState<Departure[]>([])
   const [positions, setPositions] = useState<Position[]>([])
   const [loading, setLoading] = useState(true)
-
-  // Stavy pro dialogy
   const [openNewPlanned, setOpenNewPlanned] = useState(false)
   const [openNewActual, setOpenNewActual] = useState(false)
   const [openActual, setOpenActual] = useState(false)
@@ -842,7 +542,6 @@ export default function OffboardingPage() {
     "planned"
   )
 
-  // Stavy pro modaly
   const [successModal, setSuccessModal] = useState({
     open: false,
     title: "",
@@ -860,16 +559,17 @@ export default function OffboardingPage() {
   const showSuccess = React.useCallback((title: string, message: string) => {
     setSuccessModal({ open: true, title, message })
   }, [])
-
   const showError = React.useCallback((title: string, message: string) => {
     setErrorModal({ open: true, title, message })
   }, [])
 
-  const allPersonalNumbers = useMemo(() => {
-    return [...planned, ...actual]
-      .map((d) => d.personalNumber)
-      .filter(Boolean) as string[]
-  }, [planned, actual])
+  const allPersonalNumbers = useMemo(
+    () =>
+      [...planned, ...actual]
+        .map((d) => d.personalNumber)
+        .filter(Boolean) as string[],
+    [planned, actual]
+  )
 
   const reload = React.useCallback(async () => {
     setLoading(true)
@@ -912,14 +612,10 @@ export default function OffboardingPage() {
   }, [qpMode])
 
   useEffect(() => {
-    const handler = () => {
-      void reload()
-    }
-
+    const handler = () => void reload()
     window.addEventListener("offboarding:deleted", handler)
     window.addEventListener("offboarding:updated", handler)
     window.addEventListener("offboarding:created", handler)
-
     return () => {
       window.removeEventListener("offboarding:deleted", handler)
       window.removeEventListener("offboarding:updated", handler)
@@ -928,24 +624,13 @@ export default function OffboardingPage() {
   }, [reload])
 
   const thisMonth = format(new Date(), "yyyy-MM")
+
   const defaultPlannedMonth = useMemo(() => {
     const has = planned.find((e) => e.plannedEnd?.slice(0, 7) === thisMonth)
     return (
       has?.plannedEnd?.slice(0, 7) ?? planned[0]?.plannedEnd?.slice(0, 7) ?? ""
     )
   }, [planned, thisMonth])
-
-  const actualMonths = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          actual
-            .map((e) => e.actualEnd?.slice(0, 7))
-            .filter(Boolean) as string[]
-        )
-      ),
-    [actual]
-  )
 
   const plannedMonths = useMemo(
     () =>
@@ -959,12 +644,23 @@ export default function OffboardingPage() {
     [planned]
   )
 
+  const actualMonths = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          actual
+            .map((e) => e.actualEnd?.slice(0, 7))
+            .filter(Boolean) as string[]
+        )
+      ),
+    [actual]
+  )
+
   const defaultActualMonth = useMemo(() => {
     const has = actual.find((e) => e.actualEnd?.slice(0, 7) === thisMonth)
     return has?.actualEnd?.slice(0, 7) ?? actualMonths[0] ?? ""
   }, [actual, actualMonths, thisMonth])
 
-  // Funkce pro potvrzení skutečného odchodu
   function openActualDialogFromPlanned(row: Departure) {
     setActiveRow(row)
     setActualEndInput(row.plannedEnd.slice(0, 10))
@@ -1015,7 +711,6 @@ export default function OffboardingPage() {
     }
   }
 
-  // Funkce pro editaci záznamu
   async function openEditDialog(row: Departure, context: "planned" | "actual") {
     setEditContext(context)
     setEditId(row.id)
@@ -1143,9 +838,7 @@ export default function OffboardingPage() {
                     defaultPlannedMonth ? [defaultPlannedMonth] : []
                   }
                 >
-                  {[
-                    ...new Set(planned.map((e) => e.plannedEnd.slice(0, 7))),
-                  ].map((month) => (
+                  {plannedMonths.map((month) => (
                     <AccordionItem
                       key={month}
                       value={month}
@@ -1189,7 +882,7 @@ export default function OffboardingPage() {
                                       Plánovaný odchod
                                     </TableHead>
                                     <TableHead className="w-[100px]">
-                                      Výpovědní lhůta
+                                      Průběh
                                     </TableHead>
                                     <TableHead className="w-[150px]">
                                       Kontakt
@@ -1206,8 +899,8 @@ export default function OffboardingPage() {
                                     )
                                     .sort(
                                       (a, b) =>
-                                        new Date(a.plannedEnd).getTime() -
-                                        new Date(b.plannedEnd).getTime()
+                                        parseISO(a.plannedEnd).getTime() -
+                                        parseISO(b.plannedEnd).getTime()
                                     )
                                     .map((e) => (
                                       <DepartureTableRow
@@ -1237,27 +930,17 @@ export default function OffboardingPage() {
               </div>
             )}
 
-            {/* Měsíční reporty dole napravo */}
             <div className="mt-6 flex justify-end">
-              <MonthlySummaryButton
-                candidateMonths={plannedMonths}
+              <MonthlyReportLauncher
+                initialType="odchody"
+                kind="planned"
                 defaultMonth={defaultPlannedMonth || thisMonth}
-                label="Zaslat měsíční report"
-                className="inline-flex items-center justify-center gap-2 bg-orange-600 text-white hover:bg-orange-700"
-                onDone={() => {
-                  showSuccess(
-                    "Report odeslán",
-                    "Měsíční report předpokládaných odchodů byl odeslán."
-                  )
-                  void reload()
-                }}
               />
             </div>
           </TabsContent>
 
           {/* ---------- ACTUAL TAB ---------- */}
           <TabsContent value="actual" className="mt-4 space-y-4">
-            {/* horní řádka: vlevo přidat, vpravo smazané */}
             <div className="mb-4 flex items-center justify-between gap-2">
               <Dialog open={openNewActual} onOpenChange={setOpenNewActual}>
                 <DialogTrigger asChild>
@@ -1365,7 +1048,7 @@ export default function OffboardingPage() {
                                       Skutečný odchod
                                     </TableHead>
                                     <TableHead className="w-[100px]">
-                                      Výpovědní lhůta
+                                      Průběh
                                     </TableHead>
                                     <TableHead className="w-[150px]">
                                       Kontakt
@@ -1381,9 +1064,13 @@ export default function OffboardingPage() {
                                       e.actualEnd?.startsWith(month)
                                     )
                                     .sort((a, b) => {
-                                      const dateA = new Date(a.actualEnd || "")
-                                      const dateB = new Date(b.actualEnd || "")
-                                      return dateB.getTime() - dateA.getTime()
+                                      const aT = a.actualEnd
+                                        ? parseISO(a.actualEnd).getTime()
+                                        : 0
+                                      const bT = b.actualEnd
+                                        ? parseISO(b.actualEnd).getTime()
+                                        : 0
+                                      return bT - aT
                                     })
                                     .map((e) => (
                                       <DepartureTableRow
@@ -1410,27 +1097,18 @@ export default function OffboardingPage() {
               </div>
             )}
 
-            {/* Měsíční reporty dole napravo */}
             <div className="mt-6 flex justify-end">
-              <MonthlySummaryButton
-                candidateMonths={actualMonths}
+              <MonthlyReportLauncher
+                initialType="odchody"
+                kind="actual"
                 defaultMonth={defaultActualMonth || thisMonth}
-                label="Zaslat měsíční report"
-                className="inline-flex items-center justify-center gap-2 bg-red-600 text-white hover:bg-red-700"
-                onDone={() => {
-                  showSuccess(
-                    "Report odeslán",
-                    "Měsíční report skutečných odchodů byl odeslán."
-                  )
-                  void reload()
-                }}
               />
             </div>
           </TabsContent>
         </div>
       </Tabs>
 
-      {/* Dialog pro potvrzení skutečného odchodu - oranžový s možností úpravy */}
+      {/* potvrzení skutečného odchodu */}
       <Dialog
         open={openActual}
         onOpenChange={(o) => {
@@ -1448,7 +1126,6 @@ export default function OffboardingPage() {
           <div className="max-h-[80vh] space-y-4 overflow-y-auto p-6">
             {activeRow && (
               <>
-                {/* Informace o zaměstnanci s tlačítkem upravit a potvrzením */}
                 <div className="rounded-lg border bg-muted/30 p-4">
                   <div className="mb-3 flex items-center justify-between">
                     <h4 className="flex items-center gap-2 font-medium">
@@ -1493,7 +1170,7 @@ export default function OffboardingPage() {
                       <span className="font-medium text-muted-foreground">
                         Plánovaný odchod:
                       </span>{" "}
-                      {format(new Date(activeRow.plannedEnd), "d.M.yyyy")}
+                      {format(parseISO(activeRow.plannedEnd), "d.M.yyyy")}
                     </div>
                     {activeRow.personalNumber && (
                       <div>
@@ -1507,7 +1184,6 @@ export default function OffboardingPage() {
                     )}
                   </div>
 
-                  {/* Potvrzovací box */}
                   <div className="mb-3 rounded-md border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20">
                     <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
                       ✓ Souhlasíte s těmito údaji?
@@ -1534,7 +1210,6 @@ export default function OffboardingPage() {
                   </Button>
                 </div>
 
-                {/* Datum skutečného odchodu */}
                 <Card className="border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-900/20">
                   <CardContent className="p-4">
                     <h4 className="mb-3 flex items-center gap-2 font-medium">
@@ -1569,7 +1244,7 @@ export default function OffboardingPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Dialog pro editaci */}
+      {/* edit dialog */}
       <Dialog open={openEdit} onOpenChange={setOpenEdit}>
         <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
           <DialogTitle className="px-6 pt-6">Upravit záznam</DialogTitle>
@@ -1606,7 +1281,6 @@ export default function OffboardingPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Success Modal */}
       <SuccessModal
         open={successModal.open}
         onOpenChange={(open) => setSuccessModal((prev) => ({ ...prev, open }))}
@@ -1614,7 +1288,6 @@ export default function OffboardingPage() {
         message={successModal.message}
       />
 
-      {/* Error Modal */}
       <ErrorModal
         open={errorModal.open}
         onOpenChange={(open) => setErrorModal((prev) => ({ ...prev, open }))}
@@ -1663,7 +1336,6 @@ export default function OffboardingPage() {
           box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.25);
         }
 
-        /* Dark mode jemnější focus (bez “bílé blikající” aureoly) */
         html.dark .btn-brand-planned:focus {
           box-shadow: 0 0 0 2px hsl(var(--border));
         }
