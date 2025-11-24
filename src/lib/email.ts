@@ -30,7 +30,7 @@ export async function sendMail(params: {
 
   if (resend) {
     await resend.emails.send({
-      from: process.env.MAIL_FROM ?? "no-reply@firma.cz",
+      from: process.env.MAIL_FROM ?? "onboarding@resend.dev",
       to,
       subject: params.subject,
       html: params.html,

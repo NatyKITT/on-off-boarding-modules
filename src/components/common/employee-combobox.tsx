@@ -65,6 +65,13 @@ const normalize = (s: string) =>
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
 
+const focusRing =
+  "focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/55 " +
+  "focus:ring-offset-2 focus:ring-offset-background " +
+  "focus-visible:outline-none focus-visible:border-primary " +
+  "focus-visible:ring-2 focus-visible:ring-primary/55 " +
+  "focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+
 export function EmployeeCombobox({
   formFields,
   placeholder = "Vyberte zaměstnance…",
@@ -82,7 +89,6 @@ export function EmployeeCombobox({
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
-  // ✅ OPRAVA: Sledování osobního čísla s fallbackem na prázdný string
   const watchedPersonalNumber = useWatch({
     control: form.control,
     name: formFields.personalNumber,
@@ -100,7 +106,6 @@ export function EmployeeCombobox({
     [allEmployees, currentPersonalNumber]
   )
 
-  // ✅ OPRAVA: Zobrazený text - pokud není vybraný zaměstnanec, vrať prázdný string
   const selectedLabel = selectedEmployee
     ? `${selectedEmployee.personalNumber}  ·  ${[
         selectedEmployee.titleBefore,
@@ -112,7 +117,6 @@ export function EmployeeCombobox({
         .join(" ")}`
     : ""
 
-  // Načtení zaměstnanců
   useEffect(() => {
     if (!open || allEmployees.length > 0) return
 
@@ -157,12 +161,10 @@ export function EmployeeCombobox({
     return () => controller.abort()
   }, [open, allEmployees.length, fetchLimit, excludePersonalNumbers])
 
-  // po zavření popoveru vyčisti hledání
   useEffect(() => {
     if (!open) setQuery("")
   }, [open])
 
-  // živé filtrování
   const filtered = useMemo(() => {
     const q = normalize(query.trim())
     if (!q) return allEmployees
@@ -204,7 +206,6 @@ export function EmployeeCombobox({
     await form.trigger()
   }
 
-  // ✅ OPRAVA: Vylepšená funkce pro vyčištění
   function clearEmployee() {
     const keys = [
       formFields.personalNumber,
@@ -220,7 +221,6 @@ export function EmployeeCombobox({
       formFields.userName,
     ].filter(Boolean) as string[]
 
-    // Vyčisti všechna pole
     keys.forEach((k) =>
       form.setValue(k, "", {
         shouldDirty: true,
@@ -233,13 +233,11 @@ export function EmployeeCombobox({
     setQuery("")
     setOpen(false)
 
-    // ✅ Vynucení validace po vyčištění
     setTimeout(() => {
       void form.trigger()
     }, 0)
   }
 
-  // ✅ OPRAVA: Použití key prop na input pro vynucení rerenderu
   const inputKey = `employee-input-${currentPersonalNumber || "empty"}`
 
   return (
@@ -264,6 +262,7 @@ export function EmployeeCombobox({
                 setOpen(false)
               }
             }}
+            className={focusRing}
           />
           {!!currentPersonalNumber && !disabled && (
             <button
@@ -288,6 +287,8 @@ export function EmployeeCombobox({
         className="w-[--radix-popover-trigger-width] p-0"
         sideOffset={4}
         align="start"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        onWheelCapture={(e) => e.stopPropagation()}
       >
         <Command shouldFilter={false}>
           <div className="relative">
@@ -296,6 +297,7 @@ export function EmployeeCombobox({
               value={query}
               onValueChange={setQuery}
               autoFocus
+              className={focusRing}
             />
             {query && (
               <button
@@ -331,7 +333,7 @@ export function EmployeeCombobox({
 
           <CommandList
             className="max-h-80 overflow-y-auto overscroll-contain"
-            onWheel={(e) => {
+            onWheelCapture={(e) => {
               e.stopPropagation()
             }}
           >

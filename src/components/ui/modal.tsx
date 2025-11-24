@@ -85,6 +85,7 @@ export function Modal({
       }}
     >
       <DialogContent
+        aria-describedby={undefined}
         onOpenAutoFocus={(e) => e.preventDefault()}
         onCloseAutoFocus={(e) => e.preventDefault()}
         className={cn(

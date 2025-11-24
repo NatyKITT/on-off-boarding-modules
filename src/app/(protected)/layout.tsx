@@ -13,6 +13,10 @@ import { ModeToggle } from "@/components/layout/mode-toggle"
 import { UserAccountNav } from "@/components/layout/user-account-nav"
 import MaxWidthWrapper from "@/components/shared/max-width-wrapper"
 
+import "react-big-calendar/lib/css/react-big-calendar.css"
+import "react-calendar/dist/Calendar.css"
+import "@/styles/calendar.css"
+
 interface ProtectedLayoutProps {
   children: React.ReactNode
 }

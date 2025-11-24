@@ -69,6 +69,13 @@ function rowKey(r: ReportRecord): string {
   return `${r.type}-${r.id}-${r.isPlanned ? "planned" : "actual"}`
 }
 
+const focusRing =
+  "focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/55 " +
+  "focus:ring-offset-2 focus:ring-offset-background " +
+  "focus-visible:outline-none focus-visible:border-primary " +
+  "focus-visible:ring-2 focus-visible:ring-primary/55 " +
+  "focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+
 export function MonthlyReportModal({
   openSignal,
   initialType,
@@ -90,6 +97,24 @@ export function MonthlyReportModal({
   const [selectedKeys, setSelectedKeys] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
+
+  const [confirmState, setConfirmState] = useState<{
+    open: boolean
+    mode: SendMode | null
+    alreadySent: number
+    total: number
+  }>({ open: false, mode: null, alreadySent: 0, total: 0 })
+
+  const [successState, setSuccessState] = useState<{
+    open: boolean
+    mode: SendMode | null
+    total: number
+  }>({ open: false, mode: null, total: 0 })
+
+  const [errorState, setErrorState] = useState<{
+    open: boolean
+    message: string | null
+  }>({ open: false, message: null })
 
   const monthLabel = useMemo(
     () => fmt(new Date(`${month}-01`), "LLLL yyyy", { locale: cs }),
@@ -162,18 +187,24 @@ export function MonthlyReportModal({
     )
   }
 
-  async function send(mode: SendMode) {
+  async function handleSend(mode: SendMode, force = false) {
     const payloadRows =
       mode === "selected"
         ? records.filter((r) => selectedKeys.includes(rowKey(r)))
         : records
 
+    if (payloadRows.length === 0) return
+
     const alreadySentInPayload = payloadRows.filter((r) => r.wasSent).length
-    if (mode !== "unsentOnly" && alreadySentInPayload > 0) {
-      const ok = confirm(
-        `${alreadySentInPayload} vybraných záznamů už bylo odesláno. Chceš je zahrnout znovu?`
-      )
-      if (!ok) return
+
+    if (!force && mode !== "unsentOnly" && alreadySentInPayload > 0) {
+      setConfirmState({
+        open: true,
+        mode,
+        alreadySent: alreadySentInPayload,
+        total: payloadRows.length,
+      })
+      return
     }
 
     setSending(true)
@@ -204,244 +235,395 @@ export function MonthlyReportModal({
       })
 
       if (!res.ok) {
-        console.error(await res.text().catch(() => ""))
-        alert("Chyba při odesílání reportu.")
-        return
+        const text = await res.text().catch(() => "")
+        throw new Error(text || "Chyba při odesílání reportu.")
       }
 
-      alert("Report odeslán.")
-      setOpen(false)
+      setSuccessState({
+        open: true,
+        mode,
+        total: payloadRows.length,
+      })
+
+      // znovu načteme záznamy, aby se propsal status odesláno
+      void loadRecords()
     } catch (e) {
-      console.error(e)
-      alert("Chyba při odesílání.")
+      setErrorState({
+        open: true,
+        message:
+          e instanceof Error && e.message ? e.message : "Chyba při odesílání.",
+      })
     } finally {
       setSending(false)
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="flex max-h-[85vh] max-w-5xl flex-col">
-        <DialogHeader>
-          <DialogTitle>Měsíční report – {monthLabel}</DialogTitle>
-        </DialogHeader>
+    <>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="flex max-h-[90vh] max-w-5xl flex-col">
+          <DialogHeader>
+            <DialogTitle>Měsíční report – {monthLabel}</DialogTitle>
+          </DialogHeader>
 
-        <div className="flex flex-wrap gap-4">
-          <div className="min-w-[200px] flex-1">
-            <Label htmlFor="month">Měsíc</Label>
-            <input
-              id="month"
-              type="month"
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2"
-            />
-          </div>
-
-          <div className="min-w-[200px] flex-1">
-            <Label>Režim</Label>
-            <Tabs value={kind} onValueChange={(v) => setKind(v as Kind)}>
-              <TabsList className="grid grid-cols-2">
-                <TabsTrigger value="actual" disabled={combineBoth}>
-                  Skutečné
-                </TabsTrigger>
-                <TabsTrigger value="planned" disabled={combineBoth}>
-                  Plánované
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
-
-          <div className="min-w-[200px] flex-1">
-            <Label>Hlavní typ</Label>
-            <Tabs value={type} onValueChange={(v) => setType(v as TypeFilter)}>
-              <TabsList className="grid grid-cols-2">
-                <TabsTrigger value="nastupy">Nástupy</TabsTrigger>
-                <TabsTrigger value="odchody">Odchody</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
-
-          <div className="flex items-end gap-4">
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="includeOther"
-                checked={includeOtherType}
-                onCheckedChange={(c) => setIncludeOtherType(!!c)}
+          {/* Filtry nahoře – statické, nescrollují */}
+          <div className="flex flex-wrap gap-4">
+            <div className="min-w-[200px] flex-1">
+              <Label htmlFor="month">Měsíc</Label>
+              <input
+                id="month"
+                type="month"
+                value={month}
+                onChange={(e) => setMonth(e.target.value)}
+                className={cn(
+                  "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm",
+                  focusRing
+                )}
               />
-              <Label htmlFor="includeOther" className="cursor-pointer">
-                Zahrnout i {type === "nastupy" ? "odchody" : "nástupy"}
-              </Label>
             </div>
 
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="combineBoth"
-                checked={combineBoth}
-                onCheckedChange={(c) => setCombineBoth(!!c)}
-              />
-              <Label htmlFor="combineBoth" className="cursor-pointer">
-                Zaslat společně (plánované + skutečné)
-              </Label>
+            <div className="min-w-[200px] flex-1">
+              <Label>Režim</Label>
+              <Tabs
+                value={kind}
+                onValueChange={(v) => setKind(v as Kind)}
+                className="mt-1"
+              >
+                <TabsList className="grid grid-cols-2">
+                  <TabsTrigger value="actual" disabled={combineBoth}>
+                    Skutečné
+                  </TabsTrigger>
+                  <TabsTrigger value="planned" disabled={combineBoth}>
+                    Plánované
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+
+            <div className="min-w-[200px] flex-1">
+              <Label>Hlavní typ</Label>
+              <Tabs
+                value={type}
+                onValueChange={(v) => setType(v as TypeFilter)}
+                className="mt-1"
+              >
+                <TabsList className="grid grid-cols-2">
+                  <TabsTrigger value="nastupy">Nástupy</TabsTrigger>
+                  <TabsTrigger value="odchody">Odchody</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+
+            <div className="flex flex-col justify-end gap-2">
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="includeOther"
+                  checked={includeOtherType}
+                  onCheckedChange={(c) => setIncludeOtherType(!!c)}
+                />
+                <Label htmlFor="includeOther" className="cursor-pointer">
+                  Zahrnout i {type === "nastupy" ? "odchody" : "nástupy"}
+                </Label>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="combineBoth"
+                  checked={combineBoth}
+                  onCheckedChange={(c) => setCombineBoth(!!c)}
+                />
+                <Label htmlFor="combineBoth" className="cursor-pointer">
+                  Zaslat společně (plánované + skutečné)
+                </Label>
+              </div>
             </div>
           </div>
-        </div>
 
-        {sentCount > 0 && (
-          <Alert className="mt-3">
-            <AlertCircle className="size-4" />
-            <AlertDescription>
-              {sentCount} z {records.length} záznamů už bylo odesláno.
-              {selectedSentCount > 0 && (
-                <span className="ml-1 font-semibold">
-                  Vybráno {selectedSentCount} již odeslaných.
-                </span>
-              )}
-            </AlertDescription>
-          </Alert>
-        )}
-
-        <div className="mt-3 flex gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={toggleAll}
-            disabled={loading}
-          >
-            {selectedKeys.length === records.length
-              ? "Odznačit vše"
-              : "Vybrat vše"}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={toggleUnsent}
-            disabled={loading}
-          >
-            Vybrat neodeslané
-          </Button>
-          <div className="ml-auto text-sm text-muted-foreground">
-            Vybráno: {selectedKeys.length} / {records.length}
-          </div>
-        </div>
-
-        <div
-          className="mt-2 flex-1 overflow-auto rounded-lg border"
-          aria-busy={loading}
-        >
-          {loading ? (
-            <div className="p-8 text-center text-muted-foreground">
-              Načítám…
-            </div>
-          ) : records.length === 0 ? (
-            <div className="p-8 text-center text-muted-foreground">
-              Žádné záznamy
-            </div>
-          ) : (
-            <table className="w-full">
-              <thead className="sticky top-0 bg-muted/50">
-                <tr>
-                  <th className="w-12 p-2">
-                    <Checkbox
-                      checked={
-                        selectedKeys.length === records.length &&
-                        records.length > 0
-                      }
-                      onCheckedChange={toggleAll}
-                    />
-                  </th>
-                  <th className="p-2 text-left">Jméno</th>
-                  <th className="p-2 text-left">Pozice</th>
-                  <th className="p-2 text-left">Oddělení</th>
-                  <th className="p-2 text-left">Datum</th>
-                  <th className="p-2 text-left">Typ</th>
-                  <th className="p-2 text-left">Režim</th>
-                  <th className="p-2 text-left">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {records.map((r) => {
-                  const k = rowKey(r)
-                  return (
-                    <tr
-                      key={k}
-                      className={cn(
-                        "border-t hover:bg-muted/20",
-                        r.wasSent && "bg-muted/10"
-                      )}
-                    >
-                      <td className="p-2">
-                        <Checkbox
-                          checked={selectedKeys.includes(k)}
-                          onCheckedChange={() => toggleSingle(k)}
-                        />
-                      </td>
-                      <td className="p-2 font-medium">
-                        {r.name} {r.surname}
-                      </td>
-                      <td className="p-2 text-sm">{r.position ?? "—"}</td>
-                      <td className="p-2 text-sm">{r.department ?? "—"}</td>
-                      <td className="p-2 text-sm">
-                        {r.date ? fmt(new Date(r.date), "dd.MM.yyyy") : "–"}
-                      </td>
-                      <td className="p-2">
-                        <Badge
-                          variant={
-                            r.type === "onboarding" ? "default" : "secondary"
-                          }
-                        >
-                          {r.type === "onboarding" ? "Nástup" : "Odchod"}
-                        </Badge>
-                      </td>
-                      <td className="p-2">
-                        <Badge variant={r.isPlanned ? "secondary" : "default"}>
-                          {r.isPlanned ? "Plánované" : "Skutečné"}
-                        </Badge>
-                      </td>
-                      <td className="p-2">
-                        {r.wasSent ? (
-                          <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                            <CheckCircle2 className="size-3" />
-                            Již odesláno
-                          </div>
-                        ) : (
-                          <span className="text-sm font-medium text-green-600">
-                            Nové
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+          {sentCount > 0 && (
+            <Alert className="mt-3">
+              <AlertCircle className="size-4" />
+              <AlertDescription>
+                {sentCount} z {records.length} záznamů už bylo odesláno.
+                {selectedSentCount > 0 && (
+                  <span className="ml-1 font-semibold">
+                    Vybráno {selectedSentCount} již odeslaných.
+                  </span>
+                )}
+              </AlertDescription>
+            </Alert>
           )}
-        </div>
 
-        <div className="flex justify-end gap-2 border-t pt-4">
-          <Button variant="outline" onClick={() => setOpen(false)}>
-            Zrušit
-          </Button>
-          <Button
-            onClick={() => send("unsentOnly")}
-            disabled={sending || loading}
+          {/* Hromadné označování */}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={toggleAll}
+              disabled={loading}
+              className="inline-flex items-center justify-center gap-2"
+            >
+              {selectedKeys.length === records.length && records.length > 0
+                ? "Odznačit vše"
+                : "Vybrat vše"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={toggleUnsent}
+              disabled={loading}
+              className="inline-flex items-center justify-center gap-2"
+            >
+              Vybrat neodeslané
+            </Button>
+            <div className="ml-auto text-sm text-muted-foreground">
+              Vybráno: {selectedKeys.length} / {records.length}
+            </div>
+          </div>
+
+          {/* Tabulka – jen tato část scrolluje, hlavička sticky, neprůhledná */}
+          <div
+            className="mt-2 flex-1 rounded-lg border bg-background"
+            aria-busy={loading}
           >
-            <Mail className="mr-2 size-4" />
-            Odeslat jen neodeslané
-          </Button>
-          <Button
-            onClick={() => send("selected")}
-            disabled={selectedKeys.length === 0 || sending || loading}
-          >
-            <Mail className="mr-2 size-4" />
-            Odeslat vybrané ({selectedKeys.length})
-          </Button>
-          <Button onClick={() => send("all")} disabled={sending || loading}>
-            <Mail className="mr-2 size-4" />
-            Odeslat celý měsíc
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+            {loading ? (
+              <div className="p-8 text-center text-muted-foreground">
+                Načítám…
+              </div>
+            ) : records.length === 0 ? (
+              <div className="p-8 text-center text-muted-foreground">
+                Žádné záznamy
+              </div>
+            ) : (
+              <div
+                className="relative h-full max-h-[50vh] overflow-auto overscroll-contain"
+                data-lenis-prevent=""
+                onWheelCapture={(e) => e.stopPropagation()}
+              >
+                <table className="w-full min-w-[720px] text-xs sm:text-sm">
+                  <thead className="sticky top-0 z-10 bg-background">
+                    <tr className="border-b">
+                      <th className="w-12 p-2">
+                        <Checkbox
+                          checked={
+                            selectedKeys.length === records.length &&
+                            records.length > 0
+                          }
+                          onCheckedChange={toggleAll}
+                          aria-label="Vybrat všechny"
+                        />
+                      </th>
+                      <th className="p-2 text-left">Jméno</th>
+                      <th className="p-2 text-left">Pozice</th>
+                      <th className="p-2 text-left">Oddělení</th>
+                      <th className="p-2 text-left">Datum</th>
+                      <th className="p-2 text-left">Typ</th>
+                      <th className="p-2 text-left">Režim</th>
+                      <th className="w-40 p-2 text-left">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {records.map((r) => {
+                      const k = rowKey(r)
+                      return (
+                        <tr
+                          key={k}
+                          className={cn(
+                            "border-t hover:bg-muted/20",
+                            r.wasSent && "bg-muted/10"
+                          )}
+                        >
+                          <td className="p-2">
+                            <Checkbox
+                              checked={selectedKeys.includes(k)}
+                              onCheckedChange={() => toggleSingle(k)}
+                              aria-label="Vybrat záznam"
+                            />
+                          </td>
+                          <td className="p-2 font-medium">
+                            {r.name} {r.surname}
+                          </td>
+                          <td className="p-2 text-xs sm:text-sm">
+                            {r.position ?? "—"}
+                          </td>
+                          <td className="p-2 text-xs sm:text-sm">
+                            {r.department ?? "—"}
+                          </td>
+                          <td className="whitespace-nowrap p-2 text-xs sm:text-sm">
+                            {r.date ? fmt(new Date(r.date), "dd.MM.yyyy") : "–"}
+                          </td>
+                          <td className="p-2">
+                            <Badge
+                              variant={
+                                r.type === "onboarding"
+                                  ? "default"
+                                  : "secondary"
+                              }
+                            >
+                              {r.type === "onboarding" ? "Nástup" : "Odchod"}
+                            </Badge>
+                          </td>
+                          <td className="p-2">
+                            <Badge
+                              variant={r.isPlanned ? "secondary" : "default"}
+                            >
+                              {r.isPlanned ? "Plánované" : "Skutečné"}
+                            </Badge>
+                          </td>
+                          <td className="p-2">
+                            {r.wasSent ? (
+                              <div className="flex min-w-[150px] items-center gap-1 text-xs text-muted-foreground sm:text-sm">
+                                <CheckCircle2 className="size-3 shrink-0" />
+                                <span>Již odesláno</span>
+                              </div>
+                            ) : (
+                              <span className="text-xs font-medium text-green-600 sm:text-sm">
+                                Nové
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Spodní akce */}
+          <div className="mt-4 flex flex-wrap justify-end gap-2 border-t pt-4">
+            <Button
+              variant="outline"
+              onClick={() => setOpen(false)}
+              className="inline-flex items-center justify-center gap-2"
+            >
+              Zrušit
+            </Button>
+            <Button
+              onClick={() => handleSend("unsentOnly")}
+              disabled={sending || loading}
+              className="inline-flex items-center justify-center gap-2"
+            >
+              <Mail className="size-4" />
+              <span>Odeslat jen neodeslané</span>
+            </Button>
+            <Button
+              onClick={() => handleSend("selected")}
+              disabled={selectedKeys.length === 0 || sending || loading}
+              className="inline-flex items-center justify-center gap-2"
+            >
+              <Mail className="size-4" />
+              <span>Odeslat vybrané ({selectedKeys.length})</span>
+            </Button>
+            <Button
+              onClick={() => handleSend("all")}
+              disabled={sending || loading}
+              className="inline-flex items-center justify-center gap-2"
+            >
+              <Mail className="size-4" />
+              <span>Odeslat celý měsíc</span>
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Potvrzovací dialog – znovu odeslané záznamy */}
+      <Dialog
+        open={confirmState.open}
+        onOpenChange={(open) => setConfirmState((prev) => ({ ...prev, open }))}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Odeslat znovu již odeslané?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            V aktuálním výběru je{" "}
+            <span className="font-semibold">{confirmState.alreadySent}</span>{" "}
+            záznamů, které už byly dříve odeslány.
+            <br />
+            Chceš je zahrnout znovu do tohoto reportu?
+          </p>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() =>
+                setConfirmState((prev) => ({ ...prev, open: false }))
+              }
+              className="inline-flex items-center justify-center gap-2"
+            >
+              Ne, neodesílat znovu
+            </Button>
+            <Button
+              onClick={() => {
+                const m = confirmState.mode
+                setConfirmState((prev) => ({ ...prev, open: false }))
+                if (m) void handleSend(m, true)
+              }}
+              className="inline-flex items-center justify-center gap-2"
+            >
+              Odeslat včetně nich
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Úspěch */}
+      <Dialog
+        open={successState.open}
+        onOpenChange={(open) => setSuccessState((prev) => ({ ...prev, open }))}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle2 className="size-5 text-green-600" />
+              Report odeslán
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {successState.total} záznamů bylo úspěšně odesláno.
+          </p>
+          <div className="mt-4 flex justify-end">
+            <Button
+              onClick={() => {
+                setSuccessState((prev) => ({ ...prev, open: false }))
+                setOpen(false)
+              }}
+              className="inline-flex items-center justify-center gap-2"
+            >
+              Pokračovat
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Chyba */}
+      <Dialog
+        open={errorState.open}
+        onOpenChange={(open) => setErrorState((prev) => ({ ...prev, open }))}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="size-5 text-red-600" />
+              Chyba při odesílání
+            </DialogTitle>
+          </DialogHeader>
+          <p className="whitespace-pre-line text-sm text-muted-foreground">
+            {errorState.message ?? "Nastala neznámá chyba."}
+          </p>
+          <div className="mt-4 flex justify-end">
+            <Button
+              variant="outline"
+              onClick={() =>
+                setErrorState((prev) => ({ ...prev, open: false }))
+              }
+              className="inline-flex items-center justify-center gap-2"
+            >
+              Zavřít
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

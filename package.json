@@ -2,10 +2,12 @@
   "private": true,
   "name": "On-Off-Boarding-Module",
   "description": "",
-  "version": "0.1.0",
+  "version": "0.1.7",
   "type": "module",
   "scripts": {
     "dev": "next dev -p 3001",
+    "predev": "node scripts/write-build-info.mjs",
+    "prebuild": "node scripts/write-build-info.mjs",
     "build": "next build",
     "start": "next start -p 3001",
     "postinstall": "prisma generate",

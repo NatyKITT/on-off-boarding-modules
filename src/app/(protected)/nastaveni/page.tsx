@@ -2,7 +2,6 @@ import { redirect } from "next/navigation"
 
 import { getCurrentUser } from "@/lib/session"
 
-import { DeleteAccountSection } from "@/components/dashboard/delete-account"
 import { DashboardHeader } from "@/components/dashboard/header"
 import { UpdateUserNameForm } from "@/components/forms/update-user-name-form"
 import { UpdateUserRoleForm } from "@/components/forms/update-user-role-form"
@@ -27,7 +26,6 @@ export default async function DashboardSettingsPage() {
         {isAdmin && (
           <UpdateUserRoleForm user={{ id: user.id, role: user.role }} />
         )}
-        <DeleteAccountSection />
       </div>
     </>
   )

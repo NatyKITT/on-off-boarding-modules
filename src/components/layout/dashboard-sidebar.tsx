@@ -21,6 +21,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { BuildVersionBadge } from "@/components/shared/build-version-badge"
 import { Icons } from "@/components/shared/icons"
 
 interface DashboardSidebarProps {
@@ -157,6 +158,7 @@ export function DashboardSidebar({ links }: DashboardSidebarProps) {
                     })}
                   </section>
                 ))}
+                <BuildVersionBadge />
               </nav>
             </div>
           </aside>
@@ -241,6 +243,7 @@ export function MobileSheetSidebar({ links }: DashboardSidebarProps) {
                     })}
                   </section>
                 ))}
+                <BuildVersionBadge />
               </nav>
             </div>
           </ScrollArea>

@@ -3,25 +3,45 @@ import { prisma } from "@/lib/db"
 type Channel = "planned" | "actual" | "all"
 
 export async function recipientsFor(channel: Channel): Promise<string[]> {
-  const settings = await prisma.systemSettings.findUnique({
-    where: { key: "email_recipients" },
-  })
-  if (settings?.value) {
-    const cfg = settings.value as { planned?: string[]; actual?: string[] }
-    if (channel === "all") {
-      return Array.from(
-        new Set([...(cfg?.planned ?? []), ...(cfg?.actual ?? [])])
-      ).filter(Boolean)
+  try {
+    const settings = await prisma.systemSettings.findUnique({
+      where: { key: "email_recipients" },
+    })
+
+    if (settings?.value) {
+      const cfg = settings.value as { planned?: string[]; actual?: string[] }
+
+      if (channel === "all") {
+        const all = [...(cfg?.planned ?? []), ...(cfg?.actual ?? [])]
+        return Array.from(new Set(all)).filter(Boolean)
+      }
+
+      const recipients = cfg?.[channel] ?? []
+      if (recipients.length > 0) {
+        return recipients.filter(Boolean)
+      }
     }
-    return (cfg?.[channel] ?? []).filter(Boolean)
+  } catch (error) {
+    console.warn("Nelze načíst příjemce z DB:", error)
   }
+
   const planned = (process.env.REPORT_RECIPIENTS_PLANNED ?? "")
     .split(",")
     .map((s) => s.trim())
+    .filter(Boolean)
+
   const actual = (process.env.REPORT_RECIPIENTS_ACTUAL ?? "")
     .split(",")
     .map((s) => s.trim())
-  return channel === "all"
-    ? Array.from(new Set([...planned, ...actual])).filter(Boolean)
-    : (channel === "planned" ? planned : actual).filter(Boolean)
+    .filter(Boolean)
+
+  console.log("📧 Načtení příjemců z ENV:")
+  console.log("  Planned:", planned)
+  console.log("  Actual:", actual)
+
+  if (channel === "all") {
+    return Array.from(new Set([...planned, ...actual])).filter(Boolean)
+  }
+
+  return channel === "planned" ? planned : actual
 }

@@ -74,9 +74,6 @@ const nextTempPersonalNumber = (exclude: string[] = []): string => {
   return String(i)
 }
 
-/** Když explicitně nepřišlo hasCustomDates, odvodíme ho:
- * pokud (noticeFiled + 2M) !== end (podle módu), je to manuální.
- */
 function inferManualDates(
   init: Partial<FormValues> | undefined,
   isActual: boolean
@@ -154,7 +151,9 @@ export function OffboardingFormUnified({
   const [manualDates, setManualDates] = useState<boolean>(
     () => inferredManualFlag
   )
-  useEffect(() => setManualDates(inferredManualFlag), [inferredManualFlag, id])
+  useEffect(() => {
+    setManualDates(inferredManualFlag)
+  }, [inferredManualFlag, id])
 
   const lastEditedRef = useRef<"notice" | "end" | null>(null)
 
@@ -162,6 +161,10 @@ export function OffboardingFormUnified({
   const [openError, setOpenError] = useState(false)
   const [successName, setSuccessName] = useState("")
   const [errorMsg, setErrorMsg] = useState("")
+  const firstDateRef = useRef<HTMLInputElement | null>(null)
+  useEffect(() => {
+    firstDateRef.current?.focus()
+  }, [])
 
   /* ---------------------------- defaults ---------------------------- */
   const defaults: FormValues = useMemo(() => {
@@ -184,14 +187,12 @@ export function OffboardingFormUnified({
       hasCustomDates: inferredManualFlag,
     }
 
-    // server -> formulářová pole
     if (initial) {
       Object.assign(base, initial)
       if (isEdit && initial.noticeEnd)
         base.noticeFiled = initial.noticeEnd.slice(0, 10)
     }
 
-    // Když není nic, předvyplň dneškem a +2M (stejně jako onboarding logika)
     if (!isEdit && !prefillDate) {
       if (!base.noticeFiled) base.noticeFiled = todayStr()
       const endAuto = toYMD(addMonths(new Date(base.noticeFiled), 2))
@@ -199,7 +200,6 @@ export function OffboardingFormUnified({
       else base.plannedEnd ||= endAuto
     }
 
-    // Prefill z přehledu
     if (!isEdit && prefillDate) {
       if (isActualMode) base.actualEnd = prefillDate
       else base.plannedEnd = prefillDate
@@ -210,7 +210,6 @@ export function OffboardingFormUnified({
       }
     }
 
-    // Edit fallback notice z konce
     if (isEdit && !base.noticeFiled) {
       const endStr = base.actualEnd || base.plannedEnd
       if (endStr) {
@@ -220,14 +219,9 @@ export function OffboardingFormUnified({
       }
     }
 
-    // ---- Fallbacky pro chybějící EOS data (aby validace prošla) ----
     base.personalNumber = base.personalNumber?.trim()
       ? base.personalNumber
       : nextTempPersonalNumber(excludePersonalNumbers)
-    base.positionNum = ensure(base.positionNum, "0")
-    base.positionName = ensure(base.positionName, "-")
-    base.department = ensure(base.department, "-")
-    base.unitName = ensure(base.unitName, "-")
 
     return base
   }, [
@@ -284,47 +278,16 @@ export function OffboardingFormUnified({
   const isSubmitting = form.formState.isSubmitting
   const watchPersonal = form.watch("personalNumber")
 
-  // vyžaduj výběr z EOS (při tvorbě)
   useEffect(() => {
     const ok = Boolean(watchPersonal && watchPersonal.trim() !== "")
     setSelectedFromEos(ok || isEdit)
     if (ok) form.clearErrors("personalNumber")
   }, [watchPersonal, form, isEdit])
 
-  // Pokud po výběru z EOS chybí některé hodnoty, doplň fallbacky
-  const wPosNum = form.watch("positionNum")
-  const wPosName = form.watch("positionName")
-  const wDept = form.watch("department")
-  const wUnit = form.watch("unitName")
-  useEffect(() => {
-    if (!wPosNum?.trim())
-      form.setValue("positionNum", "0", { shouldDirty: true })
-  }, [wPosNum, form])
-  useEffect(() => {
-    if (!wPosName?.trim())
-      form.setValue("positionName", "-", { shouldDirty: true })
-  }, [wPosName, form])
-  useEffect(() => {
-    if (!wDept?.trim()) form.setValue("department", "-", { shouldDirty: true })
-  }, [wDept, form])
-  useEffect(() => {
-    if (!wUnit?.trim()) form.setValue("unitName", "-", { shouldDirty: true })
-  }, [wUnit, form])
-  useEffect(() => {
-    if (!form.getValues("personalNumber")?.trim()) {
-      form.setValue(
-        "personalNumber",
-        nextTempPersonalNumber(excludePersonalNumbers),
-        { shouldDirty: true }
-      )
-    }
-  }, [excludePersonalNumbers, form])
-
   const endField: "plannedEnd" | "actualEnd" = isActualMode
     ? "actualEnd"
     : "plannedEnd"
 
-  // notice -> end (když není manuál)
   const noticeWatch = form.watch("noticeFiled")
   const endWatch = form.watch(endField)
 
@@ -352,7 +315,6 @@ export function OffboardingFormUnified({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [noticeWatch, endField, manualDates])
 
-  // end -> notice (když není manuál)
   useEffect(() => {
     if (manualDates) return
     if (lastEditedRef.current !== "end") return
@@ -377,7 +339,6 @@ export function OffboardingFormUnified({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [endWatch, manualDates])
 
-  // Při vypnutí manuálu dorovnej jednorázově konzistenci
   useEffect(() => {
     if (manualDates) return
     const e = form.getValues(endField)
@@ -403,7 +364,6 @@ export function OffboardingFormUnified({
 
   async function onSubmit(values: FormValues) {
     try {
-      // informativní noticeMonths
       let noticeMonths = 2
       if (values.noticeFiled && (values.plannedEnd || values.actualEnd)) {
         const noticeDate = new Date(values.noticeFiled)
@@ -419,7 +379,6 @@ export function OffboardingFormUnified({
 
       const body = {
         ...values,
-        // fallbacky – nikdy neposílej prázdné required
         personalNumber: ensure(
           values.personalNumber,
           nextTempPersonalNumber(excludePersonalNumbers)
@@ -479,8 +438,6 @@ export function OffboardingFormUnified({
   }
 
   const submitDisabled = isSubmitting || (!selectedFromEos && !isEdit)
-
-  // sjednocený focus ring jako u onboarding
   const focusRing =
     "focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/55 focus:ring-offset-2 focus:ring-offset-background " +
     "focus-visible:outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/55 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
@@ -490,9 +447,9 @@ export function OffboardingFormUnified({
       <form
         noValidate
         onSubmit={form.handleSubmit(onSubmit)}
-        className="space-y-6"
+        className="max-h-[80vh] space-y-6 overflow-y-auto overscroll-contain"
+        data-lenis-prevent=""
       >
-        {/* Výběr zaměstnance (jen při vytváření) */}
         {!isEdit && (
           <Card>
             <CardHeader>
@@ -519,7 +476,6 @@ export function OffboardingFormUnified({
                 fetchLimit={500}
                 excludePersonalNumbers={excludePersonalNumbers}
                 onSelect={async () => {
-                  // když EOS nevrátil osobní číslo, doplň dočasné
                   if (!form.getValues("personalNumber")?.trim()) {
                     form.setValue(
                       "personalNumber",
@@ -527,7 +483,6 @@ export function OffboardingFormUnified({
                       { shouldDirty: true }
                     )
                   }
-                  // fallbacky pro required
                   if (!form.getValues("positionNum")?.trim())
                     form.setValue("positionNum", "0", { shouldDirty: true })
                   if (!form.getValues("positionName")?.trim())
@@ -555,7 +510,6 @@ export function OffboardingFormUnified({
           </Card>
         )}
 
-        {/* Read-only EOS pole */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -593,7 +547,11 @@ export function OffboardingFormUnified({
                           value={
                             typeof field.value === "string" ? field.value : ""
                           }
-                          className={`bg-muted ${name === "positionNum" || name === "personalNumber" ? "font-mono" : ""} ${focusRing}`}
+                          className={`bg-muted ${
+                            name === "positionNum" || name === "personalNumber"
+                              ? "font-mono"
+                              : ""
+                          } ${focusRing}`}
                           readOnly
                         />
                       </FormControl>
@@ -606,7 +564,6 @@ export function OffboardingFormUnified({
           </CardContent>
         </Card>
 
-        {/* Termíny */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -641,6 +598,7 @@ export function OffboardingFormUnified({
                       <Input
                         type="date"
                         {...field}
+                        ref={firstDateRef}
                         onChange={(e) => {
                           lastEditedRef.current = "notice"
                           field.onChange(e)
@@ -653,7 +611,7 @@ export function OffboardingFormUnified({
                     </FormControl>
                     <FormDescription>
                       {manualDates
-                        ? "Automatika vypnutá."
+                        ? "Automatický dopočet vypnutý."
                         : "Změna přepočítá datum konce (+2 měsíce)."}
                     </FormDescription>
                     <FormMessage />
@@ -684,7 +642,7 @@ export function OffboardingFormUnified({
                       </FormControl>
                       <FormDescription>
                         {manualDates
-                          ? "Automatika vypnutá."
+                          ? "Automatický dopočet vypnutý."
                           : "Změna přepočítá datum podání výpovědi (−2 měsíce)."}
                       </FormDescription>
                       <FormMessage />
@@ -714,7 +672,7 @@ export function OffboardingFormUnified({
                       </FormControl>
                       <FormDescription>
                         {manualDates
-                          ? "Automatika vypnutá."
+                          ? "Automatický dopočet vypnutý."
                           : "Změna přepočítá datum podání výpovědi (−2 měsíce)."}
                       </FormDescription>
                       <FormMessage />
@@ -726,7 +684,6 @@ export function OffboardingFormUnified({
           </CardContent>
         </Card>
 
-        {/* Poznámky */}
         <Card>
           <CardContent className="pt-6">
             <FormField
@@ -747,7 +704,6 @@ export function OffboardingFormUnified({
           </CardContent>
         </Card>
 
-        {/* Akce */}
         <div className="flex flex-col gap-3 sm:flex-row">
           <Button
             type="submit"
@@ -777,7 +733,6 @@ export function OffboardingFormUnified({
           )}
         </div>
 
-        {/* Fallback dialogy */}
         <Dialog open={openSuccess} onOpenChange={setOpenSuccess}>
           <DialogContent>
             <DialogTitle>Hotovo</DialogTitle>
@@ -804,7 +759,6 @@ export function OffboardingFormUnified({
           </DialogContent>
         </Dialog>
 
-        {/* Globální jemné úpravy nativních date/time vstupů */}
         <style jsx global>{`
           input[type="date"],
           input[type="time"] {
