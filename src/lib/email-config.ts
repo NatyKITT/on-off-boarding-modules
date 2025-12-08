@@ -25,15 +25,14 @@ export async function recipientsFor(channel: Channel): Promise<string[]> {
     console.warn("Nelze načíst příjemce z DB:", error)
   }
 
-  const planned = (process.env.REPORT_RECIPIENTS_PLANNED ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
+  const normalizeList = (val: string | undefined | null) =>
+    (val ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
 
-  const actual = (process.env.REPORT_RECIPIENTS_ACTUAL ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
+  const planned = normalizeList(process.env.REPORT_RECIPIENTS_PLANNED)
+  const actual = normalizeList(process.env.REPORT_RECIPIENTS_ACTUAL)
 
   console.log("📧 Načtení příjemců z ENV:")
   console.log("  Planned:", planned)

@@ -22,23 +22,47 @@ export type EmailRecord = {
 }
 
 export async function sendMail(params: {
-  to: string[]
+  to?: string[]
+  bcc?: string[]
   subject: string
   html: string
+  from?: string
 }): Promise<void> {
-  const to = Array.from(new Set((params.to ?? []).filter(Boolean)))
-  if (!to.length) throw new Error("Missing recipients")
+  const toClean = Array.from(new Set((params.to ?? []).filter(Boolean)))
+  const bccClean = Array.from(new Set((params.bcc ?? []).filter(Boolean)))
 
-  if (resend) {
-    await resend.emails.send({
-      from: process.env.MAIL_FROM ?? "onboarding@resend.dev",
-      to,
-      subject: params.subject,
-      html: params.html,
-    })
-  } else {
-    console.warn("Resend není nastaven.")
+  if (!bccClean.length && !toClean.length) {
+    throw new Error("Missing recipients")
   }
+
+  const fallbackTo =
+    toClean.length > 0
+      ? toClean
+      : [
+          process.env.RESEND_EMAIL_TO ??
+            process.env.RESEND_EMAIL_FROM_HR ??
+            process.env.EMAIL_FROM ??
+            "no-reply@example.com",
+        ]
+
+  if (!resend) {
+    console.warn("Resend není nastaven – e-mail by se teď neposlal.")
+    console.warn("TO:", fallbackTo)
+    console.warn("BCC:", bccClean)
+    return
+  }
+
+  await resend.emails.send({
+    from:
+      params.from ??
+      process.env.RESEND_EMAIL_FROM_HR ??
+      process.env.EMAIL_FROM ??
+      "On-Off-Boarding <no-reply@example.com>",
+    to: fallbackTo,
+    ...(bccClean.length ? { bcc: bccClean } : {}),
+    subject: params.subject,
+    html: params.html,
+  })
 }
 
 function kindLabels(kind: "planned" | "actual" | "all") {

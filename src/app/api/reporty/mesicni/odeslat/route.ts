@@ -44,11 +44,20 @@ export async function POST(request: Request) {
   const { month, kind, records, mode, sendToAll } = body
 
   try {
-    let to = await recipientsFor(sendToAll ? "all" : kind)
-    to = Array.from(new Set(to.filter(Boolean)))
-    if (!to.length) {
+    const channel = (sendToAll ? "all" : kind) as "planned" | "actual" | "all"
+    let reportRecipients = await recipientsFor(channel)
+    reportRecipients = Array.from(new Set(reportRecipients.filter(Boolean)))
+
+    if (!reportRecipients.length) {
       return NextResponse.json({ error: "Žádní příjemci" }, { status: 400 })
     }
+
+    const to = [
+      process.env.RESEND_EMAIL_TO ??
+        process.env.RESEND_EMAIL_FROM_HR ??
+        process.env.EMAIL_FROM ??
+        "no-reply@example.com",
+    ]
 
     const ensureReport = async (reportKind: Kind) => {
       let rep = await prisma.monthlyReport.findUnique({
@@ -106,6 +115,7 @@ export async function POST(request: Request) {
           : !alreadyActual.has(key)
       })
     }
+
     if (payloadRows.length === 0) {
       return NextResponse.json({
         ok: true,
@@ -129,9 +139,12 @@ export async function POST(request: Request) {
     const monthLabel = format(new Date(`${month}-01`), "LLLL yyyy", {
       locale: cs,
     })
+
     const subject = sendToAll
       ? `Měsíční report změn (plánované + skutečné) – ${monthLabel}`
-      : `Měsíční report ${kind === "planned" ? "plánovaných" : "skutečných"} změn – ${monthLabel}`
+      : `Měsíční report ${
+          kind === "planned" ? "plánovaných" : "skutečných"
+        } změn – ${monthLabel}`
 
     const html = await renderMonthlyReportHtml({
       records: emailRecords,
@@ -139,7 +152,13 @@ export async function POST(request: Request) {
       kind: sendToAll ? "all" : kind,
     })
 
-    await sendMail({ to, subject, html })
+    await sendMail({
+      to,
+      bcc: reportRecipients,
+      subject,
+      html,
+      from: process.env.RESEND_EMAIL_FROM_HR ?? process.env.EMAIL_FROM,
+    })
 
     await Promise.all(
       payloadRows.map((r) => {
@@ -180,7 +199,7 @@ export async function POST(request: Request) {
 
     await logEmailHistory({
       emailType: "MONTHLY_SUMMARY",
-      recipients: to,
+      recipients: reportRecipients,
       subject,
       content: html,
       status: "SENT",

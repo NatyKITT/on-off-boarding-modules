@@ -52,7 +52,6 @@ export async function GET(req: Request) {
 
   const out: RecordRow[] = []
 
-  // NÁSTUPY
   if (type === "nastupy" || includeOtherType) {
     const where =
       kind === "planned"
@@ -109,7 +108,6 @@ export async function GET(req: Request) {
     }
   }
 
-  // ODCHODY
   if (type === "odchody" || includeOtherType) {
     const where =
       kind === "planned"
