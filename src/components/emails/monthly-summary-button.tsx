@@ -27,18 +27,17 @@ interface MonthlySummaryButtonProps {
   defaultMonth?: string // "YYYY-MM"
   label?: string
   className?: string
-  mode?: Mode // "schedule" = naplánovat, "now" = odeslat hned
+  mode?: Mode
   onDone?: () => void
-  candidateMonths?: string[] // pokud chceš omezit nabídku měsíců
+  candidateMonths?: string[]
 }
 
-type SentMonth = string // "YYYY-MM"
+type SentMonth = string
 
 function ymToLabel(ym: string) {
   const parts = ym.split("-")
   const y = Number(parts[0] ?? "0")
   const m = Number(parts[1] ?? "1")
-  // zde už jsou y i m vždy čísla
   const d = new Date(Date.UTC(y, m - 1, 1))
   return format(d, "LLLL yyyy", { locale: cs })
 }

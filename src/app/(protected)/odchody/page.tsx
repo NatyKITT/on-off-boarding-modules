@@ -9,6 +9,8 @@ import {
   CalendarDays,
   Check,
   CheckCircle,
+  ChevronDown,
+  ChevronRight,
   Clock,
   Edit,
   History as HistoryIcon,
@@ -20,15 +22,14 @@ import {
 
 import { type Position } from "@/types/position"
 
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import { DepartureProgressBar } from "@/components/ui/departure-progress-bar"
 import {
   Dialog,
@@ -55,7 +56,6 @@ import {
 import { DeletedRecordsDialog } from "@/components/history/deleted-records-dialog"
 import { HistoryDialog } from "@/components/history/history-dialog"
 
-/* ------------------------------ types ------------------------------- */
 type Departure = {
   id: number
   name: string
@@ -102,7 +102,12 @@ function departureToInitial(d: Departure): Partial<FormValues> {
   }
 }
 
-/* ----------------------- modály ----------------------- */
+type GroupedData = {
+  [year: string]: {
+    [month: string]: Departure[]
+  }
+}
+
 interface SuccessModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -165,40 +170,12 @@ const ErrorModal: React.FC<ErrorModalProps> = ({
   </Dialog>
 )
 
-/* ----------------------- normalizace pozic ----------------------- */
-type RawPos =
-  | {
-      id?: string | number
-      num?: unknown
-      name?: unknown
-      dept_name?: unknown
-      unit_name?: unknown
-    }
-  | null
-  | undefined
-
-function isRawPos(v: unknown): v is RawPos {
-  if (v == null || typeof v !== "object") return false
-  const o = v as Record<string, unknown>
-  return "num" in o
-}
-
-function toPosition(v: RawPos): Position | null {
-  if (!v || typeof v !== "object") return null
-  const o = v as Record<string, unknown>
-  const num = o.num
-  if (typeof num !== "string" && typeof num !== "number") return null
-  const id = o.id
-  const name = o.name
-  const dept = o.dept_name
-  const unit = o.unit_name
-  return {
-    id: String(id ?? num),
-    num: String(num),
-    name: typeof name === "string" ? name : "",
-    dept_name: typeof dept === "string" ? dept : "",
-    unit_name: typeof unit === "string" ? unit : "",
-  }
+type RawPosition = {
+  id?: unknown
+  num?: unknown
+  name?: unknown
+  dept_name?: unknown
+  unit_name?: unknown
 }
 
 function normalizePositions(payload: unknown): Position[] {
@@ -208,21 +185,70 @@ function normalizePositions(payload: unknown): Position[] {
       ? (payload as unknown[])
       : []
 
-  return arr
-    .filter(isRawPos)
-    .map(toPosition)
-    .filter((x): x is Position => Boolean(x))
+  const raw = arr.filter(
+    (v): v is RawPosition => v != null && typeof v === "object" && "num" in v
+  )
+
+  return raw.map((v) => ({
+    id: String((v.id as string | number | undefined) ?? v.num),
+    num: String(v.num as string | number),
+    name: typeof v.name === "string" ? v.name : "",
+    dept_name: typeof v.dept_name === "string" ? v.dept_name : "",
+    unit_name: typeof v.unit_name === "string" ? v.unit_name : "",
+  }))
 }
 
-/* ------------------------- řádek tabulky ------------------------ */
+const groupByYearAndMonth = (
+  data: Departure[],
+  dateField: "plannedEnd" | "actualEnd"
+): GroupedData => {
+  const grouped: GroupedData = {}
+
+  data.forEach((item) => {
+    const dateStr = item[dateField] || item.plannedEnd
+    if (!dateStr) return
+
+    const date = new Date(dateStr)
+    const year = String(date.getFullYear())
+    const month = format(date, "yyyy-MM")
+
+    if (!grouped[year]) grouped[year] = {}
+    if (!grouped[year][month]) grouped[year][month] = []
+
+    grouped[year][month].push(item)
+  })
+
+  return grouped
+}
+
+function getLatestYearAndMonth(
+  data: Departure[],
+  dateField: "plannedEnd" | "actualEnd"
+): { year?: string; month?: string } {
+  if (!data.length) return {}
+
+  const sorted = [...data].sort((a, b) => {
+    const aDate = new Date((a[dateField] || a.plannedEnd) ?? "").getTime()
+    const bDate = new Date((b[dateField] || b.plannedEnd) ?? "").getTime()
+    return bDate - aDate
+  })
+
+  const latest = sorted[0]
+  const dateStr = (latest[dateField] || latest.plannedEnd) ?? ""
+  if (!dateStr) return {}
+
+  const year = dateStr.slice(0, 4)
+  const month = dateStr.slice(0, 7)
+  return { year, month }
+}
+
 interface DepartureTableRowProps {
   departure: Departure
   variant: "planned" | "actual"
   onEdit: () => void
   onConfirm?: () => void
+  onDelete: () => void
   onReload: () => Promise<void>
-  onSuccessMessage: (title: string, message: string) => void
-  onErrorMessage: (title: string, message: string) => void
 }
 
 const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
@@ -230,241 +256,9 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
   variant,
   onEdit,
   onConfirm,
+  onDelete,
   onReload,
-  onSuccessMessage,
-  onErrorMessage,
 }) => {
-  const [showDeleteModal, setShowDeleteModal] = useState(false)
-
-  const handleDelete = async () => {
-    try {
-      const res = await fetch(`/api/odchody/${departure.id}`, {
-        method: "DELETE",
-      })
-      if (!res.ok) {
-        const json = await res.json().catch(() => null)
-        throw new Error(json?.message ?? "Smazání se nezdařilo.")
-      }
-      window.dispatchEvent(new Event("offboarding:deleted"))
-      onSuccessMessage(
-        "Záznam smazán",
-        `Odchod pro ${departure.name} ${departure.surname} byl úspěšně smazán.`
-      )
-      await onReload()
-    } catch (err) {
-      onErrorMessage(
-        "Chyba při mazání",
-        err instanceof Error ? err.message : "Smazání se nezdařilo."
-      )
-    }
-  }
-
-  return (
-    <>
-      <TableRow>
-        <TableCell className="w-[200px]">
-          <div className="flex items-center gap-2">
-            <User className="size-4 shrink-0 text-muted-foreground" />
-            <div className="flex flex-col">
-              <span className="font-medium">
-                {[
-                  departure.titleBefore,
-                  departure.name,
-                  departure.surname,
-                  departure.titleAfter,
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-              </span>
-              <span className="font-mono text-xs text-muted-foreground">
-                {departure.personalNumber}
-              </span>
-            </div>
-          </div>
-        </TableCell>
-        <TableCell className="w-[180px]">
-          <div className="flex flex-col">
-            <span
-              className="text-sm font-medium"
-              title={departure.positionName}
-            >
-              {departure.positionName}
-            </span>
-            <span className="font-mono text-xs text-muted-foreground">
-              {departure.positionNum}
-            </span>
-          </div>
-        </TableCell>
-        <TableCell className="w-[150px]">
-          <div className="flex flex-col">
-            <span className="text-sm font-medium" title={departure.department}>
-              {departure.department}
-            </span>
-            <span
-              className="text-xs text-muted-foreground"
-              title={departure.unitName}
-            >
-              {departure.unitName}
-            </span>
-          </div>
-        </TableCell>
-        <TableCell className="w-[120px]">
-          <div className="flex items-center gap-2">
-            <Clock className="size-4 text-muted-foreground" />
-            <span className="text-sm">
-              {variant === "planned"
-                ? format(parseISO(departure.plannedEnd), "d.M.yyyy")
-                : departure.actualEnd
-                  ? format(parseISO(departure.actualEnd), "d.M.yyyy")
-                  : "–"}
-            </span>
-          </div>
-        </TableCell>
-        <TableCell className="w-[100px]">
-          <DepartureProgressBar
-            targetDate={
-              variant === "planned"
-                ? departure.plannedEnd
-                : (departure.actualEnd as string)
-            }
-            variant={variant}
-            label={
-              variant === "planned"
-                ? "Do plánovaného odchodu"
-                : "Od skutečného odchodu"
-            }
-          />
-        </TableCell>
-        <TableCell className="w-[150px]">
-          <div className="flex flex-col">
-            <span
-              className="truncate text-sm"
-              title={departure.userEmail || undefined}
-            >
-              {departure.userEmail ?? "–"}
-            </span>
-            <span className="font-mono text-xs text-muted-foreground">
-              {departure.userName ?? "–"}
-            </span>
-          </div>
-        </TableCell>
-        <TableCell className="w-[200px] text-right">
-          <div className="flex justify-end gap-1">
-            <HistoryDialog
-              id={departure.id}
-              kind="offboarding"
-              trigger={
-                <Button
-                  size="sm"
-                  variant="outline"
-                  title="Historie změn"
-                  className="inline-flex items-center justify-center gap-1"
-                >
-                  <HistoryIcon className="size-4" />
-                </Button>
-              }
-            />
-
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                window.open(
-                  `/api/odchody/${departure.id}/vystupni-list`,
-                  "_blank",
-                  "noopener,noreferrer"
-                )
-              }
-              className="inline-flex items-center gap-1"
-              title="Tisk výstupního listu"
-            >
-              <Printer className="size-4" />
-            </Button>
-
-            <SendEmailButton
-              id={departure.id}
-              kind="offboarding"
-              email={departure.userEmail ?? undefined}
-              onDone={onReload}
-              onEditRequest={onEdit}
-              className="inline-flex items-center justify-center gap-1"
-            />
-
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={onEdit}
-              title="Upravit záznam"
-              className="inline-flex items-center justify-center gap-1"
-            >
-              <Edit className="size-4" />
-              <span className="hidden pt-1.5 sm:inline">Upravit</span>
-            </Button>
-
-            {variant === "planned" && onConfirm && (
-              <Button
-                size="sm"
-                variant="default"
-                onClick={onConfirm}
-                title="Potvrdit skutečný odchod"
-                className="inline-flex items-center justify-center gap-1 bg-orange-500 text-white hover:bg-orange-600"
-              >
-                <Check className="size-4" />
-                <span className="hidden pt-1.5 sm:inline">Odešel</span>
-              </Button>
-            )}
-
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setShowDeleteModal(true)}
-              title="Smazat záznam"
-              className="inline-flex items-center justify-center gap-1 text-red-600 hover:bg-red-50 hover:text-red-700"
-            >
-              <Trash2 className="size-4" />
-            </Button>
-          </div>
-        </TableCell>
-      </TableRow>
-
-      <ConfirmDeleteModal
-        open={showDeleteModal}
-        onOpenChange={setShowDeleteModal}
-        departure={departure}
-        onConfirm={handleDelete}
-      />
-    </>
-  )
-}
-
-/* ----------------------- confirm delete modal ----------------------- */
-interface ConfirmDeleteModalProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  departure: Departure
-  onConfirm: () => Promise<void>
-}
-
-const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
-  open,
-  onOpenChange,
-  departure,
-  onConfirm,
-}) => {
-  const [deleting, setDeleting] = useState(false)
-
-  const handleConfirm = async () => {
-    setDeleting(true)
-    try {
-      await onConfirm()
-      onOpenChange(false)
-    } catch (error) {
-      console.error("Delete error:", error)
-    } finally {
-      setDeleting(false)
-    }
-  }
-
   const fullName = [
     departure.titleBefore,
     departure.name,
@@ -475,51 +269,154 @@ const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
     .join(" ")
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <div className="flex items-center gap-4">
-          <div className="flex size-12 items-center justify-center rounded-full bg-red-100">
-            <Trash2 className="size-6 text-red-600" />
-          </div>
-          <div className="space-y-2">
-            <DialogTitle className="text-lg font-semibold">
-              Potvrdit smazání
-            </DialogTitle>
-            <p className="text-sm text-muted-foreground">
-              Opravdu chcete smazat záznam odchodu pro{" "}
-              <span className="font-medium">{fullName}</span>?
-            </p>
+    <TableRow>
+      <TableCell className="w-[200px]">
+        <div className="flex items-center gap-2">
+          <User className="size-4 shrink-0 text-muted-foreground" />
+          <div className="flex flex-col">
+            <span className="font-medium">{fullName}</span>
+            <span className="font-mono text-xs text-muted-foreground">
+              {departure.personalNumber}
+            </span>
           </div>
         </div>
-        <div className="flex justify-end gap-2">
+      </TableCell>
+      <TableCell className="w-[180px]">
+        <div className="flex flex-col">
+          <span className="text-sm font-medium" title={departure.positionName}>
+            {departure.positionName}
+          </span>
+          <span className="font-mono text-xs text-muted-foreground">
+            {departure.positionNum}
+          </span>
+        </div>
+      </TableCell>
+      <TableCell className="w-[150px]">
+        <div className="flex flex-col">
+          <span className="text-sm font-medium" title={departure.department}>
+            {departure.department}
+          </span>
+          <span
+            className="text-xs text-muted-foreground"
+            title={departure.unitName}
+          >
+            {departure.unitName}
+          </span>
+        </div>
+      </TableCell>
+      <TableCell className="w-[120px]">
+        <div className="flex items-center gap-2">
+          <Clock className="size-4 text-muted-foreground" />
+          <span className="text-sm">
+            {variant === "planned"
+              ? format(parseISO(departure.plannedEnd), "d.M.yyyy")
+              : departure.actualEnd
+                ? format(parseISO(departure.actualEnd), "d.M.yyyy")
+                : "–"}
+          </span>
+        </div>
+      </TableCell>
+      <TableCell className="w-[100px]">
+        <DepartureProgressBar
+          targetDate={
+            variant === "planned"
+              ? departure.plannedEnd
+              : (departure.actualEnd as string)
+          }
+          variant={variant}
+          label={
+            variant === "planned"
+              ? "Do předpokládaného odchodu"
+              : "Od skutečného odchodu"
+          }
+        />
+      </TableCell>
+      <TableCell className="w-[150px]">
+        <div className="flex flex-col">
+          <span
+            className="truncate text-sm"
+            title={departure.userEmail || undefined}
+          >
+            {departure.userEmail ?? "–"}
+          </span>
+          <span className="font-mono text-xs text-muted-foreground">
+            {departure.userName ?? "–"}
+          </span>
+        </div>
+      </TableCell>
+      <TableCell className="w-[200px] text-right">
+        <div className="flex justify-end gap-1">
+          <HistoryDialog
+            id={departure.id}
+            kind="offboarding"
+            trigger={
+              <Button size="sm" variant="outline" title="Historie změn">
+                <HistoryIcon className="size-4" />
+              </Button>
+            }
+          />
+
           <Button
+            size="sm"
             variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={deleting}
+            onClick={() =>
+              window.open(
+                `/api/odchody/${departure.id}/vystupni-list`,
+                "_blank",
+                "noopener,noreferrer"
+              )
+            }
+            title="Tisk výstupního listu"
           >
-            Zrušit
+            <Printer className="size-4" />
           </Button>
+
+          <SendEmailButton
+            id={departure.id}
+            kind="offboarding"
+            email={departure.userEmail ?? undefined}
+            onDone={onReload}
+            onEditRequest={onEdit}
+          />
+
           <Button
-            variant="destructive"
-            onClick={handleConfirm}
-            disabled={deleting}
+            size="sm"
+            variant="outline"
+            onClick={onEdit}
+            title="Upravit záznam"
           >
-            {deleting ? (
-              <>
-                <div className="mr-2 size-4 animate-spin rounded-full border-b-2 border-current" />
-                Mazání...
-              </>
-            ) : (
-              "Smazat"
-            )}
+            <Edit className="size-4" />
+            <span className="ml-1 hidden sm:inline">Upravit</span>
+          </Button>
+
+          {variant === "planned" && onConfirm && (
+            <Button
+              size="sm"
+              variant="default"
+              onClick={onConfirm}
+              title="Potvrdit skutečný odchod"
+              className="bg-orange-500 text-white hover:bg-orange-600"
+            >
+              <Check className="size-4" />
+              <span className="ml-1 hidden sm:inline">Odešel</span>
+            </Button>
+          )}
+
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onDelete}
+            title="Smazat záznam"
+            className="text-red-600 hover:bg-red-50 hover:text-red-700"
+          >
+            <Trash2 className="size-4" />
           </Button>
         </div>
-      </DialogContent>
-    </Dialog>
+      </TableCell>
+    </TableRow>
   )
 }
 
-/* ----------------------------- hlavní stránka ----------------------------- */
 export default function OffboardingPage() {
   const sp = useSearchParams()
 
@@ -542,6 +439,13 @@ export default function OffboardingPage() {
     "planned"
   )
 
+  const [expandedPlannedYears, setExpandedPlannedYears] = useState<string[]>([])
+  const [expandedPlannedMonths, setExpandedPlannedMonths] = useState<string[]>(
+    []
+  )
+  const [expandedActualYears, setExpandedActualYears] = useState<string[]>([])
+  const [expandedActualMonths, setExpandedActualMonths] = useState<string[]>([])
+
   const [successModal, setSuccessModal] = useState({
     open: false,
     title: "",
@@ -556,9 +460,12 @@ export default function OffboardingPage() {
   const qpMode = sp.get("new") as "create-planned" | "create-actual" | null
   const qpDate = sp.get("date") || undefined
 
+  const currentMonth = format(new Date(), "yyyy-MM")
+
   const showSuccess = React.useCallback((title: string, message: string) => {
     setSuccessModal({ open: true, title, message })
   }, [])
+
   const showError = React.useCallback((title: string, message: string) => {
     setErrorModal({ open: true, title, message })
   }, [])
@@ -606,6 +513,18 @@ export default function OffboardingPage() {
   }, [reload])
 
   useEffect(() => {
+    const { year, month } = getLatestYearAndMonth(planned, "plannedEnd")
+    setExpandedPlannedYears(year ? [year] : [])
+    setExpandedPlannedMonths(month ? [month] : [])
+  }, [planned])
+
+  useEffect(() => {
+    const { year, month } = getLatestYearAndMonth(actual, "actualEnd")
+    setExpandedActualYears(year ? [year] : [])
+    setExpandedActualMonths(month ? [month] : [])
+  }, [actual])
+
+  useEffect(() => {
     if (!qpMode) return
     if (qpMode === "create-actual") setOpenNewActual(true)
     else setOpenNewPlanned(true)
@@ -623,43 +542,39 @@ export default function OffboardingPage() {
     }
   }, [reload])
 
-  const thisMonth = format(new Date(), "yyyy-MM")
-
-  const defaultPlannedMonth = useMemo(() => {
-    const has = planned.find((e) => e.plannedEnd?.slice(0, 7) === thisMonth)
-    return (
-      has?.plannedEnd?.slice(0, 7) ?? planned[0]?.plannedEnd?.slice(0, 7) ?? ""
-    )
-  }, [planned, thisMonth])
-
-  const plannedMonths = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          planned
-            .map((e) => e.plannedEnd?.slice(0, 7))
-            .filter(Boolean) as string[]
-        )
-      ),
+  const plannedGrouped = useMemo(
+    () => groupByYearAndMonth(planned, "plannedEnd"),
     [planned]
   )
 
-  const actualMonths = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          actual
-            .map((e) => e.actualEnd?.slice(0, 7))
-            .filter(Boolean) as string[]
-        )
-      ),
+  const actualGrouped = useMemo(
+    () => groupByYearAndMonth(actual, "actualEnd"),
     [actual]
   )
 
-  const defaultActualMonth = useMemo(() => {
-    const has = actual.find((e) => e.actualEnd?.slice(0, 7) === thisMonth)
-    return has?.actualEnd?.slice(0, 7) ?? actualMonths[0] ?? ""
-  }, [actual, actualMonths, thisMonth])
+  const togglePlannedYear = (year: string) => {
+    setExpandedPlannedYears((prev) =>
+      prev.includes(year) ? prev.filter((y) => y !== year) : [...prev, year]
+    )
+  }
+
+  const togglePlannedMonth = (month: string) => {
+    setExpandedPlannedMonths((prev) =>
+      prev.includes(month) ? prev.filter((m) => m !== month) : [...prev, month]
+    )
+  }
+
+  const toggleActualYear = (year: string) => {
+    setExpandedActualYears((prev) =>
+      prev.includes(year) ? prev.filter((y) => y !== year) : [...prev, year]
+    )
+  }
+
+  const toggleActualMonth = (month: string) => {
+    setExpandedActualMonths((prev) =>
+      prev.includes(month) ? prev.filter((m) => m !== month) : [...prev, month]
+    )
+  }
 
   function openActualDialogFromPlanned(row: Departure) {
     setActiveRow(row)
@@ -698,7 +613,7 @@ export default function OffboardingPage() {
 
       showSuccess(
         "Odchod potvrzen",
-        `Skutečný odchod pro ${activeRow.name} ${activeRow.surname} byl úspěšně zaznamenán a přesunut do skutečných odchodů.`
+        `Skutečný odchod pro ${activeRow.name} ${activeRow.surname} byl úspěšně zaznamenán.`
       )
 
       await reload()
@@ -744,9 +659,32 @@ export default function OffboardingPage() {
     }
   }
 
+  async function handleDelete(departure: Departure) {
+    try {
+      const res = await fetch(`/api/odchody/${departure.id}`, {
+        method: "DELETE",
+      })
+      if (!res.ok) {
+        const json = await res.json().catch(() => null)
+        throw new Error(json?.message ?? "Smazání se nezdařilo.")
+      }
+      window.dispatchEvent(new Event("offboarding:deleted"))
+      showSuccess(
+        "Záznam smazán",
+        `Odchod pro ${departure.name} ${departure.surname} byl úspěšně smazán.`
+      )
+      await reload()
+    } catch (err) {
+      showError(
+        "Chyba při mazání",
+        err instanceof Error ? err.message : "Smazání se nezdařilo."
+      )
+    }
+  }
+
   return (
-    <div className="p-4">
-      <div className="mb-6">
+    <div className="flex flex-col gap-4">
+      <div>
         <h1 className="text-3xl font-bold tracking-tight">
           Odchody zaměstnanců
         </h1>
@@ -755,10 +693,7 @@ export default function OffboardingPage() {
         </p>
       </div>
 
-      <Tabs
-        defaultValue="planned"
-        className="flex h-[calc(100vh-160px)] flex-col"
-      >
+      <Tabs defaultValue="planned">
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="planned" className="flex items-center gap-2">
             <CalendarDays className="size-4" />
@@ -770,345 +705,358 @@ export default function OffboardingPage() {
           </TabsTrigger>
         </TabsList>
 
-        <div className="min-h-0 flex-1 overflow-auto">
-          {/* ---------- PLANNED TAB ---------- */}
-          <TabsContent value="planned" className="mt-4 space-y-4">
-            <div className="mb-4 flex items-center justify-between gap-2">
-              <Dialog open={openNewPlanned} onOpenChange={setOpenNewPlanned}>
-                <DialogTrigger asChild>
-                  <Button className="btn-brand-planned inline-flex items-center justify-center gap-2">
-                    Přidat předpokládaný odchod
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
-                  <DialogTitle className="px-6 pt-6">
-                    Nový předpokládaný odchod
-                  </DialogTitle>
-                  <div className="p-6">
-                    <OffboardingFormUnified
-                      mode="create-planned"
-                      prefillDate={qpDate}
-                      excludePersonalNumbers={allPersonalNumbers}
-                      onSuccess={async () => {
-                        setOpenNewPlanned(false)
-                        showSuccess(
-                          "Záznam vytvořen",
-                          "Předpokládaný odchod byl úspěšně přidán."
-                        )
-                        await reload()
-                      }}
-                    />
-                  </div>
-                </DialogContent>
-              </Dialog>
+        {/* PLANNED TAB */}
+        <TabsContent value="planned" className="mt-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <Dialog open={openNewPlanned} onOpenChange={setOpenNewPlanned}>
+              <DialogTrigger asChild>
+                <Button className="inline-flex items-center justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73]">
+                  Přidat předpokládaný odchod
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
+                <DialogTitle className="px-6 pt-6">
+                  Nový předpokládaný odchod
+                </DialogTitle>
+                <div className="p-6">
+                  <OffboardingFormUnified
+                    mode="create-planned"
+                    prefillDate={qpDate}
+                    excludePersonalNumbers={allPersonalNumbers}
+                    onSuccess={async () => {
+                      setOpenNewPlanned(false)
+                      showSuccess(
+                        "Záznam vytvořen",
+                        "Předpokládaný odchod byl úspěšně přidán."
+                      )
+                      await reload()
+                    }}
+                  />
+                </div>
+              </DialogContent>
+            </Dialog>
 
-              <DeletedRecordsDialog
-                kind="offboarding"
-                title="Smazané odchody"
-                triggerLabel="Smazané záznamy"
-                successEvent="offboarding:deleted"
-                onRestore={() => void reload()}
-              />
+            <DeletedRecordsDialog
+              kind="offboarding"
+              title="Smazané odchody"
+              triggerLabel="Smazané záznamy"
+              successEvent="offboarding:deleted"
+              onRestore={() => void reload()}
+            />
+          </div>
+
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
+              <span className="ml-2 text-muted-foreground">
+                Načítám data...
+              </span>
             </div>
+          ) : Object.keys(plannedGrouped).length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12">
+                <CalendarDays className="mb-4 size-12 text-muted-foreground" />
+                <p className="text-lg font-medium text-muted-foreground">
+                  Žádné předpokládané odchody
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Přidejte první záznam pomocí tlačítka výše
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-4 pb-6">
+              {Object.keys(plannedGrouped)
+                .sort((a, b) => parseInt(b) - parseInt(a))
+                .map((year) => {
+                  const yearData = plannedGrouped[year]
+                  const isYearExpanded = expandedPlannedYears.includes(year)
+                  const yearTotal = Object.values(yearData).reduce(
+                    (sum, arr) => sum + arr.length,
+                    0
+                  )
 
-            {loading ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="size-8 animate-spin rounded-full border-b-2 border-current"></div>
-                <span className="ml-2 text-muted-foreground">
-                  Načítám data...
-                </span>
-              </div>
-            ) : planned.length === 0 ? (
-              <Card>
-                <CardContent className="flex flex-col items-center justify-center py-12">
-                  <CalendarDays className="mb-4 size-12 text-muted-foreground" />
-                  <p className="text-lg font-medium text-muted-foreground">
-                    Žádné předpokládané odchody
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    Přidejte první záznam pomocí tlačítka výše
-                  </p>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="space-y-4">
-                <Accordion
-                  type="multiple"
-                  defaultValue={
-                    defaultPlannedMonth ? [defaultPlannedMonth] : []
-                  }
-                >
-                  {plannedMonths.map((month) => (
-                    <AccordionItem
-                      key={month}
-                      value={month}
-                      className="rounded-xl border"
-                      style={{ backgroundColor: "#f973161A" }}
-                    >
-                      <AccordionTrigger className="rounded-xl px-4 hover:no-underline data-[state=open]:bg-white/60 dark:data-[state=open]:bg-black/20">
-                        <div className="flex items-center gap-3">
-                          <CalendarDays className="size-5" />
-                          <span className="font-semibold">
-                            {format(new Date(`${month}-01`), "LLLL yyyy", {
-                              locale: cs,
-                            })}
-                          </span>
-                          <Badge variant="secondary" className="ml-auto">
-                            {
-                              planned.filter((e) =>
-                                e.plannedEnd.startsWith(month)
-                              ).length
-                            }
-                          </Badge>
-                        </div>
-                      </AccordionTrigger>
-                      <AccordionContent>
-                        <Card className="border-muted shadow-sm">
-                          <CardContent className="px-0">
-                            <div className="overflow-x-auto">
-                              <Table className="min-w-[1600px]">
-                                <TableHeader className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-                                  <TableRow>
-                                    <TableHead className="w-[220px]">
-                                      Zaměstnanec
-                                    </TableHead>
-                                    <TableHead className="w-[180px]">
-                                      Pozice
-                                    </TableHead>
-                                    <TableHead className="w-[160px]">
-                                      Odbor / Oddělení
-                                    </TableHead>
-                                    <TableHead className="w-[120px]">
-                                      Plánovaný odchod
-                                    </TableHead>
-                                    <TableHead className="w-[100px]">
-                                      Průběh
-                                    </TableHead>
-                                    <TableHead className="w-[150px]">
-                                      Kontakt
-                                    </TableHead>
-                                    <TableHead className="w-[200px]">
-                                      Akce
-                                    </TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {planned
-                                    .filter((e) =>
-                                      e.plannedEnd.startsWith(month)
-                                    )
-                                    .sort(
-                                      (a, b) =>
-                                        parseISO(a.plannedEnd).getTime() -
-                                        parseISO(b.plannedEnd).getTime()
-                                    )
-                                    .map((e) => (
-                                      <DepartureTableRow
-                                        key={e.id}
-                                        departure={e}
-                                        variant="planned"
-                                        onEdit={() =>
-                                          void openEditDialog(e, "planned")
-                                        }
-                                        onConfirm={() =>
-                                          openActualDialogFromPlanned(e)
-                                        }
-                                        onReload={reload}
-                                        onSuccessMessage={showSuccess}
-                                        onErrorMessage={showError}
-                                      />
-                                    ))}
-                                </TableBody>
-                              </Table>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      </AccordionContent>
-                    </AccordionItem>
-                  ))}
-                </Accordion>
-              </div>
-            )}
+                  return (
+                    <Collapsible key={year} open={isYearExpanded}>
+                      <CollapsibleTrigger
+                        onClick={() => togglePlannedYear(year)}
+                        className="flex w-full items-center gap-2 rounded-lg bg-muted/50 p-3 transition-colors hover:bg-muted"
+                      >
+                        {isYearExpanded ? (
+                          <ChevronDown className="size-5" />
+                        ) : (
+                          <ChevronRight className="size-5" />
+                        )}
+                        <span className="text-lg font-semibold">{year}</span>
+                        <Badge variant="secondary" className="ml-auto">
+                          {yearTotal}
+                        </Badge>
+                      </CollapsibleTrigger>
 
-            <div className="mt-6 flex justify-end">
-              <MonthlyReportLauncher
-                initialType="odchody"
-                kind="planned"
-                defaultMonth={defaultPlannedMonth || thisMonth}
-              />
+                      <CollapsibleContent className="mt-2 space-y-3">
+                        {Object.keys(yearData)
+                          .sort((a, b) => b.localeCompare(a))
+                          .map((month) => {
+                            const monthData = yearData[month]
+                            const isMonthExpanded =
+                              expandedPlannedMonths.includes(month)
+
+                            return (
+                              <Collapsible key={month} open={isMonthExpanded}>
+                                <CollapsibleTrigger
+                                  onClick={() => togglePlannedMonth(month)}
+                                  className="flex w-full items-center gap-2 rounded-lg bg-orange-50 p-2 transition-colors hover:bg-orange-100 dark:bg-orange-900/20 dark:hover:bg-orange-900/30"
+                                >
+                                  {isMonthExpanded ? (
+                                    <ChevronDown className="size-4" />
+                                  ) : (
+                                    <ChevronRight className="size-4" />
+                                  )}
+                                  <CalendarDays className="size-4 text-orange-600" />
+                                  <span className="font-medium">
+                                    {format(
+                                      new Date(month + "-01"),
+                                      "LLLL yyyy",
+                                      { locale: cs }
+                                    )}
+                                  </span>
+                                  <Badge variant="outline" className="ml-auto">
+                                    {monthData.length}
+                                  </Badge>
+                                </CollapsibleTrigger>
+
+                                <CollapsibleContent className="mt-2">
+                                  <Card className="overflow-hidden">
+                                    <Table>
+                                      <TableHeader>
+                                        <TableRow>
+                                          <TableHead>Zaměstnanec</TableHead>
+                                          <TableHead>Pozice</TableHead>
+                                          <TableHead>
+                                            Odbor / Oddělení
+                                          </TableHead>
+                                          <TableHead>
+                                            Plánovaný odchod
+                                          </TableHead>
+                                          <TableHead>Průběh</TableHead>
+                                          <TableHead>Kontakt</TableHead>
+                                          <TableHead>Akce</TableHead>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody>
+                                        {monthData.map((e) => (
+                                          <DepartureTableRow
+                                            key={e.id}
+                                            departure={e}
+                                            variant="planned"
+                                            onEdit={() =>
+                                              void openEditDialog(e, "planned")
+                                            }
+                                            onConfirm={() =>
+                                              openActualDialogFromPlanned(e)
+                                            }
+                                            onDelete={() =>
+                                              void handleDelete(e)
+                                            }
+                                            onReload={reload}
+                                          />
+                                        ))}
+                                      </TableBody>
+                                    </Table>
+                                  </Card>
+                                </CollapsibleContent>
+                              </Collapsible>
+                            )
+                          })}
+                      </CollapsibleContent>
+                    </Collapsible>
+                  )
+                })}
             </div>
-          </TabsContent>
+          )}
 
-          {/* ---------- ACTUAL TAB ---------- */}
-          <TabsContent value="actual" className="mt-4 space-y-4">
-            <div className="mb-4 flex items-center justify-between gap-2">
-              <Dialog open={openNewActual} onOpenChange={setOpenNewActual}>
-                <DialogTrigger asChild>
-                  <Button className="btn-brand-actual inline-flex items-center justify-center gap-2">
-                    Přidat skutečný odchod
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
-                  <DialogTitle className="px-6 pt-6">
-                    Skutečný odchod
-                  </DialogTitle>
-                  <div className="p-6">
-                    <OffboardingFormUnified
-                      mode="create-actual"
-                      prefillDate={qpDate}
-                      excludePersonalNumbers={allPersonalNumbers}
-                      onSuccess={async () => {
-                        setOpenNewActual(false)
-                        showSuccess(
-                          "Záznam vytvořen",
-                          "Skutečný odchod byl úspěšně přidán."
-                        )
-                        await reload()
-                      }}
-                    />
-                  </div>
-                </DialogContent>
-              </Dialog>
+          <div className="mt-2 flex justify-end">
+            <MonthlyReportLauncher
+              initialType="odchody"
+              kind="planned"
+              defaultMonth={currentMonth}
+            />
+          </div>
+        </TabsContent>
 
-              <DeletedRecordsDialog
-                kind="offboarding"
-                title="Smazané odchody"
-                triggerLabel="Smazané záznamy"
-                successEvent="offboarding:deleted"
-                onRestore={() => void reload()}
-              />
+        {/* ACTUAL TAB */}
+        <TabsContent value="actual" className="mt-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <Dialog open={openNewActual} onOpenChange={setOpenNewActual}>
+              <DialogTrigger asChild>
+                <Button className="inline-flex items-center justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73]">
+                  Přidat skutečný odchod
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
+                <DialogTitle className="px-6 pt-6">Skutečný odchod</DialogTitle>
+                <div className="p-6">
+                  <OffboardingFormUnified
+                    mode="create-actual"
+                    prefillDate={qpDate}
+                    excludePersonalNumbers={allPersonalNumbers}
+                    onSuccess={async () => {
+                      setOpenNewActual(false)
+                      showSuccess(
+                        "Záznam vytvořen",
+                        "Skutečný odchod byl úspěšně přidán."
+                      )
+                      await reload()
+                    }}
+                  />
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            <DeletedRecordsDialog
+              kind="offboarding"
+              title="Smazané odchody"
+              triggerLabel="Smazané záznamy"
+              successEvent="offboarding:deleted"
+              onRestore={() => void reload()}
+            />
+          </div>
+
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
+              <span className="ml-2 text-muted-foreground">
+                Načítám data...
+              </span>
             </div>
+          ) : Object.keys(actualGrouped).length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12">
+                <User className="mb-4 size-12 text-muted-foreground" />
+                <p className="text-lg font-medium text-muted-foreground">
+                  Žádné skutečné odchody
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Přidejte první záznam pomocí tlačítka výše
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-4 pb-6">
+              {Object.keys(actualGrouped)
+                .sort((a, b) => parseInt(b) - parseInt(a))
+                .map((year) => {
+                  const yearData = actualGrouped[year]
+                  const isYearExpanded = expandedActualYears.includes(year)
+                  const yearTotal = Object.values(yearData).reduce(
+                    (sum, arr) => sum + arr.length,
+                    0
+                  )
 
-            {loading ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="size-8 animate-spin rounded-full border-b-2 border-current"></div>
-                <span className="ml-2 text-muted-foreground">
-                  Načítám data...
-                </span>
-              </div>
-            ) : actual.length === 0 ? (
-              <Card>
-                <CardContent className="flex flex-col items-center justify-center py-12">
-                  <User className="mb-4 size-12 text-muted-foreground" />
-                  <p className="text-lg font-medium text-muted-foreground">
-                    Žádné skutečné odchody
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    Přidejte první záznam pomocí tlačítka výše
-                  </p>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="space-y-4">
-                <Accordion
-                  type="multiple"
-                  defaultValue={defaultActualMonth ? [defaultActualMonth] : []}
-                >
-                  {actualMonths.map((month) => (
-                    <AccordionItem
-                      key={month}
-                      value={month}
-                      className="rounded-xl border"
-                      style={{ backgroundColor: "#ef44441A" }}
-                    >
-                      <AccordionTrigger className="rounded-xl px-4 hover:no-underline data-[state=open]:bg-white/60 dark:data-[state=open]:bg-black/20">
-                        <div className="flex items-center gap-3">
-                          <User className="size-5" />
-                          <span className="font-semibold">
-                            {format(new Date(`${month}-01`), "LLLL yyyy", {
-                              locale: cs,
-                            })}
-                          </span>
-                          <Badge variant="secondary" className="ml-auto">
-                            {
-                              actual.filter((e) =>
-                                e.actualEnd?.startsWith(month)
-                              ).length
-                            }
-                          </Badge>
-                        </div>
-                      </AccordionTrigger>
-                      <AccordionContent>
-                        <Card className="border-muted shadow-sm">
-                          <CardContent className="px-0">
-                            <div className="overflow-x-auto">
-                              <Table className="min-w-[1600px]">
-                                <TableHeader className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-                                  <TableRow>
-                                    <TableHead className="w-[220px]">
-                                      Zaměstnanec
-                                    </TableHead>
-                                    <TableHead className="w-[180px]">
-                                      Pozice
-                                    </TableHead>
-                                    <TableHead className="w-[160px]">
-                                      Odbor / Oddělení
-                                    </TableHead>
-                                    <TableHead className="w-[120px]">
-                                      Skutečný odchod
-                                    </TableHead>
-                                    <TableHead className="w-[100px]">
-                                      Průběh
-                                    </TableHead>
-                                    <TableHead className="w-[150px]">
-                                      Kontakt
-                                    </TableHead>
-                                    <TableHead className="w-[200px]">
-                                      Akce
-                                    </TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {actual
-                                    .filter((e) =>
-                                      e.actualEnd?.startsWith(month)
-                                    )
-                                    .sort((a, b) => {
-                                      const aT = a.actualEnd
-                                        ? parseISO(a.actualEnd).getTime()
-                                        : 0
-                                      const bT = b.actualEnd
-                                        ? parseISO(b.actualEnd).getTime()
-                                        : 0
-                                      return bT - aT
-                                    })
-                                    .map((e) => (
-                                      <DepartureTableRow
-                                        key={e.id}
-                                        departure={e}
-                                        variant="actual"
-                                        onEdit={() =>
-                                          void openEditDialog(e, "actual")
-                                        }
-                                        onReload={reload}
-                                        onSuccessMessage={showSuccess}
-                                        onErrorMessage={showError}
-                                      />
-                                    ))}
-                                </TableBody>
-                              </Table>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      </AccordionContent>
-                    </AccordionItem>
-                  ))}
-                </Accordion>
-              </div>
-            )}
+                  return (
+                    <Collapsible key={year} open={isYearExpanded}>
+                      <CollapsibleTrigger
+                        onClick={() => toggleActualYear(year)}
+                        className="flex w-full items-center gap-2 rounded-lg bg-muted/50 p-3 transition-colors hover:bg-muted"
+                      >
+                        {isYearExpanded ? (
+                          <ChevronDown className="size-5" />
+                        ) : (
+                          <ChevronRight className="size-5" />
+                        )}
+                        <span className="text-lg font-semibold">{year}</span>
+                        <Badge variant="secondary" className="ml-auto">
+                          {yearTotal}
+                        </Badge>
+                      </CollapsibleTrigger>
 
-            <div className="mt-6 flex justify-end">
-              <MonthlyReportLauncher
-                initialType="odchody"
-                kind="actual"
-                defaultMonth={defaultActualMonth || thisMonth}
-              />
+                      <CollapsibleContent className="mt-2 space-y-3">
+                        {Object.keys(yearData)
+                          .sort((a, b) => b.localeCompare(a))
+                          .map((month) => {
+                            const monthData = yearData[month]
+                            const isMonthExpanded =
+                              expandedActualMonths.includes(month)
+
+                            return (
+                              <Collapsible key={month} open={isMonthExpanded}>
+                                <CollapsibleTrigger
+                                  onClick={() => toggleActualMonth(month)}
+                                  className="flex w-full items-center gap-2 rounded-lg bg-red-50 p-2 transition-colors hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/30"
+                                >
+                                  {isMonthExpanded ? (
+                                    <ChevronDown className="size-4" />
+                                  ) : (
+                                    <ChevronRight className="size-4" />
+                                  )}
+                                  <User className="size-4 text-red-600" />
+                                  <span className="font-medium">
+                                    {format(
+                                      new Date(month + "-01"),
+                                      "LLLL yyyy",
+                                      { locale: cs }
+                                    )}
+                                  </span>
+                                  <Badge variant="outline" className="ml-auto">
+                                    {monthData.length}
+                                  </Badge>
+                                </CollapsibleTrigger>
+
+                                <CollapsibleContent className="mt-2">
+                                  <Card className="overflow-hidden">
+                                    <Table>
+                                      <TableHeader>
+                                        <TableRow>
+                                          <TableHead>Zaměstnanec</TableHead>
+                                          <TableHead>Pozice</TableHead>
+                                          <TableHead>
+                                            Odbor / Oddělení
+                                          </TableHead>
+                                          <TableHead>Skutečný odchod</TableHead>
+                                          <TableHead>Průběh</TableHead>
+                                          <TableHead>Kontakt</TableHead>
+                                          <TableHead>Akce</TableHead>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody>
+                                        {monthData.map((e) => (
+                                          <DepartureTableRow
+                                            key={e.id}
+                                            departure={e}
+                                            variant="actual"
+                                            onEdit={() =>
+                                              void openEditDialog(e, "actual")
+                                            }
+                                            onDelete={() =>
+                                              void handleDelete(e)
+                                            }
+                                            onReload={reload}
+                                          />
+                                        ))}
+                                      </TableBody>
+                                    </Table>
+                                  </Card>
+                                </CollapsibleContent>
+                              </Collapsible>
+                            )
+                          })}
+                      </CollapsibleContent>
+                    </Collapsible>
+                  )
+                })}
             </div>
-          </TabsContent>
-        </div>
+          )}
+
+          <div className="mt-2 flex justify-end">
+            <MonthlyReportLauncher
+              initialType="odchody"
+              kind="actual"
+              defaultMonth={currentMonth}
+            />
+          </div>
+        </TabsContent>
       </Tabs>
 
-      {/* potvrzení skutečného odchodu */}
       <Dialog
         open={openActual}
         onOpenChange={(o) => {
@@ -1244,14 +1192,13 @@ export default function OffboardingPage() {
         </DialogContent>
       </Dialog>
 
-      {/* edit dialog */}
       <Dialog open={openEdit} onOpenChange={setOpenEdit}>
         <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
           <DialogTitle className="px-6 pt-6">Upravit záznam</DialogTitle>
           <div className="p-6">
             {editLoading ? (
               <div className="flex items-center justify-center py-8">
-                <div className="size-8 animate-spin rounded-full border-b-2 border-current"></div>
+                <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
                 <span className="ml-2 text-muted-foreground">
                   Načítám data...
                 </span>
@@ -1259,8 +1206,8 @@ export default function OffboardingPage() {
             ) : editId != null && editInitial ? (
               <OffboardingFormUnified
                 key={`edit-${editId}-${editContext}`}
-                id={editId!}
-                initial={editInitial!}
+                id={editId}
+                initial={editInitial}
                 mode="edit"
                 editContext={editContext}
                 excludePersonalNumbers={allPersonalNumbers}
@@ -1294,55 +1241,6 @@ export default function OffboardingPage() {
         title={errorModal.title}
         message={errorModal.message}
       />
-
-      <style jsx>{`
-        .btn-brand-planned {
-          background: linear-gradient(
-            90deg,
-            var(--brand-kitt),
-            var(--brand-p6)
-          );
-          color: #fff;
-          border: 0;
-          box-shadow:
-            0 1px 2px rgba(0, 0, 0, 0.08),
-            inset 0 -8px 20px rgba(255, 255, 255, 0.08);
-        }
-        .btn-brand-planned:hover {
-          filter: brightness(1.05);
-        }
-        .btn-brand-planned:focus {
-          outline: none;
-          box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.25);
-        }
-
-        .btn-brand-actual {
-          background: linear-gradient(
-            90deg,
-            var(--brand-p6),
-            var(--brand-kitt)
-          );
-          color: #fff;
-          border: 0;
-          box-shadow:
-            0 1px 2px rgba(0, 0, 0, 0.08),
-            inset 0 -8px 20px rgba(255, 255, 255, 0.08);
-        }
-        .btn-brand-actual:hover {
-          filter: brightness(1.05);
-        }
-        .btn-brand-actual:focus {
-          outline: none;
-          box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.25);
-        }
-
-        html.dark .btn-brand-planned:focus {
-          box-shadow: 0 0 0 2px hsl(var(--border));
-        }
-        html.dark .btn-brand-actual:focus {
-          box-shadow: 0 0 0 2px hsl(var(--border));
-        }
-      `}</style>
     </div>
   )
 }

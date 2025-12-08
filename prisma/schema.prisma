@@ -148,11 +148,25 @@ model EmployeeOnboarding {
 
   OnboardingChangeLog OnboardingChangeLog[]
   EmailHistory        EmailHistory[]
+  documents           EmploymentDocument[]
 
   @@index([plannedStart])
   @@index([actualStart])
   @@index([deletedAt])
   @@index([probationEnd])
+}
+
+enum PersonalNumberStatus {
+  SKIPPED
+  USED
+}
+
+model PersonalNumberGap {
+  id        Int                  @id @default(autoincrement())
+  number    String               @unique
+  status    PersonalNumberStatus @default(SKIPPED)
+  usedAt    DateTime?
+  createdAt DateTime             @default(now())
 }
 
 model EmployeeOffboarding {
@@ -320,4 +334,38 @@ model SystemSettings {
   updatedBy String
 
   @@index([key])
+}
+
+enum EmploymentDocumentType {
+  AFFIDAVIT
+  PERSONAL_QUESTIONNAIRE
+  EDUCATION
+  EXPERIENCE
+}
+
+enum DocumentStatus {
+  DRAFT
+  COMPLETED
+  SIGNED
+}
+
+model EmploymentDocument {
+  id           Int                    @id @default(autoincrement())
+  isLocked     Boolean                @default(false)
+  onboardingId Int
+  onboarding   EmployeeOnboarding     @relation(fields: [onboardingId], references: [id])
+  type         EmploymentDocumentType
+  status       DocumentStatus         @default(DRAFT)
+  data         Json
+  fileUrl      String?
+  accessHash   String                 @unique @default(cuid()) @map("access_hash")
+  expiresAt    DateTime?              @map("expires_at")
+  completedAt  DateTime?              @map("completed_at")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([onboardingId, type])
+  @@index([onboardingId])
+  @@index([type])
 }

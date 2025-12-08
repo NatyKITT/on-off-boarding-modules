@@ -20,6 +20,8 @@ type UiRecordIncoming = {
   type: "onboarding" | "offboarding"
   name: string
   surname: string
+  titleBefore?: string | null
+  titleAfter?: string | null
   position: string | null
   department: string | null
   date: string | Date | null
@@ -117,11 +119,11 @@ export async function POST(request: Request) {
       type: r.type === "onboarding" ? "onboarding" : "offboarding",
       name: r.name,
       surname: r.surname,
+      titleBefore: r.titleBefore ?? null,
+      titleAfter: r.titleAfter ?? null,
       position: r.position ?? null,
       department: r.department ?? null,
       date: r.date ?? null,
-      titleBefore: null,
-      titleAfter: null,
     }))
 
     const monthLabel = format(new Date(`${month}-01`), "LLLL yyyy", {

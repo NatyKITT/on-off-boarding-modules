@@ -30,7 +30,7 @@ async function getDepartureById(
   const base = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3001"
   const res = await fetch(`${base}/api/odchody/${id}`, {
     cache: "no-store",
-    headers: cookie ? { cookie } : undefined, // ← důležité kvůli 401
+    headers: cookie ? { cookie } : undefined,
   })
   if (!res.ok)
     throw new Error(

@@ -66,7 +66,11 @@ type UpdateData = {
   status?: "NEW" | "IN_PROGRESS" | "COMPLETED"
 }
 
-// GET - načtení jednoho záznamu pro editaci
+type RawOnboardingBody = {
+  generatedSkippedPersonalNumbers?: unknown
+  [key: string]: unknown
+}
+
 export async function GET(_: NextRequest, { params }: Params) {
   const session = await auth()
   if (!session?.user) {
@@ -85,10 +89,10 @@ export async function GET(_: NextRequest, { params }: Params) {
   }
 
   try {
-    const record = await prisma.employeeOnboarding.findUnique({
+    const record = await prisma.employeeOnboarding.findFirst({
       where: {
         id,
-        deletedAt: null, // Pouze nemazané záznamy
+        deletedAt: null,
       },
     })
 
@@ -99,7 +103,6 @@ export async function GET(_: NextRequest, { params }: Params) {
       )
     }
 
-    // Konvertujeme datumy na stringy pro frontend
     const responseData = {
       ...record,
       plannedStart: record.plannedStart?.toISOString() || null,
@@ -122,7 +125,6 @@ export async function GET(_: NextRequest, { params }: Params) {
   }
 }
 
-// PATCH - aktualizace záznamu
 export async function PATCH(request: NextRequest, { params }: Params) {
   const session = await auth()
   if (!session?.user) {
@@ -141,7 +143,19 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   }
 
   try {
-    const raw = await request.json()
+    const raw: RawOnboardingBody = await request.json()
+
+    const generatedSkipped: string[] = Array.isArray(
+      raw.generatedSkippedPersonalNumbers
+    )
+      ? raw.generatedSkippedPersonalNumbers
+          .filter(
+            (v: unknown): v is string =>
+              typeof v === "string" && v.trim() !== "" && /^\d+$/.test(v.trim())
+          )
+          .map((v: string) => v.trim())
+      : []
+
     const data = updateSchema.parse(raw)
 
     const userKey =
@@ -149,7 +163,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       session.user.email ??
       "unknown"
 
-    const before = await prisma.employeeOnboarding.findUnique({
+    const before = await prisma.employeeOnboarding.findFirst({
       where: {
         id,
         deletedAt: null,
@@ -168,12 +182,24 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         updatedAt: new Date(),
       }
 
+      const oldPersonalNumber = (before.personalNumber ?? "").trim() || null
+      let newPersonalNumber: string | null = oldPersonalNumber
+
       Object.keys(data).forEach((key) => {
         const value = data[key as keyof typeof data]
         if (value !== undefined) {
           ;(updateData as Record<string, unknown>)[key] = value
         }
       })
+
+      if (data.personalNumber !== undefined) {
+        const trimmed =
+          data.personalNumber == null
+            ? null
+            : String(data.personalNumber).trim() || null
+        newPersonalNumber = trimmed
+        updateData.personalNumber = trimmed
+      }
 
       if (data.actualStart && !before.actualStart) {
         updateData.status = "COMPLETED"
@@ -184,26 +210,64 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         data: updateData,
       })
 
-      const changes = []
-      for (const [key, newValue] of Object.entries(data)) {
-        if (newValue !== undefined) {
+      if (generatedSkipped.length > 0) {
+        await Promise.all(
+          generatedSkipped.map((num: string) =>
+            tx.personalNumberGap.upsert({
+              where: { number: num },
+              update: { status: "SKIPPED" },
+              create: { number: num, status: "SKIPPED" },
+            })
+          )
+        )
+      }
+
+      if (oldPersonalNumber && oldPersonalNumber !== newPersonalNumber) {
+        await tx.personalNumberGap.updateMany({
+          where: { number: oldPersonalNumber, status: "USED" },
+          data: { status: "SKIPPED", usedAt: null },
+        })
+      }
+
+      if (newPersonalNumber && newPersonalNumber !== oldPersonalNumber) {
+        await tx.personalNumberGap.updateMany({
+          where: { number: newPersonalNumber, status: "SKIPPED" },
+          data: { status: "USED", usedAt: new Date() },
+        })
+      }
+
+      const changes: {
+        field: string
+        oldValue: string
+        newValue: string
+      }[] = []
+
+      for (const [key, newValueRaw] of Object.entries(data)) {
+        if (newValueRaw !== undefined) {
           const oldValue = before[key as keyof typeof before]
 
-          let oldStr = oldValue
-          let newStr = newValue
+          let oldStr: unknown = oldValue
+          let newVal: unknown = newValueRaw
 
-          if (oldValue instanceof Date) {
-            oldStr = oldValue.toISOString()
-          }
-          if (newValue instanceof Date) {
-            newStr = newValue.toISOString()
+          if (key === "personalNumber") {
+            newVal = newPersonalNumber
           }
 
-          if (String(oldStr) !== String(newStr)) {
+          if (oldStr instanceof Date) {
+            oldStr = oldStr.toISOString()
+          }
+          if (newVal instanceof Date) {
+            newVal = newVal.toISOString()
+          }
+
+          const oldS = oldStr == null ? "" : String(oldStr)
+          const newS = newVal == null ? "" : String(newVal)
+
+          if (oldS !== newS) {
             changes.push({
               field: key,
-              oldValue: String(oldStr || ""),
-              newValue: String(newStr || ""),
+              oldValue: oldS,
+              newValue: newS,
             })
           }
         }
@@ -354,7 +418,7 @@ export async function DELETE(_: NextRequest, { params }: Params) {
             employeeId: before.id,
             employeeName: `${before.name} ${before.surname}`,
             deletedBy: userKey,
-            recipients: ["hr@company.com"],
+            recipients: ["hr@praha6.cz"],
             subject: `Smazán záznam zaměstnance - ${before.name} ${before.surname}`,
           },
           priority: 5,

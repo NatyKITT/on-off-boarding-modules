@@ -60,7 +60,6 @@ type Props = {
   onSuccess?: (newId?: number) => void | Promise<void>
 }
 
-/* --------------------------- helpers ---------------------------- */
 const undefIfEmpty = (v?: string | null) =>
   v == null || String(v).trim() === "" ? undefined : v
 const ensure = (v?: string | null, fb = "-") => (v ?? "").trim() || fb
@@ -89,7 +88,6 @@ function inferManualDates(
   return toYMD(addMonths(n, 2)) !== toYMD(e)
 }
 
-/* ---------------------------- schema ---------------------------- */
 const baseSchema = z.object({
   titleBefore: z.string().optional(),
   name: z.string().trim().min(1, "Jméno je povinné"),
@@ -166,7 +164,6 @@ export function OffboardingFormUnified({
     firstDateRef.current?.focus()
   }, [])
 
-  /* ---------------------------- defaults ---------------------------- */
   const defaults: FormValues = useMemo(() => {
     const base: FormValues = {
       titleBefore: "",
@@ -219,19 +216,8 @@ export function OffboardingFormUnified({
       }
     }
 
-    base.personalNumber = base.personalNumber?.trim()
-      ? base.personalNumber
-      : nextTempPersonalNumber(excludePersonalNumbers)
-
     return base
-  }, [
-    initial,
-    isActualMode,
-    prefillDate,
-    isEdit,
-    inferredManualFlag,
-    excludePersonalNumbers,
-  ])
+  }, [initial, isActualMode, prefillDate, isEdit, inferredManualFlag])
 
   const schema = useMemo(
     () =>
@@ -447,7 +433,7 @@ export function OffboardingFormUnified({
       <form
         noValidate
         onSubmit={form.handleSubmit(onSubmit)}
-        className="max-h-[80vh] space-y-6 overflow-y-auto overscroll-contain"
+        className="space-y-6"
         data-lenis-prevent=""
       >
         {!isEdit && (
@@ -707,7 +693,7 @@ export function OffboardingFormUnified({
         <div className="flex flex-col gap-3 sm:flex-row">
           <Button
             type="submit"
-            className={`inline-flex w-full items-center justify-center gap-2 ${focusRing}`}
+            className={`inline-flex w-full items-center justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] ${focusRing}`}
             disabled={submitDisabled}
           >
             {isSubmitting && (

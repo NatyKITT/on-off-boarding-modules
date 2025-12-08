@@ -20,7 +20,7 @@ const base = z.object({
     .preprocess(emptyToUndefined, z.string().email())
     .optional()
     .nullable(),
-  phone: z.union([z.string(), z.null()]).optional(), // Přidáno phone
+  phone: z.union([z.string(), z.null()]).optional(),
   positionNum: z.string().min(1, "Číslo pozice je povinné"),
   positionName: z.string().optional(),
   department: z.string().optional(),
@@ -38,6 +38,12 @@ const createPlannedSchema = base.extend({
       invalid_type_error: "Neplatné datum plánovaného nástupu.",
     })
   ),
+  userEmail: z
+    .preprocess(emptyToUndefined, z.string().email())
+    .optional()
+    .nullable(),
+  userName: z.union([z.string(), z.null()]).optional(),
+  personalNumber: z.union([z.string(), z.null()]).optional(),
 })
 
 const createActualSchema = base.extend({
@@ -59,10 +65,16 @@ const createActualSchema = base.extend({
 
 type SessionUser = { id?: string | null; email?: string | null }
 
+type RawOnboardingBody = {
+  actualStart?: string | null
+  generatedSkippedPersonalNumbers?: unknown
+  [key: string]: unknown
+}
+
 export async function GET() {
   try {
     const onboardings = await prisma.employeeOnboarding.findMany({
-      where: { deletedAt: null }, // Soft delete kontrola
+      where: { deletedAt: null },
       orderBy: { plannedStart: "desc" },
     })
     return NextResponse.json({ status: "success", data: onboardings })
@@ -85,9 +97,21 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const raw = await request.json()
+    const raw: RawOnboardingBody = await request.json()
+
     const isActual =
       raw.actualStart != null && String(raw.actualStart).trim() !== ""
+
+    const generatedSkipped: string[] = Array.isArray(
+      raw.generatedSkippedPersonalNumbers
+    )
+      ? raw.generatedSkippedPersonalNumbers
+          .filter(
+            (v: unknown): v is string =>
+              typeof v === "string" && v.trim() !== "" && /^\d+$/.test(v.trim())
+          )
+          .map((v: string) => v.trim())
+      : []
 
     const createdBy = ((session.user as SessionUser).id ??
       session.user.email ??
@@ -126,6 +150,28 @@ export async function POST(request: NextRequest) {
           },
         })
 
+        if (generatedSkipped.length > 0) {
+          await Promise.all(
+            generatedSkipped.map((num: string) =>
+              tx.personalNumberGap.upsert({
+                where: { number: num },
+                update: { status: "SKIPPED" },
+                create: { number: num, status: "SKIPPED" },
+              })
+            )
+          )
+        }
+
+        if (data.personalNumber && data.personalNumber.trim() !== "") {
+          await tx.personalNumberGap.updateMany({
+            where: {
+              number: data.personalNumber.trim(),
+              status: "SKIPPED",
+            },
+            data: { status: "USED", usedAt: new Date() },
+          })
+        }
+
         await tx.onboardingChangeLog.create({
           data: {
             employeeId: newEmployee.id,
@@ -148,7 +194,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ status: "success", data: created })
     }
 
-    // create PLANNED
     const d = createPlannedSchema.parse(raw)
 
     const created = await prisma.$transaction(async (tx) => {
@@ -158,8 +203,8 @@ export async function POST(request: NextRequest) {
           surname: d.surname,
           titleBefore: d.titleBefore ?? null,
           titleAfter: d.titleAfter ?? null,
-          email: d.email ?? null, // OPRAVENO: může být null
-          phone: d.phone ?? null, // Přidáno phone
+          email: d.email ?? null,
+          phone: d.phone ?? null,
 
           plannedStart: d.plannedStart,
           actualStart: null,
@@ -172,11 +217,36 @@ export async function POST(request: NextRequest) {
           unitName: d.unitName ?? "",
 
           notes: d.notes ?? null,
+          userEmail: d.userEmail ?? null,
+          userName: d.userName ?? null,
+          personalNumber: d.personalNumber ?? null,
+
           status: "NEW",
         },
       })
 
-      // NOVÉ: Change log pro vytvoření
+      if (generatedSkipped.length > 0) {
+        await Promise.all(
+          generatedSkipped.map((num: string) =>
+            tx.personalNumberGap.upsert({
+              where: { number: num },
+              update: { status: "SKIPPED" },
+              create: { number: num, status: "SKIPPED" },
+            })
+          )
+        )
+      }
+
+      if (d.personalNumber && d.personalNumber.trim() !== "") {
+        await tx.personalNumberGap.updateMany({
+          where: {
+            number: d.personalNumber.trim(),
+            status: "SKIPPED",
+          },
+          data: { status: "USED", usedAt: new Date() },
+        })
+      }
+
       await tx.onboardingChangeLog.create({
         data: {
           employeeId: newEmployee.id,

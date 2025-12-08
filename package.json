@@ -5,9 +5,9 @@
   "version": "0.1.7",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/build-info.mjs",
     "dev": "next dev -p 3001",
-    "predev": "node scripts/write-build-info.mjs",
-    "prebuild": "node scripts/write-build-info.mjs",
+    "prebuild": "node scripts/build-info.mjs",
     "build": "next build",
     "start": "next start -p 3001",
     "postinstall": "prisma generate",
@@ -70,6 +70,7 @@
     "@radix-ui/react-tooltip": "^1.0.7",
     "@react-email/components": "^0.0.17",
     "@react-email/render": "^1.4.0",
+    "@sentry/nextjs": "10",
     "@studio-freight/react-lenis": "^0.0.47",
     "@t3-oss/env-nextjs": "^0.7.1",
     "@vercel/analytics": "^1.2.2",
@@ -144,7 +145,7 @@
     "tailwindcss": "^3.4.3",
     "typescript": "^5.4.5"
   },
-  "engine": {
+  "engines": {
     "node": ">=20.10.0"
   },
   "packageManager": "pnpm@10.11.0+sha512.6540583f41cc5f628eb3d9773ecee802f4f9ef9923cc45b69890fb47991d4b092964694ec3a4f738a420c918a333062c8b925d312f42e4f0c263eb603551f977"

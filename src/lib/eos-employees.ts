@@ -137,3 +137,10 @@ export async function getEmployeesByPersonalNumber(
 ): Promise<Employee[]> {
   return getEmployees(digits)
 }
+
+export async function getEmployeeFromEos(
+  query: string
+): Promise<Employee | null> {
+  const list = await getEmployees(query)
+  return list[0] ?? null
+}

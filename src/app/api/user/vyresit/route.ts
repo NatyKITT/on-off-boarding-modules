@@ -44,7 +44,6 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // Hledání uživatelů
     const users = await prisma.user.findMany({
       where: {
         OR: [{ id: { in: uniqueIds } }, { email: { in: uniqueIds } }],
@@ -54,11 +53,10 @@ export async function POST(req: NextRequest) {
         name: true,
         surname: true,
         email: true,
-        role: true, // přidat roli pro lepší kontext
+        role: true,
       },
     })
 
-    // Vytvoření mapování
     const map: Record<string, string> = {}
     const foundIds = new Set<string>()
 

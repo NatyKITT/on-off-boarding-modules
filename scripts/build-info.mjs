@@ -1,4 +1,3 @@
-// scripts/write-build-info.mjs
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -13,20 +12,24 @@ const pkgRaw = fs.readFileSync(pkgPath, "utf8")
 const pkg = JSON.parse(pkgRaw)
 
 const lifecycle = process.env.npm_lifecycle_event ?? ""
+const nodeEnv = process.env.NODE_ENV ?? "development"
 
-let version = String(pkg.version || "0.1.0")
+const version = String(pkg.version || "0.1.0")
 
-if (lifecycle === "prebuild") {
-  const [major, minor, patchRaw] = version.split(".")
-  const patch = Number(patchRaw || "0") || 0
-  version = `${major}.${minor}.${patch + 1}`
+const buildEnv = nodeEnv === "production" ? "production" : "development"
 
-  pkg.version = version
-  fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf8")
-}
+const content = `// Tento soubor je generován skriptem scripts/build-info.mjs
+// Neupravujte ho ručně.
 
-const content = `export const APP_VERSION = "${version}"`
+export const APP_VERSION = "${version}";
+export const APP_BUILD_ENV = "${buildEnv}";
+export const APP_NPM_LIFECYCLE = "${lifecycle}";
+`
 
 fs.writeFileSync(buildInfoPath, content, "utf8")
 
-console.log("✅ build-info.ts vygenerován:", { version, lifecycle })
+console.log("✅ build-info.ts vygenerován:", {
+  version,
+  nodeEnv,
+  lifecycle,
+})

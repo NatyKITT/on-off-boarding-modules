@@ -1,10 +1,17 @@
 "use client"
 
 import * as React from "react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { addMonths, format } from "date-fns"
-import { Calendar, CheckCircle, Search, User, X } from "lucide-react"
+import {
+  Calendar,
+  CheckCircle,
+  ListChecks,
+  Search,
+  User,
+  X,
+} from "lucide-react"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 
@@ -45,7 +52,6 @@ import {
 } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 
-/* ----------------------------- types ----------------------------- */
 type Mode = "create-planned" | "create-actual" | "edit"
 
 export type FormValues = {
@@ -74,6 +80,18 @@ export type FormValues = {
   status?: "NEW" | "IN_PROGRESS" | "COMPLETED"
 }
 
+export type PersonalNumberMeta = {
+  lastUsedNumber?: string | null
+  lastUsedName?: string | null
+  skippedNumbers?: string[]
+  lastDc2Number?: string | null
+  lastDc2AssignedTo?: string | null
+}
+
+export type PersonalNumberCheckResult =
+  | { ok: true }
+  | { ok: false; usedBy?: string | null }
+
 type Props = {
   positions: Position[]
   id?: number
@@ -83,6 +101,10 @@ type Props = {
   prefillDate?: string
   editContext?: "planned" | "actual"
   onSuccess?: (newId?: number) => void
+  personalNumberMeta?: PersonalNumberMeta
+  validatePersonalNumber?: (
+    personalNumber: string
+  ) => Promise<PersonalNumberCheckResult>
 }
 
 type SearchablePosition = Position & {
@@ -90,7 +112,6 @@ type SearchablePosition = Position & {
   _hay: string
 }
 
-/* --------------------------- helpers ---------------------------- */
 const nullIfEmpty = (v?: string | null) =>
   v == null || String(v).trim() === "" ? null : v
 const ensure = (v?: string | null, fb = "NEUVEDENO") => (v ?? "").trim() || fb
@@ -104,6 +125,7 @@ const stripAccents = (s: string) =>
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "")
     .toLowerCase()
+
 const isManagerialPosition = (positionName?: string): boolean => {
   if (!positionName) return false
   const low = stripAccents(positionName)
@@ -117,7 +139,7 @@ const computeProbationEnd = (
   if (!start) return null
   const d = new Date(start)
   if (Number.isNaN(d.getTime())) return null
-  const monthsToAdd = isManagerialPosition(positionName) ? 6 : 3
+  const monthsToAdd = isManagerialPosition(positionName) ? 8 : 4
   return fmt(addMonths(d, monthsToAdd))
 }
 
@@ -133,7 +155,35 @@ const inferManualDates = (
   return init.probationEnd !== computed
 }
 
-/* ---------------------------- schema ---------------------------- */
+const incrementPersonalNumber = (value: string): string => {
+  const trimmed = value.trim()
+  if (!trimmed) return ""
+  if (!/^\d+$/.test(trimmed)) return trimmed
+  const next = (parseInt(trimmed, 10) + 1)
+    .toString()
+    .padStart(trimmed.length, "0")
+  return next
+}
+
+const computeSkippedPersonalNumbers = (
+  lastUsed?: string | null,
+  current?: string | null
+): string[] => {
+  const last = (lastUsed ?? "").trim()
+  const curr = (current ?? "").trim()
+  if (!last || !curr) return []
+  if (!/^\d+$/.test(last) || !/^\d+$/.test(curr)) return []
+  const lastNum = parseInt(last, 10)
+  const currNum = parseInt(curr, 10)
+  if (currNum <= lastNum + 1) return []
+  const padLen = Math.max(last.length, curr.length)
+  const res: string[] = []
+  for (let n = lastNum + 1; n < currNum; n++) {
+    res.push(n.toString().padStart(padLen, "0"))
+  }
+  return res
+}
+
 const baseSchema = z.object({
   titleBefore: z.string().optional(),
   name: z.string().trim().min(1, "Jméno je povinné"),
@@ -159,7 +209,6 @@ const baseSchema = z.object({
   status: z.enum(["NEW", "IN_PROGRESS", "COMPLETED"]).optional(),
 })
 
-/* -------------------- Clearable time input --------------------- */
 function ClearableTimeInput({
   value,
   onChange,
@@ -198,7 +247,6 @@ function ClearableTimeInput({
   )
 }
 
-/* ------------------------- main component ------------------------ */
 export function OnboardingFormUnified({
   positions,
   id,
@@ -208,6 +256,8 @@ export function OnboardingFormUnified({
   prefillDate,
   editContext,
   onSuccess,
+  personalNumberMeta,
+  validatePersonalNumber,
 }: Props) {
   const effectiveMode: Mode = useMemo(
     () => mode ?? defaultCreateMode ?? "create-planned",
@@ -217,6 +267,12 @@ export function OnboardingFormUnified({
     () => effectiveMode === "create-actual" || editContext === "actual",
     [effectiveMode, editContext]
   )
+
+  const suggestedPersonalNumber = useMemo(() => {
+    const last = personalNumberMeta?.lastUsedNumber ?? ""
+    if (!last.trim()) return ""
+    return incrementPersonalNumber(last)
+  }, [personalNumberMeta?.lastUsedNumber])
 
   const inferredManualFlag = useMemo(
     () => inferManualDates(initial, isActualMode),
@@ -240,9 +296,23 @@ export function OnboardingFormUnified({
   useEffect(() => {
     setManualDates(inferredManualFlag)
   }, [inferredManualFlag, id])
+
   const [positionPickerOpen, setPositionPickerOpen] = useState(false)
   const positionTriggerRef = useRef<HTMLButtonElement | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
+
+  const [skippedOpen, setSkippedOpen] = useState(false)
+
+  type PersonalCheckState =
+    | { status: "idle" }
+    | { status: "checking" }
+    | { status: "ok" }
+    | { status: "taken"; usedBy?: string }
+    | { status: "error"; message?: string }
+
+  const [personalCheck, setPersonalCheck] = useState<PersonalCheckState>({
+    status: "idle",
+  })
 
   const defaults: FormValues = useMemo(() => {
     const isEdit = Boolean(id) || effectiveMode === "edit"
@@ -269,7 +339,7 @@ export function OnboardingFormUnified({
             basePosition
           )) ?? ""
 
-    return {
+    const base: FormValues = {
       hasCustomDates: inferredManualFlag,
       titleBefore: "",
       name: "",
@@ -291,6 +361,12 @@ export function OnboardingFormUnified({
       status: "NEW",
       ...initial,
     }
+
+    if (!isEdit && !base.personalNumber && suggestedPersonalNumber) {
+      base.personalNumber = suggestedPersonalNumber
+    }
+
+    return base
   }, [
     id,
     initial,
@@ -298,6 +374,7 @@ export function OnboardingFormUnified({
     prefillDate,
     effectiveMode,
     inferredManualFlag,
+    suggestedPersonalNumber,
   ])
 
   const schema = useMemo(
@@ -309,6 +386,13 @@ export function OnboardingFormUnified({
               code: z.ZodIssueCode.custom,
               path: ["actualStart"],
               message: "Datum skutečného nástupu je povinné.",
+            })
+          }
+          if (!vals.personalNumber || !vals.personalNumber.trim()) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["personalNumber"],
+              message: "Osobní číslo je pro skutečný nástup povinné.",
             })
           }
         } else {
@@ -330,6 +414,11 @@ export function OnboardingFormUnified({
     mode: "onChange",
   })
 
+  useEffect(() => {
+    form.reset(defaults)
+    setPersonalCheck({ status: "idle" })
+  }, [defaults, form])
+
   const isSubmitting = form.formState.isSubmitting
 
   const watchPositionNum = form.watch("positionNum")
@@ -341,8 +430,7 @@ export function OnboardingFormUnified({
     if (form.getValues("hasCustomDates") !== manualDates) {
       form.setValue("hasCustomDates", manualDates, { shouldDirty: true })
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [manualDates])
+  }, [manualDates, form])
 
   useEffect(() => {
     if (manualDates) return
@@ -353,8 +441,7 @@ export function OnboardingFormUnified({
     if (computed && (form.getValues("probationEnd") || "") !== computed) {
       form.setValue("probationEnd", computed, { shouldValidate: true })
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [manualDates, isActualMode, form])
 
   useEffect(() => {
     const start = isActualMode
@@ -368,8 +455,7 @@ export function OnboardingFormUnified({
     if (!manualDates) {
       form.setValue("probationEnd", computed, { shouldValidate: true })
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [manualDates])
+  }, [manualDates, isActualMode, form])
 
   useEffect(() => {
     if (manualDates) return
@@ -406,6 +492,7 @@ export function OnboardingFormUnified({
       })),
     [positions]
   )
+
   const filteredPositions: SearchablePosition[] = useMemo(() => {
     const q = stripAccents(searchQuery)
     if (!q) return positionsForSearch
@@ -436,8 +523,68 @@ export function OnboardingFormUnified({
     requestAnimationFrame(() => positionTriggerRef.current?.focus())
   }
 
+  const checkPersonalNumber = useCallback(
+    async (value: string) => {
+      const v = value.trim()
+      if (!v || !validatePersonalNumber) {
+        setPersonalCheck({ status: "idle" })
+        form.clearErrors("personalNumber")
+        return
+      }
+      try {
+        setPersonalCheck({ status: "checking" })
+        const res = await validatePersonalNumber(v)
+        if (res.ok) {
+          setPersonalCheck({ status: "ok" })
+          form.clearErrors("personalNumber")
+        } else {
+          setPersonalCheck({
+            status: "taken",
+            usedBy: res.usedBy ?? undefined,
+          })
+          form.setError("personalNumber", {
+            type: "manual",
+            message: res.usedBy
+              ? `Osobní číslo již v EOS používá ${res.usedBy}.`
+              : "Toto osobní číslo je již v EOS použito.",
+          })
+        }
+      } catch (err) {
+        setPersonalCheck({
+          status: "error",
+          message:
+            err instanceof Error
+              ? err.message
+              : "Nepodařilo se ověřit číslo v EOS.",
+        })
+        form.setError("personalNumber", {
+          type: "manual",
+          message: "Nepodařilo se ověřit osobní číslo v EOS.",
+        })
+      }
+    },
+    [validatePersonalNumber, form]
+  )
+
   async function onSubmit(values: FormValues) {
     try {
+      if (isActualMode) {
+        const pn = (values.personalNumber ?? "").trim()
+        if (!pn) {
+          throw new Error("Pro skutečný nástup je osobní číslo povinné.")
+        }
+        if (validatePersonalNumber) {
+          const res = await validatePersonalNumber(pn)
+          if (!res.ok) {
+            throw new Error(
+              res.usedBy
+                ? `Osobní číslo již v EOS používá ${res.usedBy}.`
+                : "Toto osobní číslo je již v EOS použito."
+            )
+          }
+        }
+      }
+
       const safePositionName = ensure(values.positionName, "(nezjištěno)")
       const safeDepartment = ensure(values.department, "(doplnit)")
       const safeUnitName = ensure(values.unitName, "(doplnit)")
@@ -459,6 +606,16 @@ export function OnboardingFormUnified({
         userName: nullIfEmpty(values.userName),
         personalNumber: nullIfEmpty(values.personalNumber),
         notes: nullIfEmpty(values.notes),
+      }
+
+      if (isActualMode) {
+        const newlySkipped = computeSkippedPersonalNumbers(
+          personalNumberMeta?.lastUsedNumber,
+          values.personalNumber
+        )
+        if (newlySkipped.length > 0) {
+          payload.generatedSkippedPersonalNumbers = newlySkipped
+        }
       }
 
       if (isActualMode) {
@@ -513,10 +670,9 @@ export function OnboardingFormUnified({
         <form
           noValidate
           onSubmit={form.handleSubmit(onSubmit)}
-          className="max-h-[80vh] space-y-6 overflow-y-auto overscroll-contain"
+          className="space-y-6"
           data-lenis-prevent=""
         >
-          {/* --- Osobní údaje --- */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -603,11 +759,13 @@ export function OnboardingFormUnified({
                         <Input
                           type="email"
                           {...field}
-                          placeholder="jprijmeni@email.com"
+                          placeholder="jmeno.prijmeni@email.cz"
                           className={focusRing}
                         />
                       </FormControl>
-                      <FormDescription>E-mail pro komunikaci</FormDescription>
+                      <FormDescription>
+                        Kontaktní e-mail (např. soukromý nebo pracovní).
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -616,7 +774,6 @@ export function OnboardingFormUnified({
             </CardContent>
           </Card>
 
-          {/* --- Organizační údaje --- */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -717,7 +874,7 @@ export function OnboardingFormUnified({
                         </Popover>
                       </FormControl>
                       <FormDescription>
-                        Vyhledejte pozici podle čísla nebo názvu
+                        Vyhledejte pozici podle čísla nebo názvu.
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -735,7 +892,7 @@ export function OnboardingFormUnified({
                       <FormControl>
                         <Input {...field} className="bg-muted" readOnly />
                       </FormControl>
-                      <FormDescription>Automaticky doplněno</FormDescription>
+                      <FormDescription>Automaticky doplněno.</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -749,7 +906,7 @@ export function OnboardingFormUnified({
                       <FormControl>
                         <Input {...field} className="bg-muted" readOnly />
                       </FormControl>
-                      <FormDescription>Automaticky doplněno</FormDescription>
+                      <FormDescription>Automaticky doplněno.</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -763,7 +920,7 @@ export function OnboardingFormUnified({
                       <FormControl>
                         <Input {...field} className="bg-muted" readOnly />
                       </FormControl>
-                      <FormDescription>Automaticky doplněno</FormDescription>
+                      <FormDescription>Automaticky doplněno.</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -772,7 +929,259 @@ export function OnboardingFormUnified({
             </CardContent>
           </Card>
 
-          {/* --- Termíny nástupu --- */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <User className="size-5" /> Účty a přístupy
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <FormField
+                  name="userEmail"
+                  control={form.control}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Firemní e-mail</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="email"
+                          {...field}
+                          placeholder="např. jmeno.prijmeni@praha6.cz"
+                          className={focusRing}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        Doporučený formát:{" "}
+                        <span className="font-mono">
+                          jmeno.prijmeni@praha6.cz
+                        </span>
+                        . Lze doplnit později.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  name="userName"
+                  control={form.control}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Uživatelské jméno</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          className={`font-mono ${focusRing}`}
+                          placeholder="např. jprijmeni"
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        Doporučený formát:{" "}
+                        <span className="font-mono">jprijmeni</span>. Lze
+                        doplnit později.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <FormField
+                  name="personalNumber"
+                  control={form.control}
+                  render={({ field }) => (
+                    <FormItem className="md:col-span-2">
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <FormLabel>
+                          Osobní číslo
+                          {isActualMode && (
+                            <span className="text-destructive"> *</span>
+                          )}
+                        </FormLabel>
+                        {personalNumberMeta?.skippedNumbers &&
+                          personalNumberMeta.skippedNumbers.length > 0 && (
+                            <Popover
+                              open={skippedOpen}
+                              onOpenChange={setSkippedOpen}
+                            >
+                              <PopoverTrigger asChild>
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-1 rounded-md border border-input bg-background px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
+                                >
+                                  <ListChecks className="size-3" />
+                                  Přeskočená čísla
+                                </button>
+                              </PopoverTrigger>
+                              <PopoverContent
+                                className="w-72 p-3"
+                                align="end"
+                                sideOffset={4}
+                                onOpenAutoFocus={(e) => e.preventDefault()}
+                              >
+                                <p className="text-xs text-muted-foreground">
+                                  Osobní čísla, která byla přeskočena a dosud
+                                  nejsou využita. Kliknutím číslo použijete.
+                                </p>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  {personalNumberMeta.skippedNumbers.map(
+                                    (num) => (
+                                      <button
+                                        key={num}
+                                        type="button"
+                                        className="rounded bg-muted px-2 py-1 font-mono text-xs hover:bg-muted/80"
+                                        onClick={() => {
+                                          field.onChange(num)
+                                          void checkPersonalNumber(num)
+                                          setSkippedOpen(false)
+                                        }}
+                                      >
+                                        {num}
+                                      </button>
+                                    )
+                                  )}
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+                          )}
+                      </div>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          className={`font-mono ${focusRing}`}
+                          placeholder={suggestedPersonalNumber || "např. 0123"}
+                          onChange={(e) => {
+                            setPersonalCheck({ status: "idle" })
+                            form.clearErrors("personalNumber")
+                            field.onChange(e)
+                          }}
+                          onBlur={async (e) => {
+                            field.onBlur()
+                            await checkPersonalNumber(e.target.value)
+                          }}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {isActualMode ? (
+                          <>
+                            Povinné u skutečného nástupu.
+                            {personalNumberMeta?.lastUsedNumber && (
+                              <>
+                                {" "}
+                                Poslední použité číslo:{" "}
+                                <span className="font-mono font-semibold">
+                                  {personalNumberMeta.lastUsedNumber}
+                                </span>
+                                {personalNumberMeta.lastUsedName && (
+                                  <> – {personalNumberMeta.lastUsedName}</>
+                                )}
+                              </>
+                            )}
+                            {suggestedPersonalNumber && (
+                              <>
+                                {" "}
+                                · návrh dalšího čísla:{" "}
+                                <span className="font-mono font-semibold">
+                                  {suggestedPersonalNumber}
+                                </span>
+                                .
+                              </>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            Nepovinné – lze doplnit později.
+                            {personalNumberMeta?.lastUsedNumber && (
+                              <>
+                                {" "}
+                                Poslední použité číslo:{" "}
+                                <span className="font-mono font-semibold">
+                                  {personalNumberMeta.lastUsedNumber}
+                                </span>
+                                {personalNumberMeta.lastUsedName && (
+                                  <> – {personalNumberMeta.lastUsedName}</>
+                                )}
+                              </>
+                            )}
+                            {suggestedPersonalNumber && (
+                              <>
+                                {" "}
+                                · návrh dalšího čísla:{" "}
+                                <span className="font-mono font-semibold">
+                                  {suggestedPersonalNumber}
+                                </span>
+                                .
+                              </>
+                            )}
+                          </>
+                        )}{" "}
+                        Obvykle 4 číslice (např.{" "}
+                        <span className="font-mono">0123</span>).
+                        {personalNumberMeta?.lastDc2Number &&
+                          personalNumberMeta.lastDc2AssignedTo && (
+                            <>
+                              {" "}
+                              (Poslední číslo v DC2:{" "}
+                              <span className="font-mono">
+                                {personalNumberMeta.lastDc2Number}
+                              </span>{" "}
+                              – {personalNumberMeta.lastDc2AssignedTo}.)
+                            </>
+                          )}
+                      </FormDescription>
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                        {suggestedPersonalNumber && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={async () => {
+                              form.setValue(
+                                "personalNumber",
+                                suggestedPersonalNumber,
+                                { shouldDirty: true, shouldValidate: true }
+                              )
+                              await checkPersonalNumber(suggestedPersonalNumber)
+                            }}
+                          >
+                            Použít návrh
+                          </Button>
+                        )}
+
+                        {personalCheck.status === "checking" && (
+                          <span className="text-muted-foreground">
+                            Ověřuji číslo v EOS…
+                          </span>
+                        )}
+                        {personalCheck.status === "ok" && (
+                          <span className="text-green-600">
+                            Číslo je v EOS volné.
+                          </span>
+                        )}
+                        {personalCheck.status === "taken" && (
+                          <span className="text-red-600">
+                            Číslo už je v EOS použito
+                            {personalCheck.usedBy
+                              ? ` – ${personalCheck.usedBy}.`
+                              : "."}
+                          </span>
+                        )}
+                        {personalCheck.status === "error" && (
+                          <span className="text-red-600">
+                            {personalCheck.message ??
+                              "Nepodařilo se ověřit číslo v EOS."}
+                          </span>
+                        )}
+                      </div>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -830,8 +1239,8 @@ export function OnboardingFormUnified({
                           </FormControl>
                           <FormDescription>
                             {manualDates
-                              ? "Automatický výpočet vypnut"
-                              : "Zkušební doba se počítá automaticky od tohoto data"}
+                              ? "Automatický výpočet vypnut."
+                              : "Zkušební doba se počítá automaticky od tohoto data (4 nebo 8 měsíců podle typu pozice)."}
                           </FormDescription>
                           <FormMessage />
                         </FormItem>
@@ -849,7 +1258,7 @@ export function OnboardingFormUnified({
                               onChange={(v) => field.onChange(v)}
                             />
                           </FormControl>
-                          <FormDescription>Nepovinné</FormDescription>
+                          <FormDescription>Nepovinné.</FormDescription>
                           <FormMessage />
                         </FormItem>
                       )}
@@ -872,8 +1281,8 @@ export function OnboardingFormUnified({
                           </FormControl>
                           <FormDescription>
                             {manualDates
-                              ? "Automatický výpočet vypnut"
-                              : "Zkušební doba se počítá automaticky od tohoto data"}
+                              ? "Automatický výpočet vypnut."
+                              : "Zkušební doba se počítá automaticky od tohoto data (4 nebo 8 měsíců podle typu pozice)."}
                           </FormDescription>
                           <FormMessage />
                         </FormItem>
@@ -891,7 +1300,7 @@ export function OnboardingFormUnified({
                               onChange={(v) => field.onChange(v)}
                             />
                           </FormControl>
-                          <FormDescription>Nepovinné</FormDescription>
+                          <FormDescription>Nepovinné.</FormDescription>
                           <FormMessage />
                         </FormItem>
                       )}
@@ -915,13 +1324,13 @@ export function OnboardingFormUnified({
                       </FormControl>
                       <FormDescription>
                         {manualDates
-                          ? "Můžete upravit ručně"
+                          ? "Můžete upravit ručně."
                           : form.getValues("positionName") &&
                               isManagerialPosition(
                                 form.getValues("positionName")
                               )
-                            ? "Automatický výpočet (6 měsíců pro manažerské pozice)"
-                            : "Automatický výpočet (3 měsíce pro standardní pozice)"}
+                            ? "Automatický výpočet (8 měsíců pro manažerské pozice)."
+                            : "Automatický výpočet (4 měsíce pro standardní pozice)."}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -931,81 +1340,6 @@ export function OnboardingFormUnified({
             </CardContent>
           </Card>
 
-          {/* --- Účty a přístupy --- */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <User className="size-5" /> Účty a přístupy
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <FormField
-                  name="userEmail"
-                  control={form.control}
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Firemní e-mail</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="email"
-                          {...field}
-                          placeholder="jmeno.prijmeni@firma.cz"
-                          className={focusRing}
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        Nepovinné – vygeneruje IT oddělení po nástupu
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  name="userName"
-                  control={form.control}
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Uživatelské jméno</FormLabel>
-                      <FormControl>
-                        <Input
-                          {...field}
-                          className={`font-mono ${focusRing}`}
-                          placeholder="jprijmeni"
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        Bude přiděleno po nástupu
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  name="personalNumber"
-                  control={form.control}
-                  render={({ field }) => (
-                    <FormItem className="md:col-span-2">
-                      <FormLabel>Osobní číslo</FormLabel>
-                      <FormControl>
-                        <Input
-                          {...field}
-                          className={`font-mono ${focusRing}`}
-                          placeholder="123456"
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        Bude přiděleno při nástupu
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* --- Poznámky --- */}
           <Card>
             <CardContent className="pt-6">
               <FormField
@@ -1023,7 +1357,7 @@ export function OnboardingFormUnified({
                       />
                     </FormControl>
                     <FormDescription>
-                      Další informace k nástupu zaměstnance
+                      Nepovinné doplňující informace.
                     </FormDescription>
                   </FormItem>
                 )}
@@ -1031,11 +1365,10 @@ export function OnboardingFormUnified({
             </CardContent>
           </Card>
 
-          {/* --- Submit --- */}
           <div className="space-y-3">
             <Button
               type="submit"
-              className={`inline-flex w-full items-center justify-center gap-2 ${focusRing}`}
+              className={`inline-flex w-full items-center justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] ${focusRing}`}
               disabled={isSubmitting}
             >
               {isSubmitting && (
@@ -1049,7 +1382,6 @@ export function OnboardingFormUnified({
             </Button>
           </div>
 
-          {/* Minimalní globální úpravy nativních date/time vstupů */}
           <style jsx global>{`
             input[type="date"],
             input[type="time"] {
@@ -1070,7 +1402,6 @@ export function OnboardingFormUnified({
         </form>
       </Form>
 
-      {/* Success Modal */}
       <Dialog open={successModal.open} onOpenChange={handleSuccessModalClose}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -1083,7 +1414,7 @@ export function OnboardingFormUnified({
                 <DialogDescription>
                   {successModal.mode === "create"
                     ? `${isActualMode ? "Skutečný" : "Plánovaný"} nástup byl založen`
-                    : "Změny byly uloženy"}
+                    : "Změny byly uloženy."}
                 </DialogDescription>
               </div>
             </div>
@@ -1093,8 +1424,12 @@ export function OnboardingFormUnified({
             <p className="text-sm">
               <span className="font-medium">{successModal.name}</span>
               {successModal.mode === "create"
-                ? ` byl${isActualMode ? "" : "a"} úspěšně ${isActualMode ? "zapsán jako skutečný nástup" : "přidán do plánovaných nástupů"}.`
-                : " - změny byly úspěšně uloženy."}
+                ? ` byl${isActualMode ? "" : "a"} úspěšně ${
+                    isActualMode
+                      ? "zapsán jako skutečný nástup"
+                      : "přidán do plánovaných nástupů"
+                  }.`
+                : " – změny byly úspěšně uloženy."}
             </p>
           </div>
 
@@ -1106,7 +1441,6 @@ export function OnboardingFormUnified({
         </DialogContent>
       </Dialog>
 
-      {/* Error Modal */}
       <Dialog
         open={errorModal.open}
         onOpenChange={(open) => setErrorModal((prev) => ({ ...prev, open }))}
@@ -1119,7 +1453,7 @@ export function OnboardingFormUnified({
               </div>
               <div>
                 <DialogTitle>Chyba při ukládání</DialogTitle>
-                <DialogDescription>Operace se nepodařila</DialogDescription>
+                <DialogDescription>Operace se nepodařila.</DialogDescription>
               </div>
             </div>
           </DialogHeader>

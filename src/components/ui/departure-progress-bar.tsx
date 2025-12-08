@@ -40,7 +40,6 @@ export function DepartureProgressBar({
 
   const [animatedPct, setAnimatedPct] = useState(0)
   useEffect(() => {
-    // reset na 0 a po animation frame přepnout na cílové pct -> CSS přechod udělá animaci
     setAnimatedPct(0)
     const id = requestAnimationFrame(() =>
       setAnimatedPct(isCompleted ? 100 : pct)

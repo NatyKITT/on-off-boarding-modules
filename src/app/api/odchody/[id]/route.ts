@@ -13,7 +13,6 @@ type RouteParams = { params: { id: string } }
 const emptyToUndefined = (v: unknown) =>
   typeof v === "string" && v.trim() === "" ? undefined : v
 
-/** ---- Validace PATCH payloadu ---- */
 const updateSchema = z.object({
   titleBefore: z.union([z.string(), z.null()]).optional(),
   name: z.string().min(1).optional(),
@@ -43,7 +42,6 @@ const updateSchema = z.object({
   status: z.enum(["NEW", "IN_PROGRESS", "COMPLETED"]).optional(),
 })
 
-/** ---- Typ pro update do Prisma (zarovnaný s DB schématem) ---- */
 type UpdateData = {
   updatedAt: Date
   titleBefore?: string | null
@@ -69,7 +67,6 @@ type UpdateData = {
   status?: "NEW" | "IN_PROGRESS" | "COMPLETED"
 }
 
-/** Pomocník na převod pro porovnání změn */
 const toStr = (v: unknown) => {
   if (v === null || v === undefined) return ""
   if (v instanceof Date) return v.toISOString()

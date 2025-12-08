@@ -10,7 +10,6 @@ export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
 export const revalidate = 0
 
-// ---------- Typy ----------
 type OnboardingStatus = "NEW" | "IN_PROGRESS" | "COMPLETED"
 type OffboardingStatus = "NEW" | "IN_PROGRESS" | "COMPLETED"
 type ReportType = "onboarding" | "offboarding" | "combined"
@@ -75,7 +74,6 @@ type MonthlyReportData = {
   offboarding?: OffbSection
 }
 
-// ---------- Validace vstupu ----------
 const bodySchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/), // "2024-01"
   reportType: z.enum(["onboarding", "offboarding", "combined"]),
@@ -84,7 +82,6 @@ const bodySchema = z.object({
   sendEmail: z.boolean().default(true),
 })
 
-// ---------- POST: vygeneruje report + případně enqueuuje email ----------
 export async function POST(req: NextRequest) {
   const session = await auth()
   if (!session?.user) {
@@ -94,7 +91,6 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  // pouze HR/ADMIN
   const me = await prisma.user.findUnique({
     where: { email: session.user.email! },
     select: { role: true },
@@ -132,7 +128,6 @@ export async function POST(req: NextRequest) {
 
     const reportData: MonthlyReportData = {}
 
-    // ONBOARDING část
     if (reportType === "onboarding" || reportType === "combined") {
       const [plannedOnb, actualOnb] = await Promise.all([
         prisma.employeeOnboarding.findMany({
@@ -192,7 +187,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // OFFBOARDING část
     if (reportType === "offboarding" || reportType === "combined") {
       const [plannedOffb, actualOffb] = await Promise.all([
         prisma.employeeOffboarding.findMany({
@@ -252,19 +246,17 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // uložit report
     const monthlyReport = await prisma.monthlyReport.create({
       data: {
         month,
         reportType,
-        recipients, // JSON column – Prisma se postará o serializaci
+        recipients,
         generatedBy: createdBy,
         data: reportData, // JSON column
         sentAt: sendEmail ? new Date() : null,
       },
     })
 
-    // enqueue do Resend workeru přes MailQueue
     if (sendEmail) {
       const monthNameCz = format(monthDate, "LLLL yyyy", { locale: cs })
       await prisma.mailQueue.create({
@@ -315,7 +307,6 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// ---------- GET: seznam dostupných měsíců a existujících reportů ----------
 export async function GET(req: NextRequest) {
   const session = await auth()
   if (!session?.user) {
@@ -358,7 +349,6 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// ---------- Helpery (bez any) ----------
 function groupByDepartment<T extends { department: string | null | undefined }>(
   employees: T[]
 ): DeptBreakdown {

@@ -1,7 +1,9 @@
+import { withSentryConfig } from "@sentry/nextjs"
+
 void import("./src/env.mjs")
 
 /** @type {import("next").NextConfig} */
-const nextConfig = {
+const baseConfig = {
   reactStrictMode: true,
   pageExtensions: ["tsx", "ts", "js"],
 
@@ -16,8 +18,10 @@ const nextConfig = {
   experimental: {
     serverComponentsExternalPackages: ["@prisma/client"],
   },
+
   compress: true,
   poweredByHeader: false,
+
   async headers() {
     return [
       {
@@ -40,5 +44,17 @@ const nextConfig = {
     ]
   },
 }
+
+const sentryWebpackPluginOptions = {
+  org: "kitt6",
+  project: "on-off-boarding-module",
+  silent: !process.env.CI,
+  widenClientFileUpload: true,
+  tunnelRoute: "/monitoring",
+  disableLogger: true,
+  automaticVercelMonitors: true,
+}
+
+const nextConfig = withSentryConfig(baseConfig, sentryWebpackPluginOptions)
 
 export default nextConfig

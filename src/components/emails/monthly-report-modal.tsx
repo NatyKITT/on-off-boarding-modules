@@ -69,6 +69,18 @@ function rowKey(r: ReportRecord): string {
   return `${r.type}-${r.id}-${r.isPlanned ? "planned" : "actual"}`
 }
 
+function formatFullName(r: ReportRecord): string {
+  const before = r.titleBefore?.trim()
+  const after = r.titleAfter?.trim()
+  const base = `${r.name} ${r.surname}`.trim()
+
+  let full = base
+  if (before) full = `${before} ${full}`
+  if (after) full = `${full}, ${after}`
+
+  return full
+}
+
 const focusRing =
   "focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/55 " +
   "focus:ring-offset-2 focus:ring-offset-background " +
@@ -245,7 +257,6 @@ export function MonthlyReportModal({
         total: payloadRows.length,
       })
 
-      // znovu načteme záznamy, aby se propsal status odesláno
       void loadRecords()
     } catch (e) {
       setErrorState({
@@ -266,8 +277,7 @@ export function MonthlyReportModal({
             <DialogTitle>Měsíční report – {monthLabel}</DialogTitle>
           </DialogHeader>
 
-          {/* Filtry nahoře – statické, nescrollují */}
-          <div className="flex flex-wrap gap-4">
+          <div className="mt-3 flex flex-wrap gap-4">
             <div className="min-w-[200px] flex-1">
               <Label htmlFor="month">Měsíc</Label>
               <input
@@ -339,66 +349,64 @@ export function MonthlyReportModal({
             </div>
           </div>
 
-          {sentCount > 0 && (
-            <Alert className="mt-3">
-              <AlertCircle className="size-4" />
-              <AlertDescription>
-                {sentCount} z {records.length} záznamů už bylo odesláno.
-                {selectedSentCount > 0 && (
-                  <span className="ml-1 font-semibold">
-                    Vybráno {selectedSentCount} již odeslaných.
-                  </span>
-                )}
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {/* Hromadné označování */}
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={toggleAll}
-              disabled={loading}
-              className="inline-flex items-center justify-center gap-2"
-            >
-              {selectedKeys.length === records.length && records.length > 0
-                ? "Odznačit vše"
-                : "Vybrat vše"}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={toggleUnsent}
-              disabled={loading}
-              className="inline-flex items-center justify-center gap-2"
-            >
-              Vybrat neodeslané
-            </Button>
-            <div className="ml-auto text-sm text-muted-foreground">
-              Vybráno: {selectedKeys.length} / {records.length}
-            </div>
-          </div>
-
-          {/* Tabulka – jen tato část scrolluje, hlavička sticky, neprůhledná */}
           <div
-            className="mt-2 flex-1 rounded-lg border bg-background"
-            aria-busy={loading}
+            className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1"
+            data-lenis-prevent=""
+            onWheelCapture={(e) => e.stopPropagation()}
           >
-            {loading ? (
-              <div className="p-8 text-center text-muted-foreground">
-                Načítám…
-              </div>
-            ) : records.length === 0 ? (
-              <div className="p-8 text-center text-muted-foreground">
-                Žádné záznamy
-              </div>
-            ) : (
-              <div
-                className="relative h-full max-h-[50vh] overflow-auto overscroll-contain"
-                data-lenis-prevent=""
-                onWheelCapture={(e) => e.stopPropagation()}
+            {sentCount > 0 && (
+              <Alert>
+                <AlertCircle className="size-4" />
+                <AlertDescription>
+                  {sentCount} z {records.length} záznamů už bylo odesláno.
+                  {selectedSentCount > 0 && (
+                    <span className="ml-1 font-semibold">
+                      Vybráno {selectedSentCount} již odeslaných.
+                    </span>
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={toggleAll}
+                disabled={loading}
+                className="inline-flex items-center justify-center gap-2"
               >
+                {selectedKeys.length === records.length && records.length > 0
+                  ? "Odznačit vše"
+                  : "Vybrat vše"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={toggleUnsent}
+                disabled={loading}
+                className="inline-flex items-center justify-center gap-2"
+              >
+                Vybrat neodeslané
+              </Button>
+              <div className="ml-auto text-sm text-muted-foreground">
+                Vybráno: {selectedKeys.length} / {records.length}
+              </div>
+            </div>
+
+            <div
+              className="rounded-lg border bg-background"
+              aria-busy={loading}
+            >
+              {loading ? (
+                <div className="p-8 text-center text-muted-foreground">
+                  Načítám…
+                </div>
+              ) : records.length === 0 ? (
+                <div className="p-8 text-center text-muted-foreground">
+                  Žádné záznamy
+                </div>
+              ) : (
                 <table className="w-full min-w-[720px] text-xs sm:text-sm">
                   <thead className="sticky top-0 z-10 bg-background">
                     <tr className="border-b">
@@ -440,7 +448,7 @@ export function MonthlyReportModal({
                             />
                           </td>
                           <td className="p-2 font-medium">
-                            {r.name} {r.surname}
+                            {formatFullName(r)}
                           </td>
                           <td className="p-2 text-xs sm:text-sm">
                             {r.position ?? "—"}
@@ -471,9 +479,17 @@ export function MonthlyReportModal({
                           </td>
                           <td className="p-2">
                             {r.wasSent ? (
-                              <div className="flex min-w-[150px] items-center gap-1 text-xs text-muted-foreground sm:text-sm">
-                                <CheckCircle2 className="size-3 shrink-0" />
-                                <span>Již odesláno</span>
+                              <div className="flex min-w-[150px] flex-col gap-0.5 text-xs text-muted-foreground sm:text-sm">
+                                <span className="inline-flex items-center gap-1">
+                                  <CheckCircle2 className="size-3 shrink-0" />
+                                  <span>Již odesláno</span>
+                                </span>
+                                {r.sentDate && (
+                                  <span className="pl-5 text-[11px] sm:text-xs">
+                                    Odesláno{" "}
+                                    {fmt(new Date(r.sentDate), "dd.MM.yyyy")}
+                                  </span>
+                                )}
                               </div>
                             ) : (
                               <span className="text-xs font-medium text-green-600 sm:text-sm">
@@ -486,11 +502,10 @@ export function MonthlyReportModal({
                     })}
                   </tbody>
                 </table>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
-          {/* Spodní akce */}
           <div className="mt-4 flex flex-wrap justify-end gap-2 border-t pt-4">
             <Button
               variant="outline"
@@ -527,7 +542,6 @@ export function MonthlyReportModal({
         </DialogContent>
       </Dialog>
 
-      {/* Potvrzovací dialog – znovu odeslané záznamy */}
       <Dialog
         open={confirmState.open}
         onOpenChange={(open) => setConfirmState((prev) => ({ ...prev, open }))}
@@ -567,7 +581,6 @@ export function MonthlyReportModal({
         </DialogContent>
       </Dialog>
 
-      {/* Úspěch */}
       <Dialog
         open={successState.open}
         onOpenChange={(open) => setSuccessState((prev) => ({ ...prev, open }))}
@@ -596,7 +609,6 @@ export function MonthlyReportModal({
         </DialogContent>
       </Dialog>
 
-      {/* Chyba */}
       <Dialog
         open={errorState.open}
         onOpenChange={(open) => setErrorState((prev) => ({ ...prev, open }))}
