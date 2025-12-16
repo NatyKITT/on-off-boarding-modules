@@ -1,21 +1,23 @@
 import * as Sentry from "@sentry/nextjs"
 
+import { getSentryEnvironment, isSentryEnabled } from "@/lib/sentry-environment"
+
+const environment = getSentryEnvironment()
+const enabled = isSentryEnabled(environment)
+
 Sentry.init({
   dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
 
-  environment:
-    process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT ||
-    process.env.NODE_ENV ||
-    "development",
+  environment,
+  enabled,
 
   integrations: [Sentry.replayIntegration()],
 
-  tracesSampleRate: process.env.NODE_ENV === "production" ? 0.2 : 1.0,
+  tracesSampleRate: environment === "production" ? 0.2 : 1.0,
 
-  enableLogs: process.env.NODE_ENV !== "production",
+  enableLogs: enabled && environment !== "production",
 
-  replaysSessionSampleRate: process.env.NODE_ENV === "production" ? 0.1 : 1.0,
-
+  replaysSessionSampleRate: environment === "production" ? 0.1 : 1.0,
   replaysOnErrorSampleRate: 1.0,
 
   sendDefaultPii: true,

@@ -52,12 +52,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Žádní příjemci" }, { status: 400 })
     }
 
-    const to = [
+    const toBase =
       process.env.RESEND_EMAIL_TO ??
-        process.env.RESEND_EMAIL_FROM_HR ??
-        process.env.EMAIL_FROM ??
-        "no-reply@example.com",
-    ]
+      process.env.EMAIL_FROM ??
+      process.env.RESEND_EMAIL_FROM ??
+      ""
+
+    const to = toBase ? [toBase] : [reportRecipients[0]]
 
     const ensureReport = async (reportKind: Kind) => {
       let rep = await prisma.monthlyReport.findUnique({
@@ -157,7 +158,6 @@ export async function POST(request: Request) {
       bcc: reportRecipients,
       subject,
       html,
-      from: process.env.RESEND_EMAIL_FROM_HR ?? process.env.EMAIL_FROM,
     })
 
     await Promise.all(

@@ -4,9 +4,13 @@ import { APP_VERSION } from "@/build-info"
 
 export function BuildVersionBadge() {
   return (
-    <div className="mt-4 inline-flex flex-wrap items-center gap-2 rounded-md border bg-muted px-3 py-2 text-xs text-muted-foreground">
-      <span className="font-semibold">Verze:</span>
-      <span>{APP_VERSION}</span>
+    <div className="mt-4 w-full rounded-md border bg-muted px-2 py-1 text-[11px] text-muted-foreground">
+      <div className="flex flex-col items-start gap-0.5 sm:inline-flex sm:flex-row sm:items-center sm:gap-1">
+        <span className="font-semibold">Verze:</span>
+        <span className="break-all font-mono text-[10px] sm:text-xs">
+          {APP_VERSION}
+        </span>
+      </div>
     </div>
   )
 }

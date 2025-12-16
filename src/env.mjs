@@ -12,7 +12,6 @@ export const env = createEnv({
     RESEND_API_KEY: z.string().optional(),
     RESEND_EMAIL_FROM: z.string().email().optional(),
     RESEND_EMAIL_TO: z.string().email().optional(),
-    RESEND_USERNAME: z.string().optional(),
 
     REPORT_RECIPIENTS_PLANNED: z.string().optional(),
     REPORT_RECIPIENTS_ACTUAL: z.string().optional(),
@@ -35,7 +34,6 @@ export const env = createEnv({
     RESEND_API_KEY: process.env.RESEND_API_KEY,
     RESEND_EMAIL_FROM: process.env.RESEND_EMAIL_FROM,
     RESEND_EMAIL_TO: process.env.RESEND_EMAIL_TO,
-    RESEND_USERNAME: process.env.RESEND_USERNAME,
 
     REPORT_RECIPIENTS_PLANNED: process.env.REPORT_RECIPIENTS_PLANNED,
     REPORT_RECIPIENTS_ACTUAL: process.env.REPORT_RECIPIENTS_ACTUAL,

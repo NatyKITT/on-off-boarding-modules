@@ -9,6 +9,29 @@ const resend = process.env.RESEND_API_KEY
   ? new Resend(process.env.RESEND_API_KEY)
   : null
 
+function buildFromAddress(raw: string | undefined | null): string | null {
+  if (!raw) return null
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+
+  if (trimmed.includes("<") && trimmed.includes(">")) {
+    return trimmed
+  }
+
+  return `On-Off-Boarding <${trimmed}>`
+}
+
+const DEFAULT_FROM =
+  buildFromAddress(process.env.RESEND_EMAIL_FROM) ??
+  buildFromAddress(process.env.EMAIL_FROM) ??
+  null
+
+if (!DEFAULT_FROM) {
+  console.warn(
+    "⚠️ Není nastavená proměnná RESEND_EMAIL_FROM/EMAIL_FROM – e-maily nepůjde korektně odeslat (chybí FROM)."
+  )
+}
+
 export type EmailRecord = {
   id: number
   type: "onboarding" | "offboarding"
@@ -28,8 +51,12 @@ export async function sendMail(params: {
   html: string
   from?: string
 }): Promise<void> {
-  const toClean = Array.from(new Set((params.to ?? []).filter(Boolean)))
-  const bccClean = Array.from(new Set((params.bcc ?? []).filter(Boolean)))
+  const toClean = Array.from(
+    new Set((params.to ?? []).map((v) => v?.trim()).filter(Boolean))
+  )
+  const bccClean = Array.from(
+    new Set((params.bcc ?? []).map((v) => v?.trim()).filter(Boolean))
+  )
 
   if (!bccClean.length && !toClean.length) {
     throw new Error("Missing recipients")
@@ -40,8 +67,8 @@ export async function sendMail(params: {
       ? toClean
       : [
           process.env.RESEND_EMAIL_TO ??
-            process.env.RESEND_EMAIL_FROM_HR ??
             process.env.EMAIL_FROM ??
+            process.env.RESEND_EMAIL_FROM ??
             "no-reply@example.com",
         ]
 
@@ -52,17 +79,33 @@ export async function sendMail(params: {
     return
   }
 
+  const fromFinal =
+    params.from && params.from.trim().length ? params.from.trim() : DEFAULT_FROM
+
+  if (!fromFinal) {
+    throw new Error(
+      "Nelze odeslat e-mail – není nastaven FROM (RESEND_EMAIL_FROM / EMAIL_FROM)."
+    )
+  }
+
   await resend.emails.send({
-    from:
-      params.from ??
-      process.env.RESEND_EMAIL_FROM_HR ??
-      process.env.EMAIL_FROM ??
-      "On-Off-Boarding <no-reply@example.com>",
+    from: fromFinal,
     to: fallbackTo,
     ...(bccClean.length ? { bcc: bccClean } : {}),
     subject: params.subject,
     html: params.html,
   })
+}
+
+export function parseRecipientsEnv(value?: string | null): string[] {
+  if (!value) return []
+
+  const cleaned = value.trim().replace(/^["']|["']$/g, "")
+
+  return cleaned
+    .split(/[;,]/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0 && part.includes("@"))
 }
 
 function kindLabels(kind: "planned" | "actual" | "all") {
@@ -92,7 +135,7 @@ function kindLabels(kind: "planned" | "actual" | "all") {
 
 function formatName(
   r: Pick<EmailRecord, "name" | "surname" | "titleBefore" | "titleAfter">
-) {
+): string {
   const parts: string[] = []
   if (r.titleBefore) parts.push(r.titleBefore)
   parts.push(r.name, r.surname)
@@ -105,6 +148,12 @@ function fmtDate(d: string | Date | null | undefined): string {
   const dt = typeof d === "string" ? new Date(d) : d
   if (Number.isNaN(dt.getTime())) return "—"
   return format(dt, "dd.MM.yyyy")
+}
+
+export function buildMonthlyReportSubject(month: string): string {
+  const baseDate = new Date(`${month}-01T00:00:00`)
+  const monthLabel = format(baseDate, "LLLL yyyy", { locale: cs })
+  return `Přehled personálních změn – ${monthLabel}`
 }
 
 export async function renderMonthlyReportHtml(args: {
@@ -120,7 +169,7 @@ export async function renderMonthlyReportHtml(args: {
   const onboardings = records.filter((r) => r.type === "onboarding")
   const offboardings = records.filter((r) => r.type === "offboarding")
 
-  const { subtitle, onboardingDateHeader, offboardingDateHeader, badge } =
+  const { onboardingDateHeader, offboardingDateHeader, badge } =
     kindLabels(kind)
 
   const primary = "#00847C"
@@ -130,9 +179,9 @@ export async function renderMonthlyReportHtml(args: {
     body {
       margin: 0;
       padding: 24px 12px;
-      background: #f5f5f5;
+      background: #E5F5F2;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      color: #111827;
+      color: #082B2A;
     }
     .wrapper {
       max-width: 840px;
@@ -141,24 +190,27 @@ export async function renderMonthlyReportHtml(args: {
     .card {
       background: #ffffff;
       border-radius: 12px;
-      border: 1px solid #e5e7eb;
+      border: 1px solid #d1e7e2;
       overflow: hidden;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.04);
     }
     .header {
-      padding: 18px 24px;
+      padding: 16px 24px 14px;
       background: ${primary};
       color: #ffffff;
-      border-bottom: 1px solid #e5e7eb;
+      border-bottom: 1px solid rgba(0,0,0,0.05);
+    }
+    .header-eyebrow {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      opacity: 0.9;
+      margin-bottom: 4px;
     }
     .header-title {
       font-size: 20px;
       font-weight: 700;
-      margin-bottom: 4px;
-    }
-    .header-subtitle {
-      font-size: 13px;
-      opacity: 0.95;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
     .header-badges {
       display: flex;
@@ -170,16 +222,17 @@ export async function renderMonthlyReportHtml(args: {
       border-radius: 999px;
       border: 1px solid rgba(255,255,255,0.9);
     }
+    .intro {
+      padding: 14px 24px 16px;
+      background: #E5F5F2;
+      font-size: 13px;
+      line-height: 1.6;
+      border-bottom: 1px solid #d1e7e2;
+    }
     .content {
       padding: 20px 24px 24px;
       font-size: 13px;
-    }
-    .intro {
-      margin-bottom: 18px;
-      line-height: 1.6;
-    }
-    .intro p + p {
-      margin-top: 6px;
+      background: #ffffff;
     }
     h2.section-title {
       margin-top: 18px;
@@ -245,25 +298,68 @@ export async function renderMonthlyReportHtml(args: {
     }
     .footer {
       padding: 14px 24px 16px;
-      border-top: 1px solid #e5e7eb;
-      background: #f9fafb;
+      border-top: 1px solid #d1e7e2;
+      background: #E5F5F2;
       font-size: 11px;
-      color: #6b7280;
+      color: #4b5563;
     }
+
+    /* Dark mode – tam kde to klient podporuje */
+    @media (prefers-color-scheme: dark) {
+      body {
+        background: #020617;
+        color: #E5F4F2;
+      }
+      .card {
+        background: #020617;
+        border-color: #0f172a;
+        box-shadow: 0 12px 24px rgba(0,0,0,0.6);
+      }
+      .intro {
+        background: #022C22;
+        border-bottom-color: #064E3B;
+      }
+      .content {
+        background: transparent;
+      }
+      h2.section-title {
+        color: #E5F4F2;
+      }
+      .section-note {
+        color: #9ca3af;
+      }
+      th, td {
+        border-bottom-color: #1f2937;
+      }
+      tbody tr:nth-child(even) td {
+        background: #02081f;
+      }
+      .email-cell,
+      .date-cell {
+        color: #d1d5db;
+      }
+      .empty {
+        background: #020617;
+        border-color: #374151;
+        color: #9ca3af;
+      }
+      .footer {
+        background: #022C22;
+        border-top-color: #064E3B;
+        color: #9ca3af;
+      }
+    }
+
     @media (max-width: 600px) {
       body { padding: 16px 8px; }
-      .header, .content, .footer { padding-left: 16px; padding-right: 16px; }
+      .header, .intro, .content, .footer {
+        padding-left: 16px;
+        padding-right: 16px;
+      }
       table { font-size: 11px; }
       th, td { padding: 7px 6px; }
     }
   `
-
-  const kindSentence =
-    kind === "planned"
-      ? "přehled plánovaných nástupů a ukončení pracovního poměru"
-      : kind === "actual"
-        ? "přehled skutečných nástupů a ukončení pracovního poměru"
-        : "přehled plánovaných i skutečných nástupů a ukončení pracovního poměru"
 
   const renderTable = (rows: EmailRecord[], dateHeader: string): string => {
     if (!rows.length) return ""
@@ -302,31 +398,36 @@ export async function renderMonthlyReportHtml(args: {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Personální změny – ${monthLabel}</title>
+    <meta name="color-scheme" content="light dark" />
+    <meta name="supported-color-schemes" content="light dark" />
+    <title>Přehled personálních změn – ${monthLabel}</title>
     <style>${css}</style>
   </head>
   <body>
     <div class="wrapper">
       <div class="card">
         <div class="header">
-          <div class="header-title">Personální změny – ${monthLabel}</div>
-          <div class="header-subtitle">${subtitle}</div>
+          <div class="header-eyebrow">Personální změny</div>
+          <div class="header-title">Přehled personálních změn – ${monthLabel}</div>
           <div class="header-badges">
             <span class="badge">${monthLabel}</span>
             <span class="badge">${badge}</span>
           </div>
         </div>
-        <div class="content">
-          <div class="intro">
-            <p>Vážená paní, vážený pane,</p>
-            <p>tento e-mail obsahuje ${kindSentence} zaměstnanců Úřadu MČ Praha&nbsp;6 za měsíc <strong>${monthLabel}</strong>.</p>
-          </div>
 
+        <div class="intro">
+          Vážené kolegyně, vážení kolegové, přinášíme vám aktuální informace
+          o vzniku a ukončení pracovních poměrů v měsíci <strong>${monthLabel}</strong>.
+        </div>
+
+        <div class="content">
           ${
             onboardings.length
               ? `
                 <h2 class="section-title">Nástupy</h2>
-                <div class="section-note">Seznam zaměstnanců s nástupem v daném měsíci.</div>
+                <div class="section-note">
+                  Seznam zaměstnanců s nástupem v daném měsíci.
+                </div>
                 ${renderTable(onboardings, onboardingDateHeader)}
               `
               : ""
@@ -336,7 +437,9 @@ export async function renderMonthlyReportHtml(args: {
             offboardings.length
               ? `
                 <h2 class="section-title">Odchody</h2>
-                <div class="section-note">Seznam zaměstnanců s ukončením pracovního poměru v daném měsíci.</div>
+                <div class="section-note">
+                  Seznam zaměstnanců s ukončením pracovního poměru v daném měsíci.
+                </div>
                 ${renderTable(offboardings, offboardingDateHeader)}
               `
               : ""
@@ -344,10 +447,13 @@ export async function renderMonthlyReportHtml(args: {
 
           ${
             !onboardings.length && !offboardings.length
-              ? `<div class="empty">Pro vybraný měsíc nejsou evidovány žádné personální změny.</div>`
+              ? `<div class="empty">
+                  Pro vybraný měsíc nejsou evidovány žádné personální změny.
+                </div>`
               : ""
           }
         </div>
+
         <div class="footer">
           Tento e-mail byl automaticky vygenerován systémem On-Off-Boarding ÚMČ Praha&nbsp;6.
           Neodpovídejte prosím na tento e-mail – v případě dotazů kontaktujte personální oddělení.

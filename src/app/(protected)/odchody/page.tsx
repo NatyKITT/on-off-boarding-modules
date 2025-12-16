@@ -13,8 +13,8 @@ import {
   ChevronRight,
   Clock,
   Edit,
+  FileText,
   History as HistoryIcon,
-  Printer,
   Trash2,
   User,
   XCircle,
@@ -47,6 +47,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ExitChecklistDialog } from "@/components/common/exit-checklist-dialog"
 import { MonthlyReportLauncher } from "@/components/emails/monthly-report-launcher"
 import { SendEmailButton } from "@/components/emails/send-email-button"
 import {
@@ -249,6 +250,7 @@ interface DepartureTableRowProps {
   onConfirm?: () => void
   onDelete: () => void
   onReload: () => Promise<void>
+  onOpenExitChecklist: () => void
 }
 
 const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
@@ -258,6 +260,7 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
   onConfirm,
   onDelete,
   onReload,
+  onOpenExitChecklist,
 }) => {
   const fullName = [
     departure.titleBefore,
@@ -359,16 +362,10 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
           <Button
             size="sm"
             variant="outline"
-            onClick={() =>
-              window.open(
-                `/api/odchody/${departure.id}/vystupni-list`,
-                "_blank",
-                "noopener,noreferrer"
-              )
-            }
-            title="Tisk výstupního listu"
+            onClick={onOpenExitChecklist}
+            title="Výstupní list"
           >
-            <Printer className="size-4" />
+            <FileText className="size-4" />
           </Button>
 
           <SendEmailButton
@@ -457,6 +454,10 @@ export default function OffboardingPage() {
     message: "",
   })
 
+  const [openExitChecklistId, setOpenExitChecklistId] = useState<number | null>(
+    null
+  )
+
   const qpMode = sp.get("new") as "create-planned" | "create-actual" | null
   const qpDate = sp.get("date") || undefined
 
@@ -529,6 +530,17 @@ export default function OffboardingPage() {
     if (qpMode === "create-actual") setOpenNewActual(true)
     else setOpenNewPlanned(true)
   }, [qpMode])
+
+  useEffect(() => {
+    const handler = () => {
+      setOpenExitChecklistId(null)
+    }
+
+    window.addEventListener("exit-checklist:close", handler)
+    return () => {
+      window.removeEventListener("exit-checklist:close", handler)
+    }
+  }, [])
 
   useEffect(() => {
     const handler = () => void reload()
@@ -859,6 +871,9 @@ export default function OffboardingPage() {
                                               void handleDelete(e)
                                             }
                                             onReload={reload}
+                                            onOpenExitChecklist={() =>
+                                              setOpenExitChecklistId(e.id)
+                                            }
                                           />
                                         ))}
                                       </TableBody>
@@ -1031,6 +1046,9 @@ export default function OffboardingPage() {
                                               void handleDelete(e)
                                             }
                                             onReload={reload}
+                                            onOpenExitChecklist={() =>
+                                              setOpenExitChecklistId(e.id)
+                                            }
                                           />
                                         ))}
                                       </TableBody>
@@ -1227,6 +1245,10 @@ export default function OffboardingPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {openExitChecklistId != null && (
+        <ExitChecklistDialog offboardingId={openExitChecklistId} open={true} />
+      )}
 
       <SuccessModal
         open={successModal.open}

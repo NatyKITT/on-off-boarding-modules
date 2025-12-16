@@ -1,9 +1,11 @@
+import Image from "next/image"
 import { redirect } from "next/navigation"
+
+import { siteConfig } from "@/config/site"
 
 import { getSession } from "@/lib/session"
 
 import { OAuthButtons } from "@/components/auth/oauth-buttons"
-import { Icons } from "@/components/shared/icons"
 
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
@@ -16,29 +18,36 @@ export default async function SignInPage() {
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center px-4">
-      <div className="w-full max-w-sm">
+    <div className="relative flex min-h-screen items-center justify-center bg-gradient-to-b from-background via-background to-muted/60 px-4">
+      <div className="w-full max-w-md">
         <div className="mb-8 flex flex-col items-center text-center">
-          <Icons.logo className="mb-3 size-10" />
-          <h1 className="text-3xl font-semibold tracking-tight">Vítejte</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
+          <Image
+            src="/assets/icons/onboarding.svg"
+            alt={`${siteConfig.name} logo`}
+            width={120}
+            height={120}
+            className="mb-4 h-16 w-auto sm:h-20"
+            priority
+          />
+
+          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+            Přihlášení do systému
+          </h1>
+          <p className="mt-2 max-w-xs text-sm text-muted-foreground">
             Přihlaste se pomocí účtu Google{" "}
-            <span className="font-mono">@kitt6.cz</span> nebo{" "}
             <span className="font-mono">@praha6.cz</span>
           </p>
         </div>
 
-        <div className="relative">
-          <div className="pointer-events-none absolute -inset-0.5 -z-10 rounded-2xl bg-gradient-to-r from-[#00A86B] via-[#19B278] to-[#2E7D32] opacity-35 blur-md" />
-          <div className="rounded-2xl bg-gradient-to-r from-[#00A86B] via-[#19B278] to-[#2E7D32] p-px">
-            <div className="rounded-2xl border bg-card p-4 shadow-sm sm:p-5">
-              <OAuthButtons />
-            </div>
+        <div className="rounded-2xl border border-emerald-500/30 bg-card/90 p-px shadow-md backdrop-blur">
+          <div className="rounded-2xl bg-card p-4 sm:p-5">
+            <OAuthButtons />
           </div>
         </div>
 
         <p className="mt-6 text-center text-xs text-muted-foreground">
-          Nemáte přístup? Kontaktujte správce.
+          Nemáte přístup?{" "}
+          <span className="font-medium">Kontaktujte správce.</span>
         </p>
       </div>
     </div>

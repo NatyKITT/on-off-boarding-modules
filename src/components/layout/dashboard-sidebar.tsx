@@ -1,12 +1,11 @@
 "use client"
 
 import { Fragment, useEffect, useState } from "react"
+import Image from "next/image"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { SidebarNavItem } from "@/types"
 import { Menu, PanelLeftClose, PanelRightClose } from "lucide-react"
-
-import { siteConfig } from "@/config/site"
 
 import { useMediaQuery } from "@/hooks/use-media-query"
 import { cn } from "@/lib/utils"
@@ -34,7 +33,7 @@ export function DashboardSidebar({ links }: DashboardSidebarProps) {
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(!isTablet)
 
   const toggleSidebar = () => {
-    setIsSidebarExpanded(!isSidebarExpanded)
+    setIsSidebarExpanded((prev) => !prev)
   }
 
   useEffect(() => {
@@ -52,12 +51,22 @@ export function DashboardSidebar({ links }: DashboardSidebarProps) {
             )}
           >
             <div className="flex h-full max-h-screen flex-1 flex-col gap-2">
-              <div className="flex h-14 items-center p-4 lg:h-[60px]">
-                {isSidebarExpanded ? (
-                  <span className="text-sm font-semibold text-muted-foreground">
-                    {siteConfig.name}
-                  </span>
-                ) : null}
+              <div className="flex h-14 items-center gap-2 p-4 lg:h-[60px]">
+                <Link
+                  href="/prehled"
+                  prefetch={false}
+                  className="flex items-center gap-2"
+                >
+                  {isSidebarExpanded && (
+                    <Image
+                      src="/assets/icons/onboarding.svg"
+                      alt="On-Off-Boarding modul"
+                      width={140}
+                      height={36}
+                      className="h-8 w-auto"
+                    />
+                  )}
+                </Link>
 
                 <Button
                   variant="ghost"
@@ -191,10 +200,13 @@ export function MobileSheetSidebar({ links }: DashboardSidebarProps) {
             <div className="flex h-screen flex-col">
               <nav className="flex flex-1 flex-col gap-y-8 p-6 text-lg font-medium">
                 <div className="flex items-center gap-2 text-lg font-semibold">
-                  <Icons.logo className="size-6" />
-                  <span className="font-satoshi text-lg font-bold">
-                    {siteConfig.name}
-                  </span>
+                  <Image
+                    src="/assets/icons/onboarding.svg"
+                    alt="On-Off-Boarding modul"
+                    width={140}
+                    height={6}
+                    className="h-8 w-auto"
+                  />
                 </div>
 
                 {links.map((section) => (

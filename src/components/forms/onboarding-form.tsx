@@ -112,6 +112,18 @@ type SearchablePosition = Position & {
   _hay: string
 }
 
+type OnboardingRowForMeta = {
+  personalNumber?: string | null
+  titleBefore?: string | null
+  name?: string | null
+  surname?: string | null
+  titleAfter?: string | null
+}
+
+type OnboardingPayload = Record<string, unknown> & {
+  generatedSkippedPersonalNumbers?: string[]
+}
+
 const nullIfEmpty = (v?: string | null) =>
   v == null || String(v).trim() === "" ? null : v
 const ensure = (v?: string | null, fb = "NEUVEDENO") => (v ?? "").trim() || fb
@@ -182,6 +194,108 @@ const computeSkippedPersonalNumbers = (
     res.push(n.toString().padStart(padLen, "0"))
   }
   return res
+}
+
+const getBaselineLastPersonalNumber = (meta?: PersonalNumberMeta): string => {
+  if (!meta) return ""
+  const candidates: string[] = []
+
+  if (meta.lastUsedNumber && meta.lastUsedNumber.trim()) {
+    candidates.push(meta.lastUsedNumber.trim())
+  }
+  if (meta.lastDc2Number && meta.lastDc2Number.trim()) {
+    candidates.push(meta.lastDc2Number.trim())
+  }
+  if (!candidates.length) return ""
+
+  let best = candidates[0]
+  let bestNum = /^\d+$/.test(best) ? parseInt(best, 10) : NaN
+
+  for (const cand of candidates.slice(1)) {
+    const c = cand.trim()
+    if (!c) continue
+
+    if (!/^\d+$/.test(c)) {
+      if (Number.isNaN(bestNum)) {
+        best = c
+      }
+      continue
+    }
+
+    const n = parseInt(c, 10)
+    if (Number.isNaN(bestNum) || n > bestNum) {
+      best = c
+      bestNum = n
+    }
+  }
+
+  return best
+}
+
+function buildPersonalNumberMetaFromOnboardings(
+  rows: OnboardingRowForMeta[],
+  base?: PersonalNumberMeta
+): PersonalNumberMeta {
+  const parsed: { num: number; raw: string; fullName: string }[] = []
+
+  for (const r of rows) {
+    const raw = (r.personalNumber ?? "").trim()
+    if (!raw) continue
+    const match = raw.match(/\d+/)
+    if (!match) continue
+    const n = Number(match[0])
+    if (!Number.isFinite(n)) continue
+
+    const fullName =
+      `${r.titleBefore ?? ""} ${r.name ?? ""} ${r.surname ?? ""} ${r.titleAfter ?? ""}`
+        .replace(/\s+/g, " ")
+        .trim()
+
+    parsed.push({ num: n, raw, fullName })
+  }
+
+  const baseMeta: PersonalNumberMeta = {
+    lastUsedNumber: base?.lastUsedNumber ?? null,
+    lastUsedName: base?.lastUsedName ?? null,
+    skippedNumbers: base?.skippedNumbers ?? [],
+    lastDc2Number: base?.lastDc2Number ?? null,
+    lastDc2AssignedTo: base?.lastDc2AssignedTo ?? null,
+  }
+
+  if (!parsed.length) {
+    return baseMeta
+  }
+
+  parsed.sort((a, b) => a.num - b.num)
+  const first = parsed[0]!
+  const last = parsed[parsed.length - 1]!
+
+  const usedSet = new Set(parsed.map((p) => p.num))
+  const padLen = Math.max(last.raw.length, baseMeta.lastUsedNumber?.length ?? 0)
+
+  const computedSkipped: string[] = []
+  for (let n = first.num + 1; n < last.num; n++) {
+    if (!usedSet.has(n)) {
+      computedSkipped.push(n.toString().padStart(padLen, "0"))
+    }
+  }
+
+  const unionSkipped = new Set<string>(baseMeta.skippedNumbers ?? [])
+  for (const n of computedSkipped) unionSkipped.add(n)
+
+  const sortedSkipped = Array.from(unionSkipped).sort((a, b) => {
+    const na = parseInt(a, 10)
+    const nb = parseInt(b, 10)
+    if (Number.isNaN(na) || Number.isNaN(nb)) return a.localeCompare(b)
+    return na - nb
+  })
+
+  return {
+    ...baseMeta,
+    lastUsedNumber: last.raw,
+    lastUsedName: last.fullName || baseMeta.lastUsedName || null,
+    skippedNumbers: sortedSkipped,
+  }
 }
 
 const baseSchema = z.object({
@@ -268,11 +382,52 @@ export function OnboardingFormUnified({
     [effectiveMode, editContext]
   )
 
+  const [resolvedPersonalMeta, setResolvedPersonalMeta] = useState<
+    PersonalNumberMeta | undefined
+  >(personalNumberMeta)
+
+  useEffect(() => {
+    setResolvedPersonalMeta(personalNumberMeta)
+  }, [personalNumberMeta])
+
+  useEffect(() => {
+    if (personalNumberMeta && personalNumberMeta.skippedNumbers?.length) {
+      return
+    }
+
+    let cancelled = false
+
+    ;(async () => {
+      try {
+        const res = await fetch("/api/nastupy", { cache: "no-store" })
+        if (!res.ok) return
+        const json = await res.json().catch(() => null)
+        const rows: OnboardingRowForMeta[] = Array.isArray(json?.data)
+          ? json.data
+          : []
+
+        const computed = buildPersonalNumberMetaFromOnboardings(
+          rows,
+          personalNumberMeta
+        )
+        if (!cancelled) {
+          setResolvedPersonalMeta(computed)
+        }
+      } catch (e) {
+        console.error("Nepodařilo se načíst osobní čísla pro meta:", e)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [personalNumberMeta])
+
   const suggestedPersonalNumber = useMemo(() => {
-    const last = personalNumberMeta?.lastUsedNumber ?? ""
+    const last = getBaselineLastPersonalNumber(resolvedPersonalMeta)
     if (!last.trim()) return ""
     return incrementPersonalNumber(last)
-  }, [personalNumberMeta?.lastUsedNumber])
+  }, [resolvedPersonalMeta])
 
   const inferredManualFlag = useMemo(
     () => inferManualDates(initial, isActualMode),
@@ -302,6 +457,12 @@ export function OnboardingFormUnified({
   const [searchQuery, setSearchQuery] = useState("")
 
   const [skippedOpen, setSkippedOpen] = useState(false)
+
+  const [skippedNumbersState, setSkippedNumbersState] = useState<string[]>([])
+
+  useEffect(() => {
+    setSkippedNumbersState(resolvedPersonalMeta?.skippedNumbers ?? [])
+  }, [resolvedPersonalMeta])
 
   type PersonalCheckState =
     | { status: "idle" }
@@ -568,6 +729,8 @@ export function OnboardingFormUnified({
 
   async function onSubmit(values: FormValues) {
     try {
+      let newlySkipped: string[] = []
+
       if (isActualMode) {
         const pn = (values.personalNumber ?? "").trim()
         if (!pn) {
@@ -589,7 +752,7 @@ export function OnboardingFormUnified({
       const safeDepartment = ensure(values.department, "(doplnit)")
       const safeUnitName = ensure(values.unitName, "(doplnit)")
 
-      const payload: Record<string, unknown> = {
+      const payload: OnboardingPayload = {
         hasCustomDates: manualDates,
         titleBefore: nullIfEmpty(values.titleBefore),
         titleAfter: nullIfEmpty(values.titleAfter),
@@ -609,8 +772,9 @@ export function OnboardingFormUnified({
       }
 
       if (isActualMode) {
-        const newlySkipped = computeSkippedPersonalNumbers(
-          personalNumberMeta?.lastUsedNumber,
+        const baselineLast = getBaselineLastPersonalNumber(resolvedPersonalMeta)
+        newlySkipped = computeSkippedPersonalNumbers(
+          baselineLast,
           values.personalNumber
         )
         if (newlySkipped.length > 0) {
@@ -636,6 +800,20 @@ export function OnboardingFormUnified({
       })
       const json = await res.json().catch(() => null)
       if (!res.ok) throw new Error(json?.message ?? "Operace se nezdařila.")
+
+      if (isActualMode && newlySkipped.length > 0) {
+        setSkippedNumbersState((prev) => {
+          const set = new Set([...(prev ?? []), ...newlySkipped])
+          const arr = Array.from(set)
+          arr.sort((a, b) => {
+            const na = parseInt(a, 10)
+            const nb = parseInt(b, 10)
+            if (Number.isNaN(na) || Number.isNaN(nb)) return a.localeCompare(b)
+            return na - nb
+          })
+          return arr
+        })
+      }
 
       const fullName = `${values.name} ${values.surname}`
       setSuccessModal({
@@ -999,52 +1177,56 @@ export function OnboardingFormUnified({
                             <span className="text-destructive"> *</span>
                           )}
                         </FormLabel>
-                        {personalNumberMeta?.skippedNumbers &&
-                          personalNumberMeta.skippedNumbers.length > 0 && (
-                            <Popover
-                              open={skippedOpen}
-                              onOpenChange={setSkippedOpen}
-                            >
-                              <PopoverTrigger asChild>
-                                <button
-                                  type="button"
-                                  className="inline-flex items-center gap-1 rounded-md border border-input bg-background px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
-                                >
-                                  <ListChecks className="size-3" />
-                                  Přeskočená čísla
-                                </button>
-                              </PopoverTrigger>
-                              <PopoverContent
-                                className="w-72 p-3"
-                                align="end"
-                                sideOffset={4}
-                                onOpenAutoFocus={(e) => e.preventDefault()}
+                        {skippedNumbersState.length > 0 && (
+                          <Popover
+                            open={skippedOpen}
+                            onOpenChange={setSkippedOpen}
+                          >
+                            <PopoverTrigger asChild>
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 rounded-md border border-input bg-background px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
                               >
-                                <p className="text-xs text-muted-foreground">
-                                  Osobní čísla, která byla přeskočena a dosud
-                                  nejsou využita. Kliknutím číslo použijete.
-                                </p>
-                                <div className="mt-2 flex flex-wrap gap-2">
-                                  {personalNumberMeta.skippedNumbers.map(
-                                    (num) => (
-                                      <button
-                                        key={num}
-                                        type="button"
-                                        className="rounded bg-muted px-2 py-1 font-mono text-xs hover:bg-muted/80"
-                                        onClick={() => {
-                                          field.onChange(num)
-                                          void checkPersonalNumber(num)
-                                          setSkippedOpen(false)
-                                        }}
-                                      >
-                                        {num}
-                                      </button>
-                                    )
-                                  )}
+                                <ListChecks className="size-3" />
+                                Přeskočená čísla
+                              </button>
+                            </PopoverTrigger>
+                            <PopoverContent
+                              className="w-72 p-3"
+                              align="end"
+                              sideOffset={4}
+                              onOpenAutoFocus={(e) => e.preventDefault()}
+                              onWheelCapture={(e) => e.stopPropagation()}
+                            >
+                              <p className="text-xs text-muted-foreground">
+                                Osobní čísla, která byla přeskočena a dosud
+                                nejsou využita. Kliknutím číslo použijete.
+                              </p>
+
+                              <div className="mt-2 max-h-[min(40vh,220px)] overflow-y-auto pr-1">
+                                <div className="flex flex-wrap gap-2">
+                                  {skippedNumbersState.map((num) => (
+                                    <button
+                                      key={num}
+                                      type="button"
+                                      className="rounded bg-muted px-2 py-1 font-mono text-xs hover:bg-muted/80"
+                                      onClick={() => {
+                                        form.setValue("personalNumber", num, {
+                                          shouldDirty: true,
+                                          shouldValidate: true,
+                                        })
+                                        void checkPersonalNumber(num)
+                                        setSkippedOpen(false)
+                                      }}
+                                    >
+                                      {num}
+                                    </button>
+                                  ))}
                                 </div>
-                              </PopoverContent>
-                            </Popover>
-                          )}
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        )}
                       </div>
                       <FormControl>
                         <Input
@@ -1066,15 +1248,15 @@ export function OnboardingFormUnified({
                         {isActualMode ? (
                           <>
                             Povinné u skutečného nástupu.
-                            {personalNumberMeta?.lastUsedNumber && (
+                            {resolvedPersonalMeta?.lastUsedNumber && (
                               <>
                                 {" "}
                                 Poslední použité číslo:{" "}
                                 <span className="font-mono font-semibold">
-                                  {personalNumberMeta.lastUsedNumber}
+                                  {resolvedPersonalMeta.lastUsedNumber}
                                 </span>
-                                {personalNumberMeta.lastUsedName && (
-                                  <> – {personalNumberMeta.lastUsedName}</>
+                                {resolvedPersonalMeta.lastUsedName && (
+                                  <> – {resolvedPersonalMeta.lastUsedName}</>
                                 )}
                               </>
                             )}
@@ -1092,15 +1274,15 @@ export function OnboardingFormUnified({
                         ) : (
                           <>
                             Nepovinné – lze doplnit později.
-                            {personalNumberMeta?.lastUsedNumber && (
+                            {resolvedPersonalMeta?.lastUsedNumber && (
                               <>
                                 {" "}
                                 Poslední použité číslo:{" "}
                                 <span className="font-mono font-semibold">
-                                  {personalNumberMeta.lastUsedNumber}
+                                  {resolvedPersonalMeta.lastUsedNumber}
                                 </span>
-                                {personalNumberMeta.lastUsedName && (
-                                  <> – {personalNumberMeta.lastUsedName}</>
+                                {resolvedPersonalMeta.lastUsedName && (
+                                  <> – {resolvedPersonalMeta.lastUsedName}</>
                                 )}
                               </>
                             )}
@@ -1118,15 +1300,15 @@ export function OnboardingFormUnified({
                         )}{" "}
                         Obvykle 4 číslice (např.{" "}
                         <span className="font-mono">0123</span>).
-                        {personalNumberMeta?.lastDc2Number &&
-                          personalNumberMeta.lastDc2AssignedTo && (
+                        {resolvedPersonalMeta?.lastDc2Number &&
+                          resolvedPersonalMeta.lastDc2AssignedTo && (
                             <>
                               {" "}
                               (Poslední číslo v DC2:{" "}
                               <span className="font-mono">
-                                {personalNumberMeta.lastDc2Number}
+                                {resolvedPersonalMeta.lastDc2Number}
                               </span>{" "}
-                              – {personalNumberMeta.lastDc2AssignedTo}.)
+                              – {resolvedPersonalMeta.lastDc2AssignedTo}.)
                             </>
                           )}
                       </FormDescription>

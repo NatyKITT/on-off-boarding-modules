@@ -1,6 +1,7 @@
 "use client"
 
 import { Dispatch, SetStateAction, useCallback, useMemo, useState } from "react"
+import Image from "next/image"
 import { signIn } from "next-auth/react"
 
 import { siteConfig } from "@/config/site"
@@ -44,7 +45,14 @@ function SignInModal({
       <div className="w-full">
         <div className="flex flex-col items-center justify-center space-y-3 border-b bg-background px-4 py-6 pt-8 text-center md:px-16">
           <a href={siteConfig.url}>
-            <Icons.logo className="size-10" />
+            <Image
+              src="/assets/icons/onboarding.svg"
+              alt={`${siteConfig.name} logo`}
+              width={40}
+              height={40}
+              className="h-10 w-auto"
+              priority
+            />
           </a>
           <h3 className="font-satoshi text-2xl font-black">Přihlášení</h3>
           <p className="text-sm text-muted-foreground">

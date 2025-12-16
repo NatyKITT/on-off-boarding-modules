@@ -1,6 +1,6 @@
-# Modul pro nástupy a odchody zaměstnanců (KITT6)
+# Modul pro nástupy a odchody zaměstnanců (Praha6 a KITT6)
 
-Interní aplikace pro správu onboarding a offboarding procesů ve veřejné správě pro KITT6 rganizaci. Umožňuje efektivní spolupráci mezi HR, IT a vedením při zajištění nástupu nebo odchodu zaměstnanců.
+Interní aplikace pro správu onboarding a offboarding procesů ve veřejné správě pro MÚ pro Prahu 6 a příspěvkovou organizaci KITT6. Umožňuje efektivní spolupráci mezi HR, IT a vedením při zajištění nástupu nebo odchodu zaměstnanců.
 
 ## 🔧 Technologie
 

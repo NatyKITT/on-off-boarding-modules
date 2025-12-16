@@ -60,6 +60,34 @@ enum ActionType {
   NOTICE_REMINDER_SENT
 }
 
+enum PersonalNumberStatus {
+  SKIPPED
+  USED
+}
+
+enum EmploymentDocumentType {
+  AFFIDAVIT
+  PERSONAL_QUESTIONNAIRE
+  EDUCATION
+  EXPERIENCE
+}
+
+enum OffboardingDocumentType {
+  EXIT_CHECKLIST
+}
+
+enum DocumentStatus {
+  DRAFT
+  COMPLETED
+  SIGNED
+}
+
+enum ChecklistResolution {
+  YES
+  NO
+  NOT_APPLICABLE
+}
+
 model User {
   id             String    @id @default(cuid())
   name           String?
@@ -71,10 +99,11 @@ model User {
   role           Role      @default(USER)
   createdAt      DateTime  @default(now()) @map("created_at")
 
-  accounts     Account[]
-  sessions     Session[]
-  onboardings  EmployeeOnboarding[]
-  offboardings EmployeeOffboarding[]
+  accounts      Account[]
+  sessions      Session[]
+  onboardings   EmployeeOnboarding[]
+  offboardings  EmployeeOffboarding[]
+  ExitChecklist ExitChecklist[]
 
   @@map("users")
 }
@@ -156,11 +185,6 @@ model EmployeeOnboarding {
   @@index([probationEnd])
 }
 
-enum PersonalNumberStatus {
-  SKIPPED
-  USED
-}
-
 model PersonalNumberGap {
   id        Int                  @id @default(autoincrement())
   number    String               @unique
@@ -204,6 +228,8 @@ model EmployeeOffboarding {
 
   OffboardingChangeLog OffboardingChangeLog[]
   EmailHistory         EmailHistory[]
+  documents            OffboardingDocument[]
+  exitChecklist        ExitChecklist?
 
   @@index([plannedEnd])
   @@index([actualEnd])
@@ -336,19 +362,6 @@ model SystemSettings {
   @@index([key])
 }
 
-enum EmploymentDocumentType {
-  AFFIDAVIT
-  PERSONAL_QUESTIONNAIRE
-  EDUCATION
-  EXPERIENCE
-}
-
-enum DocumentStatus {
-  DRAFT
-  COMPLETED
-  SIGNED
-}
-
 model EmploymentDocument {
   id           Int                    @id @default(autoincrement())
   isLocked     Boolean                @default(false)
@@ -368,4 +381,86 @@ model EmploymentDocument {
   @@unique([onboardingId, type])
   @@index([onboardingId])
   @@index([type])
+}
+
+model OffboardingDocument {
+  id       Int     @id @default(autoincrement())
+  isLocked Boolean @default(false)
+
+  offboardingId Int
+  offboarding   EmployeeOffboarding @relation(fields: [offboardingId], references: [id])
+
+  type        OffboardingDocumentType
+  status      DocumentStatus          @default(DRAFT)
+  data        Json
+  fileUrl     String?
+  accessHash  String                  @unique @default(cuid()) @map("access_hash")
+  expiresAt   DateTime?               @map("expires_at")
+  completedAt DateTime?               @map("completed_at")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([offboardingId, type])
+  @@index([offboardingId])
+  @@index([type])
+}
+
+model ExitChecklist {
+  id Int @id @default(autoincrement())
+
+  offboardingId Int                 @unique
+  offboarding   EmployeeOffboarding @relation(fields: [offboardingId], references: [id])
+
+  header Json
+
+  lockedAt   DateTime?
+  lockedById String?
+  lockedBy   User?     @relation(fields: [lockedById], references: [id])
+
+  items  ExitChecklistItem[]
+  assets ExitChecklistAsset[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([offboardingId])
+}
+
+model ExitChecklistItem {
+  id          Int           @id @default(autoincrement())
+  checklistId Int
+  checklist   ExitChecklist @relation(fields: [checklistId], references: [id])
+
+  key        String
+  department String
+  label      String
+  order      Int
+
+  resolution ChecklistResolution @default(NOT_APPLICABLE)
+
+  signedById    String?
+  signedByName  String?
+  signedByEmail String?
+  signedAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([checklistId, key])
+  @@index([checklistId])
+}
+
+model ExitChecklistAsset {
+  id          Int           @id @default(autoincrement())
+  checklistId Int
+  checklist   ExitChecklist @relation(fields: [checklistId], references: [id])
+
+  subject         String
+  inventoryNumber String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([checklistId])
 }

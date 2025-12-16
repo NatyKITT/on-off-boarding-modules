@@ -1,11 +1,13 @@
 "use client"
 
 import { useCallback, useEffect, useId, useState } from "react"
+import Image from "next/image"
 import Link from "next/link"
 import { Menu, X } from "lucide-react"
 import { signIn, useSession } from "next-auth/react"
 
 import { DEFAULT_SIGNIN_REDIRECT } from "@/config/defaults"
+import { siteConfig } from "@/config/site"
 
 import { cn } from "@/lib/utils"
 
@@ -25,7 +27,6 @@ export function NavMobile() {
   }, [open])
 
   const close = useCallback(() => setOpen(false), [])
-
   const handleSignIn = useCallback(() => {
     void signIn("google", { callbackUrl: DEFAULT_SIGNIN_REDIRECT })
     setOpen(false)
@@ -58,6 +59,28 @@ export function NavMobile() {
           open && "block"
         )}
       >
+        <div className="mb-6 flex items-center justify-between">
+          <Link
+            href="/prehled"
+            onClick={close}
+            className="flex items-center gap-2"
+          >
+            <Image
+              src="/assets/icons/onboarding.svg"
+              alt={`${siteConfig.name} logo`}
+              width={32}
+              height={32}
+              className="h-8 w-auto"
+              priority
+            />
+            <span className="font-satoshi text-lg font-bold">
+              {siteConfig.name}
+            </span>
+          </Link>
+
+          <ModeToggle />
+        </div>
+
         <ul className="grid divide-y divide-muted">
           {session ? (
             <>
@@ -69,17 +92,6 @@ export function NavMobile() {
                     className="flex w-full font-medium capitalize"
                   >
                     Admin
-                  </Link>
-                </li>
-              )}
-              {session.user.role === "HR" && (
-                <li className="py-3">
-                  <Link
-                    href="/nastupy"
-                    onClick={close}
-                    className="flex w-full font-medium capitalize"
-                  >
-                    Nástupy
                   </Link>
                 </li>
               )}
@@ -105,10 +117,6 @@ export function NavMobile() {
             </li>
           )}
         </ul>
-
-        <div className="mt-5 flex items-center justify-end space-x-4">
-          <ModeToggle />
-        </div>
       </nav>
     </>
   )

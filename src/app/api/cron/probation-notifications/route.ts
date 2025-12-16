@@ -14,7 +14,6 @@ export async function POST() {
     const today = new Date()
     const notifications = []
 
-    // ============ ZKUŠEBNÍ DOBA - NÁSTUPY ============
     const activeEmployees = await prisma.employeeOnboarding.findMany({
       where: {
         deletedAt: null,
@@ -43,7 +42,6 @@ export async function POST() {
       const daysUntilEnd = differenceInDays(employee.probationEnd, today)
       const employeeEmail = employee.userEmail || employee.email
 
-      // Připomínky: 30, 14, 7, 3, 1 den před koncem
       const reminderDays = [30, 14, 7, 3, 1]
 
       if (reminderDays.includes(daysUntilEnd)) {
@@ -51,7 +49,6 @@ export async function POST() {
         const alreadySentToday = lastReminder && isToday(lastReminder)
 
         if (!alreadySentToday) {
-          // E-mail HR oddělení
           const hrMailId = await prisma.mailQueue.create({
             data: {
               type: "PROBATION_WARNING",
@@ -65,12 +62,11 @@ export async function POST() {
                 recipients: HR_EMAILS,
                 subject: `Zkušební doba končí za ${daysUntilEnd} dní - ${employee.name} ${employee.surname}`,
               },
-              priority: daysUntilEnd <= 3 ? 2 : 5, // Vyšší priorita blíže konci
+              priority: daysUntilEnd <= 3 ? 2 : 5,
               createdBy: "system-cron",
             },
           })
 
-          // E-mail zaměstnanci (pokud má email)
           let employeeMailId = null
           if (employeeEmail) {
             employeeMailId = await prisma.mailQueue.create({
@@ -91,7 +87,6 @@ export async function POST() {
             })
           }
 
-          // Aktualizace záznamu
           await prisma.employeeOnboarding.update({
             where: { id: employee.id },
             data: {
@@ -100,7 +95,6 @@ export async function POST() {
             },
           })
 
-          // Záznam do historie
           await prisma.emailHistory.create({
             data: {
               mailQueueId: hrMailId.id,
@@ -127,7 +121,6 @@ export async function POST() {
             })
           }
 
-          // Change log
           await prisma.onboardingChangeLog.create({
             data: {
               employeeId: employee.id,
@@ -154,7 +147,6 @@ export async function POST() {
         }
       }
 
-      // Poslední den zkušební doby
       if (isToday(employee.probationEnd)) {
         await prisma.mailQueue.create({
           data: {
@@ -181,7 +173,6 @@ export async function POST() {
       }
     }
 
-    // ============ VÝPOVĚDNÍ LHŮTA - ODCHODY ============
     const departingEmployees = await prisma.employeeOffboarding.findMany({
       where: {
         deletedAt: null,
@@ -206,7 +197,6 @@ export async function POST() {
 
       const daysUntilEnd = differenceInDays(employee.noticeEnd, today)
 
-      // Připomínky výpovědní lhůty: 14, 7, 3, 1 den před koncem
       const noticeReminderDays = [14, 7, 3, 1]
 
       if (noticeReminderDays.includes(daysUntilEnd)) {
@@ -289,14 +279,12 @@ export async function POST() {
   }
 }
 
-// GET endpoint pro náhled nadcházejících notifikací
 export async function GET() {
   try {
     const today = new Date()
     const next30Days = addDays(today, 30)
 
     const [probationEnding, noticeEnding] = await Promise.all([
-      // Zkušební doby končící v příštích 30 dnech
       prisma.employeeOnboarding.findMany({
         where: {
           deletedAt: null,
@@ -319,7 +307,6 @@ export async function GET() {
         orderBy: { probationEnd: "asc" },
       }),
 
-      // Výpovědní lhůty končící v příštích 30 dnech
       prisma.employeeOffboarding.findMany({
         where: {
           deletedAt: null,

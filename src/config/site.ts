@@ -9,7 +9,7 @@ export const siteConfig: SiteConfig = {
   description:
     "Interní aplikace pro správu nástupů a odchodů zaměstnanců v rámci KITT6. Umožňuje efektivní spolupráci mezi HR, IT a vedením při onboardingu a offboardingu.",
   url: site_url,
-  ogImage: `${site_url}/assets/og.jpg`,
+  ogImage: `${site_url}/assets/og.png`,
   author: "Tým KITT6",
   hostingRegion: "fra1",
   keywords: ["onboarding", "offboarding", "HR", "firemní nástupy", "KITT6"],

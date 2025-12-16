@@ -131,7 +131,18 @@ const TYPE_LABEL: Record<EventType, string> = {
   actualEnd: "Skutečný odchod",
 }
 
-/* ----------------------- Utils ----------------------- */
+const TYPE_LABEL_SHORT: Record<EventType, string> = {
+  plannedStart: "plán. nástup",
+  actualStart: "skut. nástup",
+  plannedEnd: "plán. odchod",
+  actualEnd: "skut. odchod",
+}
+
+const WORK_START_HOUR = 8
+const WORK_END_HOUR = 18
+const SLOT_LEN_MIN = 30
+const CLUSTER_THRESHOLD = 2
+
 const isSameDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() &&
   a.getMonth() === b.getMonth() &&
@@ -151,17 +162,23 @@ const withDefaultWorkTime = (d: Date) => {
 
 const normalizeSlotStart = (d: Date) => {
   const n = new Date(d)
-  if (n.getHours() === 0 && n.getMinutes() === 0) {
-    n.setHours(8, 0, 0, 0)
-  }
-  return roundToHalfHourFloor(n)
-}
-
-const roundToHalfHourFloor = (d: Date) => {
-  const n = new Date(d)
   n.setSeconds(0, 0)
+
+  const h = n.getHours()
   const m = n.getMinutes()
-  n.setMinutes(m < 30 ? 0 : 30, 0, 0)
+
+  if (h < WORK_START_HOUR) {
+    n.setHours(WORK_START_HOUR, 0, 0, 0)
+    return n
+  }
+
+  if (h > 18 || (h === 18 && m > 0)) {
+    n.setHours(17, SLOT_LEN_MIN, 0, 0) // 17:30
+    return n
+  }
+
+  const flooredMinutes = m < SLOT_LEN_MIN ? 0 : SLOT_LEN_MIN
+  n.setMinutes(flooredMinutes, 0, 0)
   return n
 }
 
@@ -210,38 +227,46 @@ const mapOffInitial = (e: Partial<OffRow>): Partial<OffFormValues> => ({
 const dayKey = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
 
-/* ----------------------- Page ----------------------- */
 export default function DashboardPage(): JSX.Element {
-  // Shared dates/views
   const [currentDate, setCurrentDate] = useState<Date>(new Date())
   const [bigView, setBigView] = useState<View>("month")
   const [miniActiveStart, setMiniActiveStart] = useState<Date>(
     startOfMonth(new Date())
   )
 
-  // Data
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const mql = window.matchMedia("(max-width: 640px)")
+
+    const handleChange = (e: MediaQueryListEvent) => {
+      setIsMobile(e.matches)
+    }
+    setIsMobile(mql.matches)
+
+    mql.addEventListener("change", handleChange)
+    return () => mql.removeEventListener("change", handleChange)
+  }, [])
+
   const [positions, setPositions] = useState<Position[]>([])
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [, setLoading] = useState(true)
 
-  // Mini calendar selection
   const [miniSelected, setMiniSelected] = useState<Date | null>(null)
 
-  // Refs
   const miniCalRef = useRef<HTMLDivElement>(null)
   const bigRef = useRef<HTMLDivElement>(null)
 
-  // Slot creation
   const [slotDate, setSlotDate] = useState<Date | null>(null)
   const [planOpen, setPlanOpen] = useState(false)
 
-  // Create modals
   const [openNewOnbPlanned, setOpenNewOnbPlanned] = useState(false)
   const [openNewOnbActual, setOpenNewOnbActual] = useState(false)
   const [openNewOffPlanned, setOpenNewOffPlanned] = useState(false)
   const [openNewOffActual, setOpenNewOffActual] = useState(false)
 
-  // Edit modal
   const [openEdit, setOpenEdit] = useState(false)
   const [editType, setEditType] = useState<"onb" | "off">("onb")
   const [editContext, setEditContext] = useState<"planned" | "actual">(
@@ -252,25 +277,26 @@ export default function DashboardPage(): JSX.Element {
     OnbRow & OffRow
   > | null>(null)
 
-  // Confirm modals
   const [openConfirmOnb, setOpenConfirmOnb] = useState(false)
   const [openConfirmOff, setOpenConfirmOff] = useState(false)
   const [confirmOnbRow, setConfirmOnbRow] = useState<OnbRow | null>(null)
   const [confirmOffRow, setConfirmOffRow] = useState<OffRow | null>(null)
-  // Onb confirm inline inputs
+
   const [onbActualStart, setOnbActualStart] = useState("")
   const [onbUserEmail, setOnbUserEmail] = useState("")
   const [onbUserName, setOnbUserName] = useState("")
   const [onbEvidence, setOnbEvidence] = useState("")
   const [onbNotes, setOnbNotes] = useState("")
-  // Off confirm inline inputs
   const [offActualEnd, setOffActualEnd] = useState("")
   const [offUserEmail, setOffUserEmail] = useState("")
   const [offUserName, setOffUserName] = useState("")
   const [offEvidence, setOffEvidence] = useState("")
   const [offNotes, setOffNotes] = useState("")
 
-  // First load
+  const [clusterOpen, setClusterOpen] = useState(false)
+  const [clusterItems, setClusterItems] = useState<CalendarEvent[] | null>(null)
+  const [clusterSlotLabel, setClusterSlotLabel] = useState("")
+
   useEffect(() => {
     ;(async () => {
       setLoading(true)
@@ -294,6 +320,7 @@ export default function DashboardPage(): JSX.Element {
             `${e.titleBefore ?? ""} ${e.name} ${e.surname} ${e.titleAfter ?? ""}`
               .replace(/\s+/g, " ")
               .trim()
+
           const makeDate = (iso?: string | null) => {
             const base = iso ? new Date(iso) : new Date()
             if (e.startTime) {
@@ -302,6 +329,7 @@ export default function DashboardPage(): JSX.Element {
             }
             return base
           }
+
           if (e.actualStart) {
             const d = makeDate(e.actualStart)
             return [
@@ -397,6 +425,7 @@ export default function DashboardPage(): JSX.Element {
     setCurrentDate(date)
     setMiniActiveStart(startOfMonth(date))
   }, [])
+
   const handleBigView = useCallback((view: View) => setBigView(view), [])
 
   const handleMiniActiveChange = useCallback((args: RCOnArgs) => {
@@ -405,6 +434,7 @@ export default function DashboardPage(): JSX.Element {
       setCurrentDate(args.activeStartDate)
     }
   }, [])
+
   const handleMiniChange = useCallback((value: RCValue) => {
     const date = Array.isArray(value) ? value[0] : value
     if (date) {
@@ -414,32 +444,71 @@ export default function DashboardPage(): JSX.Element {
     }
   }, [])
 
-  const SLOT_LEN_MIN = 30
-  const CLUSTER_THRESHOLD = 2
-
   const displayEvents = useMemo<CalendarEvent[]>(() => {
-    if (bigView === "month") {
-      // Měsíční pohled - clustering podle typu
-      const perDay = new Map<string, Map<EventType, CalendarEvent[]>>()
+    // Na mobilu všechno zabalíme do clusterů po dnech a typech,
+    // aby v buňkách kalendáře nebyla jména a dlouhé texty.
+    if (isMobile) {
+      const perDay = new Map<string, CalendarEvent[]>()
+
       for (const ev of events) {
-        const k = dayKey(ev.start)
-        if (!perDay.has(k)) perDay.set(k, new Map())
-        const dayMap = perDay.get(k)!
-        const typeList = dayMap.get(ev.type)
-        if (typeList) typeList.push(ev)
-        else dayMap.set(ev.type, [ev])
+        const dk = dayKey(ev.start)
+        const list = perDay.get(dk)
+        list ? list.push(ev) : perDay.set(dk, [ev])
       }
+
       const out: CalendarEvent[] = []
-      perDay.forEach((typeMap, day) => {
+      perDay.forEach((dayEvents, dk) => {
+        const typeMap = new Map<EventType, CalendarEvent[]>()
+        dayEvents.forEach((ev) => {
+          const list = typeMap.get(ev.type)
+          list ? list.push(ev) : typeMap.set(ev.type, [ev])
+        })
+
+        typeMap.forEach((items, type) => {
+          if (!items.length) return
+          const sample = items[0]!
+          out.push({
+            id: `cluster-mobile-${dk}-${type}`,
+            title:
+              items.length === 1
+                ? TYPE_LABEL_SHORT[type]
+                : `${items.length}× ${TYPE_LABEL_SHORT[type]}`,
+            start: sample.start,
+            end: sample.end,
+            type,
+            entity: "cluster",
+            numericId: -1,
+            clusterItems: items,
+          })
+        })
+      })
+
+      return out
+    }
+
+    // Desktop / tablet – původní logika s thresholdem
+    if (bigView === "month") {
+      const perDay = new Map<string, Map<EventType, CalendarEvent[]>>()
+
+      for (const ev of events) {
+        const dk = dayKey(ev.start)
+        if (!perDay.has(dk)) perDay.set(dk, new Map())
+        const typeMap = perDay.get(dk)!
+        const list = typeMap.get(ev.type)
+        list ? list.push(ev) : typeMap.set(ev.type, [ev])
+      }
+
+      const out: CalendarEvent[] = []
+      perDay.forEach((typeMap, dk) => {
         typeMap.forEach((items, type) => {
           if (items.length >= CLUSTER_THRESHOLD) {
             const sample = items[0]!
             out.push({
-              id: `cluster-month-${day}-${type}`,
+              id: `cluster-month-${dk}-${type}`,
               title: `${items.length} × ${TYPE_LABEL[type]}`,
               start: sample.start,
               end: sample.end,
-              type: sample.type,
+              type,
               entity: "cluster",
               numericId: -1,
               clusterItems: items,
@@ -457,113 +526,100 @@ export default function DashboardPage(): JSX.Element {
       const perDay = new Map<string, CalendarEvent[]>()
 
       for (const ev of events) {
-        const k = dayKey(ev.start)
-        const list = perDay.get(k)
-        list ? list.push(ev) : perDay.set(k, [ev])
+        const dk = dayKey(ev.start)
+        const list = perDay.get(dk)
+        list ? list.push(ev) : perDay.set(dk, [ev])
       }
 
       perDay.forEach((dayEvents) => {
+        if (!dayEvents.length) return
+
         const slots = new Map<string, Map<EventType, CalendarEvent[]>>()
-
-        // Zpracuj nástupy (onboarding)
-        const onbEvents = dayEvents.filter((e) => e.entity === "onb")
-        onbEvents.forEach((ev) => {
-          const slotStart = normalizeSlotStart(ev.start)
-          const key = slotKey(slotStart)
-
-          if (!slots.has(key)) slots.set(key, new Map())
-          const typeMap = slots.get(key)!
-          if (!typeMap.has(ev.type)) typeMap.set(ev.type, [])
-
-          typeMap.get(ev.type)!.push({
-            ...ev,
-            start: slotStart,
-            end: addMinutes(slotStart, SLOT_LEN_MIN),
-          })
-        })
-
-        // Najdi obsazené sloty nástupy
         const occupiedSlots = new Set<string>()
-        slots.forEach((_, key) => occupiedSlots.add(key))
 
-        // Zpracuj odchody (offboarding) - řaď na další volné sloty
-        const offEvents = dayEvents.filter((e) => e.entity === "off")
-        let currentH = 8
-        let currentM = 0
-
-        offEvents.forEach((ev) => {
-          // Najdi další volný slot
-          while (
-            occupiedSlots.has(
-              `${currentH}:${String(currentM).padStart(2, "0")}`
-            ) &&
-            currentH < 18
-          ) {
-            currentM += 30
-            if (currentM >= 60) {
-              currentH++
-              currentM = 0
-            }
-          }
-
-          if (currentH >= 18) {
-            // Reset pokud jsme za pracovní dobou
-            currentH = 8
-            currentM = 0
-            while (
-              occupiedSlots.has(
-                `${currentH}:${String(currentM).padStart(2, "0")}`
-              )
-            ) {
-              currentM += 30
-              if (currentM >= 60) {
-                currentH++
-                currentM = 0
-              }
-            }
-          }
-
-          const slotStart = setMinutes(
-            setHours(startOfDay(ev.start), currentH),
-            currentM
-          )
+        const addToSlot = (event: CalendarEvent, start: Date) => {
+          const slotStart = normalizeSlotStart(start)
           const key = slotKey(slotStart)
 
           if (!slots.has(key)) slots.set(key, new Map())
           const typeMap = slots.get(key)!
-          if (!typeMap.has(ev.type)) typeMap.set(ev.type, [])
+          if (!typeMap.has(event.type)) typeMap.set(event.type, [])
 
-          typeMap.get(ev.type)!.push({
-            ...ev,
+          typeMap.get(event.type)!.push({
+            ...event,
             start: slotStart,
             end: addMinutes(slotStart, SLOT_LEN_MIN),
           })
-
           occupiedSlots.add(key)
-          currentM += 30
-          if (currentM >= 60) {
-            currentH++
-            currentM = 0
+        }
+
+        const timed = dayEvents.filter(
+          (e) => e.entity === "onb" && e.hasCustomTime
+        )
+        const untimed = dayEvents.filter(
+          (e) => !(e.entity === "onb" && e.hasCustomTime)
+        )
+
+        timed.forEach((ev) => addToSlot(ev, ev.start))
+
+        let curH = WORK_START_HOUR
+        let curM = 0
+
+        const baseDay = startOfDay(dayEvents[0]!.start)
+
+        const nextFreeSlotStart = () => {
+          while (true) {
+            if (curH >= WORK_END_HOUR) {
+              curH = WORK_START_HOUR
+              curM = 0
+            }
+
+            const key = `${curH}:${String(curM).padStart(2, "0")}`
+            if (!occupiedSlots.has(key)) {
+              const slotStart = setMinutes(
+                setHours(new Date(baseDay), curH),
+                curM
+              )
+              curM += SLOT_LEN_MIN
+              if (curM >= 60) {
+                curH++
+                curM = 0
+              }
+              return slotStart
+            }
+
+            curM += SLOT_LEN_MIN
+            if (curM >= 60) {
+              curH++
+              curM = 0
+            }
           }
+        }
+
+        const untimedOrdered = [...untimed].sort((a, b) =>
+          a.title.localeCompare(b.title, "cs")
+        )
+
+        untimedOrdered.forEach((ev) => {
+          const slotStart = nextFreeSlotStart()
+          addToSlot(ev, slotStart)
         })
 
-        // Vytvoř výstupní události
         slots.forEach((typeMap) => {
           const plannedStart = typeMap.get("plannedStart") ?? []
           const actualStart = typeMap.get("actualStart") ?? []
           const plannedEnd = typeMap.get("plannedEnd") ?? []
           const actualEnd = typeMap.get("actualEnd") ?? []
 
-          // Pro týdenní pohled - kombinuj nástupy
           if (
             bigView === "week" &&
             (plannedStart.length > 0 || actualStart.length > 0)
           ) {
             const allStarts = [...plannedStart, ...actualStart]
+
             if (allStarts.length >= CLUSTER_THRESHOLD) {
               const sample = allStarts[0]!
               if (plannedStart.length > 0 && actualStart.length > 0) {
-                // Kombinovaný cluster
                 out.push({
                   id: `combo-${dayKey(sample.start)}-${slotKey(sample.start)}`,
                   title: `${plannedStart.length}× Předpokl. + ${actualStart.length}× Skutečný`,
@@ -576,7 +632,6 @@ export default function DashboardPage(): JSX.Element {
                   comboTypes: ["plannedStart", "actualStart"],
                 })
               } else {
-                // Jednotypový cluster
                 const type =
                   plannedStart.length > 0 ? "plannedStart" : "actualStart"
                 out.push({
@@ -594,9 +649,6 @@ export default function DashboardPage(): JSX.Element {
               out.push(...allStarts)
             }
           } else {
-            // Pro denní pohled nebo jednotlivé události
-
-            // Plánované nástupy
             if (plannedStart.length >= CLUSTER_THRESHOLD) {
               const sample = plannedStart[0]!
               out.push({
@@ -613,7 +665,6 @@ export default function DashboardPage(): JSX.Element {
               out.push(...plannedStart)
             }
 
-            // Skutečné nástupy
             if (actualStart.length >= CLUSTER_THRESHOLD) {
               const sample = actualStart[0]!
               out.push({
@@ -631,7 +682,6 @@ export default function DashboardPage(): JSX.Element {
             }
           }
 
-          // Odchody - vždy samostatně
           if (plannedEnd.length >= CLUSTER_THRESHOLD) {
             const sample = plannedEnd[0]!
             out.push({
@@ -669,13 +719,12 @@ export default function DashboardPage(): JSX.Element {
       return out
     }
 
-    // Ostatní pohledy (agenda atd.)
+    // agenda bys případně řešila tady
     const groups = new Map<string, CalendarEvent[]>()
     for (const ev of events) {
-      const k = dayKey(ev.start)
-      const arr = groups.get(k)
-      if (arr) arr.push(ev)
-      else groups.set(k, [ev])
+      const dk = dayKey(ev.start)
+      const arr = groups.get(dk)
+      arr ? arr.push(ev) : groups.set(dk, [ev])
     }
 
     const out: CalendarEvent[] = []
@@ -684,11 +733,12 @@ export default function DashboardPage(): JSX.Element {
       const baseDay = list[0]!.start
       const slotBase = setMinutes(setHours(startOfDay(baseDay), 8), 0)
 
-      const hasOnbTime = (e: CalendarEvent) =>
-        e.entity === "onb" && e.start.getHours() + e.start.getMinutes() > 0
-
-      const withTimeOnb = list.filter(hasOnbTime)
-      const noTimeOnb = list.filter((e) => e.entity === "onb" && !hasOnbTime(e))
+      const withTimeOnb = list.filter(
+        (e) => e.entity === "onb" && e.hasCustomTime
+      )
+      const noTimeOnb = list.filter(
+        (e) => e.entity === "onb" && !e.hasCustomTime
+      )
       const noTimeOff = list.filter((e) => e.entity === "off")
 
       const byTimeName = (a: CalendarEvent, b: CalendarEvent) =>
@@ -707,7 +757,7 @@ export default function DashboardPage(): JSX.Element {
       })
     })
     return out
-  }, [events, bigView])
+  }, [events, bigView, isMobile])
 
   const messages = useMemo(
     () => ({
@@ -715,10 +765,10 @@ export default function DashboardPage(): JSX.Element {
       time: "Čas",
       event: "Událost",
       allDay: "Celý den",
-      week: "Týden",
+      week: isMobile ? "Týd." : "Týden",
       work_week: "Pracovní týden",
       day: "Den",
-      month: "Měsíc",
+      month: isMobile ? "Měs." : "Měsíc",
       previous: "Předchozí",
       next: "Další",
       yesterday: "Včera",
@@ -728,7 +778,7 @@ export default function DashboardPage(): JSX.Element {
       showMore: (total: number) => `+${total} více`,
       noEventsInRange: "Žádné události v tomto rozsahu.",
     }),
-    []
+    [isMobile]
   )
 
   const formats = useMemo(
@@ -739,12 +789,14 @@ export default function DashboardPage(): JSX.Element {
         dfFormat(date, "EEEE d. LLLL", { locale: cs }),
       dayRangeHeaderFormat: ({ start, end }: { start: Date; end: Date }) =>
         `${dfFormat(start, "d. LLLL", { locale: cs })} – ${dfFormat(end, "d. LLLL yyyy", { locale: cs })}`,
-      weekdayFormat: (date: Date) => dfFormat(date, "EEEE", { locale: cs }),
-      dayFormat: (date: Date) => dfFormat(date, "EEEE d.", { locale: cs }),
+      weekdayFormat: (date: Date) =>
+        dfFormat(date, isMobile ? "EE" : "EEEE", { locale: cs }),
+      dayFormat: (date: Date) =>
+        dfFormat(date, isMobile ? "d. M." : "EEEE d.", { locale: cs }),
       eventTimeRangeFormat: () => "",
       agendaTimeRangeFormat: () => "",
     }),
-    []
+    [isMobile]
   )
 
   const minTime = useMemo(() => new Date(1970, 0, 1, 8, 0, 0), [])
@@ -785,7 +837,6 @@ export default function DashboardPage(): JSX.Element {
     [slotDate]
   )
 
-  // Helpers: load details
   const fetchOnb = useCallback(async (id: number): Promise<OnbRow | null> => {
     try {
       const res = await fetch(`/api/nastupy/${id}`, { cache: "no-store" })
@@ -796,6 +847,7 @@ export default function DashboardPage(): JSX.Element {
       return null
     }
   }, [])
+
   const fetchOff = useCallback(async (id: number): Promise<OffRow | null> => {
     try {
       const res = await fetch(`/api/odchody/${id}`, { cache: "no-store" })
@@ -806,10 +858,6 @@ export default function DashboardPage(): JSX.Element {
       return null
     }
   }, [])
-
-  const [clusterOpen, setClusterOpen] = useState(false)
-  const [clusterItems, setClusterItems] = useState<CalendarEvent[] | null>(null)
-  const [clusterSlotLabel, setClusterSlotLabel] = useState("")
 
   const onSelectEvent = useCallback(
     async (ev: CalendarEvent) => {
@@ -822,6 +870,7 @@ export default function DashboardPage(): JSX.Element {
         setClusterOpen(true)
         return
       }
+
       if (ev.entity === "onb") {
         const d = await fetchOnb(ev.numericId)
         if (!d) return alert("Nepodařilo se načíst záznam.")
@@ -840,7 +889,7 @@ export default function DashboardPage(): JSX.Element {
           setEditInitial(d)
           setOpenEdit(true)
         }
-      } else {
+      } else if (ev.entity === "off") {
         const d = await fetchOff(ev.numericId)
         if (!d) return alert("Nepodařilo se načíst záznam.")
         if (ev.type === "plannedEnd") {
@@ -1033,7 +1082,6 @@ export default function DashboardPage(): JSX.Element {
     reloadAll,
   ])
 
-  // Mini calendar marker
   const miniTileContent = useCallback(
     ({ date, view }: RCTileArgs) => {
       if (view !== "month") return null
@@ -1060,12 +1108,7 @@ export default function DashboardPage(): JSX.Element {
     if (event.entity === "cluster" || event.entity === "combo") {
       return event.clusterItems?.map((e) => e.title).join(", ") || ""
     }
-    const typeText = {
-      plannedStart: "Předpokládaný nástup",
-      actualStart: "Skutečný nástup",
-      plannedEnd: "Plánovaný odchod",
-      actualEnd: "Skutečný odchod",
-    }[event.type]
+    const typeText = TYPE_LABEL[event.type]
     if (event.hasCustomTime) {
       const timeStr = dfFormat(event.start, "HH:mm", { locale: cs })
       return `${typeText} ${event.title} (${timeStr})`
@@ -1088,6 +1131,16 @@ export default function DashboardPage(): JSX.Element {
         const tooltipText =
           event.clusterItems?.map((e) => e.title).join(", ") || ""
 
+        const label = isMobile
+          ? `${plannedCount || ""}${plannedCount ? "× pl. " : ""}${
+              actualCount
+                ? (plannedCount ? "+ " : "") + `${actualCount}× sk.`
+                : ""
+            }`
+          : `${plannedCount > 0 ? `${plannedCount}× Předpokl.` : ""}${
+              plannedCount > 0 && actualCount > 0 ? " + " : ""
+            }${actualCount > 0 ? `${actualCount}× Skutečný` : ""}`
+
         return (
           <div
             className="rbc-event-inner"
@@ -1099,9 +1152,7 @@ export default function DashboardPage(): JSX.Element {
             }}
             title={tooltipText}
           >
-            {plannedCount > 0 && `${plannedCount}× Předpokl.`}
-            {plannedCount > 0 && actualCount > 0 && " + "}
-            {actualCount > 0 && `${actualCount}× Skutečný`}
+            {label}
           </div>
         )
       }
@@ -1109,6 +1160,16 @@ export default function DashboardPage(): JSX.Element {
       if (event.entity === "cluster") {
         const tooltipText =
           event.clusterItems?.map((e) => e.title).join(", ") || ""
+
+        const labelBase = isMobile
+          ? TYPE_LABEL_SHORT[event.type]
+          : TYPE_LABEL[event.type]
+
+        const label =
+          event.clusterItems && event.clusterItems.length > 1
+            ? `${event.clusterItems.length}× ${labelBase}`
+            : labelBase
+
         return (
           <div
             className="rbc-event-inner"
@@ -1120,20 +1181,20 @@ export default function DashboardPage(): JSX.Element {
             }}
             title={tooltipText}
           >
-            {event.title}
+            {label}
           </div>
         )
       }
 
-      const typeText = {
-        plannedStart: "Předpokládaný nástup",
-        actualStart: "Skutečný nástup",
-        plannedEnd: "Plánovaný odchod",
-        actualEnd: "Skutečný odchod",
-      }[event.type]
+      const baseLabel = isMobile
+        ? TYPE_LABEL_SHORT[event.type]
+        : TYPE_LABEL[event.type]
+
       const tooltipText = event.hasCustomTime
-        ? `${typeText}: ${event.title} (${dfFormat(event.start, "HH:mm", { locale: cs })})`
-        : `${typeText}: ${event.title}`
+        ? `${baseLabel}: ${event.title} (${dfFormat(event.start, "HH:mm", { locale: cs })})`
+        : `${baseLabel}: ${event.title}`
+
+      const text = isMobile ? baseLabel : event.title
 
       return (
         <div
@@ -1146,17 +1207,15 @@ export default function DashboardPage(): JSX.Element {
           }}
           title={tooltipText}
         >
-          {event.title}
+          {text}
         </div>
       )
     },
-    [bigView]
+    [bigView, isMobile]
   )
 
-  /* ----------------------- Render ----------------------- */
   return (
-    <div className="flex h-[calc(100vh-1rem)] flex-col gap-4 p-4 lg:flex-row lg:gap-6 lg:p-6">
-      {/* LEFT: Mini calendar */}
+    <div className="flex flex-col gap-4 p-3 sm:p-4 lg:flex-row lg:gap-6 lg:p-6">
       <aside className="w-full shrink-0 rounded-2xl bg-white/90 p-3 shadow-md ring-1 ring-black/5 dark:bg-neutral-900 lg:w-[280px] lg:p-4">
         <div ref={miniCalRef}>
           <MiniCalendar
@@ -1195,7 +1254,6 @@ export default function DashboardPage(): JSX.Element {
           />
         </div>
 
-        {/* Legend */}
         <div className="mt-4 space-y-2 text-xs lg:text-sm">
           <div className="mb-1 font-semibold">Legenda</div>
           <Legend color={COLORS.plannedStart} label="Plánovaný nástup" />
@@ -1205,67 +1263,92 @@ export default function DashboardPage(): JSX.Element {
         </div>
       </aside>
 
-      {/* RIGHT: Big calendar */}
       <section
         ref={bigRef}
-        className="flex-1 overflow-hidden rounded-2xl bg-white p-3 shadow-lg ring-1 ring-black/5 dark:bg-neutral-900 lg:p-4"
+        className="max-w-full flex-1 overflow-hidden rounded-2xl bg-white p-2 shadow-lg ring-1 ring-black/5 dark:bg-neutral-900 sm:p-3 lg:p-4"
       >
-        <Calendar<CalendarEvent>
-          localizer={localizer}
-          events={displayEvents}
-          startAccessor="start"
-          endAccessor="end"
-          titleAccessor="title"
-          selectable="ignoreEvents"
-          onSelectSlot={handleSelectSlot}
-          onSelectEvent={(e) => void onSelectEvent(e)}
-          date={currentDate}
-          view={bigView}
-          onNavigate={handleBigNavigate}
-          onView={handleBigView}
-          messages={messages}
-          formats={formats}
-          views={["month", "week", "day"]}
-          step={30}
-          timeslots={2}
-          min={minTime}
-          max={maxTime}
-          components={{ event: EventCell }}
-          tooltipAccessor={null}
-          eventPropGetter={(event) => {
-            const bg = (() => {
-              if (event.entity === "combo") {
-                return `linear-gradient(90deg, ${COLORS.plannedStart} 0%, ${COLORS.plannedStart} 50%, ${COLORS.actualStart} 50%, ${COLORS.actualStart} 100%)`
-              }
-              return COLORS[event.type]
-            })()
+        <div className="h-[420px] sm:h-[520px] md:h-[640px] lg:h-[calc(100vh-10rem)]">
+          <Calendar<CalendarEvent>
+            localizer={localizer}
+            events={displayEvents}
+            startAccessor="start"
+            endAccessor="end"
+            titleAccessor="title"
+            selectable="ignoreEvents"
+            onSelectSlot={handleSelectSlot}
+            onSelectEvent={(e) => void onSelectEvent(e)}
+            date={currentDate}
+            view={bigView}
+            onNavigate={handleBigNavigate}
+            onView={handleBigView}
+            messages={messages}
+            formats={formats}
+            views={["month", "week", "day"]}
+            step={30}
+            timeslots={2}
+            min={minTime}
+            max={maxTime}
+            components={{ event: EventCell }}
+            tooltipAccessor={null}
+            eventPropGetter={(event) => {
+              const bg = (() => {
+                if (event.entity === "combo") {
+                  return `linear-gradient(90deg, ${COLORS.plannedStart} 0%, ${COLORS.plannedStart} 50%, ${COLORS.actualStart} 50%, ${COLORS.actualStart} 100%)`
+                }
+                return COLORS[event.type]
+              })()
 
-            return {
-              style: {
-                background: bg,
-                color: "white",
-                borderRadius: 8,
-                border: "none",
-                padding: bigView === "month" ? "4px 6px" : "6px 8px",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.12)",
-                whiteSpace: "normal",
-                wordBreak: "break-word",
-                overflowWrap: "anywhere",
-                lineHeight: 1.15,
-                fontSize: bigView === "month" ? 10 : 11,
-                fontWeight: 600,
-                textShadow: "0 1px 1px rgba(0,0,0,0.25)",
-                overflow: "visible",
-                height: "auto",
-                minHeight: bigView === "month" ? "24px" : "28px",
-              },
-            }
-          }}
-          style={{ height: "100%" }}
-        />
+              return {
+                style: {
+                  background: bg,
+                  color: "white",
+                  borderRadius: 8,
+                  border: "none",
+                  padding: bigView === "month" ? "4px 6px" : "6px 8px",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.12)",
+                  whiteSpace: "normal",
+                  wordBreak: "break-word",
+                  overflowWrap: "anywhere",
+                  lineHeight: 1.15,
+                  fontSize: bigView === "month" ? 10 : 11,
+                  fontWeight: 600,
+                  textShadow: "0 1px 1px rgba(0,0,0,0.25)",
+                  overflow: "visible",
+                  height: "auto",
+                  minHeight: bigView === "month" ? "24px" : "28px",
+                },
+              }
+            }}
+            style={{ height: "100%" }}
+          />
+        </div>
       </section>
 
-      {/* Slot planning modal */}
+      <style jsx global>{`
+        @media (max-width: 640px) {
+          .rbc-calendar {
+            width: 100%;
+          }
+          .rbc-toolbar {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0.25rem;
+          }
+          .rbc-toolbar .rbc-btn-group {
+            flex-wrap: wrap;
+            justify-content: flex-start;
+          }
+          .rbc-time-view,
+          .rbc-time-header {
+            font-size: 11px;
+          }
+          .rbc-event {
+            padding: 2px 4px !important;
+            min-height: 20px !important;
+          }
+        }
+      `}</style>
+
       {planOpen && (
         <div
           className="fixed inset-0 z-[200] grid place-items-center bg-black/40 p-4"
@@ -1333,76 +1416,85 @@ export default function DashboardPage(): JSX.Element {
         </div>
       )}
 
-      {/* Create modals */}
       <Dialog open={openNewOnbPlanned} onOpenChange={setOpenNewOnbPlanned}>
-        <DialogContent className="z-[300] max-w-4xl p-6">
-          <DialogTitle className="mb-4">Nový předpokládaný nástup</DialogTitle>
-          <OnboardingFormUnified
-            positions={positions}
-            mode="create-planned"
-            initial={{
-              plannedStart: toISO(slotDate) || undefined,
-              startTime: slotDate
-                ? dfFormat(withDefaultWorkTime(slotDate), "HH:mm")
-                : "08:00",
-            }}
-            onSuccess={async () => {
-              setOpenNewOnbPlanned(false)
-              await reloadAll()
-            }}
-          />
+        <DialogContent className="z-[300] max-h-[90vh] max-w-5xl overflow-y-auto p-0">
+          <DialogTitle className="px-6 pt-6">
+            Nový předpokládaný nástup
+          </DialogTitle>
+          <div className="p-6">
+            <OnboardingFormUnified
+              positions={positions}
+              mode="create-planned"
+              initial={{
+                plannedStart: toISO(slotDate) || undefined,
+                startTime: slotDate
+                  ? dfFormat(withDefaultWorkTime(slotDate), "HH:mm")
+                  : "08:00",
+              }}
+              onSuccess={async () => {
+                setOpenNewOnbPlanned(false)
+                await reloadAll()
+              }}
+            />
+          </div>
         </DialogContent>
       </Dialog>
 
       <Dialog open={openNewOnbActual} onOpenChange={setOpenNewOnbActual}>
-        <DialogContent className="z-[300] max-w-4xl p-6">
-          <DialogTitle className="mb-4">Nový skutečný nástup</DialogTitle>
-          <OnboardingFormUnified
-            positions={positions}
-            mode="create-actual"
-            initial={{
-              actualStart: toISO(slotDate) || undefined,
-              startTime: slotDate
-                ? dfFormat(withDefaultWorkTime(slotDate), "HH:mm")
-                : "08:00",
-            }}
-            onSuccess={async () => {
-              setOpenNewOnbActual(false)
-              await reloadAll()
-            }}
-          />
+        <DialogContent className="z-[300] max-h-[90vh] max-w-5xl overflow-y-auto p-0">
+          <DialogTitle className="px-6 pt-6">Nový skutečný nástup</DialogTitle>
+          <div className="p-6">
+            <OnboardingFormUnified
+              positions={positions}
+              mode="create-actual"
+              initial={{
+                actualStart: toISO(slotDate) || undefined,
+                startTime: slotDate
+                  ? dfFormat(withDefaultWorkTime(slotDate), "HH:mm")
+                  : "08:00",
+              }}
+              onSuccess={async () => {
+                setOpenNewOnbActual(false)
+                await reloadAll()
+              }}
+            />
+          </div>
         </DialogContent>
       </Dialog>
 
       <Dialog open={openNewOffPlanned} onOpenChange={setOpenNewOffPlanned}>
-        <DialogContent className="z-[300] max-w-4xl p-6">
-          <DialogTitle className="mb-4">Nový plánovaný odchod</DialogTitle>
-          <OffboardingFormUnified
-            key={`new-off-planned-${toISO(slotDate) || "no-date"}`}
-            mode="create-planned"
-            prefillDate={toISO(slotDate) || undefined}
-            initial={{ hasCustomDates: false }}
-            onSuccess={async () => {
-              setOpenNewOffPlanned(false)
-              await reloadAll()
-            }}
-          />
+        <DialogContent className="z-[300] max-h-[90vh] max-w-5xl overflow-y-auto p-0">
+          <DialogTitle className="px-6 pt-6">Nový plánovaný odchod</DialogTitle>
+          <div className="p-6">
+            <OffboardingFormUnified
+              key={`new-off-planned-${toISO(slotDate) || "no-date"}`}
+              mode="create-planned"
+              prefillDate={toISO(slotDate) || undefined}
+              initial={{ hasCustomDates: false }}
+              onSuccess={async () => {
+                setOpenNewOffPlanned(false)
+                await reloadAll()
+              }}
+            />
+          </div>
         </DialogContent>
       </Dialog>
 
       <Dialog open={openNewOffActual} onOpenChange={setOpenNewOffActual}>
-        <DialogContent className="z-[300] max-w-4xl p-6">
-          <DialogTitle className="mb-4">Nový skutečný odchod</DialogTitle>
-          <OffboardingFormUnified
-            key={`new-off-actual-${toISO(slotDate) || "no-date"}`}
-            mode="create-actual"
-            prefillDate={toISO(slotDate) || undefined}
-            initial={{ hasCustomDates: false }}
-            onSuccess={async () => {
-              setOpenNewOffActual(false)
-              await reloadAll()
-            }}
-          />
+        <DialogContent className="z-[300] max-h-[90vh] max-w-5xl overflow-y-auto p-0">
+          <DialogTitle className="px-6 pt-6">Nový skutečný odchod</DialogTitle>
+          <div className="p-6">
+            <OffboardingFormUnified
+              key={`new-off-actual-${toISO(slotDate) || "no-date"}`}
+              mode="create-actual"
+              prefillDate={toISO(slotDate) || undefined}
+              initial={{ hasCustomDates: false }}
+              onSuccess={async () => {
+                setOpenNewOffActual(false)
+                await reloadAll()
+              }}
+            />
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -1434,7 +1526,6 @@ export default function DashboardPage(): JSX.Element {
         </DialogContent>
       </Dialog>
 
-      {/* Confirm ONB */}
       <Dialog
         open={openConfirmOnb}
         onOpenChange={(o) => {
@@ -1563,7 +1654,6 @@ export default function DashboardPage(): JSX.Element {
         </DialogContent>
       </Dialog>
 
-      {/* Confirm OFF */}
       <Dialog
         open={openConfirmOff}
         onOpenChange={(o) => {
@@ -1692,7 +1782,6 @@ export default function DashboardPage(): JSX.Element {
         </DialogContent>
       </Dialog>
 
-      {/* Edit (shared) */}
       <Dialog
         open={openEdit}
         onOpenChange={(o) => {
