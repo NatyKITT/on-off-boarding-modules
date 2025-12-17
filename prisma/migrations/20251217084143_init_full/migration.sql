@@ -88,6 +88,18 @@ CREATE TABLE `EmployeeOnboarding` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
+CREATE TABLE `PersonalNumberGap` (
+    `id` INTEGER NOT NULL AUTO_INCREMENT,
+    `number` VARCHAR(191) NOT NULL,
+    `status` ENUM('SKIPPED', 'USED') NOT NULL DEFAULT 'SKIPPED',
+    `usedAt` DATETIME(3) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    UNIQUE INDEX `PersonalNumberGap_number_key`(`number`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
 CREATE TABLE `EmployeeOffboarding` (
     `id` INTEGER NOT NULL AUTO_INCREMENT,
     `userId` VARCHAR(191) NULL,
@@ -252,6 +264,99 @@ CREATE TABLE `SystemSettings` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
+-- CreateTable
+CREATE TABLE `EmploymentDocument` (
+    `id` INTEGER NOT NULL AUTO_INCREMENT,
+    `isLocked` BOOLEAN NOT NULL DEFAULT false,
+    `onboardingId` INTEGER NOT NULL,
+    `type` ENUM('AFFIDAVIT', 'PERSONAL_QUESTIONNAIRE', 'EDUCATION', 'EXPERIENCE') NOT NULL,
+    `status` ENUM('DRAFT', 'COMPLETED', 'SIGNED') NOT NULL DEFAULT 'DRAFT',
+    `data` JSON NOT NULL,
+    `fileUrl` VARCHAR(191) NULL,
+    `access_hash` VARCHAR(191) NOT NULL,
+    `expires_at` DATETIME(3) NULL,
+    `completed_at` DATETIME(3) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    UNIQUE INDEX `EmploymentDocument_access_hash_key`(`access_hash`),
+    INDEX `EmploymentDocument_onboardingId_idx`(`onboardingId`),
+    INDEX `EmploymentDocument_type_idx`(`type`),
+    UNIQUE INDEX `EmploymentDocument_onboardingId_type_key`(`onboardingId`, `type`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `OffboardingDocument` (
+    `id` INTEGER NOT NULL AUTO_INCREMENT,
+    `isLocked` BOOLEAN NOT NULL DEFAULT false,
+    `offboardingId` INTEGER NOT NULL,
+    `type` ENUM('EXIT_CHECKLIST') NOT NULL,
+    `status` ENUM('DRAFT', 'COMPLETED', 'SIGNED') NOT NULL DEFAULT 'DRAFT',
+    `data` JSON NOT NULL,
+    `fileUrl` VARCHAR(191) NULL,
+    `access_hash` VARCHAR(191) NOT NULL,
+    `expires_at` DATETIME(3) NULL,
+    `completed_at` DATETIME(3) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    UNIQUE INDEX `OffboardingDocument_access_hash_key`(`access_hash`),
+    INDEX `OffboardingDocument_offboardingId_idx`(`offboardingId`),
+    INDEX `OffboardingDocument_type_idx`(`type`),
+    UNIQUE INDEX `OffboardingDocument_offboardingId_type_key`(`offboardingId`, `type`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `ExitChecklist` (
+    `id` INTEGER NOT NULL AUTO_INCREMENT,
+    `offboardingId` INTEGER NOT NULL,
+    `header` JSON NOT NULL,
+    `lockedAt` DATETIME(3) NULL,
+    `lockedById` VARCHAR(191) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    UNIQUE INDEX `ExitChecklist_offboardingId_key`(`offboardingId`),
+    INDEX `ExitChecklist_offboardingId_idx`(`offboardingId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `ExitChecklistItem` (
+    `id` INTEGER NOT NULL AUTO_INCREMENT,
+    `checklistId` INTEGER NOT NULL,
+    `key` VARCHAR(191) NOT NULL,
+    `department` VARCHAR(191) NOT NULL,
+    `label` VARCHAR(191) NOT NULL,
+    `order` INTEGER NOT NULL,
+    `resolution` ENUM('YES', 'NO', 'NOT_APPLICABLE') NOT NULL DEFAULT 'NOT_APPLICABLE',
+    `signedById` VARCHAR(191) NULL,
+    `signedByName` VARCHAR(191) NULL,
+    `signedByEmail` VARCHAR(191) NULL,
+    `signedAt` DATETIME(3) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `ExitChecklistItem_checklistId_idx`(`checklistId`),
+    UNIQUE INDEX `ExitChecklistItem_checklistId_key_key`(`checklistId`, `key`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `ExitChecklistAsset` (
+    `id` INTEGER NOT NULL AUTO_INCREMENT,
+    `checklistId` INTEGER NOT NULL,
+    `subject` VARCHAR(191) NOT NULL,
+    `inventoryNumber` VARCHAR(191) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `ExitChecklistAsset_checklistId_idx`(`checklistId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
 -- AddForeignKey
 ALTER TABLE `accounts` ADD CONSTRAINT `accounts_user_id_fkey` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
@@ -282,3 +387,20 @@ ALTER TABLE `EmailHistory` ADD CONSTRAINT `EmailHistory_offboardingEmployeeId_fk
 -- AddForeignKey
 ALTER TABLE `MonthlyReportRecord` ADD CONSTRAINT `MonthlyReportRecord_monthlyReportId_fkey` FOREIGN KEY (`monthlyReportId`) REFERENCES `MonthlyReport`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
+-- AddForeignKey
+ALTER TABLE `EmploymentDocument` ADD CONSTRAINT `EmploymentDocument_onboardingId_fkey` FOREIGN KEY (`onboardingId`) REFERENCES `EmployeeOnboarding`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `OffboardingDocument` ADD CONSTRAINT `OffboardingDocument_offboardingId_fkey` FOREIGN KEY (`offboardingId`) REFERENCES `EmployeeOffboarding`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ExitChecklist` ADD CONSTRAINT `ExitChecklist_offboardingId_fkey` FOREIGN KEY (`offboardingId`) REFERENCES `EmployeeOffboarding`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ExitChecklist` ADD CONSTRAINT `ExitChecklist_lockedById_fkey` FOREIGN KEY (`lockedById`) REFERENCES `users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ExitChecklistItem` ADD CONSTRAINT `ExitChecklistItem_checklistId_fkey` FOREIGN KEY (`checklistId`) REFERENCES `ExitChecklist`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ExitChecklistAsset` ADD CONSTRAINT `ExitChecklistAsset_checklistId_fkey` FOREIGN KEY (`checklistId`) REFERENCES `ExitChecklist`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
