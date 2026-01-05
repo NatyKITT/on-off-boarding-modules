@@ -10,6 +10,7 @@ export const getUserByEmail = async (email: string) => {
         name: true,
         role: true,
         emailVerified: true,
+        canAccessApp: false,
         createdAt: true,
       },
     })

@@ -17,6 +17,22 @@ const ALLOWED_DOMAINS: ReadonlySet<string> = new Set<string>(
   isProd ? PROD_ALLOWED_DOMAINS : DEV_ALLOWED_DOMAINS
 )
 
+const ADMIN_EMAILS: ReadonlySet<string> = new Set(
+  (process.env.REPORT_RECIPIENTS_PLANNED ?? "")
+    .split(/[;,]/)
+    .map((v) => v.trim().toLowerCase())
+    .filter(Boolean)
+)
+
+type AuthUserWithFlags = {
+  id: string
+  role: Role
+  email?: string | null
+  name?: string | null
+  image?: string | null
+  canAccessApp?: boolean | null
+}
+
 function getDomain(email: string | null | undefined): string {
   if (!email) return ""
   return email.split("@")[1]?.toLowerCase() ?? ""
@@ -60,10 +76,10 @@ export const authConfig = {
       try {
         const email = user.email?.toLowerCase() ?? ""
 
-        if (email.endsWith("@kitt6.cz")) {
+        if (email.endsWith("@kitt6.cz") || ADMIN_EMAILS.has(email)) {
           await prisma.user.update({
             where: { id: user.id as string },
-            data: { role: "ADMIN" },
+            data: { role: "ADMIN", canAccessApp: true },
           })
         }
       } catch (e) {
@@ -82,8 +98,14 @@ export const authConfig = {
 
       if (!auth?.user) return false
 
-      const email = auth.user.email ?? null
-      const canAccessApp = auth.user.canAccessApp ?? false
+      const user = auth.user as AuthUserWithFlags
+
+      const email = user.email ?? null
+      const canAccessApp = user.canAccessApp ?? false
+
+      if (user.role === "ADMIN") {
+        return true
+      }
 
       if (pathname.startsWith("/public/exit")) {
         return isPraha6(email)
@@ -129,8 +151,14 @@ export const authConfig = {
         }
       }
 
+      if (email && ADMIN_EMAILS.has(email.toLowerCase())) {
+        token.role = "ADMIN"
+        token.canAccessApp = true
+      }
+
       if (email && isKitt6(email)) {
         token.role = "ADMIN"
+        token.canAccessApp = true
       }
 
       if (!token.role) token.role = "USER"
