@@ -233,10 +233,6 @@ async function processMonthlySummaryJob(job: MailQueue): Promise<void> {
   ])
 }
 
-/**
- * Deduplikace – zjisti, zda už existuje aktivní job
- * (QUEUED/PROCESSING/SENT) pro daný (year, month).
- */
 export async function existsMonthlyJob(
   year: number,
   month: number

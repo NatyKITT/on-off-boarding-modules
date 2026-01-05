@@ -3,16 +3,26 @@ import { auth } from "@/auth"
 import type { Role } from "@prisma/client"
 import type { Session } from "next-auth"
 
-type SessionWithRole = Session & { user: { role?: Role } }
+type SessionUser = {
+  id: string
+  role?: Role
+  canAccessApp?: boolean
+  email?: string | null
+}
+
+type SessionWithUser = Session & { user: SessionUser }
 
 export default auth((req) => {
-  const session = req.auth as SessionWithRole | null
+  const session = req.auth as SessionWithUser | null
   const path = req.nextUrl.pathname
 
   const publicPaths = ["/signin", "/terms", "/privacy"]
   const isPublicPath = publicPaths.some((p) => path.startsWith(p))
   const isAuthPath = path.startsWith("/api/auth")
-  if (isPublicPath || isAuthPath) return NextResponse.next()
+
+  if (isPublicPath || isAuthPath) {
+    return NextResponse.next()
+  }
 
   if (!session) {
     const signInUrl = new URL("/signin", req.url)
@@ -20,16 +30,11 @@ export default auth((req) => {
     return NextResponse.redirect(signInUrl)
   }
 
-  if (path === "/" && !session) {
-    return NextResponse.redirect(new URL("/signin", req.url))
-  }
-
-  if (path === "/" && session) {
+  if (path === "/") {
     return NextResponse.redirect(new URL("/prehled", req.url))
   }
 
   const userRole = session.user?.role
-
   if (path.startsWith("/admin") && userRole !== "ADMIN") {
     return NextResponse.redirect(new URL("/prehled", req.url))
   }

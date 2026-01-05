@@ -97,6 +97,7 @@ model User {
   image          String?
   personalNumber String?   @unique
   role           Role      @default(USER)
+  canAccessApp   Boolean   @default(false)
   createdAt      DateTime  @default(now()) @map("created_at")
 
   accounts      Account[]
@@ -413,6 +414,8 @@ model ExitChecklist {
   offboarding   EmployeeOffboarding @relation(fields: [offboardingId], references: [id])
 
   header Json
+
+  publicToken String @unique @default(cuid()) @map("public_token")
 
   lockedAt   DateTime?
   lockedById String?

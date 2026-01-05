@@ -109,27 +109,12 @@ export function parseRecipientsEnv(value?: string | null): string[] {
 }
 
 function kindLabels(kind: "planned" | "actual" | "all") {
-  if (kind === "planned") {
-    return {
-      subtitle: "Měsíční přehled plánovaných změn",
-      onboardingDateHeader: "Plánovaný nástup",
-      offboardingDateHeader: "Plánované ukončení",
-      badge: "Plánované",
-    }
-  }
-  if (kind === "actual") {
-    return {
-      subtitle: "Měsíční přehled skutečných změn",
-      onboardingDateHeader: "Skutečný nástup",
-      offboardingDateHeader: "Skutečné ukončení",
-      badge: "Skutečné",
-    }
-  }
+  void kind
+
   return {
-    subtitle: "Měsíční přehled plánovaných + skutečných změn",
+    subtitle: "Přehled personálních změn",
     onboardingDateHeader: "Datum nástupu",
     offboardingDateHeader: "Datum ukončení",
-    badge: "Plánované + Skutečné",
   }
 }
 
@@ -169,8 +154,7 @@ export async function renderMonthlyReportHtml(args: {
   const onboardings = records.filter((r) => r.type === "onboarding")
   const offboardings = records.filter((r) => r.type === "offboarding")
 
-  const { onboardingDateHeader, offboardingDateHeader, badge } =
-    kindLabels(kind)
+  const { onboardingDateHeader, offboardingDateHeader } = kindLabels(kind)
 
   const primary = "#00847C"
 
@@ -201,7 +185,7 @@ export async function renderMonthlyReportHtml(args: {
       border-bottom: 1px solid rgba(0,0,0,0.05);
     }
     .header-eyebrow {
-      font-size: 11px;
+      font-size: 14px;
       text-transform: uppercase;
       letter-spacing: 0.08em;
       opacity: 0.9;
@@ -211,11 +195,6 @@ export async function renderMonthlyReportHtml(args: {
       font-size: 20px;
       font-weight: 700;
       margin-bottom: 6px;
-    }
-    .header-badges {
-      display: flex;
-      gap: 8px;
-      font-size: 11px;
     }
     .badge {
       padding: 2px 10px;
@@ -279,7 +258,6 @@ export async function renderMonthlyReportHtml(args: {
     }
     .dept-cell {
       font-weight: 500;
-      color: ${primary};
     }
     .date-cell {
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
@@ -409,10 +387,6 @@ export async function renderMonthlyReportHtml(args: {
         <div class="header">
           <div class="header-eyebrow">Personální změny</div>
           <div class="header-title">Přehled personálních změn – ${monthLabel}</div>
-          <div class="header-badges">
-            <span class="badge">${monthLabel}</span>
-            <span class="badge">${badge}</span>
-          </div>
         </div>
 
         <div class="intro">

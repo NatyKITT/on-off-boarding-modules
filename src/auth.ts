@@ -8,14 +8,34 @@ import { env } from "@/env.mjs"
 import { prisma } from "@/lib/db"
 import { getUserById } from "@/lib/user"
 
-const ALLOWED_DOMAINS = new Set(["kitt6.cz", "praha6.cz"])
+const isProd = process.env.NODE_ENV === "production"
 
-const authConfig: NextAuthConfig = {
+const DEV_ALLOWED_DOMAINS = ["kitt6.cz", "praha6.cz"] as const
+const PROD_ALLOWED_DOMAINS = ["praha6.cz"] as const
+
+const ALLOWED_DOMAINS: ReadonlySet<string> = new Set<string>(
+  isProd ? PROD_ALLOWED_DOMAINS : DEV_ALLOWED_DOMAINS
+)
+
+function getDomain(email: string | null | undefined): string {
+  if (!email) return ""
+  return email.split("@")[1]?.toLowerCase() ?? ""
+}
+
+function isPraha6(email: string | null | undefined): boolean {
+  return getDomain(email) === "praha6.cz"
+}
+
+function isKitt6(email: string | null | undefined): boolean {
+  return getDomain(email) === "kitt6.cz"
+}
+
+export const authConfig = {
   adapter: PrismaAdapter(prisma),
 
   session: {
     strategy: "jwt",
-    maxAge: 8 * 60 * 60, // 8h
+    maxAge: 8 * 60 * 60,
     updateAge: 0,
   },
 
@@ -39,6 +59,7 @@ const authConfig: NextAuthConfig = {
     async signIn({ user }) {
       try {
         const email = user.email?.toLowerCase() ?? ""
+
         if (email.endsWith("@kitt6.cz")) {
           await prisma.user.update({
             where: { id: user.id as string },
@@ -54,18 +75,38 @@ const authConfig: NextAuthConfig = {
   callbacks: {
     authorized({ auth, request }) {
       const { pathname } = request.nextUrl
-      if (pathname.startsWith("/signin")) return true
-      return !!auth
+
+      if (pathname.startsWith("/signin") || pathname.startsWith("/api/auth")) {
+        return true
+      }
+
+      if (!auth?.user) return false
+
+      const email = auth.user.email ?? null
+      const canAccessApp = auth.user.canAccessApp ?? false
+
+      if (pathname.startsWith("/public/exit")) {
+        return isPraha6(email)
+      }
+
+      if (!isProd && isKitt6(email)) {
+        return true
+      }
+
+      return Boolean(canAccessApp)
     },
 
     async signIn({ profile }) {
       const email = profile?.email ?? ""
-      const domain = email.split("@")[1]?.toLowerCase() ?? ""
+      const domain = getDomain(email)
+
       return ALLOWED_DOMAINS.has(domain)
     },
 
     async jwt({ token, user, profile }) {
-      if (user && "id" in user) token.id = String(user.id)
+      if (user && "id" in user) {
+        token.id = String(user.id)
+      }
 
       const email =
         (typeof token.email === "string" && token.email) ||
@@ -73,16 +114,29 @@ const authConfig: NextAuthConfig = {
         (typeof profile?.email === "string" && profile.email) ||
         null
 
-      if (!token.role && token.sub) {
-        const dbUser = await getUserById(token.sub)
-        if (dbUser?.role) token.role = dbUser.role as Role
+      if (email) {
+        token.email = email
       }
 
-      if (email && email.toLowerCase().endsWith("@kitt6.cz")) {
+      if (
+        (!token.role || typeof token.canAccessApp === "undefined") &&
+        token.sub
+      ) {
+        const dbUser = await getUserById(token.sub)
+        if (dbUser) {
+          token.role = dbUser.role as Role
+          token.canAccessApp = dbUser.canAccessApp ?? false
+        }
+      }
+
+      if (email && isKitt6(email)) {
         token.role = "ADMIN"
       }
 
       if (!token.role) token.role = "USER"
+      if (typeof token.canAccessApp === "undefined") {
+        token.canAccessApp = false
+      }
 
       return token
     },
@@ -90,13 +144,15 @@ const authConfig: NextAuthConfig = {
     async session({ session, token }) {
       if (session.user) {
         session.user.id = String(token.id)
+        session.user.email = token.email ?? session.user.email
         session.user.role = token.role as Role
+        session.user.canAccessApp = Boolean(token.canAccessApp)
       }
       return session
     },
   },
 
   debug: process.env.NODE_ENV === "development",
-}
+} satisfies NextAuthConfig
 
 export const { handlers, auth, signIn, signOut } = NextAuth(authConfig)
