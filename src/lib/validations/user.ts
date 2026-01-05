@@ -8,6 +8,7 @@ export const userSchema = z.object({
   email: z.string().email(),
   name: z.string().min(1, "Jméno je povinné").max(32, "Jméno je příliš dlouhé"),
   role: roleSchema,
+  canAccessApp: z.boolean().optional(),
   createdAt: z.date().optional(),
 })
 
