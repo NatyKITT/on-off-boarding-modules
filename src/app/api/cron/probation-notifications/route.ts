@@ -160,7 +160,7 @@ export async function POST() {
               recipients: HR_EMAILS,
               subject: `🚨 DNES končí zkušební doba - ${employee.name} ${employee.surname}`,
             },
-            priority: 1, // Nejvyšší priorita
+            priority: 1,
             createdBy: "system-cron",
           },
         })

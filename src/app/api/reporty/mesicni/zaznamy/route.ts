@@ -31,8 +31,15 @@ export async function GET(req: Request) {
 
   const { searchParams } = new URL(req.url)
   const month = searchParams.get("month") || format(new Date(), "yyyy-MM")
-  const kind = (searchParams.get("kind") as Kind) || "actual"
-  const type = (searchParams.get("type") as TypeFilter) || "nastupy"
+
+  const kindParam = searchParams.get("kind")
+  const kind: Kind =
+    kindParam === "planned" || kindParam === "actual" ? kindParam : "actual"
+
+  const typeParam = searchParams.get("type")
+  const type: TypeFilter =
+    typeParam === "odchody" || typeParam === "nastupy" ? typeParam : "nastupy"
+
   const includeOtherType = searchParams.get("includeOtherType") === "true"
 
   const [y, m] = month.split("-").map(Number)
@@ -45,6 +52,7 @@ export async function GET(req: Request) {
       records: { select: { recordType: true, recordId: true, sentAt: true } },
     },
   })
+
   const sentMap = new Map<string, Date>()
   for (const r of monthly?.records ?? []) {
     sentMap.set(`${r.recordType}-${r.recordId}`, r.sentAt)
@@ -60,7 +68,10 @@ export async function GET(req: Request) {
             actualStart: null,
             plannedStart: { gte: monthStart, lte: monthEnd },
           }
-        : { deletedAt: null, actualStart: { gte: monthStart, lte: monthEnd } }
+        : {
+            deletedAt: null,
+            actualStart: { gte: monthStart, lte: monthEnd },
+          }
 
     const rows = await prisma.employeeOnboarding.findMany({
       where,
@@ -116,7 +127,10 @@ export async function GET(req: Request) {
             actualEnd: null,
             plannedEnd: { gte: monthStart, lte: monthEnd },
           }
-        : { deletedAt: null, actualEnd: { gte: monthStart, lte: monthEnd } }
+        : {
+            deletedAt: null,
+            actualEnd: { gte: monthStart, lte: monthEnd },
+          }
 
     const rows = await prisma.employeeOffboarding.findMany({
       where,

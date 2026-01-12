@@ -12,7 +12,6 @@ export const revalidate = 0
 
 type OnboardingStatus = "NEW" | "IN_PROGRESS" | "COMPLETED"
 type OffboardingStatus = "NEW" | "IN_PROGRESS" | "COMPLETED"
-type ReportType = "onboarding" | "offboarding" | "combined"
 
 type SessionUser = { id?: string | null; email?: string | null }
 
@@ -252,13 +251,15 @@ export async function POST(req: NextRequest) {
         reportType,
         recipients,
         generatedBy: createdBy,
-        data: reportData, // JSON column
+        data: reportData,
         sentAt: sendEmail ? new Date() : null,
       },
     })
 
     if (sendEmail) {
       const monthNameCz = format(monthDate, "LLLL yyyy", { locale: cs })
+      const subject = `Přehled personálních změn – ${monthNameCz}`
+
       await prisma.mailQueue.create({
         data: {
           type: "MONTHLY_SUMMARY",
@@ -270,7 +271,7 @@ export async function POST(req: NextRequest) {
             recipients,
             data: reportData,
             includeDetails,
-            subject: `Měsíční přehled ${getReportTypeName(reportType)} - ${monthNameCz}`,
+            subject,
           },
           priority: 4,
           createdBy,
@@ -281,7 +282,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       status: "success",
       message: sendEmail
-        ? "Report byl vygenerován a odeslán."
+        ? "Report byl vygenerován a zařazen k odeslání."
         : "Report byl vygenerován.",
       data: {
         reportId: monthlyReport.id,
@@ -368,17 +369,6 @@ function groupByStatus<S extends string>(
     acc[key] = (acc[key] ?? 0) + 1
     return acc
   }, {} as StatusBreakdown<S>)
-}
-
-function getReportTypeName(type: ReportType) {
-  switch (type) {
-    case "onboarding":
-      return "nástupy"
-    case "offboarding":
-      return "odchody"
-    case "combined":
-      return "nástupy a odchody"
-  }
 }
 
 async function getAvailableMonths(year: string) {

@@ -85,9 +85,14 @@ export async function recipientsFor(channel: Channel): Promise<string[]> {
     }
   }
 
-  const fallback = parseRecipientsEnv(
-    process.env.RESEND_EMAIL_TO ?? process.env.EMAIL_FROM ?? ""
-  )
+  const fallback = parseRecipientsEnv(process.env.RESEND_EMAIL_FROM ?? "")
+  if (!fallback.length) {
+    console.warn(
+      "Nebyl nalezen žádný příjemce pro kanál",
+      channel,
+      "– zkontrolujte REPORT_RECIPIENTS_* nebo nastavení v DB."
+    )
+  }
 
   return dedupeValid(fallback)
 }

@@ -11,10 +11,10 @@ export const env = createEnv({
 
     RESEND_API_KEY: z.string().optional(),
     RESEND_EMAIL_FROM: z.string().email().optional(),
-    RESEND_EMAIL_TO: z.string().email().optional(),
 
     REPORT_RECIPIENTS_PLANNED: z.string().optional(),
     REPORT_RECIPIENTS_ACTUAL: z.string().optional(),
+    REPORT_RECIPIENTS_ALL: z.string().optional(),
 
     EOS_API_BASE: z.string().url().optional(),
     EOS_API_TOKEN: z.string().optional(),
@@ -33,10 +33,10 @@ export const env = createEnv({
 
     RESEND_API_KEY: process.env.RESEND_API_KEY,
     RESEND_EMAIL_FROM: process.env.RESEND_EMAIL_FROM,
-    RESEND_EMAIL_TO: process.env.RESEND_EMAIL_TO,
 
     REPORT_RECIPIENTS_PLANNED: process.env.REPORT_RECIPIENTS_PLANNED,
     REPORT_RECIPIENTS_ACTUAL: process.env.REPORT_RECIPIENTS_ACTUAL,
+    REPORT_RECIPIENTS_ALL: process.env.REPORT_RECIPIENTS_ALL,
 
     EOS_API_BASE: process.env.EOS_API_BASE,
     EOS_API_TOKEN: process.env.EOS_API_TOKEN,

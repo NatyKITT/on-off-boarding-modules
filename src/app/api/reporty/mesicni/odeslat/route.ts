@@ -30,8 +30,9 @@ type UiRecordIncoming = {
 
 export async function POST(request: Request) {
   const session = await auth()
-  if (!session?.user)
+  if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
 
   const body = (await request.json()) as {
     month: string
@@ -52,18 +53,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Žádní příjemci" }, { status: 400 })
     }
 
-    const toBase =
-      process.env.RESEND_EMAIL_TO ??
-      process.env.EMAIL_FROM ??
-      process.env.RESEND_EMAIL_FROM ??
-      ""
-
-    const to = toBase ? [toBase] : [reportRecipients[0]]
-
     const ensureReport = async (reportKind: Kind) => {
       let rep = await prisma.monthlyReport.findUnique({
         where: { month_reportType: { month, reportType: reportKind } },
       })
+
       if (!rep) {
         const recips = await recipientsFor(reportKind)
         rep = await prisma.monthlyReport.create({
@@ -84,6 +78,7 @@ export async function POST(request: Request) {
 
     const hasPlanned = records.some((r) => r.originKind === "planned")
     const hasActual = records.some((r) => r.originKind === "actual")
+
     const reportPlanned = hasPlanned ? await ensureReport("planned") : null
     const reportActual = hasActual ? await ensureReport("actual") : null
 
@@ -93,6 +88,7 @@ export async function POST(request: Request) {
           select: { recordType: true, recordId: true },
         })
       : []
+
     const existedActual = reportActual
       ? await prisma.monthlyReportRecord.findMany({
           where: { monthlyReportId: reportActual.id },
@@ -108,6 +104,7 @@ export async function POST(request: Request) {
     )
 
     let payloadRows = records
+
     if (mode === "unsentOnly") {
       payloadRows = records.filter((r) => {
         const key = `${r.type}_${r.originKind}-${r.id}`
@@ -140,12 +137,7 @@ export async function POST(request: Request) {
     const monthLabel = format(new Date(`${month}-01`), "LLLL yyyy", {
       locale: cs,
     })
-
-    const subject = sendToAll
-      ? `Měsíční report změn (plánované + skutečné) – ${monthLabel}`
-      : `Měsíční report ${
-          kind === "planned" ? "plánovaných" : "skutečných"
-        } změn – ${monthLabel}`
+    const subject = `Přehled personálních změn – ${monthLabel}`
 
     const html = await renderMonthlyReportHtml({
       records: emailRecords,
@@ -154,7 +146,6 @@ export async function POST(request: Request) {
     })
 
     await sendMail({
-      to,
       bcc: reportRecipients,
       subject,
       html,
@@ -164,6 +155,7 @@ export async function POST(request: Request) {
       payloadRows.map((r) => {
         const monthlyReportId =
           r.originKind === "planned" ? reportPlanned!.id : reportActual!.id
+
         return prisma.monthlyReportRecord.upsert({
           where: {
             recordType_recordId_monthlyReportId: {
@@ -186,16 +178,19 @@ export async function POST(request: Request) {
       })
     )
 
-    if (reportPlanned)
+    if (reportPlanned) {
       await prisma.monthlyReport.update({
         where: { id: reportPlanned.id },
         data: { sentAt: new Date() },
       })
-    if (reportActual)
+    }
+
+    if (reportActual) {
       await prisma.monthlyReport.update({
         where: { id: reportActual.id },
         data: { sentAt: new Date() },
       })
+    }
 
     await logEmailHistory({
       emailType: "MONTHLY_SUMMARY",
