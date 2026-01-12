@@ -29,7 +29,6 @@ import {
 type Props = {
   offboardingId: number
   initialData: ExitChecklistData
-  canEdit: boolean
   onDirtyChange?: (dirty: boolean) => void
   onSaved?: (data: ExitChecklistData) => void
   externalSaveTrigger?: number
@@ -55,7 +54,6 @@ function mergeItemsWithConfig(
 export function ExitChecklistForm({
   offboardingId,
   initialData,
-  canEdit,
   onDirtyChange,
   onSaved,
   externalSaveTrigger,
@@ -72,12 +70,15 @@ export function ExitChecklistForm({
     initialData.assets ?? []
   )
   const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [lastSaveTrigger, setLastSaveTrigger] = useState<number | undefined>(
     undefined
   )
 
   const isLocked = Boolean(lockedAt)
-  const editable = canEdit && !isLocked
+
+  const role = session?.user.role ?? "USER"
+  const isAdmin = role === "ADMIN" || role === "HR" || role === "IT"
 
   const header = useMemo(
     () => ({
@@ -102,8 +103,9 @@ export function ExitChecklistForm({
   const currentUserEmail = session?.user?.email ?? ""
 
   useEffect(() => {
+    const merged = mergeItemsWithConfig(initialData.items ?? [])
     setLockedAt(initialData.lockedAt ?? null)
-    setItems(mergeItemsWithConfig(initialData.items ?? []))
+    setItems(merged)
     setAssets(initialData.assets ?? [])
     setDirty(false)
   }, [initialData])
@@ -134,7 +136,19 @@ export function ExitChecklistForm({
     key: ExitChecklistItem["key"],
     value: ExitResolvedValue
   ) {
-    if (!editable) return
+    if (isLocked) return
+
+    const current = items.find((i) => i.key === key)
+    if (!current) return
+
+    if (
+      !isAdmin &&
+      current.signedByEmail &&
+      current.signedByEmail !== currentUserEmail
+    ) {
+      return
+    }
+
     markDirty()
     setItems((prev) =>
       prev.map((item) =>
@@ -149,7 +163,14 @@ export function ExitChecklistForm({
   }
 
   function signRow(key: ExitChecklistItem["key"]) {
-    if (!editable || !currentUserEmail) return
+    if (isLocked || !currentUserEmail) return
+
+    const current = items.find((i) => i.key === key)
+    if (!current) return
+
+    const isAlreadySigned = Boolean(current.signedAt)
+    if (isAlreadySigned) return
+
     markDirty()
     setItems((prev) =>
       prev.map((item) =>
@@ -167,7 +188,20 @@ export function ExitChecklistForm({
   }
 
   function revokeSignature(key: ExitChecklistItem["key"]) {
-    if (!canEdit) return
+    if (isLocked) return
+
+    const current = items.find((i) => i.key === key)
+    if (!current) return
+
+    const isSigned = Boolean(current.signedAt)
+    if (!isSigned) return
+
+    const isSignedByCurrentUser =
+      current.signedByEmail && current.signedByEmail === currentUserEmail
+
+    const canRevoke = isAdmin || isSignedByCurrentUser
+    if (!canRevoke) return
+
     markDirty()
     setItems((prev) =>
       prev.map((item) =>
@@ -184,7 +218,7 @@ export function ExitChecklistForm({
   }
 
   function addAssetRow() {
-    if (!editable) return
+    if (isLocked) return
     markDirty()
     setAssets((prev) => [
       ...prev,
@@ -201,7 +235,7 @@ export function ExitChecklistForm({
     field: "subject" | "inventoryNumber",
     value: string
   ) {
-    if (!editable) return
+    if (isLocked) return
     markDirty()
     setAssets((prev) =>
       prev.map((a) =>
@@ -216,13 +250,15 @@ export function ExitChecklistForm({
   }
 
   function removeAsset(id: string) {
-    if (!editable) return
+    if (isLocked) return
     markDirty()
     setAssets((prev) => prev.filter((a) => a.id !== id))
   }
 
   async function handleSave(lockAfterSave: boolean) {
     try {
+      setSaving(true)
+
       const res = await fetch(`/api/odchody/${offboardingId}/exit-checklist`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -236,6 +272,7 @@ export function ExitChecklistForm({
             signedAt: i.signedAt,
           })),
           assets: assets.map((a) => ({
+            id: a.id,
             subject: a.subject,
             inventoryNumber: a.inventoryNumber,
           })),
@@ -258,20 +295,26 @@ export function ExitChecklistForm({
         setAssets(json.data.assets ?? [])
         setLockedAt(json.data.lockedAt ?? null)
         setDirty(false)
+
         onSaved?.(json.data)
       }
     } catch (err) {
       console.error("Chyba při ukládání výstupního listu:", err)
+    } finally {
+      setSaving(false)
     }
   }
 
-  async function handleGeneratePdf() {
+  async function handleGeneratePdfWithSave() {
+    await handleSave(false)
     window.open(
       `/api/odchody/${offboardingId}/vystupni-list`,
       "_blank",
       "noopener,noreferrer"
     )
   }
+
+  const pdfButtonLabel = dirty ? "Uložit a vygenerovat PDF" : "Vygenerovat PDF"
 
   const isLockedBadge = isLocked ? (
     <Badge variant="outline" className="flex items-center gap-1">
@@ -343,8 +386,8 @@ export function ExitChecklistForm({
                 <TableHead className="w-[110px] text-center">
                   Vyrovnán
                 </TableHead>
-                <TableHead className="w-[150px]">Datum a podpis</TableHead>
-                <TableHead className="w-[150px] text-right">Akce</TableHead>
+                <TableHead className="w-[180px]">Datum a podpis</TableHead>
+                <TableHead className="w-[170px] text-right">Akce</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -358,6 +401,11 @@ export function ExitChecklistForm({
                   currentUserEmail &&
                   item.signedByEmail === currentUserEmail
 
+                const showSignButton = !isLocked && !isSigned
+
+                const showRevokeButton =
+                  !isLocked && isSigned && (isAdmin || currentUserIsSigner)
+
                 return (
                   <TableRow key={item.key}>
                     <TableCell className="align-top text-sm">
@@ -367,7 +415,7 @@ export function ExitChecklistForm({
                       {item.obligation}
                     </TableCell>
                     <TableCell className="text-center align-top">
-                      {editable ? (
+                      {!isLocked ? (
                         <div className="inline-flex items-center gap-1 rounded-md bg-muted px-1 py-0.5 text-xs">
                           <button
                             type="button"
@@ -418,7 +466,7 @@ export function ExitChecklistForm({
                     </TableCell>
                     <TableCell className="align-top">
                       <div className="flex justify-end gap-2">
-                        {editable && (
+                        {showSignButton && (
                           <Button
                             type="button"
                             size="sm"
@@ -430,7 +478,7 @@ export function ExitChecklistForm({
                             Podepsat
                           </Button>
                         )}
-                        {isSigned && (canEdit || currentUserIsSigner) && (
+                        {showRevokeButton && (
                           <Button
                             type="button"
                             size="sm"
@@ -485,7 +533,7 @@ export function ExitChecklistForm({
               {assets.map((asset) => (
                 <TableRow key={asset.id}>
                   <TableCell>
-                    {editable ? (
+                    {!isLocked ? (
                       <Input
                         value={asset.subject}
                         onChange={(e) =>
@@ -498,7 +546,7 @@ export function ExitChecklistForm({
                     )}
                   </TableCell>
                   <TableCell>
-                    {editable ? (
+                    {!isLocked ? (
                       <Input
                         value={asset.inventoryNumber}
                         onChange={(e) =>
@@ -515,7 +563,7 @@ export function ExitChecklistForm({
                     )}
                   </TableCell>
                   <TableCell className="text-right">
-                    {editable && (
+                    {!isLocked && (
                       <Button
                         type="button"
                         size="icon"
@@ -532,7 +580,7 @@ export function ExitChecklistForm({
             </TableBody>
           </Table>
 
-          {editable && (
+          {!isLocked && (
             <Button
               type="button"
               variant="outline"
@@ -560,31 +608,37 @@ export function ExitChecklistForm({
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => void handleGeneratePdf()}
+              onClick={() => void handleGeneratePdfWithSave()}
               className="gap-1"
+              disabled={saving}
             >
               <Printer className="size-4" />
-              Vygenerovat PDF k tisku
+              {pdfButtonLabel}
             </Button>
 
-            {editable && (
+            {!isLocked && (
               <>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   onClick={() => void handleSave(false)}
+                  disabled={saving}
                 >
-                  Uložit průběžně
+                  Uložit
                 </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  className="bg-[#00847C] text-white hover:bg-[#0B6D73]"
-                  onClick={() => void handleSave(true)}
-                >
-                  Uložit a uzamknout
-                </Button>
+
+                {isAdmin && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="bg-[#00847C] text-white hover:bg-[#0B6D73]"
+                    onClick={() => void handleSave(true)}
+                    disabled={saving}
+                  >
+                    Uzamknout
+                  </Button>
+                )}
               </>
             )}
           </div>

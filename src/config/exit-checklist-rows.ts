@@ -3,17 +3,17 @@ import type { ExitChecklistRowDefinition } from "@/types/exit-checklist"
 export const EXIT_CHECKLIST_ROWS: ExitChecklistRowDefinition[] = [
   {
     key: "sneoChip",
-    organization: "Správa objektu – SNEO, a.s., p. Tolde, přízemí, č. dv. 008",
+    organization: "Správa objektu – SNEO, a.s., p. Tolde, přízemí, č.dv.008",
     obligation: "identifikační karta (čip) zaměstnance",
   },
   {
     key: "sneoRemote",
-    organization: "Správa objektu – SNEO, a.s., p. Tolde, přízemí, č. dv. 008",
+    organization: "Správa objektu – SNEO, a.s., p. Tolde, přízemí, č.dv.008",
     obligation: "dálk. ovladač/e (garáže, dvůr)",
   },
   {
     key: "serviceTools",
-    organization: "Odbor služeb, Ing. Krýzová, přízemí, č. dv. 006",
+    organization: "Odbor služeb, Ing. Krýzová, přízemí, č.dv.006",
     obligation: "služební pomůcky + 2 str. VL",
   },
   {
@@ -25,56 +25,56 @@ export const EXIT_CHECKLIST_ROWS: ExitChecklistRowDefinition[] = [
   {
     key: "centralRegistry",
     organization:
-      "Vedoucí odd. spisové služby, Kancelář tajemníka, pí Štičková, 1. patro, č. dv. 119",
+      "Vedoucí odd. spisové služby, Kancelář tajemníka, pí Štičková, 1.patro, č.dv.119",
     obligation: "závazky ve vztahu k centrální spisovně",
   },
   {
     key: "classifiedDocs",
     organization:
-      "Vedoucí odd. krizového řízení a bezpečnosti, Kancelář tajemníka, Mgr. Duben, 6. patro, č. dv. 617A",
+      "Vedoucí odd. krizového řízení a bezpečnosti, Kancelář tajemníka, Mgr. Duben, 6.patro, č.dv.617A",
     obligation: "utajované písemnosti",
   },
   {
     key: "electronicTicket",
     organization:
-      "Vedoucí Odboru služeb, Mgr. Kratochvílová, přízemí, č. dv. 001",
+      "vedoucí Odboru služeb, Mgr. Kratochvílová, přízemí, č.dv. 001",
     obligation: "vyrovnání alikvotní částky z elektronické jízdenky",
   },
   {
     key: "carChip",
     organization:
-      "Vedoucí Odboru služeb, Mgr. Kratochvílová, přízemí, č. dv. 001",
+      "vedoucí Odboru služeb, Mgr. Kratochvílová, přízemí, č.dv. 001",
     obligation: "čip/y od služebního vozidla",
   },
   {
     key: "cashAdvance",
     organization:
-      "Vedoucí Odboru služeb, Mgr. Kratochvílová, přízemí, č. dv. 001",
+      "vedoucí Odboru služeb, Mgr. Kratochvílová, přízemí, č.dv. 001",
     obligation: "vyúčtování hotovostní zálohy",
   },
   {
     key: "serviceId",
-    organization: "Personální odd., Ing. Neugebauerová, 5. patro, č. dv. 521",
+    organization: "personální odd., Ing. Neugebauerová, 5.patro, č.dv.521",
     obligation: "služební průkaz",
   },
   {
     key: "socialFundLoan",
-    organization:
-      "Mzdová účtárna, pí Krupařová, p. Štola, 5. patro, č. dv. 519",
+    organization: "mzdová účtárna, pí Krupařová, p. Štola, 5.patro, č.dv.519",
     obligation: "vč. půjčky ze SF",
   },
   {
     key: "phoneCosts",
     organization:
-      "ředitel KITT6, Vladimír Šuvarina, Dr. Zikmunda  Wintra 768/20",
+      "ředitel KITT6, Vladimír Šuvarina, Dr.Zikmunda  Wintra 768/20",
     obligation:
       "úhrada nákladů za telefonní hovory přesahující měsíční finanční limit",
   },
   {
     key: "itEquipment",
     organization:
-      "ředitel KITT6, Vladimír Šuvarina, Dr. Zikmunda  Wintra 768/20",
-    obligation: "výpočetní technika, mobilní telefon, fotopřístroje",
+      "ředitel KITT6, Vladimír Šuvarina, Dr.Zikmunda  Wintra 768/20",
+    obligation:
+      "výpočetní technika, mobilní telefon, fotopřístroje (viz 2.str.)",
   },
   {
     key: "espis",
@@ -83,9 +83,15 @@ export const EXIT_CHECKLIST_ROWS: ExitChecklistRowDefinition[] = [
     obligation: "e-spis – kontrola předání dokumentů (viz předávací protokol)",
   },
   {
+    key: "lawInfo",
+    organization: "Právní odbor, Ing. Bečičková, 5. patro, č.dv.507",
+    obligation:
+      "Podání informace v návaznosti na ust. § 14a odst. 3 zákona č.159/2006 Sb., o střetu zájmu",
+  },
+  {
     key: "fineBlocks",
     organization:
-      "Vedoucí oddělení místních příjmů, Ing. Zavřelová, 5. patro, č. dv. 513",
+      "Vedoucí oddělení místních příjmů Ing. Zavřelová, 5. patro, č.dv.513",
     obligation: "příkazové bloky na pokuty a jejich vyúčtování",
   },
 ]

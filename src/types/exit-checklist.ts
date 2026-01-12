@@ -13,6 +13,7 @@ export type ExitChecklistRowKey =
   | "phoneCosts"
   | "itEquipment"
   | "espis"
+  | "lawInfo"
   | "fineBlocks"
 
 export type ExitResolvedValue = "YES" | "NO" | null
@@ -34,6 +35,7 @@ export interface ExitAssetItem {
   id: string
   subject: string
   inventoryNumber: string
+  createdById?: string | null
 }
 
 export interface ExitChecklistData {

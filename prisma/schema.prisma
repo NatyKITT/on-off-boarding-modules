@@ -29,14 +29,14 @@ enum OffboardingStatus {
 
 enum MailJobType {
   EMPLOYEE_INFO
-  MONTHLY_SUMMARY // měsíční shrnutí
-  PROBATION_WARNING // 10 dní před koncem zkušební doby
-  PROBATION_REMINDER // Připomínka zaměstnanci
-  PROBATION_ENDING // Poslední den zkušební doby
-  NOTICE_WARNING // Připomínka výpovědní lhůty
-  NOTICE_ENDING // Konec výpovědní lhůty
-  MANUAL_EMAIL // Ručně odeslaný email
-  SYSTEM_NOTIFICATION // Systémové notifikace
+  MONTHLY_SUMMARY
+  PROBATION_WARNING
+  PROBATION_REMINDER
+  PROBATION_ENDING
+  NOTICE_WARNING
+  NOTICE_ENDING
+  MANUAL_EMAIL
+  SYSTEM_NOTIFICATION
 }
 
 enum MailJobStatus {
@@ -100,11 +100,12 @@ model User {
   canAccessApp   Boolean   @default(false)
   createdAt      DateTime  @default(now()) @map("created_at")
 
-  accounts      Account[]
-  sessions      Session[]
-  onboardings   EmployeeOnboarding[]
-  offboardings  EmployeeOffboarding[]
-  ExitChecklist ExitChecklist[]
+  accounts            Account[]
+  sessions            Session[]
+  onboardings         EmployeeOnboarding[]
+  offboardings        EmployeeOffboarding[]
+  ExitChecklist       ExitChecklist[]
+  exitChecklistAssets ExitChecklistAsset[]
 
   @@map("users")
 }
@@ -461,6 +462,9 @@ model ExitChecklistAsset {
 
   subject         String
   inventoryNumber String?
+
+  createdById String?
+  createdBy   User?   @relation(fields: [createdById], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
