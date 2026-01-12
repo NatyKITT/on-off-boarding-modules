@@ -170,14 +170,12 @@ export async function GET(
       assets,
     } = checklist
 
-    // hlavička
     drawText(page1, czFont, nfc(employeeName), 130, 738, 11)
     drawText(page1, czFont, nfc(personalNumber), 424, 738, 11)
     drawText(page1, czFont, nfc(department), 130, 716, 11)
     drawText(page1, czFont, nfc(unitName), 130, 700, 11)
     drawText(page1, czFont, formatCzDate(employmentEndDate), 260, 666, 11)
 
-    // mapování řádků
     const rowIndexByKey = new Map(
       EXIT_CHECKLIST_ROWS.map((r, idx) => [r.key, idx] as const)
     )
@@ -190,8 +188,6 @@ export async function GET(
     const YESNO_FONT_SIZE = 10
     const YESNO_Y_OFFSET = -17
 
-    // – podpisový sloupec:
-    // posuneme trochu doleva a zmenšíme max šířku, aby vše zůstalo v rámečku
     const SIGN_COL_X = 465
     const SIGN_COL_MAX_WIDTH = 100
 
@@ -209,7 +205,6 @@ export async function GET(
       const rowTopY =
         (onFirstPage ? ROW_TOP_Y_P1 : ROW_TOP_Y_P2) - localIndex * ROW_HEIGHT
 
-      // Ano / Ne
       if (item.resolved === "YES") {
         drawCenteredText(
           page,
@@ -230,14 +225,12 @@ export async function GET(
         )
       }
 
-      // Podpis + datum + poznámka
       if (item.signedAt && item.signedByName) {
         const name = nfc(item.signedByName)
         const dateStr = formatCzDateTime(item.signedAt)
         const note =
           "Elektronicky potvrzeno v aplikaci On-Off-Boarding ÚMČ Praha 6."
 
-        // jméno – maxWidth je teď menší, takže se vynutí zmenšení fontu, pokud je moc dlouhé
         drawTextFitted(
           page,
           czFont,
@@ -258,7 +251,6 @@ export async function GET(
           8
         )
 
-        // poznámka – ještě menší font, aby se vlezla do šířky políčka pod podpis
         drawTextFitted(
           page,
           czFont,
@@ -271,7 +263,6 @@ export async function GET(
       }
     }
 
-    // movitý majetek
     const ASSETS_START_Y = 589
     const ASSETS_ROW_HEIGHT = 20
     const MAX_ASSET_ROWS = 11
