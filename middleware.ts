@@ -18,15 +18,29 @@ export default auth((req) => {
 
   const publicPaths = ["/signin", "/terms", "/privacy"]
   const isPublicPath = publicPaths.some((p) => path.startsWith(p))
+
   const isAuthPath = path.startsWith("/api/auth")
 
-  if (isPublicPath || isAuthPath) {
+  const isPublicDocumentPage =
+    path.startsWith("/dokumenty/") && !path.startsWith("/dokumenty/internal")
+
+  const isPublicDocumentApi = path.startsWith("/api/dokumenty/public")
+
+  if (
+    isPublicPath ||
+    isAuthPath ||
+    isPublicDocumentPage ||
+    isPublicDocumentApi
+  ) {
     return NextResponse.next()
   }
 
   if (!session) {
     const signInUrl = new URL("/signin", req.url)
-    signInUrl.searchParams.set("callbackUrl", path)
+
+    const callbackUrl = `${req.nextUrl.pathname}${req.nextUrl.search}`
+    signInUrl.searchParams.set("callbackUrl", callbackUrl)
+
     return NextResponse.redirect(signInUrl)
   }
 
@@ -35,6 +49,7 @@ export default auth((req) => {
   }
 
   const userRole = session.user?.role
+
   if (path.startsWith("/admin") && userRole !== "ADMIN") {
     return NextResponse.redirect(new URL("/prehled", req.url))
   }
