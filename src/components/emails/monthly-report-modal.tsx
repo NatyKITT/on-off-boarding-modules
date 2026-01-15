@@ -39,6 +39,8 @@ interface ReportRecord {
   wasSent: boolean
   sentDate?: string | null
   email?: string | null
+  personalNumber?: string | null
+  positionNum?: string | null
 }
 
 interface RecordsResponse {
@@ -56,6 +58,8 @@ interface UiRecordPayload {
   department: string | null
   date: string | null
   originKind: "planned" | "actual"
+  personalNumber?: string | null
+  positionNum?: string | null
 }
 
 interface Props {
@@ -232,6 +236,8 @@ export function MonthlyReportModal({
         department: r.department ?? null,
         date: r.date,
         originKind: r.isPlanned ? "planned" : "actual",
+        personalNumber: r.personalNumber ?? null,
+        positionNum: r.positionNum ?? null,
       }))
 
       const res = await fetch("/api/reporty/mesicni/odeslat", {

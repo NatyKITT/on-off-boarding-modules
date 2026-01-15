@@ -22,6 +22,8 @@ export type RecordRow = {
   wasSent: boolean
   sentDate: string | null
   email: string | null
+  personalNumber: string | null
+  positionNum: string | null
 }
 
 export async function GET(req: Request) {
@@ -91,6 +93,8 @@ export async function GET(req: Request) {
         department: true,
         unitName: true,
         email: true,
+        personalNumber: true,
+        positionNum: true,
       },
     })
 
@@ -115,6 +119,8 @@ export async function GET(req: Request) {
         wasSent: Boolean(sentAt),
         sentDate: sentAt ? sentAt.toISOString() : null,
         email: o.email ?? null,
+        personalNumber: o.personalNumber ? String(o.personalNumber) : null,
+        positionNum: o.positionNum ? String(o.positionNum) : null,
       })
     }
   }
@@ -148,6 +154,8 @@ export async function GET(req: Request) {
         actualEnd: true,
         positionName: true,
         department: true,
+        personalNumber: true,
+        positionNum: true,
       },
     })
 
@@ -170,6 +178,8 @@ export async function GET(req: Request) {
         wasSent: Boolean(sentAt),
         sentDate: sentAt ? sentAt.toISOString() : null,
         email: null,
+        personalNumber: o.personalNumber ? String(o.personalNumber) : null,
+        positionNum: o.positionNum ? String(o.positionNum) : null,
       })
     }
   }

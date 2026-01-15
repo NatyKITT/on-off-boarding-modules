@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
-import { format } from "date-fns"
-import { cs } from "date-fns/locale"
 
 import { prisma } from "@/lib/db"
 import {
+  buildMonthlyReportSubject,
   logEmailHistory,
   renderMonthlyReportHtml,
   sendMail,
@@ -26,6 +25,8 @@ type UiRecordIncoming = {
   department: string | null
   date: string | Date | null
   originKind: Kind
+  personalNumber?: string | null
+  positionNum?: string | null
 }
 
 export async function POST(request: Request) {
@@ -124,7 +125,7 @@ export async function POST(request: Request) {
 
     const emailRecords: EmailRecord[] = payloadRows.map((r) => ({
       id: r.id,
-      type: r.type === "onboarding" ? "onboarding" : "offboarding",
+      type: r.type,
       name: r.name,
       surname: r.surname,
       titleBefore: r.titleBefore ?? null,
@@ -132,17 +133,22 @@ export async function POST(request: Request) {
       position: r.position ?? null,
       department: r.department ?? null,
       date: r.date ?? null,
+      personalNumber: r.personalNumber ?? null,
+      positionNum: r.positionNum ?? null,
     }))
 
-    const monthLabel = format(new Date(`${month}-01`), "LLLL yyyy", {
-      locale: cs,
+    const hasOnboarding = emailRecords.some((r) => r.type === "onboarding")
+    const hasOffboarding = emailRecords.some((r) => r.type === "offboarding")
+
+    const subject = buildMonthlyReportSubject(month, kind, {
+      hasOnboarding,
+      hasOffboarding,
     })
-    const subject = `Přehled personálních změn – ${monthLabel}`
 
     const html = await renderMonthlyReportHtml({
       records: emailRecords,
       month,
-      kind: sendToAll ? "all" : kind,
+      kind: kind,
     })
 
     await sendMail({

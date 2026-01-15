@@ -57,6 +57,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       positionName: true,
       department: true,
       deletedAt: true,
+      personalNumber: true,
+      positionNum: true,
     },
   })
 
@@ -96,7 +98,6 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   const defaultContent = `Automaticky generovaný email pro zaměstnance ${rec.name} ${rec.surname} na pozici ${rec.positionName} v odboru ${rec.department}.`
 
   try {
-    // 1) MailQueue
     const mailJob = await prisma.mailQueue.create({
       data: {
         type: "EMPLOYEE_INFO",
@@ -107,6 +108,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
           employeeName: `${rec.name} ${rec.surname}`,
           position: rec.positionName,
           department: rec.department,
+          personalNumber: rec.personalNumber ?? null,
+          positionNum: rec.positionNum ?? null,
           subject: customSubject || defaultSubject,
           content: customContent || defaultContent,
           isCustom: Boolean(customSubject || customContent),
@@ -117,7 +120,6 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       },
     })
 
-    // 2) EmailHistory
     const emailHistory = await prisma.emailHistory.create({
       data: {
         mailQueueId: mailJob.id,
@@ -131,7 +133,6 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       },
     })
 
-    // 3) Audit log
     await prisma.offboardingChangeLog.create({
       data: {
         employeeId: rec.id,
