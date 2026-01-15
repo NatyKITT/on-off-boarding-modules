@@ -5,6 +5,7 @@ import { z } from "zod"
 
 import { prisma } from "@/lib/db"
 import { sendMail } from "@/lib/email"
+import { absoluteUrl } from "@/lib/url"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -27,10 +28,6 @@ const postSchema = z.object({
     )
     .min(1),
 })
-
-function baseUrlFrom(req: NextRequest) {
-  return process.env.NEXTAUTH_URL ?? req.nextUrl.origin
-}
 
 function docTypeLabel(t: EmploymentDocumentType) {
   switch (t) {
@@ -67,8 +64,6 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  const baseUrl = baseUrlFrom(req)
-
   const documents = await prisma.employmentDocument.findMany({
     where: { onboardingId: parsed.data.onboardingId },
     select: {
@@ -86,7 +81,9 @@ export async function GET(req: NextRequest) {
 
   const docsWithUrl = documents.map((d) => ({
     ...d,
-    publicUrl: d.accessHash ? `${baseUrl}/dokumenty/${d.accessHash}` : null,
+    publicUrl: d.accessHash
+      ? absoluteUrl(`/dokumenty/${d.accessHash}`, req)
+      : null,
   }))
 
   return NextResponse.json({ documents: docsWithUrl })
@@ -112,8 +109,6 @@ export async function POST(req: NextRequest) {
   }
 
   const { onboardingId, email, employeeName, documents } = parsed.data
-  const baseUrl = baseUrlFrom(req)
-
   const ids = documents.map((d) => d.id)
 
   const docsFromDb = await prisma.employmentDocument.findMany({
@@ -133,7 +128,7 @@ export async function POST(req: NextRequest) {
     .map((d) => ({
       id: d.id,
       type: d.type,
-      url: `${baseUrl}/dokumenty/${d.accessHash}`,
+      url: absoluteUrl(`/dokumenty/${d.accessHash}`, req),
     }))
 
   if (!mapped.length) {
