@@ -510,15 +510,19 @@ export async function sendMail(params: {
   const textBody = params.text ?? htmlToText(params.html)
 
   if (!toClean.length && bccClean.length) {
-    for (const recipient of bccClean) {
-      await resend.emails.send({
-        from: fromFinal,
-        to: [recipient],
-        subject: params.subject,
-        html: params.html,
-        text: textBody,
-      })
-    }
+    const neutralTo = (process.env.RESEND_EMAIL_FROM ?? "").trim().length
+      ? (process.env.RESEND_EMAIL_FROM as string).trim()
+      : fromFinal
+
+    await resend.emails.send({
+      from: fromFinal,
+      to: [neutralTo],
+      ...(bccClean.length ? { bcc: bccClean } : {}),
+      subject: params.subject,
+      html: params.html,
+      text: textBody,
+    })
+
     return
   }
 
