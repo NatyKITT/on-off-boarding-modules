@@ -20,6 +20,7 @@ export default auth((req) => {
   const isPublicPath = publicPaths.some((p) => path.startsWith(p))
 
   const isAuthPath = path.startsWith("/api/auth")
+  const isHealthPath = path.startsWith("/api/health")
 
   const isPublicDocumentPage =
     path.startsWith("/dokumenty/") && !path.startsWith("/dokumenty/internal")
@@ -29,6 +30,7 @@ export default auth((req) => {
   if (
     isPublicPath ||
     isAuthPath ||
+    isHealthPath ||
     isPublicDocumentPage ||
     isPublicDocumentApi
   ) {
@@ -37,10 +39,8 @@ export default auth((req) => {
 
   if (!session) {
     const signInUrl = new URL("/signin", req.url)
-
     const callbackUrl = `${req.nextUrl.pathname}${req.nextUrl.search}`
     signInUrl.searchParams.set("callbackUrl", callbackUrl)
-
     return NextResponse.redirect(signInUrl)
   }
 

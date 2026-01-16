@@ -27,7 +27,7 @@ async function getDepartureById(
   id: number,
   cookie: string | null
 ): Promise<Departure> {
-  const base = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3001"
+  const base = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3001"
   const res = await fetch(`${base}/api/odchody/${id}`, {
     cache: "no-store",
     headers: cookie ? { cookie } : undefined,

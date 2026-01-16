@@ -195,7 +195,7 @@ async function processMonthlySummaryJob(job: MailQueue): Promise<void> {
     </ul>
   `
 
-  const baseRecipients = (process.env.REPORT_RECIPIENTS ?? "")
+  const baseRecipients = (process.env.REPORT_RECIPIENTS_PLANNED ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean)

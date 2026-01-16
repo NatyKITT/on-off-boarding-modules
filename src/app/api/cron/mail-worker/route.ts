@@ -8,7 +8,7 @@ export const fetchCache = "force-no-store"
 export const revalidate = 0
 
 const resend = new Resend(process.env.RESEND_API_KEY)
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || "system@company.com"
+const FROM_EMAIL = process.env.RESEND_EMAIL_FROM || ""
 
 type EmployeeListItem = {
   name: string
