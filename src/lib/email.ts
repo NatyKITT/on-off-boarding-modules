@@ -98,7 +98,7 @@ function kindLabels(args: {
   return {
     subtitle: "Přehled personálních změn",
     onboardingDateHeader: "Datum nástupu",
-    offboardingDateHeader: "Datum ukončení",
+    offboardingDateHeader: "Datum odchodu",
   }
 }
 
@@ -219,9 +219,6 @@ export async function renderMonthlyReportHtml(args: {
     `
   }
 
-  const thMobile = (desktop: string, mobile: string) =>
-    `<span class="d-only">${desktop}</span><span class="m-only">${mobile}</span>`
-
   const renderTablePlanned = (
     rows: EmailRecord[],
     dateHeader: string
@@ -229,74 +226,85 @@ export async function renderMonthlyReportHtml(args: {
     if (!rows.length) return ""
 
     return `
-      <table border="0" cellpadding="0" cellspacing="0" width="100%"
-        style="width:100%; border-collapse: collapse; font-family: 'Civil Premium', 'Segoe UI', Arial, sans-serif; font-size: 13px; margin-bottom: 22px;">
-        <thead>
-          <tr bgcolor="${primary}" style="background-color: ${primary}; color: #ffffff;">
+    <table border="0" cellpadding="0" cellspacing="0" width="100%"
+      style="width:100%; border-collapse: collapse; font-family: 'Civil Premium', 'Segoe UI', Arial, sans-serif; font-size: 13px; margin-bottom: 22px;">
+      <thead>
+        <tr bgcolor="${primary}" style="background-color: ${primary}; color: #ffffff;">
 
-            <th class="thcell" align="left" style="padding: 10px; width: 220px; font-weight: 600; text-transform: uppercase; font-size: 11px;">
-              Zaměstnanec
-            </th>
+          <th class="thcell" align="left"
+              style="padding: 10px; width: 220px; font-weight: 600; text-transform: uppercase; font-size: 11px;">
+            Zaměstnanec
+          </th>
 
-            <th class="thcell" align="left" style="padding: 10px; width: 95px; font-weight: 600; text-transform: uppercase; font-size: 11px; white-space: nowrap;">
-              ${thMobile("Osobní číslo", "Os. číslo")}
-            </th>
+          <th class="thcell" align="left"
+              style="padding: 10px; width: 95px; font-weight: 600; text-transform: uppercase; font-size: 11px;">
+            Osobní číslo
+          </th>
 
-            <th class="thcell" align="left" style="padding: 10px; width: 200px; font-weight: 600; text-transform: uppercase; font-size: 11px;">
-              Pozice
-            </th>
+          <th class="thcell" align="left"
+              style="padding: 10px; width: 200px; font-weight: 600; text-transform: uppercase; font-size: 11px;">
+            Pozice
+          </th>
 
-            <th class="thcell" align="left" style="padding: 10px; width: 190px; font-weight: 600; text-transform: uppercase; font-size: 11px;">
-              Odbor
-            </th>
+          <th class="thcell" align="left"
+              style="padding: 10px; width: 190px; font-weight: 600; text-transform: uppercase; font-size: 11px;">
+            Odbor
+          </th>
 
-            <th class="thcell" align="left" style="padding: 10px; width: 105px; font-weight: 600; text-transform: uppercase; font-size: 11px; white-space: nowrap;">
-              ${thMobile("Číslo funkce", "Funkce")}
-            </th>
+          <th class="thcell" align="left"
+              style="padding: 10px; width: 105px; font-weight: 600; text-transform: uppercase; font-size: 11px;">
+            Číslo funkce
+          </th>
 
-            <th class="thcell" align="left" style="padding: 10px; width: 120px; font-weight: 600; text-transform: uppercase; font-size: 11px; white-space: nowrap;">
-              ${thMobile(dateHeader, "Datum")}
-            </th>
+          <th class="thcell" align="left"
+              style="padding: 10px; width: 120px; font-weight: 600; text-transform: uppercase; font-size: 11px;">
+            ${dateHeader}
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows
+          .map(
+            (r, i) => `
+          <tr bgcolor="${i % 2 === 0 ? "#ffffff" : "#f9fafb"}"
+              style="background-color: ${i % 2 === 0 ? "#ffffff" : "#f9fafb"};">
+
+            <td class="cell row-text name-primary"
+                style="padding: 10px; border-bottom: 1px solid #e5e7eb;">
+              ${formatName(r)}
+            </td>
+
+            <td class="cell row-text"
+                style="padding: 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap;">
+              ${r.personalNumber ?? "—"}
+            </td>
+
+            <td class="cell row-text"
+                style="padding: 10px; border-bottom: 1px solid #e5e7eb;">
+              ${r.position ?? "—"}
+            </td>
+
+            <td class="cell row-text"
+                style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: 500;">
+              ${r.department ?? "—"}
+            </td>
+
+            <td class="cell row-text"
+                style="padding: 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap;">
+              ${r.positionNum ?? "—"}
+            </td>
+
+            <td class="cell row-text"
+                style="padding: 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; font-variant-numeric: tabular-nums;">
+              ${fmtDate(r.date)}
+            </td>
           </tr>
-        </thead>
-        <tbody>
-          ${rows
-            .map(
-              (r, i) => `
-            <tr bgcolor="${i % 2 === 0 ? "#ffffff" : "#f9fafb"}" style="background-color: ${
-              i % 2 === 0 ? "#ffffff" : "#f9fafb"
-            };">
-
-              <td class="cell row-text name-primary" style="padding: 10px; border-bottom: 1px solid #e5e7eb;">
-                ${formatName(r)}
-              </td>
-
-              <td class="cell row-text" style="padding: 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap;">
-                ${r.personalNumber ?? "—"}
-              </td>
-
-              <td class="cell row-text" style="padding: 10px; border-bottom: 1px solid #e5e7eb;">
-                ${r.position ?? "—"}
-              </td>
-
-              <td class="cell row-text" style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: 500;">
-                ${r.department ?? "—"}
-              </td>
-
-              <td class="cell row-text" style="padding: 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap;">
-                ${r.positionNum ?? "—"}
-              </td>
-
-              <td class="cell row-text" style="padding: 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; font-variant-numeric: tabular-nums;">
-                ${fmtDate(r.date)}
-              </td>
-            </tr>
-          `
-            )
-            .join("")}
-        </tbody>
-      </table>
-    `
+        `
+          )
+          .join("")}
+      </tbody>
+    </table>
+  `
   }
 
   const renderTable =
@@ -349,8 +357,6 @@ export async function renderMonthlyReportHtml(args: {
         .thcell { word-break: normal; overflow-wrap: normal; white-space: normal; }
         .cell { word-break: normal; overflow-wrap: normal; }
 
-        .d-only { display: inline; }
-        .m-only { display: none; }
 
         @media only screen and (min-width: 600px) {
           .card-shadow {
@@ -363,9 +369,6 @@ export async function renderMonthlyReportHtml(args: {
 
         @media only screen and (max-width: 600px) {
           .content-pad { padding: 18px 14px !important; }
-
-          .d-only { display: none !important; }
-          .m-only { display: inline !important; }
 
           .thcell { padding: 8px !important; font-size: 10px !important; }
           .cell { padding: 8px !important; font-size: 12px !important; }
@@ -388,10 +391,32 @@ export async function renderMonthlyReportHtml(args: {
       <table class="outer-bg" border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
         <tr>
           <td align="center" style="padding: 30px 10px;">
-            <table class="card-shadow card-border" border="0" cellpadding="0" cellspacing="0"
-              width="860" style="max-width: 820px; background-color: #ffffff; border-collapse: separate; border: 1px solid #d9ece7;">
+            <table
+              class="card-shadow card-border"
+              border="0"
+              cellpadding="0"
+              cellspacing="0"
+              width="860"
+              style="
+                max-width: 820px;
+                background-color: #ffffff;
+                border-collapse: separate;
+                border: 1px solid #d9ece7;
+                border-radius: 12px;
+                overflow: hidden;
+                box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+              "
+            >
               <tr>
-                <td class="rounded-top" bgcolor="${primary}" style="padding: 25px 30px; background-color: ${primary};">
+                <td
+                  class="rounded-top"
+                  bgcolor="${primary}"
+                  style="
+                    padding: 25px 30px;
+                    background-color: ${primary};
+                    border-radius: 12px 12px 0 0;
+                  "
+                >
                   <table border="0" cellpadding="0" cellspacing="0" width="100%">
                     <tr>
                       <td style="color: #ffffff; font-family: 'Civil Premium', 'Segoe UI', Arial, sans-serif;">
@@ -450,7 +475,19 @@ export async function renderMonthlyReportHtml(args: {
               </tr>
 
               <tr>
-                <td class="rounded-bottom footer-row" bgcolor="${bgLight}" style="padding: 18px 26px; font-family: 'Civil Premium', 'Segoe UI', Arial, sans-serif; font-size: 12px; color: #4b5563; line-height: 1.5; border-top: 1px solid #d9ece7;">
+                <td
+                  class="rounded-bottom footer-row"
+                  bgcolor="${bgLight}"
+                  style="
+                    padding: 18px 26px;
+                    font-family: 'Civil Premium', 'Segoe UI', Arial, sans-serif;
+                    font-size: 12px;
+                    color: #4b5563;
+                    line-height: 1.5;
+                    border-top: 1px solid #d9ece7;
+                    border-radius: 0 0 12px 12px;
+                  "
+                >
                   <table border="0" cellpadding="0" cellspacing="0" width="100%">
                     <tr>
                       <td>
