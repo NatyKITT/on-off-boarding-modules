@@ -10,6 +10,7 @@ datasource db {
 
 enum Role {
   USER
+  READONLY
   HR
   IT
   ADMIN
@@ -89,16 +90,17 @@ enum ChecklistResolution {
 }
 
 model User {
-  id             String    @id @default(cuid())
-  name           String?
-  surname        String?
-  email          String    @unique
-  emailVerified  DateTime? @map("email_verified")
-  image          String?
-  personalNumber String?   @unique
-  role           Role      @default(USER)
-  canAccessApp   Boolean   @default(false)
-  createdAt      DateTime  @default(now()) @map("created_at")
+  id                String    @id @default(cuid())
+  name              String?
+  surname           String?
+  email             String    @unique
+  emailVerified     DateTime? @map("email_verified")
+  image             String?
+  personalNumber    String?   @unique
+  role              Role      @default(USER)
+  canAccessApp      Boolean   @default(false)
+  createdAt         DateTime  @default(now()) @map("created_at")
+  exitChecklistKeys Json?     @map("exit_checklist_keys")
 
   accounts            Account[]
   sessions            Session[]

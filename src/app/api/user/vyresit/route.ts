@@ -7,17 +7,14 @@ export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
 export const revalidate = 0
 
-// Validace vstupu
 const bodySchema = z.object({
   ids: z.array(z.string().min(1)).max(100), // max 100 IDs najednou
 })
 
 export async function POST(req: NextRequest) {
   try {
-    // Bezpečné parsování JSON
     const rawBody = await req.json().catch(() => ({}))
 
-    // Validace vstupu
     const parseResult = bodySchema.safeParse(rawBody)
     if (!parseResult.success) {
       return NextResponse.json(
@@ -33,7 +30,6 @@ export async function POST(req: NextRequest) {
 
     const { ids } = parseResult.data
 
-    // Odstranění duplicit a prázdných hodnot
     const uniqueIds = [...new Set(ids.filter(Boolean))]
 
     if (uniqueIds.length === 0) {
@@ -66,30 +62,26 @@ export async function POST(req: NextRequest) {
         user.email ||
         user.id
 
-      // Přidat roli do display name (volitelně)
       const withRole =
         user.role && user.role !== "USER"
           ? `${displayName} (${user.role})`
           : displayName
 
-      // Mapování podle ID
       if (user.id) {
         map[user.id] = withRole
         foundIds.add(user.id)
       }
 
-      // Mapování podle emailu (pokud byl email v požadavku)
       if (user.email && uniqueIds.includes(user.email)) {
         map[user.email] = withRole
         foundIds.add(user.email)
       }
     }
 
-    // Pro neexistující ID/emaily vrátit původní hodnotu nebo placeholder
     const missingIds: string[] = []
     for (const id of uniqueIds) {
       if (!foundIds.has(id)) {
-        map[id] = `Neznámý uživatel (${id})` // nebo prostě: map[id] = id
+        map[id] = `Neznámý uživatel (${id})`
         missingIds.push(id)
       }
     }
@@ -117,7 +109,6 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// GET verze pro jednoduché dotazy přes URL params
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
@@ -155,7 +146,6 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    // Validace pomocí schéma
     const parseResult = bodySchema.safeParse({ ids })
     if (!parseResult.success) {
       return NextResponse.json(
@@ -168,7 +158,6 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    // Duplikace logiky z POST (bez any typu)
     const uniqueIds = [...new Set(ids.filter(Boolean))]
 
     const users = await prisma.user.findMany({
