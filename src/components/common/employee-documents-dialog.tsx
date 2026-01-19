@@ -175,9 +175,14 @@ export function EmployeeDocumentsDialog({
 
   function getPublicUrlForDoc(doc: EmploymentDocumentLite): string | null {
     if (doc.publicUrl) return doc.publicUrl
+
     if (doc.accessHash) {
-      return `/dokumenty/${doc.accessHash}`
+      const origin = typeof window !== "undefined" ? window.location.origin : ""
+      return origin
+        ? `${origin}/dokumenty/${doc.accessHash}`
+        : `/dokumenty/${doc.accessHash}`
     }
+
     return null
   }
 

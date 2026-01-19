@@ -108,7 +108,6 @@ export async function POST(
         },
       })
 
-      // Volitelné - mail notifikace
       try {
         await tx.mailQueue.create({
           data: {
@@ -120,7 +119,7 @@ export async function POST(
               restoredBy: createdBy,
               originalDeletedBy: employee.deletedBy,
               originalDeleteReason: employee.deleteReason,
-              recipients: [process.env.HR_EMAIL || "hr@company.com"],
+              recipients: [process.env.HR_NOTIFICATION_EMAILS || ""],
               subject: `Obnoven záznam zaměstnance - ${employee.name} ${employee.surname}`,
             },
             priority: 3,

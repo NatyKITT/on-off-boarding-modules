@@ -6,6 +6,7 @@ import { EmploymentDocumentType } from "@prisma/client"
 import { z } from "zod"
 
 import { prisma } from "@/lib/db"
+import { absoluteUrl } from "@/lib/url"
 
 const assignSchema = z.object({
   onboardingId: z.number().int(),
@@ -27,7 +28,6 @@ export async function POST(req: NextRequest) {
 
   const accessHash = randomBytes(16).toString("hex")
   const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
-  const baseUrl = process.env.NEXTAUTH_URL ?? req.nextUrl.origin
 
   const doc = await prisma.employmentDocument.create({
     data: {
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
     },
   })
 
-  const publicUrl = `${baseUrl}/dokumenty/${accessHash}`
+  const publicUrl = absoluteUrl(`/dokumenty/${accessHash}`, req)
 
   return NextResponse.json({
     id: doc.id,

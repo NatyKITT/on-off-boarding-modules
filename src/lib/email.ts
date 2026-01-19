@@ -18,17 +18,14 @@ function buildFromAddress(raw: string | undefined | null): string | null {
     return trimmed
   }
 
-  return `On-Off-Boarding <${trimmed}>`
+  return `On-Boarding-Modul <${trimmed}>`
 }
 
-const DEFAULT_FROM =
-  buildFromAddress(process.env.RESEND_EMAIL_FROM) ??
-  buildFromAddress(process.env.EMAIL_FROM) ??
-  null
+const DEFAULT_FROM = buildFromAddress(process.env.RESEND_EMAIL_FROM) ?? null
 
 if (!DEFAULT_FROM) {
   console.warn(
-    "⚠️ Není nastavená proměnná RESEND_EMAIL_FROM/EMAIL_FROM – e-maily nepůjde korektně odeslat (chybí FROM)."
+    "⚠️ Není nastavená proměnná RESEND_EMAIL_FROM – e-maily nepůjde korektně odeslat (chybí FROM)."
   )
 }
 
@@ -42,59 +39,8 @@ export type EmailRecord = {
   position: string | null
   department: string | null
   date: string | Date | null
-}
-
-export async function sendMail(params: {
-  to?: string[]
-  bcc?: string[]
-  subject: string
-  html: string
-  from?: string
-}): Promise<void> {
-  const toClean = Array.from(
-    new Set((params.to ?? []).map((v) => v?.trim()).filter(Boolean))
-  )
-  const bccClean = Array.from(
-    new Set((params.bcc ?? []).map((v) => v?.trim()).filter(Boolean))
-  )
-
-  if (!bccClean.length && !toClean.length) {
-    throw new Error("Missing recipients")
-  }
-
-  const fallbackTo =
-    toClean.length > 0
-      ? toClean
-      : [
-          process.env.RESEND_EMAIL_TO ??
-            process.env.EMAIL_FROM ??
-            process.env.RESEND_EMAIL_FROM ??
-            "no-reply@example.com",
-        ]
-
-  if (!resend) {
-    console.warn("Resend není nastaven – e-mail by se teď neposlal.")
-    console.warn("TO:", fallbackTo)
-    console.warn("BCC:", bccClean)
-    return
-  }
-
-  const fromFinal =
-    params.from && params.from.trim().length ? params.from.trim() : DEFAULT_FROM
-
-  if (!fromFinal) {
-    throw new Error(
-      "Nelze odeslat e-mail – není nastaven FROM (RESEND_EMAIL_FROM / EMAIL_FROM)."
-    )
-  }
-
-  await resend.emails.send({
-    from: fromFinal,
-    to: fallbackTo,
-    ...(bccClean.length ? { bcc: bccClean } : {}),
-    subject: params.subject,
-    html: params.html,
-  })
+  personalNumber?: string | null
+  positionNum?: string | null
 }
 
 export function parseRecipientsEnv(value?: string | null): string[] {
@@ -106,16 +52,6 @@ export function parseRecipientsEnv(value?: string | null): string[] {
     .split(/[;,]/)
     .map((part) => part.trim())
     .filter((part) => part.length > 0 && part.includes("@"))
-}
-
-function kindLabels(kind: "planned" | "actual" | "all") {
-  void kind
-
-  return {
-    subtitle: "Přehled personálních změn",
-    onboardingDateHeader: "Datum nástupu",
-    offboardingDateHeader: "Datum ukončení",
-  }
 }
 
 function formatName(
@@ -135,10 +71,78 @@ function fmtDate(d: string | Date | null | undefined): string {
   return format(dt, "dd.MM.yyyy")
 }
 
-export function buildMonthlyReportSubject(month: string): string {
+function plannedScopeLabel(hasOnboarding: boolean, hasOffboarding: boolean) {
+  if (hasOnboarding && hasOffboarding) return "předpokládané nástupy a odchody"
+  if (hasOffboarding) return "předpokládané odchody"
+  return "předpokládané nástupy"
+}
+
+function kindLabels(args: {
+  kind: "planned" | "actual" | "all"
+  hasOnboarding: boolean
+  hasOffboarding: boolean
+}) {
+  const { kind, hasOnboarding, hasOffboarding } = args
+
+  if (kind === "planned") {
+    return {
+      subtitle: `Přehled personálních změn – ${plannedScopeLabel(
+        hasOnboarding,
+        hasOffboarding
+      )}`,
+      onboardingDateHeader: "Datum nástupu",
+      offboardingDateHeader: "Datum odchodu",
+    }
+  }
+
+  return {
+    subtitle: "Přehled personálních změn",
+    onboardingDateHeader: "Datum nástupu",
+    offboardingDateHeader: "Datum ukončení",
+  }
+}
+
+export function buildMonthlyReportSubject(
+  month: string,
+  kind: "planned" | "actual" | "all" = "actual",
+  opts?: { hasOnboarding?: boolean; hasOffboarding?: boolean }
+): string {
   const baseDate = new Date(`${month}-01T00:00:00`)
   const monthLabel = format(baseDate, "LLLL yyyy", { locale: cs })
+
+  if (kind === "planned") {
+    const hasOnboarding = opts?.hasOnboarding ?? true
+    const hasOffboarding = opts?.hasOffboarding ?? false
+    const scope = plannedScopeLabel(hasOnboarding, hasOffboarding)
+    return `Přehled personálních změn – ${scope} – ${monthLabel}`
+  }
+
   return `Přehled personálních změn – ${monthLabel}`
+}
+
+function htmlToText(html: string): string {
+  let text = html
+
+  text = text.replace(/<style[\s\S]*?<\/style>/gi, "")
+  text = text.replace(/<script[\s\S]*?<\/script>/gi, "")
+
+  text = text.replace(/<br\s*\/?>/gi, "\n")
+  text = text.replace(/<\/p>/gi, "\n\n")
+  text = text.replace(/<\/h[1-6]>/gi, "\n\n")
+
+  text = text.replace(/<\/?[^>]+>/g, "")
+
+  text = text
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+
+  text = text.replace(/\n{3,}/g, "\n\n")
+
+  return text.trim()
 }
 
 export async function renderMonthlyReportHtml(args: {
@@ -154,215 +158,60 @@ export async function renderMonthlyReportHtml(args: {
   const onboardings = records.filter((r) => r.type === "onboarding")
   const offboardings = records.filter((r) => r.type === "offboarding")
 
-  const { onboardingDateHeader, offboardingDateHeader } = kindLabels(kind)
+  const hasOnboarding = onboardings.length > 0
+  const hasOffboarding = offboardings.length > 0
+
+  const { subtitle, onboardingDateHeader, offboardingDateHeader } = kindLabels({
+    kind,
+    hasOnboarding,
+    hasOffboarding,
+  })
 
   const primary = "#00847C"
+  const bgLight = "#E5F5F2"
 
-  const css = `
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      margin: 0;
-      padding: 24px 12px;
-      background: #E5F5F2;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      color: #082B2A;
-    }
-    .wrapper {
-      max-width: 840px;
-      margin: 0 auto;
-    }
-    .card {
-      background: #ffffff;
-      border-radius: 12px;
-      border: 1px solid #d1e7e2;
-      overflow: hidden;
-      box-shadow: 0 8px 20px rgba(0,0,0,0.04);
-    }
-    .header {
-      padding: 16px 24px 14px;
-      background: ${primary};
-      color: #ffffff;
-      border-bottom: 1px solid rgba(0,0,0,0.05);
-    }
-    .header-eyebrow {
-      font-size: 14px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      opacity: 0.9;
-      margin-bottom: 4px;
-    }
-    .header-title {
-      font-size: 20px;
-      font-weight: 700;
-      margin-bottom: 6px;
-    }
-    .badge {
-      padding: 2px 10px;
-      border-radius: 999px;
-      border: 1px solid rgba(255,255,255,0.9);
-    }
-    .intro {
-      padding: 14px 24px 16px;
-      background: #E5F5F2;
-      font-size: 13px;
-      line-height: 1.6;
-      border-bottom: 1px solid #d1e7e2;
-    }
-    .content {
-      padding: 20px 24px 24px;
-      font-size: 13px;
-      background: #ffffff;
-    }
-    h2.section-title {
-      margin-top: 18px;
-      margin-bottom: 6px;
-      font-size: 15px;
-      font-weight: 600;
-      color: #111827;
-    }
-    .section-note {
-      font-size: 12px;
-      color: #6b7280;
-      margin-bottom: 8px;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 12px;
-      margin-bottom: 16px;
-    }
-    thead tr {
-      background: ${primary};
-      color: #ffffff;
-    }
-    th, td {
-      padding: 8px 10px;
-      text-align: left;
-      border-bottom: 1px solid #e5e7eb;
-    }
-    th {
-      font-weight: 600;
-      text-transform: uppercase;
-      font-size: 11px;
-    }
-    tbody tr:nth-child(even) td {
-      background: #f9fafb;
-    }
-    .name-cell {
-      font-weight: 600;
-    }
-    .email-cell {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      font-size: 11px;
-      color: #374151;
-    }
-    .dept-cell {
-      font-weight: 500;
-    }
-    .date-cell {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      font-size: 11px;
-      color: #4b5563;
-    }
-    .empty {
-      margin-top: 8px;
-      padding: 16px 12px;
-      border-radius: 8px;
-      border: 1px dashed #d1d5db;
-      background: #f9fafb;
-      font-style: italic;
-      color: #6b7280;
-      text-align: center;
-    }
-    .footer {
-      padding: 14px 24px 16px;
-      border-top: 1px solid #d1e7e2;
-      background: #E5F5F2;
-      font-size: 11px;
-      color: #4b5563;
-    }
-
-    /* Dark mode – tam kde to klient podporuje */
-    @media (prefers-color-scheme: dark) {
-      body {
-        background: #020617;
-        color: #E5F4F2;
-      }
-      .card {
-        background: #020617;
-        border-color: #0f172a;
-        box-shadow: 0 12px 24px rgba(0,0,0,0.6);
-      }
-      .intro {
-        background: #022C22;
-        border-bottom-color: #064E3B;
-      }
-      .content {
-        background: transparent;
-      }
-      h2.section-title {
-        color: #E5F4F2;
-      }
-      .section-note {
-        color: #9ca3af;
-      }
-      th, td {
-        border-bottom-color: #1f2937;
-      }
-      tbody tr:nth-child(even) td {
-        background: #02081f;
-      }
-      .email-cell,
-      .date-cell {
-        color: #d1d5db;
-      }
-      .empty {
-        background: #020617;
-        border-color: #374151;
-        color: #9ca3af;
-      }
-      .footer {
-        background: #022C22;
-        border-top-color: #064E3B;
-        color: #9ca3af;
-      }
-    }
-
-    @media (max-width: 600px) {
-      body { padding: 16px 8px; }
-      .header, .intro, .content, .footer {
-        padding-left: 16px;
-        padding-right: 16px;
-      }
-      table { font-size: 11px; }
-      th, td { padding: 7px 6px; }
-    }
-  `
-
-  const renderTable = (rows: EmailRecord[], dateHeader: string): string => {
+  const renderTableActual = (
+    rows: EmailRecord[],
+    dateHeader: string
+  ): string => {
     if (!rows.length) return ""
 
     return `
-      <table>
+      <table border="0" cellpadding="0" cellspacing="0" width="100%"
+        style="width:100%; border-collapse: collapse; font-family: 'Civil Premium', 'Segoe UI', Arial, sans-serif; font-size: 13px; margin-bottom: 22px;">
         <thead>
-          <tr>
-            <th>Zaměstnanec</th>
-            <th>Pozice</th>
-            <th>Odbor</th>
-            <th>${dateHeader}</th>
+          <tr bgcolor="${primary}" style="background-color: ${primary}; color: #ffffff;">
+            <th class="thcell" align="left" style="padding: 10px; width: 220px; font-weight: 600; text-transform: uppercase; font-size: 11px;">Zaměstnanec</th>
+            <th class="thcell" align="left" style="padding: 10px; font-weight: 600; text-transform: uppercase; font-size: 11px;">Pozice</th>
+            <th class="thcell" align="left" style="padding: 10px; font-weight: 600; text-transform: uppercase; font-size: 11px;">Odbor</th>
+            <th class="thcell" align="left" style="padding: 10px; width: 120px; font-weight: 600; text-transform: uppercase; font-size: 11px; white-space: nowrap;">${dateHeader}</th>
           </tr>
         </thead>
         <tbody>
           ${rows
             .map(
-              (r) => `
-                <tr>
-                  <td class="name-cell">${formatName(r)}</td>
-                  <td>${r.position ?? "—"}</td>
-                  <td class="dept-cell">${r.department ?? "—"}</td>
-                  <td class="date-cell">${fmtDate(r.date)}</td>
-                </tr>
-              `
+              (r, i) => `
+            <tr bgcolor="${i % 2 === 0 ? "#ffffff" : "#f9fafb"}" style="background-color: ${
+              i % 2 === 0 ? "#ffffff" : "#f9fafb"
+            };">
+
+              <td class="cell row-text name-primary" style="padding: 10px; border-bottom: 1px solid #e5e7eb;">
+                ${formatName(r)}
+              </td>
+
+              <td class="cell row-text" style="padding: 10px; border-bottom: 1px solid #e5e7eb;">
+                ${r.position ?? "—"}
+              </td>
+
+              <td class="cell row-text" style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: 500;">
+                ${r.department ?? "—"}
+              </td>
+
+              <td class="cell row-text" style="padding: 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; font-variant-numeric: tabular-nums;">
+                ${fmtDate(r.date)}
+              </td>
+            </tr>
+          `
             )
             .join("")}
         </tbody>
@@ -370,72 +219,321 @@ export async function renderMonthlyReportHtml(args: {
     `
   }
 
+  const thMobile = (desktop: string, mobile: string) =>
+    `<span class="d-only">${desktop}</span><span class="m-only">${mobile}</span>`
+
+  const renderTablePlanned = (
+    rows: EmailRecord[],
+    dateHeader: string
+  ): string => {
+    if (!rows.length) return ""
+
+    return `
+      <table border="0" cellpadding="0" cellspacing="0" width="100%"
+        style="width:100%; border-collapse: collapse; font-family: 'Civil Premium', 'Segoe UI', Arial, sans-serif; font-size: 13px; margin-bottom: 22px;">
+        <thead>
+          <tr bgcolor="${primary}" style="background-color: ${primary}; color: #ffffff;">
+
+            <th class="thcell" align="left" style="padding: 10px; width: 220px; font-weight: 600; text-transform: uppercase; font-size: 11px;">
+              Zaměstnanec
+            </th>
+
+            <th class="thcell" align="left" style="padding: 10px; width: 95px; font-weight: 600; text-transform: uppercase; font-size: 11px; white-space: nowrap;">
+              ${thMobile("Osobní číslo", "Os. číslo")}
+            </th>
+
+            <th class="thcell" align="left" style="padding: 10px; width: 200px; font-weight: 600; text-transform: uppercase; font-size: 11px;">
+              Pozice
+            </th>
+
+            <th class="thcell" align="left" style="padding: 10px; width: 190px; font-weight: 600; text-transform: uppercase; font-size: 11px;">
+              Odbor
+            </th>
+
+            <th class="thcell" align="left" style="padding: 10px; width: 105px; font-weight: 600; text-transform: uppercase; font-size: 11px; white-space: nowrap;">
+              ${thMobile("Číslo funkce", "Funkce")}
+            </th>
+
+            <th class="thcell" align="left" style="padding: 10px; width: 120px; font-weight: 600; text-transform: uppercase; font-size: 11px; white-space: nowrap;">
+              ${thMobile(dateHeader, "Datum")}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows
+            .map(
+              (r, i) => `
+            <tr bgcolor="${i % 2 === 0 ? "#ffffff" : "#f9fafb"}" style="background-color: ${
+              i % 2 === 0 ? "#ffffff" : "#f9fafb"
+            };">
+
+              <td class="cell row-text name-primary" style="padding: 10px; border-bottom: 1px solid #e5e7eb;">
+                ${formatName(r)}
+              </td>
+
+              <td class="cell row-text" style="padding: 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap;">
+                ${r.personalNumber ?? "—"}
+              </td>
+
+              <td class="cell row-text" style="padding: 10px; border-bottom: 1px solid #e5e7eb;">
+                ${r.position ?? "—"}
+              </td>
+
+              <td class="cell row-text" style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: 500;">
+                ${r.department ?? "—"}
+              </td>
+
+              <td class="cell row-text" style="padding: 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap;">
+                ${r.positionNum ?? "—"}
+              </td>
+
+              <td class="cell row-text" style="padding: 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; font-variant-numeric: tabular-nums;">
+                ${fmtDate(r.date)}
+              </td>
+            </tr>
+          `
+            )
+            .join("")}
+        </tbody>
+      </table>
+    `
+  }
+
+  const renderTable =
+    kind === "planned" ? renderTablePlanned : renderTableActual
+
+  const onboardingTitle =
+    kind === "planned" ? "Předpokládané nástupy" : "Nástupy"
+  const offboardingTitle =
+    kind === "planned" ? "Předpokládané odchody" : "Odchody"
+
+  const onboardingNote =
+    kind === "planned"
+      ? "Seznam zaměstnanců s předpokládaným nástupem v daném měsíci."
+      : "Seznam zaměstnanců s nástupem v daném měsíci."
+
+  const offboardingNote =
+    kind === "planned"
+      ? "Seznam zaměstnanců s předpokládaným odchodem v daném měsíci."
+      : "Seznam zaměstnanců s ukončením pracovního poměru v daném měsíci."
+
+  const showIntro = kind !== "planned"
+
   return `
-<!DOCTYPE html>
-<html lang="cs">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <meta name="color-scheme" content="light dark" />
-    <meta name="supported-color-schemes" content="light dark" />
-    <title>Přehled personálních změn – ${monthLabel}</title>
-    <style>${css}</style>
-  </head>
-  <body>
-    <div class="wrapper">
-      <div class="card">
-        <div class="header">
-          <div class="header-eyebrow">Personální změny</div>
-          <div class="header-title">Přehled personálních změn – ${monthLabel}</div>
-        </div>
+  <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+  <html xmlns="http://www.w3.org/1999/xhtml" lang="cs">
+    <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <title>${subtitle} – ${monthLabel}</title>
+      <style type="text/css">
+        body { margin: 0; padding: 0; }
+        table { border-collapse: collapse; }
 
-        <div class="intro">
-          Vážené kolegyně, vážení kolegové, přinášíme vám aktuální informace
-          o vzniku a ukončení pracovních poměrů v měsíci <strong>${monthLabel}</strong>.
-        </div>
+        .intro-text {
+          font-family: 'Civil Premium', 'Segoe UI', Arial, sans-serif;
+          font-size: 14px;
+          line-height: 1.6;
+          color: #082B2A;
+        }
 
-        <div class="content">
-          ${
-            onboardings.length
-              ? `
-                <h2 class="section-title">Nástupy</h2>
-                <div class="section-note">
-                  Seznam zaměstnanců s nástupem v daném měsíci.
-                </div>
-                ${renderTable(onboardings, onboardingDateHeader)}
-              `
-              : ""
+        .card-border { border: 1px solid #d9ece7; }
+        .intro-row { border-bottom: 1px solid #d9ece7; }
+        .footer-row { border-top: 1px solid #d9ece7; }
+
+        .row-text { color: #111827; }
+        .name-primary { font-weight: 600; }
+
+        .content-pad { padding: 26px 22px !important; }
+
+        .thcell { word-break: normal; overflow-wrap: normal; white-space: normal; }
+        .cell { word-break: normal; overflow-wrap: normal; }
+
+        .d-only { display: inline; }
+        .m-only { display: none; }
+
+        @media only screen and (min-width: 600px) {
+          .card-shadow {
+            box-shadow: 0 8px 24px rgba(0,0,0,0.12) !important;
+            border-radius: 12px !important;
           }
+          .rounded-top { border-radius: 12px 12px 0 0 !important; }
+          .rounded-bottom { border-radius: 0 0 12px 12px !important; }
+        }
 
-          ${
-            offboardings.length
-              ? `
-                <h2 class="section-title">Odchody</h2>
-                <div class="section-note">
-                  Seznam zaměstnanců s ukončením pracovního poměru v daném měsíci.
-                </div>
-                ${renderTable(offboardings, offboardingDateHeader)}
-              `
-              : ""
-          }
+        @media only screen and (max-width: 600px) {
+          .content-pad { padding: 18px 14px !important; }
 
-          ${
-            !onboardings.length && !offboardings.length
-              ? `<div class="empty">
-                  Pro vybraný měsíc nejsou evidovány žádné personální změny.
-                </div>`
-              : ""
-          }
-        </div>
+          .d-only { display: none !important; }
+          .m-only { display: inline !important; }
 
-        <div class="footer">
-          Tento e-mail byl automaticky vygenerován systémem On-Off-Boarding ÚMČ Praha&nbsp;6.
-          Neodpovídejte prosím na tento e-mail – v případě dotazů kontaktujte personální oddělení.
-        </div>
-      </div>
-    </div>
-  </body>
-</html>`
+          .thcell { padding: 8px !important; font-size: 10px !important; }
+          .cell { padding: 8px !important; font-size: 12px !important; }
+        }
+
+        @media (prefers-color-scheme: dark) {
+          body { background-color: #111827 !important; }
+          .outer-bg { background-color: #111827 !important; }
+
+          .intro-text { color: #F9FAFB !important; }
+          .card-border { border-color: #4b5563 !important; }
+          .intro-row { border-bottom-color: #4b5563 !important; }
+          .footer-row { border-top-color: #4b5563 !important; }
+
+          .row-text { color: #F9FAFB !important; }
+        }
+      </style>
+    </head>
+    <body style="margin: 0; padding: 0; background-color: ${bgLight}; width: 100% !important;">
+      <table class="outer-bg" border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
+        <tr>
+          <td align="center" style="padding: 30px 10px;">
+            <table class="card-shadow card-border" border="0" cellpadding="0" cellspacing="0"
+              width="860" style="max-width: 820px; background-color: #ffffff; border-collapse: separate; border: 1px solid #d9ece7;">
+              <tr>
+                <td class="rounded-top" bgcolor="${primary}" style="padding: 25px 30px; background-color: ${primary};">
+                  <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                    <tr>
+                      <td style="color: #ffffff; font-family: 'Civil Premium', 'Segoe UI', Arial, sans-serif;">
+                        <div style="font-size: 13px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 8px; opacity: 0.9;">Personální změny</div>
+                        <div style="font-size: 24px; font-weight: bold; line-height: 1.2;">${subtitle} – ${monthLabel}</div>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+              ${
+                showIntro
+                  ? `
+                <tr>
+                  <td class="intro-row intro-text" bgcolor="${bgLight}" style="padding: 15px 30px; border-bottom: 1px solid #d9ece7;">
+                    Vážené kolegyně, vážení kolegové, přinášíme vám aktuální informace o vzniku a ukončení pracovních poměrů v měsíci <strong>${monthLabel}</strong>.
+                  </td>
+                </tr>
+                `
+                  : ""
+              }
+
+              <tr>
+                <td class="content-pad" style="padding: 26px 22px; background-color: #ffffff; font-family: 'Civil Premium', 'Segoe UI', Arial, sans-serif;">
+                  ${
+                    onboardings.length
+                      ? `
+                    <h2 style="font-size: 16px; color: #111827; margin: 0 0 4px 0; font-weight: 700;">${onboardingTitle}</h2>
+                    <p style="font-size: 12px; color: #6b7280; margin: 0 0 12px 0; line-height: 1.4;">${onboardingNote}</p>
+                    ${renderTable(onboardings, onboardingDateHeader)}
+                    `
+                      : ""
+                  }
+
+                  ${
+                    offboardings.length
+                      ? `
+                    <h2 style="font-size: 16px; color: #111827; margin: 18px 0 4px 0; font-weight: 700;">${offboardingTitle}</h2>
+                    <p style="font-size: 12px; color: #6b7280; margin: 0 0 12px 0; line-height: 1.4;">${offboardingNote}</p>
+                    ${renderTable(offboardings, offboardingDateHeader)}
+                    `
+                      : ""
+                  }
+
+                  ${
+                    !onboardings.length && !offboardings.length
+                      ? `
+                    <div style="padding: 40px; text-align: center; border: 2px dashed #d9ece7; color: #6b7280; font-style: italic;">
+                      Pro tento měsíc nejsou evidovány žádné personální změny.
+                    </div>
+                    `
+                      : ""
+                  }
+                </td>
+              </tr>
+
+              <tr>
+                <td class="rounded-bottom footer-row" bgcolor="${bgLight}" style="padding: 18px 26px; font-family: 'Civil Premium', 'Segoe UI', Arial, sans-serif; font-size: 12px; color: #4b5563; line-height: 1.5; border-top: 1px solid #d9ece7;">
+                  <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                    <tr>
+                      <td>
+                        Tento e-mail byl automaticky vygenerován systémem
+                        <strong>On-Boarding Modul ÚMČ Praha&nbsp;6</strong>.<br/>
+                        Prosíme neodpovídejte na tuto zprávu. V případě dotazů kontaktujte personální oddělení.
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+  </html>
+  `
+}
+
+export async function sendMail(params: {
+  to?: string[]
+  bcc?: string[]
+  subject: string
+  html: string
+  text?: string
+  from?: string
+}): Promise<void> {
+  const toClean = Array.from(
+    new Set((params.to ?? []).map((v) => v?.trim()).filter(Boolean))
+  )
+  const bccClean = Array.from(
+    new Set((params.bcc ?? []).map((v) => v?.trim()).filter(Boolean))
+  )
+
+  if (!toClean.length && !bccClean.length) {
+    throw new Error("Missing recipients")
+  }
+
+  if (!resend) {
+    console.warn("Resend není nastaven – e-mail by se teď neposlal.")
+    console.warn("TO:", toClean)
+    console.warn("BCC:", bccClean)
+    return
+  }
+
+  const fromFinal =
+    params.from && params.from.trim().length ? params.from.trim() : DEFAULT_FROM
+
+  if (!fromFinal) {
+    throw new Error(
+      "Nelze odeslat e-mail – není nastaven FROM (RESEND_EMAIL_FROM)."
+    )
+  }
+
+  const textBody = params.text ?? htmlToText(params.html)
+
+  if (!toClean.length && bccClean.length) {
+    const neutralTo = (process.env.RESEND_EMAIL_FROM ?? "").trim().length
+      ? (process.env.RESEND_EMAIL_FROM as string).trim()
+      : fromFinal
+
+    await resend.emails.send({
+      from: fromFinal,
+      to: [neutralTo],
+      ...(bccClean.length ? { bcc: bccClean } : {}),
+      subject: params.subject,
+      html: params.html,
+      text: textBody,
+    })
+
+    return
+  }
+
+  await resend.emails.send({
+    from: fromFinal,
+    to: toClean,
+    ...(bccClean.length ? { bcc: bccClean } : {}),
+    subject: params.subject,
+    html: params.html,
+    text: textBody,
+  })
 }
 
 export async function logEmailHistory(args: {

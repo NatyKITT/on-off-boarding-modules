@@ -194,13 +194,43 @@ function normalizePositions(payload: unknown): Position[] {
     (v): v is RawPosition => v != null && typeof v === "object" && "num" in v
   )
 
-  return raw.map((v) => ({
-    id: String((v.id as string | number | undefined) ?? v.num),
-    num: String(v.num as string | number),
-    name: typeof v.name === "string" ? v.name : "",
-    dept_name: typeof v.dept_name === "string" ? v.dept_name : "",
-    unit_name: typeof v.unit_name === "string" ? v.unit_name : "",
-  }))
+  const mapped: Position[] = raw.map((v) => {
+    const num = String(v.num as string | number)
+
+    return {
+      id: num,
+      num,
+      name: typeof v.name === "string" ? v.name : "",
+      dept_name: typeof v.dept_name === "string" ? v.dept_name : "",
+      unit_name: typeof v.unit_name === "string" ? v.unit_name : "",
+    }
+  })
+
+  const score = (p: Position) =>
+    (p.name ? 1 : 0) + (p.dept_name ? 1 : 0) + (p.unit_name ? 1 : 0)
+
+  const byNum = new Map<string, Position>()
+  for (const p of mapped) {
+    const existing = byNum.get(p.num)
+    if (!existing) {
+      byNum.set(p.num, p)
+    } else {
+      byNum.set(p.num, score(p) > score(existing) ? p : existing)
+    }
+  }
+
+  const deduped = Array.from(byNum.values())
+
+  if (process.env.NODE_ENV !== "production") {
+    const dupCount = mapped.length - deduped.length
+    if (dupCount > 0) {
+      console.warn(
+        `[systematizace] Deduplikováno ${dupCount} pozic. Backend vrací duplicity.`
+      )
+    }
+  }
+
+  return deduped
 }
 
 const groupByYearAndMonth = (

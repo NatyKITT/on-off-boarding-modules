@@ -18,7 +18,7 @@ export async function POST() {
 
     const already = await existsMonthlyJob(prevYear, prevMonth)
     if (!already) {
-      const sendAt = new Date(Date.UTC(y, m - 1, 1, 8, 0, 0)) // 1. den 08:00 UTC
+      const sendAt = new Date(Date.UTC(y, m - 1, 1, 8, 0, 0))
       await prisma.mailQueue.create({
         data: {
           type: "MONTHLY_SUMMARY",

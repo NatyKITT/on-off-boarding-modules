@@ -10,11 +10,11 @@ declare module "@/env.mjs" {
 
     RESEND_API_KEY: string
     RESEND_EMAIL_FROM: string
-    RESEND_EMAIL_TO: string
     RESEND_USERNAME: string
 
     REPORT_RECIPIENTS_PLANNED?: string
     REPORT_RECIPIENTS_ACTUAL?: string
+    REPORT_RECIPIENTS_ALL?: string
 
     EOS_API_BASE?: string
     EOS_API_TOKEN?: string

@@ -1245,72 +1245,64 @@ export function OnboardingFormUnified({
                         />
                       </FormControl>
                       <FormDescription>
-                        {isActualMode ? (
-                          <>
-                            Povinné u skutečného nástupu.
-                            {resolvedPersonalMeta?.lastUsedNumber && (
-                              <>
-                                {" "}
-                                Poslední použité číslo:{" "}
-                                <span className="font-mono font-semibold">
-                                  {resolvedPersonalMeta.lastUsedNumber}
-                                </span>
-                                {resolvedPersonalMeta.lastUsedName && (
-                                  <> – {resolvedPersonalMeta.lastUsedName}</>
-                                )}
-                              </>
-                            )}
-                            {suggestedPersonalNumber && (
-                              <>
-                                {" "}
-                                · návrh dalšího čísla:{" "}
-                                <span className="font-mono font-semibold">
-                                  {suggestedPersonalNumber}
-                                </span>
-                                .
-                              </>
-                            )}
-                          </>
-                        ) : (
-                          <>
-                            Nepovinné – lze doplnit později.
-                            {resolvedPersonalMeta?.lastUsedNumber && (
-                              <>
-                                {" "}
-                                Poslední použité číslo:{" "}
-                                <span className="font-mono font-semibold">
-                                  {resolvedPersonalMeta.lastUsedNumber}
-                                </span>
-                                {resolvedPersonalMeta.lastUsedName && (
-                                  <> – {resolvedPersonalMeta.lastUsedName}</>
-                                )}
-                              </>
-                            )}
-                            {suggestedPersonalNumber && (
-                              <>
-                                {" "}
-                                · návrh dalšího čísla:{" "}
-                                <span className="font-mono font-semibold">
-                                  {suggestedPersonalNumber}
-                                </span>
-                                .
-                              </>
-                            )}
-                          </>
-                        )}{" "}
-                        Obvykle 4 číslice (např.{" "}
-                        <span className="font-mono">0123</span>).
-                        {resolvedPersonalMeta?.lastDc2Number &&
-                          resolvedPersonalMeta.lastDc2AssignedTo && (
-                            <>
-                              {" "}
-                              (Poslední číslo v DC2:{" "}
-                              <span className="font-mono">
-                                {resolvedPersonalMeta.lastDc2Number}
-                              </span>{" "}
-                              – {resolvedPersonalMeta.lastDc2AssignedTo}.)
-                            </>
+                        <div className="space-y-2">
+                          {!isActualMode ? (
+                            <p>
+                              Nepovinné – lze doplnit později, obvykle 4 číslice
+                              (např. <span className="font-mono">0123</span>).
+                              Před použitím ověřte správnost. Pokud jste některá
+                              čísla nevyužili, zvažte jejich použití (viz{" "}
+                              <span className="font-medium">
+                                „Přeskočená čísla“
+                              </span>
+                              ).
+                            </p>
+                          ) : (
+                            <p>
+                              Povinné u skutečného nástupu, obbvykle 4 číslice
+                              (např. <span className="font-mono">0123</span>).
+                              Před uložením ověřte správnost. Pokud jste některá
+                              čísla přeskočili, zvažte jejich použití (viz{" "}
+                              <span className="font-medium">
+                                „Přeskočená čísla“
+                              </span>
+                              ).
+                            </p>
                           )}
+
+                          <ul className="list-disc space-y-1 pl-5">
+                            {resolvedPersonalMeta?.lastUsedNumber && (
+                              <li>
+                                <span className="text-muted-foreground">
+                                  Poslední použité číslo:
+                                </span>{" "}
+                                <span className="font-mono font-semibold">
+                                  {resolvedPersonalMeta.lastUsedNumber}
+                                </span>
+                                {resolvedPersonalMeta.lastUsedName ? (
+                                  <> – {resolvedPersonalMeta.lastUsedName}</>
+                                ) : null}
+                              </li>
+                            )}
+
+                            {resolvedPersonalMeta?.lastDc2Number && (
+                              <li>
+                                <span className="text-muted-foreground">
+                                  Poslední číslo v DC2:
+                                </span>{" "}
+                                <span className="font-mono font-semibold">
+                                  {resolvedPersonalMeta.lastDc2Number}
+                                </span>
+                                {resolvedPersonalMeta.lastDc2AssignedTo ? (
+                                  <>
+                                    {" "}
+                                    – {resolvedPersonalMeta.lastDc2AssignedTo}
+                                  </>
+                                ) : null}
+                              </li>
+                            )}
+                          </ul>
+                        </div>
                       </FormDescription>
                       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                         {suggestedPersonalNumber && (

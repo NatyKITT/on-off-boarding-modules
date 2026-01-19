@@ -46,7 +46,7 @@ const baseConfig = {
 }
 
 const sentryWebpackPluginOptions = {
-  org: "kitt6",
+  org: "praha6",
   project: "on-off-boarding-module",
   silent: !process.env.CI,
   widenClientFileUpload: true,
