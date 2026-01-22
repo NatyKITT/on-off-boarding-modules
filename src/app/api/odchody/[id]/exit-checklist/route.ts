@@ -15,6 +15,7 @@ import type {
 import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
 
 import { prisma } from "@/lib/db"
+import { hasPerm } from "@/lib/rbac"
 import { getSession } from "@/lib/session"
 
 export const runtime = "nodejs"
@@ -188,11 +189,10 @@ export async function PUT(
   const user = session?.user
   const userId = user?.id ?? null
   const userRole = user?.role ?? "USER"
-  const canAdmin =
-    userRole === "ADMIN" || userRole === "HR" || userRole === "IT"
+  const canAdmin = hasPerm(userRole, "EXIT_CHECKLIST_ADMIN")
+  const canSign = hasPerm(userRole, "EXIT_CHECKLIST_SIGN")
 
   const body = await req.json().catch(() => null)
-
   if (!body) {
     return NextResponse.json(
       { status: "error", message: "Chybí tělo požadavku." },
@@ -201,6 +201,20 @@ export async function PUT(
   }
 
   const lock: boolean = Boolean(body.lock)
+
+  if (!canSign) {
+    return NextResponse.json(
+      { status: "error", message: "Nemáte oprávnění podepisovat." },
+      { status: 403 }
+    )
+  }
+
+  if (lock && !canAdmin) {
+    return NextResponse.json(
+      { status: "error", message: "Nemáte oprávnění uzamknout formulář." },
+      { status: 403 }
+    )
+  }
   const items = (
     Array.isArray(body.items) ? body.items : []
   ) as ExitChecklistItem[]

@@ -14,10 +14,11 @@ type SessionUser = {
 
 type SessionWithUser = Session & { user: SessionUser }
 
+const INTERNAL_ROLES: Role[] = ["ADMIN", "HR", "IT", "READONLY"]
+
 function getDomain(email?: string | null) {
   return (email ?? "").split("@")[1]?.toLowerCase() ?? ""
 }
-
 function isPraha6(email?: string | null) {
   return getDomain(email) === "praha6.cz"
 }
@@ -37,8 +38,22 @@ function requiredPermForPath(path: string, method: string): Permission | null {
   if (path.startsWith("/admin") || path.startsWith("/api/admin")) {
     return "ADMIN_ACCESS"
   }
+  if (path.startsWith("/api/users")) {
+    return "USERS_MANAGE"
+  }
 
-  if (path.startsWith("/nastupy") || path.startsWith("/api/nastupy")) {
+  if (path.startsWith("/prehled") || path.startsWith("/api/prehled")) {
+    return "ONBOARDING_READ"
+  }
+
+  if (
+    path.startsWith("/nastupy") ||
+    path.startsWith("/api/nastupy") ||
+    path.startsWith("/dokumenty/internal") ||
+    path.startsWith("/api/dokumenty/internal") ||
+    path.startsWith("/api/dokumenty/assign") ||
+    path.startsWith("/api/dokumenty/send-link")
+  ) {
     return isMutatingMethod(method) ? "ONBOARDING_WRITE" : "ONBOARDING_READ"
   }
 
@@ -60,12 +75,10 @@ export default auth((req) => {
   const path = req.nextUrl.pathname
   const method = req.method
   const isApi = path.startsWith("/api")
-
   const publicPaths = ["/signin", "/terms", "/privacy"]
   const isPublicPath = publicPaths.some((p) => path.startsWith(p))
   const isAuthPath = path.startsWith("/api/auth")
   const isHealthPath = path.startsWith("/api/health")
-
   const isPublicDocumentPage =
     path.startsWith("/dokumenty/") && !path.startsWith("/dokumenty/internal")
   const isPublicDocumentApi = path.startsWith("/api/dokumenty/public")
@@ -89,8 +102,8 @@ export default auth((req) => {
     return NextResponse.redirect(signInUrl)
   }
 
-  const role = session.user.role ?? "USER"
   const email = session.user.email ?? null
+  const role = (session.user.role ?? "USER") as Role
   const canAccessApp = Boolean(session.user.canAccessApp)
 
   const isPublicExitPage = path.startsWith("/public/exit")
@@ -102,7 +115,6 @@ export default auth((req) => {
         ? jsonError(403, "Nemáte oprávnění k podpisové části.")
         : NextResponse.redirect(new URL("/prehled", req.url))
     }
-
     return NextResponse.next()
   }
 
@@ -110,7 +122,9 @@ export default auth((req) => {
     return NextResponse.redirect(new URL("/prehled", req.url))
   }
 
-  if (role !== "ADMIN" && !canAccessApp) {
+  const isInternal = INTERNAL_ROLES.includes(role)
+
+  if (!isInternal && !canAccessApp) {
     return isApi
       ? jsonError(403, "Nemáte přístup do aplikace.")
       : NextResponse.redirect(new URL("/no-access", req.url))
