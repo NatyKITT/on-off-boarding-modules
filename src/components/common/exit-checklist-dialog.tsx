@@ -97,7 +97,11 @@ export function ExitChecklistDialog({ offboardingId, open }: Props) {
   return (
     <>
       <Dialog open={open} onOpenChange={handleDialogOpenChange}>
-        <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
+        <DialogContent
+          className="max-h-[90vh] max-w-5xl overflow-y-auto"
+          data-lenis-prevent="true"
+          data-lenis-prevent-wheel="true"
+        >
           <DialogTitle>Výstupní list</DialogTitle>
 
           {loading && (
@@ -115,7 +119,6 @@ export function ExitChecklistDialog({ offboardingId, open }: Props) {
             <ExitChecklistForm
               offboardingId={offboardingId}
               initialData={data}
-              canEdit={!data.lockedAt}
               onDirtyChange={setDirty}
               onSaved={handleSaved}
               externalSaveTrigger={saveTrigger}
@@ -129,8 +132,7 @@ export function ExitChecklistDialog({ offboardingId, open }: Props) {
           <AlertDialogHeader>
             <AlertDialogTitle>Neuložené změny</AlertDialogTitle>
             <AlertDialogDescription>
-              Ve výstupním listu jsou neuložené změny. Opravdu chcete formulář
-              zavřít?
+              Ve výstupním listu jsou neuložené změny. Co s nimi?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

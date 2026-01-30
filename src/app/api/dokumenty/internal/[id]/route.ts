@@ -1,4 +1,3 @@
-// app/api/dokumenty/internal/[id]/route.ts
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { DocumentStatus, Prisma } from "@prisma/client"

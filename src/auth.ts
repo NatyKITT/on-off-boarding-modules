@@ -89,46 +89,18 @@ export const authConfig = {
   },
 
   callbacks: {
-    authorized({ auth, request }) {
-      const { pathname } = request.nextUrl
-
-      if (pathname.startsWith("/signin") || pathname.startsWith("/api/auth")) {
-        return true
-      }
-
-      if (!auth?.user) return false
-
-      const user = auth.user as AuthUserWithFlags
-
-      const email = user.email ?? null
-      const canAccessApp = user.canAccessApp ?? false
-
-      if (user.role === "ADMIN") {
-        return true
-      }
-
-      if (pathname.startsWith("/public/exit")) {
-        return isPraha6(email)
-      }
-
-      if (!isProd && isKitt6(email)) {
-        return true
-      }
-
-      return Boolean(canAccessApp)
+    authorized() {
+      return true
     },
 
     async signIn({ profile }) {
       const email = profile?.email ?? ""
       const domain = getDomain(email)
-
       return ALLOWED_DOMAINS.has(domain)
     },
 
     async jwt({ token, user, profile }) {
-      if (user && "id" in user) {
-        token.id = String(user.id)
-      }
+      if (user && "id" in user) token.id = String(user.id)
 
       const email =
         (typeof token.email === "string" && token.email) ||
@@ -136,9 +108,7 @@ export const authConfig = {
         (typeof profile?.email === "string" && profile.email) ||
         null
 
-      if (email) {
-        token.email = email
-      }
+      if (email) token.email = email
 
       if (
         (!token.role || typeof token.canAccessApp === "undefined") &&
@@ -147,7 +117,14 @@ export const authConfig = {
         const dbUser = await getUserById(token.sub)
         if (dbUser) {
           token.role = dbUser.role as Role
-          token.canAccessApp = dbUser.canAccessApp ?? false
+
+          const internal =
+            dbUser.role === "ADMIN" ||
+            dbUser.role === "HR" ||
+            dbUser.role === "IT" ||
+            dbUser.role === "READONLY"
+
+          token.canAccessApp = internal ? true : (dbUser.canAccessApp ?? false)
         }
       }
 
@@ -155,16 +132,13 @@ export const authConfig = {
         token.role = "ADMIN"
         token.canAccessApp = true
       }
-
       if (email && isKitt6(email)) {
         token.role = "ADMIN"
         token.canAccessApp = true
       }
 
       if (!token.role) token.role = "USER"
-      if (typeof token.canAccessApp === "undefined") {
-        token.canAccessApp = false
-      }
+      if (typeof token.canAccessApp === "undefined") token.canAccessApp = false
 
       return token
     },

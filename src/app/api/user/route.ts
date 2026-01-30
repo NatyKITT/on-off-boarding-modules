@@ -74,7 +74,6 @@ export async function GET() {
   }
 }
 
-// -------- DELETE (admin only)
 export async function DELETE(req: NextRequest) {
   const session = await auth()
   if (!session?.user?.id) {
@@ -212,7 +211,6 @@ export async function DELETE(req: NextRequest) {
   }
 }
 
-// -------- PUT (admin only)
 export async function PUT(req: NextRequest) {
   const session = await auth()
   if (!session?.user?.id) {

@@ -1,4 +1,5 @@
-import { notFound } from "next/navigation"
+import { cookies } from "next/headers"
+import { notFound, redirect } from "next/navigation"
 
 import type { ExitChecklistData } from "@/types/exit-checklist"
 
@@ -19,8 +20,15 @@ export default async function ExitChecklistPage({ params }: Props) {
     notFound()
   }
 
-  const res = await fetch(`/api/odchody/${offId}/exit-checklist`, {
+  const base = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3001"
+
+  const cookieHeader = cookies().toString()
+
+  const res = await fetch(`${base}/api/odchody/${offId}/exit-checklist`, {
     cache: "no-store",
+    headers: {
+      cookie: cookieHeader,
+    },
   })
 
   if (!res.ok) {
@@ -38,17 +46,20 @@ export default async function ExitChecklistPage({ params }: Props) {
 
   const data = json.data
 
-  const canEditRole =
-    session.user.role === "ADMIN" || session.user.role === "HR"
-  const canEdit = canEditRole && !data.lockedAt
+  const role = session.user.role
+  const isAdmin = role === "ADMIN" || role === "HR" || role === "IT"
+
+  if (data.lockedAt && !isAdmin) {
+    redirect(`/api/odchody/${offId}/vystupni-list`)
+  }
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-6 px-4 py-8">
-      <ExitChecklistForm
-        offboardingId={offId}
-        initialData={data}
-        canEdit={canEdit}
-      />
+    <div
+      className="mx-auto w-full max-w-5xl space-y-6 px-4 py-8"
+      data-lenis-prevent="true"
+      data-lenis-prevent-wheel="true"
+    >
+      <ExitChecklistForm offboardingId={offId} initialData={data} />
     </div>
   )
 }

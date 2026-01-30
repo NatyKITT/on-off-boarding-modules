@@ -15,6 +15,7 @@ import type {
 import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
 
 import { prisma } from "@/lib/db"
+import { hasPerm } from "@/lib/rbac"
 import { getSession } from "@/lib/session"
 
 export const runtime = "nodejs"
@@ -76,6 +77,7 @@ function mapToExitChecklistData(
       id: String(a.id),
       subject: a.subject,
       inventoryNumber: a.inventoryNumber ?? "",
+      createdById: a.createdById ?? null,
     })
   )
 
@@ -185,9 +187,12 @@ export async function PUT(
 
   const session = await getSession()
   const user = session?.user
+  const userId = user?.id ?? null
+  const userRole = user?.role ?? "USER"
+  const canAdmin = hasPerm(userRole, "EXIT_CHECKLIST_ADMIN")
+  const canSign = hasPerm(userRole, "EXIT_CHECKLIST_SIGN")
 
   const body = await req.json().catch(() => null)
-
   if (!body) {
     return NextResponse.json(
       { status: "error", message: "Chybí tělo požadavku." },
@@ -196,6 +201,20 @@ export async function PUT(
   }
 
   const lock: boolean = Boolean(body.lock)
+
+  if (!canSign) {
+    return NextResponse.json(
+      { status: "error", message: "Nemáte oprávnění podepisovat." },
+      { status: 403 }
+    )
+  }
+
+  if (lock && !canAdmin) {
+    return NextResponse.json(
+      { status: "error", message: "Nemáte oprávnění uzamknout formulář." },
+      { status: 403 }
+    )
+  }
   const items = (
     Array.isArray(body.items) ? body.items : []
   ) as ExitChecklistItem[]
@@ -256,19 +275,68 @@ export async function PUT(
     })
   }
 
-  await prisma.exitChecklistAsset.deleteMany({
+  const existingAssets = await prisma.exitChecklistAsset.findMany({
     where: { checklistId: checklist.id },
   })
 
-  if (assets.length > 0) {
-    await prisma.exitChecklistAsset.createMany({
-      data: assets.map((a) => ({
-        checklistId: checklist.id,
-        subject: String(a.subject ?? "").trim(),
-        inventoryNumber: a.inventoryNumber
-          ? String(a.inventoryNumber).trim()
-          : null,
-      })),
+  const existingById = new Map<number, ExitChecklistAssetModel>(
+    existingAssets.map((a) => [a.id, a])
+  )
+
+  const seenExistingIds = new Set<number>()
+
+  for (const a of assets) {
+    const subject = String(a.subject ?? "").trim()
+    const inventoryNumber = a.inventoryNumber
+      ? String(a.inventoryNumber).trim()
+      : null
+
+    if (!subject && !inventoryNumber) continue
+
+    const numericId = Number(a.id)
+
+    if (!Number.isNaN(numericId)) {
+      const existing = existingById.get(numericId)
+      if (!existing) continue
+
+      seenExistingIds.add(numericId)
+
+      const isOwner = !!userId && existing.createdById === userId
+
+      if (!canAdmin && !isOwner) {
+        continue
+      }
+
+      await prisma.exitChecklistAsset.update({
+        where: { id: numericId },
+        data: {
+          subject,
+          inventoryNumber,
+        },
+      })
+    } else {
+      await prisma.exitChecklistAsset.create({
+        data: {
+          checklistId: checklist.id,
+          subject,
+          inventoryNumber,
+          createdById: userId,
+        },
+      })
+    }
+  }
+
+  const deletableIds = existingAssets
+    .filter((a) => {
+      if (seenExistingIds.has(a.id)) return false
+      const isOwner = !!userId && a.createdById === userId
+      return canAdmin || isOwner
+    })
+    .map((a) => a.id)
+
+  if (deletableIds.length > 0) {
+    await prisma.exitChecklistAsset.deleteMany({
+      where: { id: { in: deletableIds } },
     })
   }
 
@@ -277,7 +345,7 @@ export async function PUT(
 
   if (lock && !lockedAt) {
     lockedAt = new Date()
-    lockedById = user?.id ?? null
+    lockedById = userId
   }
 
   const updatedChecklist = await prisma.exitChecklist.update({
