@@ -1245,31 +1245,34 @@ export function OnboardingFormUnified({
                         />
                       </FormControl>
                       <FormDescription>
-                        <div className="space-y-2">
-                          {!isActualMode ? (
-                            <p>
-                              Nepovinné – lze doplnit později, obvykle 4 číslice
-                              (např. <span className="font-mono">0123</span>).
-                              Před použitím ověřte správnost. Pokud jste některá
-                              čísla nevyužili, zvažte jejich použití (viz{" "}
-                              <span className="font-medium">
-                                „Přeskočená čísla“
-                              </span>
-                              ).
-                            </p>
-                          ) : (
-                            <p>
-                              Povinné u skutečného nástupu, obbvykle 4 číslice
-                              (např. <span className="font-mono">0123</span>).
-                              Před uložením ověřte správnost. Pokud jste některá
-                              čísla přeskočili, zvažte jejich použití (viz{" "}
-                              <span className="font-medium">
-                                „Přeskočená čísla“
-                              </span>
-                              ).
-                            </p>
-                          )}
+                        {!isActualMode ? (
+                          <>
+                            Nepovinné – lze doplnit později, obvykle 4 číslice
+                            (např. <span className="font-mono">0123</span>).
+                            Před použitím ověřte správnost. Pokud jste některá
+                            čísla nevyužili, zvažte jejich použití (viz{" "}
+                            <span className="font-medium">
+                              „Přeskočená čísla“
+                            </span>
+                            ).
+                          </>
+                        ) : (
+                          <>
+                            Povinné u skutečného nástupu, obvykle 4 číslice
+                            (např. <span className="font-mono">0123</span>).
+                            Před uložením ověřte správnost. Pokud jste některá
+                            čísla přeskočili, zvažte jejich použití (viz{" "}
+                            <span className="font-medium">
+                              „Přeskočená čísla“
+                            </span>
+                            ).
+                          </>
+                        )}
+                      </FormDescription>
 
+                      {(resolvedPersonalMeta?.lastUsedNumber ||
+                        resolvedPersonalMeta?.lastDc2Number) && (
+                        <div className="mt-2 text-xs text-muted-foreground">
                           <ul className="list-disc space-y-1 pl-5">
                             {resolvedPersonalMeta?.lastUsedNumber && (
                               <li>
@@ -1303,7 +1306,7 @@ export function OnboardingFormUnified({
                             )}
                           </ul>
                         </div>
-                      </FormDescription>
+                      )}
                       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                         {suggestedPersonalNumber && (
                           <Button

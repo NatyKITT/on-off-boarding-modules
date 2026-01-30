@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation"
 import { format, parseISO } from "date-fns"
 import { cs } from "date-fns/locale"
 import {
+  AlertTriangle,
   CalendarDays,
   Check,
   CheckCircle,
@@ -15,6 +16,7 @@ import {
   Edit,
   FileText,
   History as HistoryIcon,
+  RotateCcw,
   Trash2,
   User,
   XCircle,
@@ -34,6 +36,9 @@ import { DepartureProgressBar } from "@/components/ui/departure-progress-bar"
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
@@ -248,6 +253,7 @@ interface DepartureTableRowProps {
   variant: "planned" | "actual"
   onEdit: () => void
   onConfirm?: () => void
+  onRevert?: () => void
   onDelete: () => void
   onReload: () => Promise<void>
   onOpenExitChecklist: () => void
@@ -259,6 +265,7 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
   onEdit,
   onConfirm,
   onDelete,
+  onRevert,
   onReload,
   onOpenExitChecklist,
 }) => {
@@ -284,6 +291,7 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
           </div>
         </div>
       </TableCell>
+
       <TableCell className="w-[180px]">
         <div className="flex flex-col">
           <span className="text-sm font-medium" title={departure.positionName}>
@@ -294,6 +302,7 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
           </span>
         </div>
       </TableCell>
+
       <TableCell className="w-[150px]">
         <div className="flex flex-col">
           <span className="text-sm font-medium" title={departure.department}>
@@ -307,7 +316,8 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
           </span>
         </div>
       </TableCell>
-      <TableCell className="w-[120px]">
+
+      <TableCell className="w-[140px] whitespace-nowrap">
         <div className="flex items-center gap-2">
           <Clock className="size-4 text-muted-foreground" />
           <span className="text-sm">
@@ -319,7 +329,8 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
           </span>
         </div>
       </TableCell>
-      <TableCell className="w-[100px]">
+
+      <TableCell className="w-[180px]">
         <DepartureProgressBar
           targetDate={
             variant === "planned"
@@ -329,12 +340,13 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
           variant={variant}
           label={
             variant === "planned"
-              ? "Do předpokládaného odchodu"
+              ? "Do plánovaného odchodu"
               : "Od skutečného odchodu"
           }
         />
       </TableCell>
-      <TableCell className="w-[150px]">
+
+      <TableCell className="w-[180px]">
         <div className="flex flex-col">
           <span
             className="truncate text-sm"
@@ -347,7 +359,8 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
           </span>
         </div>
       </TableCell>
-      <TableCell className="w-[200px] text-right">
+
+      <TableCell className="w-[420px] whitespace-nowrap text-right">
         <div className="flex justify-end gap-1">
           <HistoryDialog
             id={departure.id}
@@ -386,7 +399,7 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
             <span className="ml-1 hidden sm:inline">Upravit</span>
           </Button>
 
-          {variant === "planned" && onConfirm && (
+          {variant === "planned" && onConfirm ? (
             <Button
               size="sm"
               variant="default"
@@ -397,7 +410,20 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
               <Check className="size-4" />
               <span className="ml-1 hidden sm:inline">Odešel</span>
             </Button>
-          )}
+          ) : variant === "actual" && onRevert ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onRevert}
+              title="Vrátit zpět do plánovaných"
+              className="text-orange-600 hover:bg-orange-50 hover:text-orange-700 dark:hover:bg-orange-950"
+            >
+              <RotateCcw className="size-4" />
+              <span className="ml-1 hidden whitespace-nowrap sm:inline">
+                Vrátit zpět do plánovaných
+              </span>
+            </Button>
+          ) : null}
 
           <Button
             size="sm"
@@ -435,6 +461,18 @@ export default function OffboardingPage() {
   const [editContext, setEditContext] = useState<"planned" | "actual">(
     "planned"
   )
+
+  const [revertDialog, setRevertDialog] = useState<{
+    open: boolean
+    departure: Departure | null
+    loading: boolean
+  }>({ open: false, departure: null, loading: false })
+
+  const [deleteDialog, setDeleteDialog] = useState<{
+    open: boolean
+    departure: Departure | null
+    loading: boolean
+  }>({ open: false, departure: null, loading: false })
 
   const [expandedPlannedYears, setExpandedPlannedYears] = useState<string[]>([])
   const [expandedPlannedMonths, setExpandedPlannedMonths] = useState<string[]>(
@@ -638,6 +676,38 @@ export default function OffboardingPage() {
     }
   }
 
+  async function handleRevert() {
+    const departure = revertDialog.departure
+    if (!departure) return
+
+    setRevertDialog((prev) => ({ ...prev, loading: true }))
+
+    try {
+      const response = await fetch(`/api/odchody/${departure.id}/revert`, {
+        method: "POST",
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null)
+        throw new Error(errorData?.message ?? "Vrácení se nezdařilo")
+      }
+
+      setRevertDialog({ open: false, departure: null, loading: false })
+      showSuccess(
+        "Odchod vrácen",
+        `Záznam "${departure.name} ${departure.surname}" byl vrácen do plánovaných.`
+      )
+      await reload()
+    } catch (error) {
+      console.error("Error reverting departure:", error)
+      showError(
+        "Chyba při vracení",
+        error instanceof Error ? error.message : "Vrácení se nezdařilo"
+      )
+      setRevertDialog((prev) => ({ ...prev, loading: false }))
+    }
+  }
+
   async function openEditDialog(row: Departure, context: "planned" | "actual") {
     setEditContext(context)
     setEditId(row.id)
@@ -672,6 +742,19 @@ export default function OffboardingPage() {
   }
 
   async function handleDelete(departure: Departure) {
+    setDeleteDialog({
+      open: true,
+      departure,
+      loading: false,
+    })
+  }
+
+  async function confirmDelete() {
+    const departure = deleteDialog.departure
+    if (!departure) return
+
+    setDeleteDialog((prev) => ({ ...prev, loading: true }))
+
     try {
       const res = await fetch(`/api/odchody/${departure.id}`, {
         method: "DELETE",
@@ -680,6 +763,8 @@ export default function OffboardingPage() {
         const json = await res.json().catch(() => null)
         throw new Error(json?.message ?? "Smazání se nezdařilo.")
       }
+
+      setDeleteDialog({ open: false, departure: null, loading: false })
       window.dispatchEvent(new Event("offboarding:deleted"))
       showSuccess(
         "Záznam smazán",
@@ -691,11 +776,20 @@ export default function OffboardingPage() {
         "Chyba při mazání",
         err instanceof Error ? err.message : "Smazání se nezdařilo."
       )
+      setDeleteDialog((prev) => ({ ...prev, loading: false }))
     }
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div
+      className="
+        mx-auto
+        flex w-full max-w-[1400px] flex-col
+        gap-4 px-3 pb-8
+        sm:px-4
+        lg:px-8
+      "
+    >
       <div>
         <h1 className="text-3xl font-bold tracking-tight">
           Odchody zaměstnanců
@@ -709,7 +803,7 @@ export default function OffboardingPage() {
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="planned" className="flex items-center gap-2">
             <CalendarDays className="size-4" />
-            Předpokládané
+            Plánované
           </TabsTrigger>
           <TabsTrigger value="actual" className="flex items-center gap-2">
             <User className="size-4" />
@@ -717,18 +811,17 @@ export default function OffboardingPage() {
           </TabsTrigger>
         </TabsList>
 
-        {/* PLANNED TAB */}
         <TabsContent value="planned" className="mt-4 space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <Dialog open={openNewPlanned} onOpenChange={setOpenNewPlanned}>
               <DialogTrigger asChild>
-                <Button className="inline-flex items-center justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73]">
-                  Přidat předpokládaný odchod
+                <Button className="w-full justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] sm:w-auto">
+                  Přidat plánovaný odchod
                 </Button>
               </DialogTrigger>
               <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
                 <DialogTitle className="px-6 pt-6">
-                  Nový předpokládaný odchod
+                  Nový plánovaný odchod
                 </DialogTitle>
                 <div className="p-6">
                   <OffboardingFormUnified
@@ -739,7 +832,7 @@ export default function OffboardingPage() {
                       setOpenNewPlanned(false)
                       showSuccess(
                         "Záznam vytvořen",
-                        "Předpokládaný odchod byl úspěšně přidán."
+                        "Plánovaný odchod byl úspěšně přidán."
                       )
                       await reload()
                     }}
@@ -748,13 +841,15 @@ export default function OffboardingPage() {
               </DialogContent>
             </Dialog>
 
-            <DeletedRecordsDialog
-              kind="offboarding"
-              title="Smazané odchody"
-              triggerLabel="Smazané záznamy"
-              successEvent="offboarding:deleted"
-              onRestore={() => void reload()}
-            />
+            <div className="w-full sm:w-auto [&_button]:w-full sm:[&_button]:w-auto">
+              <DeletedRecordsDialog
+                kind="offboarding"
+                title="Smazané odchody"
+                triggerLabel="Smazané záznamy"
+                successEvent="offboarding:deleted"
+                onRestore={() => void reload()}
+              />
+            </div>
           </div>
 
           {loading ? (
@@ -769,7 +864,7 @@ export default function OffboardingPage() {
               <CardContent className="flex flex-col items-center justify-center py-12">
                 <CalendarDays className="mb-4 size-12 text-muted-foreground" />
                 <p className="text-lg font-medium text-muted-foreground">
-                  Žádné předpokládané odchody
+                  Žádné plánované odchody
                 </p>
                 <p className="text-sm text-muted-foreground">
                   Přidejte první záznam pomocí tlačítka výše
@@ -838,46 +933,73 @@ export default function OffboardingPage() {
                                 </CollapsibleTrigger>
 
                                 <CollapsibleContent className="mt-2">
-                                  <Card className="overflow-hidden">
-                                    <Table>
-                                      <TableHeader>
-                                        <TableRow>
-                                          <TableHead>Zaměstnanec</TableHead>
-                                          <TableHead>Pozice</TableHead>
-                                          <TableHead>
-                                            Odbor / Oddělení
-                                          </TableHead>
-                                          <TableHead>
-                                            Plánovaný odchod
-                                          </TableHead>
-                                          <TableHead>Průběh</TableHead>
-                                          <TableHead>Kontakt</TableHead>
-                                          <TableHead>Akce</TableHead>
-                                        </TableRow>
-                                      </TableHeader>
-                                      <TableBody>
-                                        {monthData.map((e) => (
-                                          <DepartureTableRow
-                                            key={e.id}
-                                            departure={e}
-                                            variant="planned"
-                                            onEdit={() =>
-                                              void openEditDialog(e, "planned")
-                                            }
-                                            onConfirm={() =>
-                                              openActualDialogFromPlanned(e)
-                                            }
-                                            onDelete={() =>
-                                              void handleDelete(e)
-                                            }
-                                            onReload={reload}
-                                            onOpenExitChecklist={() =>
-                                              setOpenExitChecklistId(e.id)
-                                            }
-                                          />
-                                        ))}
-                                      </TableBody>
-                                    </Table>
+                                  <Card className="w-full min-w-0 overflow-hidden">
+                                    <CardContent className="min-w-0 p-0">
+                                      <div
+                                        className="w-full max-w-full overflow-x-auto overflow-y-hidden
+                                          [-webkit-overflow-scrolling:touch] [overscroll-behavior-x:contain]
+                                          [touch-action:pan-x]
+                                        "
+                                      >
+                                        <div className="inline-block min-w-full pr-6">
+                                          <Table className="w-max min-w-[1320px]">
+                                            <TableHeader>
+                                              <TableRow>
+                                                <TableHead className="w-[200px]">
+                                                  Zaměstnanec
+                                                </TableHead>
+                                                <TableHead className="w-[180px]">
+                                                  Pozice
+                                                </TableHead>
+                                                <TableHead className="w-[150px]">
+                                                  Odbor / Oddělení
+                                                </TableHead>
+                                                <TableHead className="w-[140px]">
+                                                  Plánovaný odchod
+                                                </TableHead>
+                                                <TableHead className="w-[180px]">
+                                                  Průběh
+                                                </TableHead>
+                                                <TableHead className="w-[180px]">
+                                                  Kontakt
+                                                </TableHead>
+
+                                                <TableHead className="w-[420px] whitespace-nowrap text-right">
+                                                  Akce
+                                                </TableHead>
+                                              </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                              {monthData.map((e) => (
+                                                <DepartureTableRow
+                                                  key={e.id}
+                                                  departure={e}
+                                                  variant="planned"
+                                                  onEdit={() =>
+                                                    void openEditDialog(
+                                                      e,
+                                                      "planned"
+                                                    )
+                                                  }
+                                                  onConfirm={() =>
+                                                    openActualDialogFromPlanned(
+                                                      e
+                                                    )
+                                                  }
+                                                  onDelete={() =>
+                                                    void handleDelete(e)
+                                                  }
+                                                  onReload={reload}
+                                                  onOpenExitChecklist={() =>
+                                                    setOpenExitChecklistId(e.id)
+                                                  }
+                                                />
+                                              ))}
+                                            </TableBody>
+                                          </Table>
+                                        </div>
+                                      </div>
+                                    </CardContent>
                                   </Card>
                                 </CollapsibleContent>
                               </Collapsible>
@@ -899,12 +1021,11 @@ export default function OffboardingPage() {
           </div>
         </TabsContent>
 
-        {/* ACTUAL TAB */}
         <TabsContent value="actual" className="mt-4 space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <Dialog open={openNewActual} onOpenChange={setOpenNewActual}>
               <DialogTrigger asChild>
-                <Button className="inline-flex items-center justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73]">
+                <Button className="w-full justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] sm:w-auto">
                   Přidat skutečný odchod
                 </Button>
               </DialogTrigger>
@@ -928,13 +1049,15 @@ export default function OffboardingPage() {
               </DialogContent>
             </Dialog>
 
-            <DeletedRecordsDialog
-              kind="offboarding"
-              title="Smazané odchody"
-              triggerLabel="Smazané záznamy"
-              successEvent="offboarding:deleted"
-              onRestore={() => void reload()}
-            />
+            <div className="w-full sm:w-auto [&_button]:w-full sm:[&_button]:w-auto">
+              <DeletedRecordsDialog
+                kind="offboarding"
+                title="Smazané odchody"
+                triggerLabel="Smazané záznamy"
+                successEvent="offboarding:deleted"
+                onRestore={() => void reload()}
+              />
+            </div>
           </div>
 
           {loading ? (
@@ -1018,41 +1141,75 @@ export default function OffboardingPage() {
                                 </CollapsibleTrigger>
 
                                 <CollapsibleContent className="mt-2">
-                                  <Card className="overflow-hidden">
-                                    <Table>
-                                      <TableHeader>
-                                        <TableRow>
-                                          <TableHead>Zaměstnanec</TableHead>
-                                          <TableHead>Pozice</TableHead>
-                                          <TableHead>
-                                            Odbor / Oddělení
-                                          </TableHead>
-                                          <TableHead>Skutečný odchod</TableHead>
-                                          <TableHead>Průběh</TableHead>
-                                          <TableHead>Kontakt</TableHead>
-                                          <TableHead>Akce</TableHead>
-                                        </TableRow>
-                                      </TableHeader>
-                                      <TableBody>
-                                        {monthData.map((e) => (
-                                          <DepartureTableRow
-                                            key={e.id}
-                                            departure={e}
-                                            variant="actual"
-                                            onEdit={() =>
-                                              void openEditDialog(e, "actual")
-                                            }
-                                            onDelete={() =>
-                                              void handleDelete(e)
-                                            }
-                                            onReload={reload}
-                                            onOpenExitChecklist={() =>
-                                              setOpenExitChecklistId(e.id)
-                                            }
-                                          />
-                                        ))}
-                                      </TableBody>
-                                    </Table>
+                                  <Card className="w-full min-w-0 overflow-hidden">
+                                    <CardContent className="min-w-0 p-0">
+                                      <div
+                                        className="w-full max-w-full overflow-x-auto overflow-y-hidden
+                                          [-webkit-overflow-scrolling:touch] [overscroll-behavior-x:contain]
+                                          [touch-action:pan-x]
+                                        "
+                                      >
+                                        <div className="inline-block min-w-full pr-6">
+                                          <Table className="w-max min-w-[1320px]">
+                                            <TableHeader>
+                                              <TableRow>
+                                                <TableHead className="w-[200px]">
+                                                  Zaměstnanec
+                                                </TableHead>
+                                                <TableHead className="w-[180px]">
+                                                  Pozice
+                                                </TableHead>
+                                                <TableHead className="w-[150px]">
+                                                  Odbor / Oddělení
+                                                </TableHead>
+                                                <TableHead className="w-[140px]">
+                                                  Skutečný odchod
+                                                </TableHead>
+                                                <TableHead className="w-[180px]">
+                                                  Průběh
+                                                </TableHead>
+                                                <TableHead className="w-[180px]">
+                                                  Kontakt
+                                                </TableHead>
+
+                                                <TableHead className="w-[420px] whitespace-nowrap text-right">
+                                                  Akce
+                                                </TableHead>
+                                              </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                              {monthData.map((e) => (
+                                                <DepartureTableRow
+                                                  key={e.id}
+                                                  departure={e}
+                                                  variant="actual"
+                                                  onEdit={() =>
+                                                    void openEditDialog(
+                                                      e,
+                                                      "actual"
+                                                    )
+                                                  }
+                                                  onRevert={() =>
+                                                    setRevertDialog({
+                                                      open: true,
+                                                      departure: e,
+                                                      loading: false,
+                                                    })
+                                                  }
+                                                  onDelete={() =>
+                                                    void handleDelete(e)
+                                                  }
+                                                  onReload={reload}
+                                                  onOpenExitChecklist={() =>
+                                                    setOpenExitChecklistId(e.id)
+                                                  }
+                                                />
+                                              ))}
+                                            </TableBody>
+                                          </Table>
+                                        </div>
+                                      </div>
+                                    </CardContent>
                                   </Card>
                                 </CollapsibleContent>
                               </Collapsible>
@@ -1207,6 +1364,134 @@ export default function OffboardingPage() {
               </>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={revertDialog.open}
+        onOpenChange={(open) => setRevertDialog((prev) => ({ ...prev, open }))}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex size-10 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-900/20">
+                <RotateCcw className="size-5 text-orange-600 dark:text-orange-400" />
+              </div>
+              <div>
+                <DialogTitle>Vrátit odchod do plánovaných</DialogTitle>
+                {revertDialog.departure && (
+                  <DialogDescription className="font-medium">
+                    {[
+                      revertDialog.departure.titleBefore,
+                      revertDialog.departure.name,
+                      revertDialog.departure.surname,
+                      revertDialog.departure.titleAfter,
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                  </DialogDescription>
+                )}
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground">
+              Opravdu chcete vrátit tento odchod zpět do plánovaných? Skutečné
+              datum odchodu bude odstraněno a status se změní na Plánovaný a
+              přesune se zpět do plánovaných odchodů.
+            </p>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() =>
+                setRevertDialog({
+                  open: false,
+                  departure: null,
+                  loading: false,
+                })
+              }
+              disabled={revertDialog.loading}
+            >
+              Zrušit
+            </Button>
+            <Button
+              variant="default"
+              onClick={handleRevert}
+              disabled={revertDialog.loading}
+              className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700"
+            >
+              {revertDialog.loading && (
+                <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              )}
+              Vrátit zpět
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={deleteDialog.open}
+        onOpenChange={(open) => setDeleteDialog((prev) => ({ ...prev, open }))}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex size-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/20">
+                <AlertTriangle className="size-5 text-red-600 dark:text-red-400" />
+              </div>
+              <div>
+                <DialogTitle>Smazat záznam</DialogTitle>
+                {deleteDialog.departure && (
+                  <DialogDescription className="font-medium">
+                    {[
+                      deleteDialog.departure.titleBefore,
+                      deleteDialog.departure.name,
+                      deleteDialog.departure.surname,
+                      deleteDialog.departure.titleAfter,
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                  </DialogDescription>
+                )}
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground">
+              Opravdu chcete smazat tento záznam? Tato akce je nevratná.
+            </p>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() =>
+                setDeleteDialog({
+                  open: false,
+                  departure: null,
+                  loading: false,
+                })
+              }
+              disabled={deleteDialog.loading}
+            >
+              Zrušit
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDelete}
+              disabled={deleteDialog.loading}
+              className="flex items-center gap-2"
+            >
+              {deleteDialog.loading && (
+                <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              )}
+              Smazat
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

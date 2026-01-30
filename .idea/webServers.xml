@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="a301f400-d5a6-4f80-b063-aea98fd91bf2" name="ČarodějniceLadronka" url="http://carodejnicenaladronce.cz/">
+        <fileTransfer host="carodejnicenaladronce.cz" port="21">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
+    </option>
+  </component>
+</project>

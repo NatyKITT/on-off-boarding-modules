@@ -19,7 +19,12 @@ import MiniCalendar from "react-calendar"
 import { type Position } from "@/types/position"
 
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -58,7 +63,7 @@ const localizer = dateFnsLocalizer({
 })
 
 type EventType = "plannedStart" | "actualStart" | "plannedEnd" | "actualEnd"
-type EntityKind = "onb" | "off" | "cluster" | "combo"
+type EntityKind = "onb" | "off" | "cluster" | "combo" | "group"
 
 interface CalendarEvent {
   id: string
@@ -70,7 +75,7 @@ interface CalendarEvent {
   numericId: number
   clusterItems?: CalendarEvent[]
   hasCustomTime?: boolean
-  comboTypes?: EventType[]
+  groupKind?: "onb" | "off"
 }
 
 type OnbRow = {
@@ -132,16 +137,32 @@ const TYPE_LABEL: Record<EventType, string> = {
 }
 
 const TYPE_LABEL_SHORT: Record<EventType, string> = {
-  plannedStart: "plán. nástup",
-  actualStart: "skut. nástup",
-  plannedEnd: "plán. odchod",
-  actualEnd: "skut. odchod",
+  plannedStart: "Nástup pl.",
+  actualStart: "Nástup sk.",
+  plannedEnd: "Odchod pl.",
+  actualEnd: "Odchod sk.",
+}
+
+const TYPE_LABEL_ULTRA_SHORT: Record<EventType, string> = {
+  plannedStart: "N",
+  actualStart: "N",
+  plannedEnd: "O",
+  actualEnd: "O",
 }
 
 const WORK_START_HOUR = 8
 const WORK_END_HOUR = 18
 const SLOT_LEN_MIN = 30
-const CLUSTER_THRESHOLD = 2
+
+const MOBILE_WIDTH = 640
+const TABLET_WIDTH = 860
+const LAPTOP_WIDTH = 1700
+const GROUP_AFTER = 2
+
+const START_GRADIENT = `linear-gradient(90deg, ${COLORS.plannedStart} 0%, ${COLORS.plannedStart} 30%, ${COLORS.actualStart} 70%, ${COLORS.actualStart} 100%)`
+const END_GRADIENT = `linear-gradient(90deg, ${COLORS.plannedEnd} 0%, ${COLORS.plannedEnd} 30%, ${COLORS.actualEnd} 70%, ${COLORS.actualEnd} 100%)`
+
+type ScreenTier = "mobile" | "tablet" | "laptop" | "desktop"
 
 const isSameDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() &&
@@ -172,8 +193,8 @@ const normalizeSlotStart = (d: Date) => {
     return n
   }
 
-  if (h > 18 || (h === 18 && m > 0)) {
-    n.setHours(17, SLOT_LEN_MIN, 0, 0) // 17:30
+  if (h > WORK_END_HOUR || (h === WORK_END_HOUR && m > 0)) {
+    n.setHours(WORK_END_HOUR - 1, SLOT_LEN_MIN, 0, 0)
     return n
   }
 
@@ -184,6 +205,20 @@ const normalizeSlotStart = (d: Date) => {
 
 const slotKey = (d: Date) =>
   `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`
+
+const dayKey = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+
+const typeOrderMonth: Record<EventType, number> = {
+  plannedStart: 1,
+  actualStart: 2,
+  plannedEnd: 3,
+  actualEnd: 4,
+}
+
+const isStartType = (t: EventType) =>
+  t === "plannedStart" || t === "actualStart"
+const isEndType = (t: EventType) => t === "plannedEnd" || t === "actualEnd"
 
 const toUndef = (v?: string | null) => (v == null ? undefined : v)
 
@@ -224,8 +259,184 @@ const mapOffInitial = (e: Partial<OffRow>): Partial<OffFormValues> => ({
   notes: toUndef(e.notes),
 })
 
-const dayKey = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+function countTypes(items: CalendarEvent[] | undefined) {
+  const counts: Record<EventType, number> = {
+    plannedStart: 0,
+    actualStart: 0,
+    plannedEnd: 0,
+    actualEnd: 0,
+  }
+  ;(items ?? []).forEach((e) => {
+    counts[e.type]++
+  })
+  return counts
+}
+
+function buildGroupLabel(
+  kind: "onb" | "off",
+  counts: Record<EventType, number>,
+  tier: ScreenTier,
+  view: View
+) {
+  const mul = "×"
+
+  if (kind === "onb") {
+    const p = counts.plannedStart
+    const a = counts.actualStart
+    const total = p + a
+
+    // ✅ DENNÍ REŽIM: dlouhé texty pro VŠECHNY tier
+    if (view === "day") {
+      const parts: string[] = []
+      if (p > 0) parts.push(`Plánované ${p}${mul}`)
+      if (a > 0) parts.push(`Skutečné ${a}${mul}`)
+      return `Nástupy: ${parts.join(", ")}`
+    }
+
+    // MOBILE: ultra krátké
+    if (tier === "mobile") {
+      return `N ${total}${mul}`
+    }
+
+    // TABLET: bez pl./sk.
+    if (tier === "tablet") {
+      return `Nástupy ${total}${mul}`
+    }
+
+    // LAPTOP: zkratky
+    if (tier === "laptop") {
+      const parts: string[] = []
+      if (p > 0) parts.push(`pl. ${p}${mul}`) // ✅ Přidány závorky
+      if (a > 0) parts.push(`sk. ${a}${mul}`) // ✅ Přidány závorky
+      return `Nástupy: ${parts.join(" + ")}`
+    }
+
+    // DESKTOP: plné texty
+    const parts: string[] = []
+    if (p > 0) parts.push(`Plánované ${p}${mul}`) // ✅ Přidány závorky
+    if (a > 0) parts.push(`Skutečné ${a}${mul}`) // ✅ Přidány závorky
+    return `Nástupy: ${parts.join(", ")}`
+  }
+
+  // ODCHODY
+  const p = counts.plannedEnd
+  const a = counts.actualEnd
+  const total = p + a
+
+  if (view === "day") {
+    const parts: string[] = []
+    if (p > 0) parts.push(`Plánované ${p}${mul}`)
+    if (a > 0) parts.push(`Skutečné ${a}${mul}`)
+    return `Odchody: ${parts.join(", ")}`
+  }
+
+  if (tier === "mobile") {
+    return `O ${total}${mul}`
+  }
+
+  if (tier === "tablet") {
+    return `Odchody ${total}${mul}`
+  }
+
+  if (tier === "laptop") {
+    const parts: string[] = []
+    if (p > 0) parts.push(`pl. ${p}${mul}`) // ✅ Přidány závorky
+    if (a > 0) parts.push(`sk. ${a}${mul}`) // ✅ Přidány závorky
+    return `Odchody: ${parts.join(" + ")}`
+  }
+
+  const parts: string[] = []
+  if (p > 0) parts.push(`Plánované ${p}${mul}`) // ✅ Přidány závorky
+  if (a > 0) parts.push(`Skutečné ${a}${mul}`) // ✅ Přidány závorky
+  return `Odchody: ${parts.join(", ")}`
+}
+
+function buildSlotClusterLabel(args: {
+  kind: "onb" | "off"
+  counts: Record<EventType, number>
+  tier: ScreenTier
+  view: View
+}) {
+  const { kind, counts, tier, view } = args
+  const mul = "×"
+
+  if (tier === "desktop" && (view === "week" || view === "day")) {
+    if (kind === "onb") {
+      const p = counts.plannedStart
+      const a = counts.actualStart
+      const total = p + a
+      if (p > 0 && a > 0) return `Nástup plánovaný + skutečný ${total}${mul}`
+      if (p > 0) return `Plánovaný nástup ${p}${mul}`
+      if (a > 0) return `Skutečný nástup ${a}${mul}`
+      return `Nástupy ${total}${mul}`
+    } else {
+      const p = counts.plannedEnd
+      const a = counts.actualEnd
+      const total = p + a
+      if (p > 0 && a > 0) return `Odchod plánovaný + skutečný ${total}${mul}`
+      if (p > 0) return `Plánovaný odchod ${p}${mul}`
+      if (a > 0) return `Skutečný odchod ${a}${mul}`
+      return `Odchody ${total}${mul}`
+    }
+  }
+
+  return buildGroupLabel(kind, counts, tier, view)
+}
+
+function getGroupBg(kind: "onb" | "off", counts: Record<EventType, number>) {
+  if (kind === "onb") {
+    if (counts.plannedStart > 0 && counts.actualStart > 0) return START_GRADIENT
+    if (counts.actualStart > 0) return COLORS.actualStart
+    return COLORS.plannedStart
+  }
+  if (counts.plannedEnd > 0 && counts.actualEnd > 0) return END_GRADIENT
+  if (counts.actualEnd > 0) return COLORS.actualEnd
+  return COLORS.plannedEnd
+}
+
+function isGradient(bg: string) {
+  return bg.includes("linear-gradient")
+}
+
+function buildEventBg(event: CalendarEvent) {
+  if (event.entity === "onb" || event.entity === "off")
+    return COLORS[event.type]
+
+  const counts = countTypes(event.clusterItems)
+  if (event.entity === "group") {
+    return getGroupBg(
+      event.groupKind ?? (isEndType(event.type) ? "off" : "onb"),
+      counts
+    )
+  }
+
+  const hasStart = counts.plannedStart + counts.actualStart > 0
+  const hasEnd = counts.plannedEnd + counts.actualEnd > 0
+
+  if (hasStart && !hasEnd) return getGroupBg("onb", counts)
+  if (hasEnd && !hasStart) return getGroupBg("off", counts)
+
+  return "#0f172a"
+}
+
+function shouldClusterLabelShowTime(args: {
+  view: View
+  anchor: Date
+  items: CalendarEvent[] | null
+}) {
+  const { view, anchor, items } = args
+
+  if (view === "month") return false
+
+  const onlyEndUntimed =
+    (items ?? []).length > 0 &&
+    (items ?? []).every((e) => isEndType(e.type) && !e.hasCustomTime)
+  if (onlyEndUntimed) return false
+
+  const anchorHasTime = anchor.getHours() !== 0 || anchor.getMinutes() !== 0
+  const anyCustomTime = (items ?? []).some((e) => !!e.hasCustomTime)
+  return anchorHasTime || anyCustomTime
+}
 
 export default function DashboardPage(): JSX.Element {
   const [currentDate, setCurrentDate] = useState<Date>(new Date())
@@ -235,20 +446,49 @@ export default function DashboardPage(): JSX.Element {
   )
 
   const [isMobile, setIsMobile] = useState(false)
+  const [isTablet, setIsTablet] = useState(false)
+
+  const [windowWidth, setWindowWidth] = useState(0)
+  const [isDesktopMonthWide, setIsDesktopMonthWide] = useState(false)
 
   useEffect(() => {
     if (typeof window === "undefined") return
+    const mobileQuery = window.matchMedia(`(max-width: ${MOBILE_WIDTH}px)`)
+    const tabletQuery = window.matchMedia(`(max-width: ${TABLET_WIDTH}px)`)
 
-    const mql = window.matchMedia("(max-width: 640px)")
-
-    const handleChange = (e: MediaQueryListEvent) => {
-      setIsMobile(e.matches)
+    const updateQueries = () => {
+      setIsMobile(mobileQuery.matches)
+      setIsTablet(tabletQuery.matches && !mobileQuery.matches)
     }
-    setIsMobile(mql.matches)
 
-    mql.addEventListener("change", handleChange)
-    return () => mql.removeEventListener("change", handleChange)
+    updateQueries()
+
+    const handleMobile = () => updateQueries()
+    const handleTablet = () => updateQueries()
+
+    mobileQuery.addEventListener("change", handleMobile)
+    tabletQuery.addEventListener("change", handleTablet)
+
+    return () => {
+      mobileQuery.removeEventListener("change", handleMobile)
+      tabletQuery.removeEventListener("change", handleTablet)
+    }
   }, [])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const update = () => setWindowWidth(window.innerWidth)
+    update()
+    window.addEventListener("resize", update)
+    return () => window.removeEventListener("resize", update)
+  }, [])
+
+  const tier = useMemo<ScreenTier>(() => {
+    if (isMobile) return "mobile"
+    if (isTablet) return "tablet"
+    if (windowWidth >= LAPTOP_WIDTH) return "desktop"
+    return "laptop"
+  }, [isMobile, isTablet, windowWidth])
 
   const [positions, setPositions] = useState<Position[]>([])
   const [events, setEvents] = useState<CalendarEvent[]>([])
@@ -258,6 +498,23 @@ export default function DashboardPage(): JSX.Element {
 
   const miniCalRef = useRef<HTMLDivElement>(null)
   const bigRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    if (!bigRef.current) return
+
+    const el = bigRef.current
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect?.width ?? 0
+      // ✅ Použít přímo konstantu místo WIDE_CALENDAR_MIN
+      setIsDesktopMonthWide(w >= 1700) // DESKTOP_MONTH_WIDE_WIDTH_PX
+
+      requestAnimationFrame(() => window.dispatchEvent(new Event("resize")))
+    })
+
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   const [slotDate, setSlotDate] = useState<Date | null>(null)
   const [planOpen, setPlanOpen] = useState(false)
@@ -287,6 +544,7 @@ export default function DashboardPage(): JSX.Element {
   const [onbUserName, setOnbUserName] = useState("")
   const [onbEvidence, setOnbEvidence] = useState("")
   const [onbNotes, setOnbNotes] = useState("")
+
   const [offActualEnd, setOffActualEnd] = useState("")
   const [offUserEmail, setOffUserEmail] = useState("")
   const [offUserName, setOffUserName] = useState("")
@@ -363,13 +621,12 @@ export default function DashboardPage(): JSX.Element {
           return []
         })
 
-        const offEvents: CalendarEvent[] = (
-          offJson.data ?? []
-        ).flatMap<CalendarEvent>((e) => {
+        const offEvents: CalendarEvent[] = (offJson.data ?? []).flatMap((e) => {
           const full =
             `${e.titleBefore ?? ""} ${e.name} ${e.surname} ${e.titleAfter ?? ""}`
               .replace(/\s+/g, " ")
               .trim()
+
           const out: CalendarEvent[] = []
           if (e.actualEnd) {
             const d = new Date(e.actualEnd)
@@ -381,6 +638,7 @@ export default function DashboardPage(): JSX.Element {
               end: d,
               type: "actualEnd",
               entity: "off",
+              hasCustomTime: false,
             })
           } else if (e.plannedEnd) {
             const d = new Date(e.plannedEnd)
@@ -392,6 +650,7 @@ export default function DashboardPage(): JSX.Element {
               end: d,
               type: "plannedEnd",
               entity: "off",
+              hasCustomTime: false,
             })
           }
           return out
@@ -444,12 +703,21 @@ export default function DashboardPage(): JSX.Element {
     }
   }, [])
 
+  /**
+   * ✅ Měsíc:
+   * - Desktop + wide: do 4 událostí ukazuj jména (bez group). Pokud >4, groupuj po typech (pl/sk nástupy a pl/sk odchody),
+   *   single nech jako jméno.
+   * - Desktop + užší políčka: fallback 2 groupy (Nástupy / Odchody)
+   * - Laptop/Tablet/Mobile: zachovej compact chování = 2 groupy
+   *
+   * ✅ Týden/Den:
+   * - logika slotů zůstává, cluster vzniká jen při kolizi (stejný slot).
+   * - na desktopu se u jednotlivých událostí ukazuje jméno.
+   */
   const displayEvents = useMemo<CalendarEvent[]>(() => {
-    // Na mobilu všechno zabalíme do clusterů po dnech a typech,
-    // aby v buňkách kalendáře nebyla jména a dlouhé texty.
-    if (isMobile) {
+    // MONTH
+    if (bigView === "month") {
       const perDay = new Map<string, CalendarEvent[]>()
-
       for (const ev of events) {
         const dk = dayKey(ev.start)
         const list = perDay.get(dk)
@@ -457,70 +725,128 @@ export default function DashboardPage(): JSX.Element {
       }
 
       const out: CalendarEvent[] = []
-      perDay.forEach((dayEvents, dk) => {
-        const typeMap = new Map<EventType, CalendarEvent[]>()
-        dayEvents.forEach((ev) => {
-          const list = typeMap.get(ev.type)
-          list ? list.push(ev) : typeMap.set(ev.type, [ev])
-        })
 
-        typeMap.forEach((items, type) => {
-          if (!items.length) return
-          const sample = items[0]!
+      const pushStartEndGroups = (ordered: CalendarEvent[], dk: string) => {
+        const counts = countTypes(ordered)
+        const startItems = ordered.filter((e) => isStartType(e.type))
+        const endItems = ordered.filter((e) => isEndType(e.type))
+
+        if (startItems.length) {
+          const sample = startItems[0]!
           out.push({
-            id: `cluster-mobile-${dk}-${type}`,
-            title:
-              items.length === 1
-                ? TYPE_LABEL_SHORT[type]
-                : `${items.length}× ${TYPE_LABEL_SHORT[type]}`,
+            id: `group-onb-${dk}`,
+            title: buildGroupLabel("onb", counts, tier, "month"),
             start: sample.start,
             end: sample.end,
-            type,
-            entity: "cluster",
+            type: counts.actualStart > 0 ? "actualStart" : "plannedStart",
+            entity: "group",
+            groupKind: "onb",
             numericId: -1,
-            clusterItems: items,
+            clusterItems: startItems,
           })
-        })
-      })
+        }
 
-      return out
-    }
-
-    // Desktop / tablet – původní logika s thresholdem
-    if (bigView === "month") {
-      const perDay = new Map<string, Map<EventType, CalendarEvent[]>>()
-
-      for (const ev of events) {
-        const dk = dayKey(ev.start)
-        if (!perDay.has(dk)) perDay.set(dk, new Map())
-        const typeMap = perDay.get(dk)!
-        const list = typeMap.get(ev.type)
-        list ? list.push(ev) : typeMap.set(ev.type, [ev])
+        if (endItems.length) {
+          const sample = endItems[0]!
+          out.push({
+            id: `group-off-${dk}`,
+            title: buildGroupLabel("off", counts, tier, "month"),
+            start: sample.start,
+            end: sample.end,
+            type: counts.actualEnd > 0 ? "actualEnd" : "plannedEnd",
+            entity: "group",
+            groupKind: "off",
+            numericId: -1,
+            clusterItems: endItems,
+          })
+        }
       }
 
-      const out: CalendarEvent[] = []
-      perDay.forEach((typeMap, dk) => {
-        typeMap.forEach((items, type) => {
-          if (items.length >= CLUSTER_THRESHOLD) {
+      const pushTypeGroupsDesktop = (ordered: CalendarEvent[], dk: string) => {
+        const byType: Record<EventType, CalendarEvent[]> = {
+          plannedStart: [],
+          actualStart: [],
+          plannedEnd: [],
+          actualEnd: [],
+        }
+        ordered.forEach((e) => byType[e.type].push(e))
+
+        const itemsOut: CalendarEvent[] = []
+
+        ;(
+          [
+            "plannedStart",
+            "actualStart",
+            "plannedEnd",
+            "actualEnd",
+          ] as EventType[]
+        ).forEach((t) => {
+          const items = byType[t]
+          if (items.length >= 2) {
             const sample = items[0]!
-            out.push({
-              id: `cluster-month-${dk}-${type}`,
-              title: `${items.length} × ${TYPE_LABEL[type]}`,
+            itemsOut.push({
+              id: `group-${t}-${dk}`,
+              title: (() => {
+                const mul = "×"
+                switch (t) {
+                  case "plannedStart":
+                    return `Plánované nástupy ${items.length}${mul}`
+                  case "actualStart":
+                    return `Skutečné nástupy ${items.length}${mul}`
+                  case "plannedEnd":
+                    return `Plánované odchody ${items.length}${mul}`
+                  case "actualEnd":
+                    return `Skutečné odchody ${items.length}${mul}`
+                }
+              })(),
               start: sample.start,
               end: sample.end,
-              type,
-              entity: "cluster",
+              type: t,
+              entity: "group",
+              groupKind: isStartType(t) ? "onb" : "off",
               numericId: -1,
               clusterItems: items,
             })
-          } else {
-            out.push(...items)
+          } else if (items.length === 1) {
+            itemsOut.push(items[0]!)
           }
         })
+
+        // extra bezpečnost: kdyby bylo pořád moc segmentů, spadni do 2 skupin
+        if (itemsOut.length > GROUP_AFTER) {
+          pushStartEndGroups(ordered, dk)
+          return
+        }
+
+        out.push(...itemsOut)
+      }
+
+      perDay.forEach((dayEvents, dk) => {
+        const ordered = [...dayEvents].sort(
+          (a, b) =>
+            typeOrderMonth[a.type] - typeOrderMonth[b.type] ||
+            a.title.localeCompare(b.title, "cs")
+        )
+
+        // ✅ Na velkých monitorech (1200px+) s širokým kalendářem (>1100px)
+        // zobrazit do 2 událostí jména, víc = groupy po typech
+        if (tier === "desktop" && isDesktopMonthWide) {
+          if (ordered.length <= GROUP_AFTER) {
+            out.push(...ordered)
+            return
+          }
+          pushTypeGroupsDesktop(ordered, dk)
+          return
+        }
+
+        // Všechny ostatní případy: 2 groupy (Nástupy/Odchody)
+        pushStartEndGroups(ordered, dk)
       })
+
       return out
     }
 
+    // WEEK / DAY
     if (bigView === "week" || bigView === "day") {
       const out: CalendarEvent[] = []
       const perDay = new Map<string, CalendarEvent[]>()
@@ -531,21 +857,19 @@ export default function DashboardPage(): JSX.Element {
         list ? list.push(ev) : perDay.set(dk, [ev])
       }
 
-      perDay.forEach((dayEvents) => {
+      perDay.forEach((dayEvents, dk) => {
         if (!dayEvents.length) return
 
-        const slots = new Map<string, Map<EventType, CalendarEvent[]>>()
+        const slots = new Map<string, CalendarEvent[]>()
         const occupiedSlots = new Set<string>()
+        const baseDay = startOfDay(dayEvents[0]!.start)
 
         const addToSlot = (event: CalendarEvent, start: Date) => {
           const slotStart = normalizeSlotStart(start)
           const key = slotKey(slotStart)
 
-          if (!slots.has(key)) slots.set(key, new Map())
-          const typeMap = slots.get(key)!
-          if (!typeMap.has(event.type)) typeMap.set(event.type, [])
-
-          typeMap.get(event.type)!.push({
+          if (!slots.has(key)) slots.set(key, [])
+          slots.get(key)!.push({
             ...event,
             start: slotStart,
             end: addMinutes(slotStart, SLOT_LEN_MIN),
@@ -564,8 +888,6 @@ export default function DashboardPage(): JSX.Element {
 
         let curH = WORK_START_HOUR
         let curM = 0
-
-        const baseDay = startOfDay(dayEvents[0]!.start)
 
         const nextFreeSlotStart = () => {
           while (true) {
@@ -599,165 +921,69 @@ export default function DashboardPage(): JSX.Element {
         const untimedOrdered = [...untimed].sort((a, b) =>
           a.title.localeCompare(b.title, "cs")
         )
+        untimedOrdered.forEach((ev) => addToSlot(ev, nextFreeSlotStart()))
 
-        untimedOrdered.forEach((ev) => {
-          const slotStart = nextFreeSlotStart()
-          addToSlot(ev, slotStart)
-        })
-
-        slots.forEach((typeMap) => {
-          const plannedStart = typeMap.get("plannedStart") ?? []
-          const actualStart = typeMap.get("actualStart") ?? []
-          const plannedEnd = typeMap.get("plannedEnd") ?? []
-          const actualEnd = typeMap.get("actualEnd") ?? []
-
-          if (
-            bigView === "week" &&
-            (plannedStart.length > 0 || actualStart.length > 0)
-          ) {
-            const allStarts = [...plannedStart, ...actualStart]
-
-            if (allStarts.length >= CLUSTER_THRESHOLD) {
-              const sample = allStarts[0]!
-              if (plannedStart.length > 0 && actualStart.length > 0) {
-                out.push({
-                  id: `combo-${dayKey(sample.start)}-${slotKey(sample.start)}`,
-                  title: `${plannedStart.length}× Předpokl. + ${actualStart.length}× Skutečný`,
-                  start: sample.start,
-                  end: sample.end,
-                  type: "actualStart",
-                  entity: "combo",
-                  numericId: -1,
-                  clusterItems: allStarts,
-                  comboTypes: ["plannedStart", "actualStart"],
-                })
-              } else {
-                const type =
-                  plannedStart.length > 0 ? "plannedStart" : "actualStart"
-                out.push({
-                  id: `cluster-${dayKey(sample.start)}-${slotKey(sample.start)}-${type}`,
-                  title: `${allStarts.length} × ${TYPE_LABEL[type]}`,
-                  start: sample.start,
-                  end: sample.end,
-                  type,
-                  entity: "cluster",
-                  numericId: -1,
-                  clusterItems: allStarts,
-                })
-              }
-            } else {
-              out.push(...allStarts)
-            }
-          } else {
-            if (plannedStart.length >= CLUSTER_THRESHOLD) {
-              const sample = plannedStart[0]!
-              out.push({
-                id: `cluster-${dayKey(sample.start)}-${slotKey(sample.start)}-plannedStart`,
-                title: `${plannedStart.length} × Plánovaný nástup`,
-                start: sample.start,
-                end: sample.end,
-                type: "plannedStart",
-                entity: "cluster",
-                numericId: -1,
-                clusterItems: plannedStart,
-              })
-            } else {
-              out.push(...plannedStart)
-            }
-
-            if (actualStart.length >= CLUSTER_THRESHOLD) {
-              const sample = actualStart[0]!
-              out.push({
-                id: `cluster-${dayKey(sample.start)}-${slotKey(sample.start)}-actualStart`,
-                title: `${actualStart.length} × Skutečný nástup`,
-                start: sample.start,
-                end: sample.end,
-                type: "actualStart",
-                entity: "cluster",
-                numericId: -1,
-                clusterItems: actualStart,
-              })
-            } else {
-              out.push(...actualStart)
-            }
+        slots.forEach((slotEvents, sk) => {
+          // Desktop + široký kalendář = zobrazit jména
+          if (tier === "desktop" && isDesktopMonthWide) {
+            out.push(...slotEvents)
+            return
           }
 
-          if (plannedEnd.length >= CLUSTER_THRESHOLD) {
-            const sample = plannedEnd[0]!
-            out.push({
-              id: `cluster-${dayKey(sample.start)}-${slotKey(sample.start)}-plannedEnd`,
-              title: `${plannedEnd.length} × Plánovaný odchod`,
-              start: sample.start,
-              end: sample.end,
-              type: "plannedEnd",
-              entity: "cluster",
-              numericId: -1,
-              clusterItems: plannedEnd,
+          if (slotEvents.length === 1) {
+            out.push(slotEvents[0]!)
+            return
+          }
+
+          const counts = countTypes(slotEvents)
+          const hasStart = counts.plannedStart + counts.actualStart > 0
+          const hasEnd = counts.plannedEnd + counts.actualEnd > 0
+
+          let title = `Události (${slotEvents.length})`
+          let type: EventType = slotEvents[0]!.type
+          let groupKind: "onb" | "off" | undefined
+
+          // ✅ POUŽÍT buildSlotClusterLabel místo buildGroupLabel
+          if (hasStart && !hasEnd) {
+            title = buildSlotClusterLabel({
+              kind: "onb",
+              counts,
+              tier,
+              view: bigView,
             })
-          } else {
-            out.push(...plannedEnd)
+            type = counts.actualStart > 0 ? "actualStart" : "plannedStart"
+            groupKind = "onb"
+          } else if (hasEnd && !hasStart) {
+            title = buildSlotClusterLabel({
+              kind: "off",
+              counts,
+              tier,
+              view: bigView,
+            })
+            type = counts.actualEnd > 0 ? "actualEnd" : "plannedEnd"
+            groupKind = "off"
           }
 
-          if (actualEnd.length >= CLUSTER_THRESHOLD) {
-            const sample = actualEnd[0]!
-            out.push({
-              id: `cluster-${dayKey(sample.start)}-${slotKey(sample.start)}-actualEnd`,
-              title: `${actualEnd.length} × Skutečný odchod`,
-              start: sample.start,
-              end: sample.end,
-              type: "actualEnd",
-              entity: "cluster",
-              numericId: -1,
-              clusterItems: actualEnd,
-            })
-          } else {
-            out.push(...actualEnd)
-          }
+          const sample = slotEvents[0]!
+          out.push({
+            id: `cluster-${dk}-${sk}`,
+            title,
+            start: sample.start,
+            end: sample.end,
+            type,
+            entity: "cluster",
+            numericId: -1,
+            clusterItems: slotEvents,
+            groupKind,
+          })
         })
       })
 
       return out
     }
 
-    // agenda bys případně řešila tady
-    const groups = new Map<string, CalendarEvent[]>()
-    for (const ev of events) {
-      const dk = dayKey(ev.start)
-      const arr = groups.get(dk)
-      arr ? arr.push(ev) : groups.set(dk, [ev])
-    }
-
-    const out: CalendarEvent[] = []
-    groups.forEach((list) => {
-      if (!list.length) return
-      const baseDay = list[0]!.start
-      const slotBase = setMinutes(setHours(startOfDay(baseDay), 8), 0)
-
-      const withTimeOnb = list.filter(
-        (e) => e.entity === "onb" && e.hasCustomTime
-      )
-      const noTimeOnb = list.filter(
-        (e) => e.entity === "onb" && !e.hasCustomTime
-      )
-      const noTimeOff = list.filter((e) => e.entity === "off")
-
-      const byTimeName = (a: CalendarEvent, b: CalendarEvent) =>
-        a.start.getTime() - b.start.getTime() ||
-        a.title.localeCompare(b.title, "cs")
-
-      withTimeOnb.sort(byTimeName)
-      noTimeOnb.sort((a, b) => a.title.localeCompare(b.title, "cs"))
-      noTimeOff.sort((a, b) => a.title.localeCompare(b.title, "cs"))
-
-      const ordered = [...withTimeOnb, ...noTimeOnb, ...noTimeOff]
-      ordered.forEach((item, idx) => {
-        const start = addMinutes(slotBase, idx * SLOT_LEN_MIN)
-        const end = addMinutes(start, SLOT_LEN_MIN)
-        out.push({ ...item, start, end })
-      })
-    })
-    return out
-  }, [events, bigView, isMobile])
+    return events
+  }, [events, bigView, tier, isDesktopMonthWide])
 
   const messages = useMemo(
     () => ({
@@ -765,18 +991,18 @@ export default function DashboardPage(): JSX.Element {
       time: "Čas",
       event: "Událost",
       allDay: "Celý den",
-      week: isMobile ? "Týd." : "Týden",
-      work_week: "Pracovní týden",
-      day: "Den",
-      month: isMobile ? "Měs." : "Měsíc",
-      previous: "Předchozí",
-      next: "Další",
+      week: isMobile ? "T" : "Týden",
+      work_week: "Pracovní",
+      day: isMobile ? "D" : "Den",
+      month: isMobile ? "M" : "Měsíc",
+      previous: isMobile ? "←" : "Předchozí",
+      next: isMobile ? "→" : "Další",
       yesterday: "Včera",
       tomorrow: "Zítra",
       today: "Dnes",
       agenda: "Agenda",
-      showMore: (total: number) => `+${total} více`,
-      noEventsInRange: "Žádné události v tomto rozsahu.",
+      showMore: (total: number) => `+${total}`,
+      noEventsInRange: "Žádné události",
     }),
     [isMobile]
   )
@@ -784,19 +1010,32 @@ export default function DashboardPage(): JSX.Element {
   const formats = useMemo(
     () => ({
       monthHeaderFormat: (date: Date) =>
-        dfFormat(date, "LLLL yyyy", { locale: cs }),
-      dayHeaderFormat: (date: Date) =>
-        dfFormat(date, "EEEE d. LLLL", { locale: cs }),
+        isMobile
+          ? dfFormat(date, "MMM yyyy", { locale: cs })
+          : dfFormat(date, "LLLL yyyy", { locale: cs }),
+
+      dayHeaderFormat: (date: Date) => {
+        if (tier === "mobile") return dfFormat(date, "d", { locale: cs })
+        if (tier === "tablet")
+          return dfFormat(date, "EEEEEE d.", { locale: cs })
+        if (tier === "laptop") return dfFormat(date, "EE d.", { locale: cs })
+        return dfFormat(date, "EEEE d.", { locale: cs })
+      },
+
       dayRangeHeaderFormat: ({ start, end }: { start: Date; end: Date }) =>
-        `${dfFormat(start, "d. LLLL", { locale: cs })} – ${dfFormat(end, "d. LLLL yyyy", { locale: cs })}`,
+        isMobile
+          ? `${dfFormat(start, "d.M.", { locale: cs })} – ${dfFormat(end, "d.M.", { locale: cs })}`
+          : `${dfFormat(start, "d. LLLL", { locale: cs })} – ${dfFormat(end, "d. LLLL yyyy", { locale: cs })}`,
       weekdayFormat: (date: Date) =>
         dfFormat(date, isMobile ? "EE" : "EEEE", { locale: cs }),
       dayFormat: (date: Date) =>
-        dfFormat(date, isMobile ? "d. M." : "EEEE d.", { locale: cs }),
+        dfFormat(date, isMobile ? "d" : "EEEE d.", { locale: cs }),
       eventTimeRangeFormat: () => "",
       agendaTimeRangeFormat: () => "",
+      timeGutterFormat: (date: Date) =>
+        dfFormat(date, isMobile ? "HH" : "HH:mm", { locale: cs }),
     }),
-    [isMobile]
+    [isMobile, tier]
   )
 
   const minTime = useMemo(() => new Date(1970, 0, 1, 8, 0, 0), [])
@@ -859,14 +1098,42 @@ export default function DashboardPage(): JSX.Element {
     }
   }, [])
 
+  const getEventTooltip = useCallback((event: CalendarEvent) => {
+    if (event.entity === "cluster" || event.entity === "group") {
+      return (
+        event.clusterItems
+          ?.map((e) => `${TYPE_LABEL[e.type]}: ${e.title}`)
+          .join(", ")
+          .slice(0, 500) || ""
+      )
+    }
+    const typeText = TYPE_LABEL[event.type]
+    if (event.hasCustomTime) {
+      const timeStr = dfFormat(event.start, "HH:mm", { locale: cs })
+      return `${typeText} ${event.title} (${timeStr})`
+    }
+    return `${typeText} ${event.title}`
+  }, [])
+
   const onSelectEvent = useCallback(
     async (ev: CalendarEvent) => {
       if (
-        (ev.entity === "cluster" || ev.entity === "combo") &&
+        (ev.entity === "cluster" || ev.entity === "group") &&
         ev.clusterItems?.length
       ) {
         setClusterItems(ev.clusterItems)
-        setClusterSlotLabel(dfFormat(ev.start, "d. M. yyyy HH:mm"))
+
+        const showTime = shouldClusterLabelShowTime({
+          view: bigView,
+          anchor: ev.start,
+          items: ev.clusterItems,
+        })
+
+        setClusterSlotLabel(
+          dfFormat(ev.start, showTime ? "d. M. yyyy HH:mm" : "d. M. yyyy", {
+            locale: cs,
+          })
+        )
         setClusterOpen(true)
         return
       }
@@ -909,7 +1176,7 @@ export default function DashboardPage(): JSX.Element {
         }
       }
     },
-    [fetchOnb, fetchOff]
+    [bigView, fetchOnb, fetchOff]
   )
 
   const reloadAll = useCallback(async () => {
@@ -937,6 +1204,7 @@ export default function DashboardPage(): JSX.Element {
           }
           return d
         }
+
         if (e.actualStart) {
           const d = makeDate(e.actualStart)
           return [
@@ -969,9 +1237,7 @@ export default function DashboardPage(): JSX.Element {
         return []
       })
 
-      const offEvents: CalendarEvent[] = (
-        offJson.data ?? []
-      ).flatMap<CalendarEvent>((e) => {
+      const offEvents: CalendarEvent[] = (offJson.data ?? []).flatMap((e) => {
         const full =
           `${e.titleBefore ?? ""} ${e.name} ${e.surname} ${e.titleAfter ?? ""}`
             .replace(/\s+/g, " ")
@@ -987,6 +1253,7 @@ export default function DashboardPage(): JSX.Element {
             end: d,
             type: "actualEnd",
             entity: "off",
+            hasCustomTime: false,
           })
         } else if (e.plannedEnd) {
           const d = new Date(e.plannedEnd)
@@ -998,10 +1265,12 @@ export default function DashboardPage(): JSX.Element {
             end: d,
             type: "plannedEnd",
             entity: "off",
+            hasCustomTime: false,
           })
         }
         return out
       })
+
       setEvents([...onbEvents, ...offEvents])
     } finally {
       setLoading(false)
@@ -1104,118 +1373,103 @@ export default function DashboardPage(): JSX.Element {
     [events]
   )
 
-  const getEventTooltip = useCallback((event: CalendarEvent) => {
-    if (event.entity === "cluster" || event.entity === "combo") {
-      return event.clusterItems?.map((e) => e.title).join(", ") || ""
-    }
-    const typeText = TYPE_LABEL[event.type]
-    if (event.hasCustomTime) {
-      const timeStr = dfFormat(event.start, "HH:mm", { locale: cs })
-      return `${typeText} ${event.title} (${timeStr})`
-    }
-    return `${typeText} ${event.title}`
-  }, [])
-
   const EventCell = useCallback(
     ({ event }: { event: CalendarEvent }) => {
       const fontSize =
-        bigView === "month" ? "10px" : bigView === "week" ? "11px" : "12px"
+        tier === "mobile"
+          ? "10px"
+          : bigView === "month"
+            ? "11px"
+            : bigView === "week"
+              ? "12px"
+              : "13px"
 
-      if (event.entity === "combo") {
-        const plannedCount =
-          event.clusterItems?.filter((e) => e.type === "plannedStart").length ??
-          0
-        const actualCount =
-          event.clusterItems?.filter((e) => e.type === "actualStart").length ??
-          0
-        const tooltipText =
-          event.clusterItems?.map((e) => e.title).join(", ") || ""
-
-        const label = isMobile
-          ? `${plannedCount || ""}${plannedCount ? "× pl. " : ""}${
-              actualCount
-                ? (plannedCount ? "+ " : "") + `${actualCount}× sk.`
-                : ""
-            }`
-          : `${plannedCount > 0 ? `${plannedCount}× Předpokl.` : ""}${
-              plannedCount > 0 && actualCount > 0 ? " + " : ""
-            }${actualCount > 0 ? `${actualCount}× Skutečný` : ""}`
-
+      // Den: vždy jméno
+      if (bigView === "day") {
         return (
           <div
             className="rbc-event-inner"
             style={{
-              fontWeight: 700,
+              fontWeight: 800,
               fontSize,
-              lineHeight: 1.2,
-              padding: "2px 4px",
+              lineHeight: 1.15,
+              padding:
+                tier === "mobile"
+                  ? "1px 3px"
+                  : tier === "tablet"
+                    ? "2px 4px"
+                    : "3px 6px",
+              whiteSpace: "normal",
             }}
-            title={tooltipText}
+            title={getEventTooltip(event)}
           >
-            {label}
+            {event.title}
           </div>
         )
       }
 
-      if (event.entity === "cluster") {
-        const tooltipText =
-          event.clusterItems?.map((e) => e.title).join(", ") || ""
+      // ✅ Desktop (velké monitory): v týdnu i měsíci u jednotlivých událostí ukazuj jméno
+      // Group/cluster samozřejmě zůstává label.
+      let displayText = event.title
 
-        const labelBase = isMobile
-          ? TYPE_LABEL_SHORT[event.type]
-          : TYPE_LABEL[event.type]
-
-        const label =
-          event.clusterItems && event.clusterItems.length > 1
-            ? `${event.clusterItems.length}× ${labelBase}`
-            : labelBase
-
-        return (
-          <div
-            className="rbc-event-inner"
-            style={{
-              fontWeight: 700,
-              fontSize,
-              lineHeight: 1.2,
-              padding: "2px 4px",
-            }}
-            title={tooltipText}
-          >
-            {label}
-          </div>
-        )
+      if (event.entity === "group" || event.entity === "cluster") {
+        displayText = event.title
+      } else if (
+        tier === "desktop" &&
+        (bigView === "week" || bigView === "month")
+      ) {
+        displayText = event.title
+      } else {
+        // Laptop/Tablet/Mobile: typy/zkratky
+        if (tier === "mobile" && bigView === "week") {
+          displayText = TYPE_LABEL_ULTRA_SHORT[event.type]
+        } else if (tier === "mobile" || tier === "tablet") {
+          displayText = TYPE_LABEL_SHORT[event.type]
+        } else if (tier === "laptop" && bigView === "week") {
+          displayText = TYPE_LABEL_SHORT[event.type]
+        } else {
+          displayText = TYPE_LABEL[event.type]
+        }
       }
-
-      const baseLabel = isMobile
-        ? TYPE_LABEL_SHORT[event.type]
-        : TYPE_LABEL[event.type]
-
-      const tooltipText = event.hasCustomTime
-        ? `${baseLabel}: ${event.title} (${dfFormat(event.start, "HH:mm", { locale: cs })})`
-        : `${baseLabel}: ${event.title}`
-
-      const text = isMobile ? baseLabel : event.title
 
       return (
         <div
           className="rbc-event-inner"
           style={{
-            fontWeight: 700,
+            fontWeight: 800,
             fontSize,
-            lineHeight: 1.2,
-            padding: "2px 4px",
+            lineHeight: 1.15,
+            padding:
+              tier === "mobile"
+                ? "1px 3px"
+                : tier === "tablet"
+                  ? "2px 4px"
+                  : "3px 6px",
+            whiteSpace: "normal",
           }}
-          title={tooltipText}
+          title={getEventTooltip(event)}
         >
-          {text}
+          {displayText}
         </div>
       )
     },
-    [bigView, isMobile]
+    [bigView, getEventTooltip, tier]
   )
 
+  const calendarHeight = useMemo(() => {
+    if (bigView === "month") {
+      return tier === "mobile"
+        ? "h-[520px]"
+        : "h-[440px] sm:h-[560px] md:h-[680px] lg:h-[calc(100vh-10rem)]"
+    }
+    if (tier === "mobile") return "h-[600px]"
+    if (tier === "tablet") return "h-[700px]"
+    return "h-[calc(100vh-10rem)]"
+  }, [bigView, tier])
+
   return (
-    <div className="flex flex-col gap-4 p-3 sm:p-4 lg:flex-row lg:gap-6 lg:p-6">
+    <div className="flex flex-col gap-4 p-2 sm:p-3 md:p-4 xl:flex-row xl:gap-6 xl:p-6">
+      {/* Sidebar s mini kalendářem */}
       <aside className="w-full shrink-0 rounded-2xl bg-white/90 p-3 shadow-md ring-1 ring-black/5 dark:bg-neutral-900 lg:w-[280px] lg:p-4">
         <div ref={miniCalRef}>
           <MiniCalendar
@@ -1263,11 +1517,12 @@ export default function DashboardPage(): JSX.Element {
         </div>
       </aside>
 
+      {/* Main calendar */}
       <section
         ref={bigRef}
-        className="max-w-full flex-1 overflow-hidden rounded-2xl bg-white p-2 shadow-lg ring-1 ring-black/5 dark:bg-neutral-900 sm:p-3 lg:p-4"
+        className="min-w-0 max-w-full flex-1 overflow-hidden rounded-2xl bg-white p-2 shadow-lg ring-1 ring-black/5 dark:bg-neutral-900 sm:p-3 lg:p-4"
       >
-        <div className="h-[420px] sm:h-[520px] md:h-[640px] lg:h-[calc(100vh-10rem)]">
+        <div className={`min-w-0 ${calendarHeight}`}>
           <Calendar<CalendarEvent>
             localizer={localizer}
             events={displayEvents}
@@ -1290,32 +1545,45 @@ export default function DashboardPage(): JSX.Element {
             max={maxTime}
             components={{ event: EventCell }}
             tooltipAccessor={null}
+            dayLayoutAlgorithm="no-overlap"
             eventPropGetter={(event) => {
-              const bg = (() => {
-                if (event.entity === "combo") {
-                  return `linear-gradient(90deg, ${COLORS.plannedStart} 0%, ${COLORS.plannedStart} 50%, ${COLORS.actualStart} 50%, ${COLORS.actualStart} 100%)`
-                }
-                return COLORS[event.type]
-              })()
+              const bg = buildEventBg(event)
+              const gradient = isGradient(bg)
 
               return {
                 style: {
-                  background: bg,
+                  backgroundColor: gradient ? undefined : bg,
+                  backgroundImage: gradient ? bg : undefined,
                   color: "white",
-                  borderRadius: 8,
+                  borderRadius: tier === "mobile" ? 6 : 10,
                   border: "none",
-                  padding: bigView === "month" ? "4px 6px" : "6px 8px",
+                  padding:
+                    tier === "mobile"
+                      ? "1px 3px"
+                      : tier === "tablet"
+                        ? "2px 4px"
+                        : bigView === "month"
+                          ? "4px 6px"
+                          : "6px 8px",
                   boxShadow: "0 1px 2px rgba(0,0,0,0.12)",
                   whiteSpace: "normal",
                   wordBreak: "break-word",
                   overflowWrap: "anywhere",
                   lineHeight: 1.15,
-                  fontSize: bigView === "month" ? 10 : 11,
-                  fontWeight: 600,
-                  textShadow: "0 1px 1px rgba(0,0,0,0.25)",
+                  fontSize:
+                    tier === "mobile" ? 10 : bigView === "month" ? 11 : 12,
+                  fontWeight: 800,
+                  textShadow: "0 1px 1px rgba(0,0,0,0.22)",
                   overflow: "visible",
                   height: "auto",
-                  minHeight: bigView === "month" ? "24px" : "28px",
+                  minHeight:
+                    tier === "mobile"
+                      ? "16px"
+                      : tier === "tablet"
+                        ? "20px"
+                        : bigView === "month"
+                          ? "24px"
+                          : "28px",
                 },
               }
             }}
@@ -1325,41 +1593,239 @@ export default function DashboardPage(): JSX.Element {
       </section>
 
       <style jsx global>{`
+        .touch-scroll {
+          -webkit-overflow-scrolling: touch;
+          overscroll-behavior: contain;
+          touch-action: pan-y;
+        }
+
+        .rbc-time-content,
+        .rbc-time-view,
+        .rbc-calendar {
+          touch-action: pan-y;
+        }
+
         @media (max-width: 640px) {
           .rbc-calendar {
             width: 100%;
+            font-size: 11px;
           }
+
           .rbc-toolbar {
             flex-direction: column;
             align-items: stretch;
             gap: 0.25rem;
+            padding: 0.25rem;
           }
+
           .rbc-toolbar .rbc-btn-group {
-            flex-wrap: wrap;
-            justify-content: flex-start;
+            flex-wrap: nowrap;
+            justify-content: center;
+            width: 100%;
           }
-          .rbc-time-view,
-          .rbc-time-header {
+
+          .rbc-toolbar button {
+            font-size: 10px;
+            padding: 0.25rem 0.5rem;
+          }
+
+          .rbc-toolbar .rbc-toolbar-label {
+            font-size: 12px;
+            font-weight: 600;
+            text-align: center;
+            width: 100%;
+            padding: 0.25rem 0;
+          }
+
+          .rbc-header {
+            padding: 3px !important;
+            font-size: 10px !important;
+            font-weight: 700;
+            min-height: 24px;
+          }
+
+          .rbc-date-cell {
+            padding: 2px !important;
             font-size: 11px;
           }
-          .rbc-event {
-            padding: 2px 4px !important;
-            min-height: 20px !important;
+
+          .rbc-month-view {
+            border: 1px solid rgba(0, 0, 0, 0.1);
           }
+
+          .rbc-month-row {
+            min-height: 60px !important;
+            overflow: visible;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+          }
+
+          .rbc-day-bg {
+            border-left: 1px solid rgba(0, 0, 0, 0.1);
+          }
+
+          .rbc-row-content {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+          }
+
+          .rbc-row-segment {
+            padding: 1px;
+          }
+
+          .rbc-time-gutter {
+            width: 34px !important;
+            font-size: 9px;
+          }
+
+          .rbc-event {
+            padding: 1px 3px !important;
+            min-height: 16px !important;
+            font-size: 10px !important;
+            margin-bottom: 2px;
+          }
+
+          .rbc-event-label {
+            display: none;
+          }
+
+          .rbc-show-more {
+            font-size: 9px;
+            padding: 1px 2px;
+            margin-top: 1px;
+          }
+        }
+
+        @media (max-width: 768px) {
+          .rbc-month-view {
+            border: 1px solid rgba(0, 0, 0, 0.1);
+          }
+          .rbc-month-row {
+            min-height: 60px !important;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+          }
+          .rbc-day-bg {
+            border-left: 1px solid rgba(0, 0, 0, 0.08);
+          }
+        }
+
+        @media (min-width: 641px) and (max-width: 768px) {
+          .rbc-toolbar button {
+            font-size: 11px;
+            padding: 0.35rem 0.75rem;
+          }
+
+          .rbc-header {
+            padding: 3px !important;
+            font-size: 10px !important;
+          }
+
+          .rbc-month-row {
+            min-height: 70px !important;
+          }
+
+          .rbc-event {
+            font-size: 11px !important;
+          }
+        }
+
+        .rbc-calendar {
+          min-width: 100%;
+        }
+
+        .mini-marker {
+          position: absolute;
+          left: 50%;
+          top: 50%;
+          transform: translate(-50%, -50%);
+          border-radius: 9999px;
+          z-index: 10;
+          pointer-events: none;
+        }
+
+        .react-calendar__tile {
+          position: relative;
+          overflow: visible;
+        }
+
+        .mini-today {
+          font-weight: 700 !important;
+        }
+
+        .mini-today abbr {
+          box-shadow: none;
+        }
+
+        .mini-selected {
+          background: rgba(59, 130, 246, 0.2) !important;
+          border: 2px solid rgb(59, 130, 246) !important;
+        }
+
+        .mini-weekend {
+          background: rgba(0, 0, 0, 0.02);
+        }
+
+        .mini-outside {
+          opacity: 0.4;
+        }
+
+        .mini-outside-weekend {
+          opacity: 0.3;
+          background: rgba(0, 0, 0, 0.01);
+        }
+
+        .react-calendar {
+          width: 100%;
+          border: none;
+          font-family: inherit;
+        }
+
+        .react-calendar__tile {
+          padding: 8px 2px;
+          font-size: 13px;
+          position: relative;
+        }
+
+        .react-calendar__tile abbr {
+          font-size: 13px;
+        }
+
+        .react-calendar__navigation button {
+          font-size: 14px;
+          font-weight: 600;
+          min-width: 36px;
+          height: 36px;
+        }
+
+        .react-calendar__month-view__weekdays {
+          font-size: 11px;
+          font-weight: 600;
+          text-transform: lowercase;
+        }
+
+        .react-calendar__month-view__days__day {
+          color: inherit;
         }
       `}</style>
 
+      {/* Plan overlay */}
       {planOpen && (
         <div
           className="fixed inset-0 z-[200] grid place-items-center bg-black/40 p-4"
           onClick={() => setPlanOpen(false)}
         >
           <div
-            className="w-full max-w-[460px] rounded-2xl bg-white p-5 text-neutral-800 shadow-xl ring-1 ring-black/5 dark:bg-neutral-900 dark:text-neutral-100"
+            className={`w-full ${tier === "mobile" ? "max-w-[340px]" : "max-w-[460px]"} rounded-2xl bg-white p-4 text-neutral-800 shadow-xl ring-1 ring-black/5 dark:bg-neutral-900 dark:text-neutral-100`}
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="mb-2 text-lg font-semibold">Naplánovat akci</h3>
-            <p className="mb-4 text-sm text-neutral-600 dark:text-neutral-300">
+            <h3
+              className={`mb-2 ${tier === "mobile" ? "text-base" : "text-lg"} font-semibold`}
+            >
+              Naplánovat akci
+            </h3>
+            <p
+              className={`mb-4 ${tier === "mobile" ? "text-xs" : "text-sm"} text-neutral-600 dark:text-neutral-300`}
+            >
               Datum:{" "}
               <strong>
                 {dfFormat(slotDate ?? new Date(), "d. M. yyyy", { locale: cs })}
@@ -1376,37 +1842,37 @@ export default function DashboardPage(): JSX.Element {
             </p>
             <div className="grid grid-cols-2 gap-2">
               <button
-                className="rounded-lg px-3 py-2 text-white"
+                className={`rounded-lg ${tier === "mobile" ? "px-2 py-1.5 text-xs" : "px-3 py-2 text-sm"} text-white`}
                 style={{ background: COLORS.plannedStart }}
                 onClick={() => openCreate("onb-planned")}
               >
-                Předpokládaný nástup
+                {tier === "mobile" ? "Pl. nástup" : "Předpokládaný nástup"}
               </button>
               <button
-                className="rounded-lg px-3 py-2 text-white"
+                className={`rounded-lg ${tier === "mobile" ? "px-2 py-1.5 text-xs" : "px-3 py-2 text-sm"} text-white`}
                 style={{ background: COLORS.actualStart }}
                 onClick={() => openCreate("onb-actual")}
               >
-                Skutečný nástup
+                {tier === "mobile" ? "Sk. nástup" : "Skutečný nástup"}
               </button>
               <button
-                className="rounded-lg px-3 py-2 text-white"
+                className={`rounded-lg ${tier === "mobile" ? "px-2 py-1.5 text-xs" : "px-3 py-2 text-sm"} text-white`}
                 style={{ background: COLORS.plannedEnd }}
                 onClick={() => openCreate("off-planned")}
               >
-                Plánovaný odchod
+                {tier === "mobile" ? "Pl. odchod" : "Plánovaný odchod"}
               </button>
               <button
-                className="rounded-lg px-3 py-2 text-white"
+                className={`rounded-lg ${tier === "mobile" ? "px-2 py-1.5 text-xs" : "px-3 py-2 text-sm"} text-white`}
                 style={{ background: COLORS.actualEnd }}
                 onClick={() => openCreate("off-actual")}
               >
-                Skutečný odchod
+                {tier === "mobile" ? "Sk. odchod" : "Skutečný odchod"}
               </button>
             </div>
             <div className="mt-4 flex justify-end">
               <button
-                className="rounded-md px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 dark:text-neutral-300 dark:hover:bg-white/10"
+                className={`rounded-md ${tier === "mobile" ? "px-2 py-1 text-xs" : "px-3 py-2 text-sm"} text-gray-600 hover:bg-gray-100 dark:text-neutral-300 dark:hover:bg-white/10`}
                 onClick={() => setPlanOpen(false)}
               >
                 Zavřít
@@ -1416,12 +1882,22 @@ export default function DashboardPage(): JSX.Element {
         </div>
       )}
 
+      {/* DIALOGS */}
       <Dialog open={openNewOnbPlanned} onOpenChange={setOpenNewOnbPlanned}>
-        <DialogContent className="z-[300] max-h-[90vh] max-w-5xl overflow-y-auto p-0">
-          <DialogTitle className="px-6 pt-6">
+        <DialogContent
+          className={`z-[300] max-h-[90vh] ${tier === "mobile" ? "max-w-[95vw]" : "max-w-5xl"} touch-scroll overflow-y-auto p-0`}
+        >
+          <DialogTitle
+            className={`${tier === "mobile" ? "px-4 pt-4 text-base" : "px-6 pt-6"}`}
+          >
             Nový předpokládaný nástup
           </DialogTitle>
-          <div className="p-6">
+          <DialogDescription asChild>
+            <span className="sr-only">
+              Formulář pro vytvoření předpokládaného nástupu.
+            </span>
+          </DialogDescription>
+          <div className={tier === "mobile" ? "p-4" : "p-6"}>
             <OnboardingFormUnified
               positions={positions}
               mode="create-planned"
@@ -1441,9 +1917,20 @@ export default function DashboardPage(): JSX.Element {
       </Dialog>
 
       <Dialog open={openNewOnbActual} onOpenChange={setOpenNewOnbActual}>
-        <DialogContent className="z-[300] max-h-[90vh] max-w-5xl overflow-y-auto p-0">
-          <DialogTitle className="px-6 pt-6">Nový skutečný nástup</DialogTitle>
-          <div className="p-6">
+        <DialogContent
+          className={`z-[300] max-h-[90vh] ${tier === "mobile" ? "max-w-[95vw]" : "max-w-5xl"} touch-scroll overflow-y-auto p-0`}
+        >
+          <DialogTitle
+            className={`${tier === "mobile" ? "px-4 pt-4 text-base" : "px-6 pt-6"}`}
+          >
+            Nový skutečný nástup
+          </DialogTitle>
+          <DialogDescription asChild>
+            <span className="sr-only">
+              Formulář pro vytvoření skutečného nástupu.
+            </span>
+          </DialogDescription>
+          <div className={tier === "mobile" ? "p-4" : "p-6"}>
             <OnboardingFormUnified
               positions={positions}
               mode="create-actual"
@@ -1463,9 +1950,20 @@ export default function DashboardPage(): JSX.Element {
       </Dialog>
 
       <Dialog open={openNewOffPlanned} onOpenChange={setOpenNewOffPlanned}>
-        <DialogContent className="z-[300] max-h-[90vh] max-w-5xl overflow-y-auto p-0">
-          <DialogTitle className="px-6 pt-6">Nový plánovaný odchod</DialogTitle>
-          <div className="p-6">
+        <DialogContent
+          className={`z-[300] max-h-[90vh] ${tier === "mobile" ? "max-w-[95vw]" : "max-w-5xl"} touch-scroll overflow-y-auto p-0`}
+        >
+          <DialogTitle
+            className={`${tier === "mobile" ? "px-4 pt-4 text-base" : "px-6 pt-6"}`}
+          >
+            Nový plánovaný odchod
+          </DialogTitle>
+          <DialogDescription asChild>
+            <span className="sr-only">
+              Formulář pro vytvoření plánovaného odchodu.
+            </span>
+          </DialogDescription>
+          <div className={tier === "mobile" ? "p-4" : "p-6"}>
             <OffboardingFormUnified
               key={`new-off-planned-${toISO(slotDate) || "no-date"}`}
               mode="create-planned"
@@ -1481,9 +1979,20 @@ export default function DashboardPage(): JSX.Element {
       </Dialog>
 
       <Dialog open={openNewOffActual} onOpenChange={setOpenNewOffActual}>
-        <DialogContent className="z-[300] max-h-[90vh] max-w-5xl overflow-y-auto p-0">
-          <DialogTitle className="px-6 pt-6">Nový skutečný odchod</DialogTitle>
-          <div className="p-6">
+        <DialogContent
+          className={`z-[300] max-h-[90vh] ${tier === "mobile" ? "max-w-[95vw]" : "max-w-5xl"} touch-scroll overflow-y-auto p-0`}
+        >
+          <DialogTitle
+            className={`${tier === "mobile" ? "px-4 pt-4 text-base" : "px-6 pt-6"}`}
+          >
+            Nový skutečný odchod
+          </DialogTitle>
+          <DialogDescription asChild>
+            <span className="sr-only">
+              Formulář pro vytvoření skutečného odchodu.
+            </span>
+          </DialogDescription>
+          <div className={tier === "mobile" ? "p-4" : "p-6"}>
             <OffboardingFormUnified
               key={`new-off-actual-${toISO(slotDate) || "no-date"}`}
               mode="create-actual"
@@ -1499,26 +2008,46 @@ export default function DashboardPage(): JSX.Element {
       </Dialog>
 
       <Dialog open={clusterOpen} onOpenChange={setClusterOpen}>
-        <DialogContent className="z-[300] max-w-md">
-          <DialogTitle>Události ve slotu {clusterSlotLabel}</DialogTitle>
+        <DialogContent
+          className={`z-[300] ${tier === "mobile" ? "max-w-[90vw]" : "max-w-md"} touch-scroll`}
+        >
+          <DialogTitle className={tier === "mobile" ? "text-sm" : ""}>
+            Události {clusterSlotLabel}
+          </DialogTitle>
+          <DialogDescription asChild>
+            <span className="sr-only">
+              Seznam událostí v daném dni nebo časovém slotu.
+            </span>
+          </DialogDescription>
+
           <div className="mt-2 space-y-2">
             {clusterItems?.map((e) => (
               <button
                 key={e.id}
-                className="w-full rounded-md border px-3 py-2 text-left hover:bg-muted"
+                className={`w-full rounded-md border ${tier === "mobile" ? "px-2 py-1.5" : "px-3 py-2"} text-left hover:bg-muted`}
                 onClick={() => {
                   setClusterOpen(false)
                   void onSelectEvent({ ...e, entity: e.entity })
                 }}
-                title={getEventTooltip(e)}
+                title={`${TYPE_LABEL[e.type]}: ${e.title}`}
               >
-                <div className="font-semibold">{e.title}</div>
-                <div className="text-xs opacity-80">
-                  {dfFormat(e.start, "HH:mm")} •{" "}
-                  {e.type === "plannedStart" && "Předpokládaný nástup"}
-                  {e.type === "actualStart" && "Skutečný nástup"}
-                  {e.type === "plannedEnd" && "Plánovaný odchod"}
-                  {e.type === "actualEnd" && "Skutečný odchod"}
+                <div className="flex items-start gap-2">
+                  <span
+                    className="mt-1 inline-block size-2 rounded-full"
+                    style={{ background: COLORS[e.type] }}
+                  />
+                  <div className="min-w-0">
+                    <div
+                      className={`truncate font-semibold ${tier === "mobile" ? "text-xs" : "text-sm"}`}
+                    >
+                      {e.title}
+                    </div>
+                    <div
+                      className={`opacity-80 ${tier === "mobile" ? "text-[10px]" : "text-xs"}`}
+                    >
+                      {TYPE_LABEL[e.type]}
+                    </div>
+                  </div>
                 </div>
               </button>
             ))}
@@ -1540,14 +2069,26 @@ export default function DashboardPage(): JSX.Element {
           }
         }}
       >
-        <DialogContent className="z-[300] max-w-3xl overflow-hidden p-0">
-          <DialogTitle className="px-6 pt-6">
+        <DialogContent
+          className={`z-[300] ${tier === "mobile" ? "max-w-[95vw]" : "max-w-3xl"} overflow-hidden p-0`}
+        >
+          <DialogTitle
+            className={`${tier === "mobile" ? "px-4 pt-4 text-base" : "px-6 pt-6"}`}
+          >
             Potvrdit skutečný nástup
           </DialogTitle>
-          <div className="max-h-[80vh] space-y-4 overflow-y-auto p-6">
+          <DialogDescription asChild>
+            <span className="sr-only">Potvrzení nástupu a doplnění údajů.</span>
+          </DialogDescription>
+
+          <div
+            className={`max-h-[80vh] space-y-4 overflow-y-auto ${tier === "mobile" ? "p-4" : "p-6"} touch-scroll`}
+          >
             {confirmOnbRow && (
               <>
-                <div className="rounded-lg border bg-muted/30 p-3 text-sm">
+                <div
+                  className={`rounded-lg border bg-muted/30 ${tier === "mobile" ? "p-2 text-xs" : "p-3 text-sm"}`}
+                >
                   <p className="mb-2 font-medium">Souhlasí ostatní údaje?</p>
                   <div className="grid gap-y-1 md:grid-cols-2">
                     <div>
@@ -1571,7 +2112,7 @@ export default function DashboardPage(): JSX.Element {
                   </div>
                   <div className="mt-3">
                     <Button
-                      size="sm"
+                      size={tier === "mobile" ? "sm" : "default"}
                       variant="outline"
                       onClick={() => {
                         setOpenConfirmOnb(false)
@@ -1582,12 +2123,14 @@ export default function DashboardPage(): JSX.Element {
                         setOpenEdit(true)
                       }}
                     >
-                      Nesouhlasí – upravit formulář
+                      Nesouhlasí – upravit
                     </Button>
                   </div>
                 </div>
 
-                <div className="rounded-lg border bg-blue-50 p-3 text-sm dark:bg-blue-900/20">
+                <div
+                  className={`rounded-lg border bg-blue-50 dark:bg-blue-900/20 ${tier === "mobile" ? "p-2 text-xs" : "p-3 text-sm"}`}
+                >
                   <label className="mb-1 block font-medium">
                     Datum skutečného nástupu
                   </label>
@@ -1596,55 +2139,71 @@ export default function DashboardPage(): JSX.Element {
                       type="date"
                       value={onbActualStart}
                       onChange={(e) => setOnbActualStart(e.target.value)}
-                      className="max-w-[220px]"
+                      className={
+                        tier === "mobile"
+                          ? "max-w-full text-xs"
+                          : "max-w-[220px]"
+                      }
                     />
                   </div>
                   <div className="mt-3 grid gap-3 md:grid-cols-2">
                     <div>
-                      <label className="mb-1 block text-xs font-medium">
+                      <label
+                        className={`mb-1 block font-medium ${tier === "mobile" ? "text-[10px]" : "text-xs"}`}
+                      >
                         Firemní e-mail (nepovinné)
                       </label>
                       <Input
                         type="email"
                         value={onbUserEmail}
                         onChange={(e) => setOnbUserEmail(e.target.value)}
+                        className={tier === "mobile" ? "text-xs" : ""}
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium">
+                      <label
+                        className={`mb-1 block font-medium ${tier === "mobile" ? "text-[10px]" : "text-xs"}`}
+                      >
                         Uživatelské jméno (nepovinné)
                       </label>
                       <Input
                         value={onbUserName}
                         onChange={(e) => setOnbUserName(e.target.value)}
+                        className={tier === "mobile" ? "text-xs" : ""}
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium">
+                      <label
+                        className={`mb-1 block font-medium ${tier === "mobile" ? "text-[10px]" : "text-xs"}`}
+                      >
                         Osobní číslo (nepovinné)
                       </label>
                       <Input
                         value={onbEvidence}
                         onChange={(e) => setOnbEvidence(e.target.value)}
+                        className={tier === "mobile" ? "text-xs" : ""}
                       />
                     </div>
                     <div className="md:col-span-2">
-                      <label className="mb-1 block text-xs font-medium">
+                      <label
+                        className={`mb-1 block font-medium ${tier === "mobile" ? "text-[10px]" : "text-xs"}`}
+                      >
                         Poznámka (nepovinné)
                       </label>
                       <Textarea
                         value={onbNotes}
                         onChange={(e) => setOnbNotes(e.target.value)}
+                        className={tier === "mobile" ? "text-xs" : ""}
                       />
                     </div>
                   </div>
                   <div className="mt-4">
                     <Button
-                      size="sm"
+                      size={tier === "mobile" ? "sm" : "default"}
                       onClick={() => void confirmOnboarding()}
                       disabled={!onbActualStart}
                     >
-                      Souhlasí, potvrdit nástup
+                      Potvrdit nástup
                     </Button>
                   </div>
                 </div>
@@ -1668,14 +2227,26 @@ export default function DashboardPage(): JSX.Element {
           }
         }}
       >
-        <DialogContent className="z-[300] max-w-3xl overflow-hidden p-0">
-          <DialogTitle className="px-6 pt-6">
+        <DialogContent
+          className={`z-[300] ${tier === "mobile" ? "max-w-[95vw]" : "max-w-3xl"} overflow-hidden p-0`}
+        >
+          <DialogTitle
+            className={`${tier === "mobile" ? "px-4 pt-4 text-base" : "px-6 pt-6"}`}
+          >
             Potvrdit skutečný odchod
           </DialogTitle>
-          <div className="max-h-[80vh] space-y-4 overflow-y-auto p-6">
+          <DialogDescription asChild>
+            <span className="sr-only">Potvrzení odchodu a doplnění údajů.</span>
+          </DialogDescription>
+
+          <div
+            className={`max-h-[80vh] space-y-4 overflow-y-auto ${tier === "mobile" ? "p-4" : "p-6"} touch-scroll`}
+          >
             {confirmOffRow && (
               <>
-                <div className="rounded-lg border bg-muted/30 p-3 text-sm">
+                <div
+                  className={`rounded-lg border bg-muted/30 ${tier === "mobile" ? "p-2 text-xs" : "p-3 text-sm"}`}
+                >
                   <p className="mb-2 font-medium">Souhlasí ostatní údaje?</p>
                   <div className="grid gap-y-1 md:grid-cols-2">
                     <div>
@@ -1699,7 +2270,7 @@ export default function DashboardPage(): JSX.Element {
                   </div>
                   <div className="mt-3">
                     <Button
-                      size="sm"
+                      size={tier === "mobile" ? "sm" : "default"}
                       variant="outline"
                       onClick={() => {
                         setOpenConfirmOff(false)
@@ -1710,12 +2281,14 @@ export default function DashboardPage(): JSX.Element {
                         setOpenEdit(true)
                       }}
                     >
-                      Nesouhlasí – upravit formulář
+                      Nesouhlasí – upravit
                     </Button>
                   </div>
                 </div>
 
-                <div className="rounded-lg border bg-amber-50 p-3 text-sm dark:bg-amber-950/30">
+                <div
+                  className={`rounded-lg border bg-amber-50 dark:bg-amber-950/30 ${tier === "mobile" ? "p-2 text-xs" : "p-3 text-sm"}`}
+                >
                   <label className="mb-1 block font-medium">
                     Datum skutečného odchodu
                   </label>
@@ -1724,55 +2297,71 @@ export default function DashboardPage(): JSX.Element {
                       type="date"
                       value={offActualEnd}
                       onChange={(e) => setOffActualEnd(e.target.value)}
-                      className="max-w-[220px]"
+                      className={
+                        tier === "mobile"
+                          ? "max-w-full text-xs"
+                          : "max-w-[220px]"
+                      }
                     />
                   </div>
                   <div className="mt-3 grid gap-3 md:grid-cols-2">
                     <div>
-                      <label className="mb-1 block text-xs font-medium">
+                      <label
+                        className={`mb-1 block font-medium ${tier === "mobile" ? "text-[10px]" : "text-xs"}`}
+                      >
                         Firemní e-mail (nepovinné)
                       </label>
                       <Input
                         type="email"
                         value={offUserEmail}
                         onChange={(e) => setOffUserEmail(e.target.value)}
+                        className={tier === "mobile" ? "text-xs" : ""}
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium">
+                      <label
+                        className={`mb-1 block font-medium ${tier === "mobile" ? "text-[10px]" : "text-xs"}`}
+                      >
                         Uživatelské jméno (nepovinné)
                       </label>
                       <Input
                         value={offUserName}
                         onChange={(e) => setOffUserName(e.target.value)}
+                        className={tier === "mobile" ? "text-xs" : ""}
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium">
+                      <label
+                        className={`mb-1 block font-medium ${tier === "mobile" ? "text-[10px]" : "text-xs"}`}
+                      >
                         Osobní číslo (nepovinné)
                       </label>
                       <Input
                         value={offEvidence}
                         onChange={(e) => setOffEvidence(e.target.value)}
+                        className={tier === "mobile" ? "text-xs" : ""}
                       />
                     </div>
                     <div className="md:col-span-2">
-                      <label className="mb-1 block text-xs font-medium">
+                      <label
+                        className={`mb-1 block font-medium ${tier === "mobile" ? "text-[10px]" : "text-xs"}`}
+                      >
                         Poznámka (nepovinné)
                       </label>
                       <Textarea
                         value={offNotes}
                         onChange={(e) => setOffNotes(e.target.value)}
+                        className={tier === "mobile" ? "text-xs" : ""}
                       />
                     </div>
                   </div>
                   <div className="mt-4">
                     <Button
-                      size="sm"
+                      size={tier === "mobile" ? "sm" : "default"}
                       onClick={() => void confirmOffboarding()}
                       disabled={!offActualEnd}
                     >
-                      Souhlasí, potvrdit odchod
+                      Potvrdit odchod
                     </Button>
                   </div>
                 </div>
@@ -1792,42 +2381,59 @@ export default function DashboardPage(): JSX.Element {
           }
         }}
       >
-        <DialogContent className="z-[300] max-w-4xl p-6">
-          <DialogTitle className="mb-4">Upravit záznam</DialogTitle>
-          {editId != null && editInitial && (
-            <div>
-              {editType === "onb" ? (
-                <OnboardingFormUnified
-                  key={`edit-onb-${editId}-${editContext}`}
-                  positions={positions}
-                  id={editId}
-                  mode="edit"
-                  editContext={editContext}
-                  initial={mapOnbInitial(editInitial as Partial<OnbRow>)}
-                  onSuccess={async () => {
-                    setOpenEdit(false)
-                    setEditId(null)
-                    setEditInitial(null)
-                    await reloadAll()
-                  }}
-                />
-              ) : (
-                <OffboardingFormUnified
-                  key={`edit-off-${editId}-${editContext}`}
-                  id={editId}
-                  mode="edit"
-                  editContext={editContext}
-                  initial={mapOffInitial(editInitial as Partial<OffRow>)}
-                  onSuccess={async () => {
-                    setOpenEdit(false)
-                    setEditId(null)
-                    setEditInitial(null)
-                    await reloadAll()
-                  }}
-                />
-              )}
-            </div>
-          )}
+        <DialogContent
+          className={`z-[300] max-h-[90dvh] ${tier === "mobile" ? "max-w-[95vw]" : "max-w-5xl"} overflow-hidden p-0`}
+        >
+          <DialogTitle
+            className={`${tier === "mobile" ? "px-4 pt-4 text-base" : "px-6 pt-6"}`}
+          >
+            Upravit záznam
+          </DialogTitle>
+          <DialogDescription asChild>
+            <span className="sr-only">
+              Formulář pro úpravu vybraného záznamu.
+            </span>
+          </DialogDescription>
+
+          <div
+            className={`max-h-[calc(90dvh-4.5rem)] overflow-y-auto ${tier === "mobile" ? "p-4" : "p-6"} touch-scroll`}
+            data-lenis-prevent
+          >
+            {editId != null && editInitial && (
+              <>
+                {editType === "onb" ? (
+                  <OnboardingFormUnified
+                    key={`edit-onb-${editId}-${editContext}`}
+                    positions={positions}
+                    id={editId}
+                    mode="edit"
+                    editContext={editContext}
+                    initial={mapOnbInitial(editInitial as Partial<OnbRow>)}
+                    onSuccess={async () => {
+                      setOpenEdit(false)
+                      setEditId(null)
+                      setEditInitial(null)
+                      await reloadAll()
+                    }}
+                  />
+                ) : (
+                  <OffboardingFormUnified
+                    key={`edit-off-${editId}-${editContext}`}
+                    id={editId}
+                    mode="edit"
+                    editContext={editContext}
+                    initial={mapOffInitial(editInitial as Partial<OffRow>)}
+                    onSuccess={async () => {
+                      setOpenEdit(false)
+                      setEditId(null)
+                      setEditInitial(null)
+                      await reloadAll()
+                    }}
+                  />
+                )}
+              </>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

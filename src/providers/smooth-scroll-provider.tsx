@@ -3,13 +3,20 @@
 import * as React from "react"
 import { ReactLenis } from "@studio-freight/react-lenis"
 
-interface SmoothScrollProviderProps {
+export function SmoothScrollProvider({
+  children,
+}: {
   children: React.ReactNode
-}
-
-export function SmoothScrollProvider({ children }: SmoothScrollProviderProps) {
+}) {
   return (
-    <ReactLenis root options={{ lerp: 0.1, duration: 1.5, syncTouch: true }}>
+    <ReactLenis
+      root
+      options={{
+        lerp: 0.1,
+        duration: 1.5,
+        syncTouch: false,
+      }}
+    >
       {children}
     </ReactLenis>
   )

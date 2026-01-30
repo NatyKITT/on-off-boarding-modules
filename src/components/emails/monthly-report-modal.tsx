@@ -90,7 +90,7 @@ const focusRing =
   "focus:ring-offset-2 focus:ring-offset-background " +
   "focus-visible:outline-none focus-visible:border-primary " +
   "focus-visible:ring-2 focus-visible:ring-primary/55 " +
-  "focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+  "focus-visible:ring-offset-2 focus:ring-offset-background"
 
 export function MonthlyReportModal({
   openSignal,
@@ -356,7 +356,7 @@ export function MonthlyReportModal({
           </div>
 
           <div
-            className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1"
+            className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden pr-1"
             data-lenis-prevent=""
             onWheelCapture={(e) => e.stopPropagation()}
           >
@@ -401,7 +401,7 @@ export function MonthlyReportModal({
             </div>
 
             <div
-              className="rounded-lg border bg-background"
+              className="overflow-hidden rounded-lg border bg-background"
               aria-busy={loading}
             >
               {loading ? (
@@ -413,101 +413,111 @@ export function MonthlyReportModal({
                   Žádné záznamy
                 </div>
               ) : (
-                <table className="w-full min-w-[720px] text-xs sm:text-sm">
-                  <thead className="sticky top-0 z-10 bg-background">
-                    <tr className="border-b">
-                      <th className="w-12 p-2">
-                        <Checkbox
-                          checked={
-                            selectedKeys.length === records.length &&
-                            records.length > 0
-                          }
-                          onCheckedChange={toggleAll}
-                          aria-label="Vybrat všechny"
-                        />
-                      </th>
-                      <th className="p-2 text-left">Jméno</th>
-                      <th className="p-2 text-left">Pozice</th>
-                      <th className="p-2 text-left">Oddělení</th>
-                      <th className="p-2 text-left">Datum</th>
-                      <th className="p-2 text-left">Typ</th>
-                      <th className="p-2 text-left">Režim</th>
-                      <th className="w-40 p-2 text-left">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {records.map((r) => {
-                      const k = rowKey(r)
-                      return (
-                        <tr
-                          key={k}
-                          className={cn(
-                            "border-t hover:bg-muted/20",
-                            r.wasSent && "bg-muted/10"
-                          )}
-                        >
-                          <td className="p-2">
-                            <Checkbox
-                              checked={selectedKeys.includes(k)}
-                              onCheckedChange={() => toggleSingle(k)}
-                              aria-label="Vybrat záznam"
-                            />
-                          </td>
-                          <td className="p-2 font-medium">
-                            {formatFullName(r)}
-                          </td>
-                          <td className="p-2 text-xs sm:text-sm">
-                            {r.position ?? "—"}
-                          </td>
-                          <td className="p-2 text-xs sm:text-sm">
-                            {r.department ?? "—"}
-                          </td>
-                          <td className="whitespace-nowrap p-2 text-xs sm:text-sm">
-                            {r.date ? fmt(new Date(r.date), "dd.MM.yyyy") : "–"}
-                          </td>
-                          <td className="p-2">
-                            <Badge
-                              variant={
-                                r.type === "onboarding"
-                                  ? "default"
-                                  : "secondary"
-                              }
-                            >
-                              {r.type === "onboarding" ? "Nástup" : "Odchod"}
-                            </Badge>
-                          </td>
-                          <td className="p-2">
-                            <Badge
-                              variant={r.isPlanned ? "secondary" : "default"}
-                            >
-                              {r.isPlanned ? "Plánované" : "Skutečné"}
-                            </Badge>
-                          </td>
-                          <td className="p-2">
-                            {r.wasSent ? (
-                              <div className="flex min-w-[150px] flex-col gap-0.5 text-xs text-muted-foreground sm:text-sm">
-                                <span className="inline-flex items-center gap-1">
-                                  <CheckCircle2 className="size-3 shrink-0" />
-                                  <span>Již odesláno</span>
-                                </span>
-                                {r.sentDate && (
-                                  <span className="pl-5 text-[11px] sm:text-xs">
-                                    Odesláno{" "}
-                                    {fmt(new Date(r.sentDate), "dd.MM.yyyy")}
-                                  </span>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="text-xs font-medium text-green-600 sm:text-sm">
-                                Nové
-                              </span>
+                <div
+                  className="w-full overflow-x-auto overflow-y-hidden
+                    [-webkit-overflow-scrolling:touch]
+                    [overscroll-behavior-x:contain]
+                    [touch-action:pan-x]
+                  "
+                >
+                  <table className="w-full min-w-[720px] text-xs sm:text-sm">
+                    <thead className="sticky top-0 z-10 bg-background">
+                      <tr className="border-b">
+                        <th className="w-12 p-2">
+                          <Checkbox
+                            checked={
+                              selectedKeys.length === records.length &&
+                              records.length > 0
+                            }
+                            onCheckedChange={toggleAll}
+                            aria-label="Vybrat všechny"
+                          />
+                        </th>
+                        <th className="p-2 text-left">Jméno</th>
+                        <th className="p-2 text-left">Pozice</th>
+                        <th className="p-2 text-left">Oddělení</th>
+                        <th className="p-2 text-left">Datum</th>
+                        <th className="p-2 text-left">Typ</th>
+                        <th className="p-2 text-left">Režim</th>
+                        <th className="w-40 p-2 text-left">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {records.map((r) => {
+                        const k = rowKey(r)
+                        return (
+                          <tr
+                            key={k}
+                            className={cn(
+                              "border-t hover:bg-muted/20",
+                              r.wasSent && "bg-muted/10"
                             )}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
+                          >
+                            <td className="p-2">
+                              <Checkbox
+                                checked={selectedKeys.includes(k)}
+                                onCheckedChange={() => toggleSingle(k)}
+                                aria-label="Vybrat záznam"
+                              />
+                            </td>
+                            <td className="p-2 font-medium">
+                              {formatFullName(r)}
+                            </td>
+                            <td className="p-2 text-xs sm:text-sm">
+                              {r.position ?? "—"}
+                            </td>
+                            <td className="p-2 text-xs sm:text-sm">
+                              {r.department ?? "—"}
+                            </td>
+                            <td className="whitespace-nowrap p-2 text-xs sm:text-sm">
+                              {r.date
+                                ? fmt(new Date(r.date), "dd.MM.yyyy")
+                                : "–"}
+                            </td>
+                            <td className="p-2">
+                              <Badge
+                                variant={
+                                  r.type === "onboarding"
+                                    ? "default"
+                                    : "secondary"
+                                }
+                              >
+                                {r.type === "onboarding" ? "Nástup" : "Odchod"}
+                              </Badge>
+                            </td>
+                            <td className="p-2">
+                              <Badge
+                                variant={r.isPlanned ? "secondary" : "default"}
+                              >
+                                {r.isPlanned ? "Plánované" : "Skutečné"}
+                              </Badge>
+                            </td>
+                            <td className="p-2">
+                              {r.wasSent ? (
+                                <div className="flex min-w-[150px] flex-col gap-0.5 text-xs text-muted-foreground sm:text-sm">
+                                  <span className="inline-flex items-center gap-1">
+                                    <CheckCircle2 className="size-3 shrink-0" />
+                                    <span>Již odesláno</span>
+                                  </span>
+                                  {r.sentDate && (
+                                    <span className="pl-5 text-[11px] sm:text-xs">
+                                      Odesláno{" "}
+                                      {fmt(new Date(r.sentDate), "dd.MM.yyyy")}
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-xs font-medium text-green-600 sm:text-sm">
+                                  Nové
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           </div>

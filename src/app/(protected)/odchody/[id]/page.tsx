@@ -42,7 +42,6 @@ interface PageProps {
   params: { id: string }
 }
 
-/** Převod detailu z API do tvaru, který chce formulář (Partial<FormValues>) */
 function toInitial(d: OffboardingDetail): Partial<FormValues> {
   return {
     titleBefore: d.titleBefore ?? "",
@@ -79,13 +78,13 @@ export default async function OffboardingDetailPage({ params }: PageProps) {
   const isCompleted = Boolean(data.actualEnd)
 
   const statusLabels: Record<OffboardingDetail["status"], string> = {
-    NEW: "Předpokládaný",
+    NEW: "Plánovaný",
     IN_PROGRESS: "Zpracovává se",
     COMPLETED: "Odešel/a",
   }
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-5xl space-y-6 px-4 py-6">
       <div>
         <h1 className="mb-1 text-2xl font-bold">Detail odchodu</h1>
         <p className="text-muted-foreground">

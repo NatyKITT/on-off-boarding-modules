@@ -60,9 +60,10 @@ export function DashboardSidebar({ links }: DashboardSidebarProps) {
                   {isSidebarExpanded && (
                     <Image
                       src="/assets/icons/onboarding.svg"
-                      alt="On-Off-Boarding modul"
+                      alt="On-Off-Boarding-modul"
                       width={140}
                       height={36}
+                      priority
                       className="h-8 w-auto"
                     />
                   )}
@@ -92,7 +93,10 @@ export function DashboardSidebar({ links }: DashboardSidebarProps) {
               <nav
                 role="navigation"
                 aria-label="Postranní navigace"
-                className="flex flex-1 flex-col gap-8 px-4 pt-4"
+                className={cn(
+                  "flex flex-1 flex-col gap-8 pt-4",
+                  isSidebarExpanded ? "px-4" : "px-2"
+                )}
               >
                 {links.map((section) => (
                   <section
@@ -167,7 +171,7 @@ export function DashboardSidebar({ links }: DashboardSidebarProps) {
                     })}
                   </section>
                 ))}
-                <BuildVersionBadge />
+                <BuildVersionBadge compact={!isSidebarExpanded} />
               </nav>
             </div>
           </aside>
@@ -206,6 +210,7 @@ export function MobileSheetSidebar({ links }: DashboardSidebarProps) {
                     width={140}
                     height={6}
                     className="h-8 w-auto"
+                    priority
                   />
                 </div>
 

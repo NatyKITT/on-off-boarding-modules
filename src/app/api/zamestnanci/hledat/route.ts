@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 
+import { prisma } from "@/lib/db"
 import { getEmployees } from "@/lib/eos-employees"
 
 export const dynamic = "force-dynamic"
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest) {
     )
 
     const excludeParam = searchParams.get("exclude") || ""
-    const excludePersonalNumbers = excludeParam
+    const manualExclude = excludeParam
       ? excludeParam
           .split(",")
           .map((n) => n.trim())
@@ -25,13 +26,26 @@ export async function GET(req: NextRequest) {
 
     if (!q) return NextResponse.json({ data: [] })
 
+    const activeOffboardings = await prisma.employeeOffboarding.findMany({
+      where: {
+        deletedAt: null,
+      },
+      select: {
+        personalNumber: true,
+      },
+    })
+
+    const excludeFromDB = activeOffboardings
+      .map((o) => o.personalNumber)
+      .filter(Boolean) as string[]
+
+    const allExcluded = [...new Set([...excludeFromDB, ...manualExclude])]
+
     const employees = await getEmployees(q)
 
     const filteredEmployees =
-      excludePersonalNumbers.length > 0
-        ? employees.filter(
-            (emp) => !excludePersonalNumbers.includes(emp.personalNumber)
-          )
+      allExcluded.length > 0
+        ? employees.filter((emp) => !allExcluded.includes(emp.personalNumber))
         : employees
 
     return NextResponse.json({ data: filteredEmployees.slice(0, limit) })
