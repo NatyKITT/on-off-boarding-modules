@@ -2,11 +2,13 @@
 
 import * as React from "react"
 import { useTransition } from "react"
+import Image from "next/image"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { CheckCircle, XCircle } from "lucide-react"
 import { useFieldArray, useForm } from "react-hook-form"
 
 import { useToast } from "@/hooks/use-toast"
+import { EmployeeMeta } from "@/lib/employee-meta"
 import {
   experienceDocumentSchema,
   type ExperienceDocumentSchema,
@@ -22,11 +24,13 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { DocumentEmployeeHeader } from "@/components/common/document-employee-header"
 
 type ExperienceFormBaseProps = {
   documentId: number
   initialData?: unknown
   readOnly?: boolean
+  employeeMeta?: EmployeeMeta
 }
 
 type ExperienceFormPublicProps = ExperienceFormBaseProps & {
@@ -178,6 +182,41 @@ export function ExperienceForm(props: ExperienceFormProps) {
         onSubmit={handleSubmit(onSubmit)}
         className="mx-auto w-full max-w-6xl space-y-6"
       >
+        <header className="space-y-4 text-sm text-muted-foreground">
+          <div className="flex flex-col items-center gap-3 text-center">
+            <Image
+              src="/assets/images/logo-kitt6.png"
+              alt="Městská část Praha 6"
+              width={100}
+              height={100}
+            />
+            <h1 className="text-xl font-semibold text-foreground">
+              Přehled praxe
+            </h1>
+          </div>
+          <DocumentEmployeeHeader
+            fullName={props.employeeMeta?.fullName}
+            department={props.employeeMeta?.department}
+            position={props.employeeMeta?.position}
+          />
+          <p>Vážená paní, vážený pane,</p>
+          <p>
+            dovolujeme si Vás požádat o vyplnění následujících údajů pro účely
+            zpracování personální a mzdové agendy. Vaše údaje budou k dispozici
+            pouze tajemníkovi úřadu, zaměstnancům personálního oddělení, mzdové
+            účtárně a HR specialistce. Data jsou přenášena šifrovaná a uložena
+            na zabezpečeném úložišti.
+          </p>
+          <p>Dotazník Vám zabere maximálně 30 minut.</p>
+          <p>Děkujeme a těšíme se na spolupráci.</p>
+          <p>
+            Městská část Praha 6, Úřad městské části, Čs. armády 23, 160 52
+            Praha 6, IČO 00063703
+          </p>
+          <p>Personální oddělení, v přímém řízení tajemníka</p>
+          <p>Oddělení účetnictví, Odbor ekonomický</p>
+        </header>
+
         <section className="space-y-2 text-sm text-muted-foreground">
           <p>
             Uveďte dosavadní pracovní zkušenosti. V případě potřeby přidejte
@@ -309,7 +348,7 @@ export function ExperienceForm(props: ExperienceFormProps) {
                 ? "Odesílám…"
                 : "Ukládám…"
               : props.mode === "public"
-                ? "Odeslat čestné prohlášení"
+                ? "Odeslat přehled praxe"
                 : "Uložit úpravy"}
           </Button>
         </div>

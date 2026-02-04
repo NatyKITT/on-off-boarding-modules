@@ -1,12 +1,11 @@
 import { AlertCircle } from "lucide-react"
 
 import { prisma } from "@/lib/db"
+import { buildEmployeeMeta } from "@/lib/employee-meta"
 
 import { PublicDocumentShell } from "./public-document-shell"
 
-type PageProps = {
-  params: { hash: string }
-}
+type PageProps = { params: { hash: string } }
 
 export default async function PublicDocumentPage({ params }: PageProps) {
   const { hash } = params
@@ -18,13 +17,22 @@ export default async function PublicDocumentPage({ params }: PageProps) {
       type: true,
       status: true,
       expiresAt: true,
+      onboarding: {
+        select: {
+          titleBefore: true,
+          name: true,
+          surname: true,
+          titleAfter: true,
+          department: true,
+          unitName: true,
+          positionName: true,
+        },
+      },
     },
   })
 
-  const isInvalid =
-    !doc ||
-    doc.status !== "DRAFT" ||
-    (doc.expiresAt && doc.expiresAt < new Date())
+  const isExpired = !!doc?.expiresAt && doc.expiresAt < new Date()
+  const isInvalid = !doc || doc.status !== "DRAFT" || isExpired
 
   if (isInvalid) {
     return (
@@ -39,10 +47,19 @@ export default async function PublicDocumentPage({ params }: PageProps) {
     )
   }
 
+  const employeeMeta = doc.onboarding
+    ? buildEmployeeMeta(doc.onboarding)
+    : undefined
+
   return (
     <main className="flex min-h-screen flex-col items-center bg-slate-50 py-10">
       <div className="w-full max-w-3xl rounded-xl bg-white p-6 shadow-sm">
-        <PublicDocumentShell documentId={doc.id} hash={hash} type={doc.type} />
+        <PublicDocumentShell
+          documentId={doc.id}
+          hash={hash}
+          type={doc.type}
+          employeeMeta={employeeMeta}
+        />
       </div>
     </main>
   )

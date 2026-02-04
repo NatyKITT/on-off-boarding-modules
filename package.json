@@ -2,7 +2,7 @@
   "private": true,
   "name": "On-Off-Boarding-Module",
   "description": "",
-  "version": "0.1.8",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "next dev -p 3001",

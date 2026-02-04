@@ -516,6 +516,11 @@ export async function sendMail(params: {
   html: string
   text?: string
   from?: string
+  attachments?: Array<{
+    filename: string
+    content: Buffer
+    contentType: string
+  }>
 }): Promise<void> {
   const toClean = Array.from(
     new Set((params.to ?? []).map((v) => v?.trim()).filter(Boolean))
@@ -558,6 +563,9 @@ export async function sendMail(params: {
       subject: params.subject,
       html: params.html,
       text: textBody,
+      ...(params.attachments?.length
+        ? { attachments: params.attachments }
+        : {}),
     })
 
     return
@@ -570,6 +578,7 @@ export async function sendMail(params: {
     subject: params.subject,
     html: params.html,
     text: textBody,
+    ...(params.attachments?.length ? { attachments: params.attachments } : {}),
   })
 }
 

@@ -8,6 +8,7 @@ import { CheckCircle, XCircle } from "lucide-react"
 import { useFieldArray, useForm } from "react-hook-form"
 
 import { useToast } from "@/hooks/use-toast"
+import { EmployeeMeta } from "@/lib/employee-meta"
 import {
   affidavitSchema,
   type AffidavitSchema,
@@ -31,11 +32,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { DocumentEmployeeHeader } from "@/components/common/document-employee-header"
+
+type ExperienceEntry = AffidavitSchema["experience"][number]
+type MilitaryEntry = AffidavitSchema["militaryService"][number]
+type CloseRelativeCareEntry = AffidavitSchema["closeRelativeCare"][number]
+type DoctoralStudyEntry = AffidavitSchema["doctoralStudy"][number]
 
 type AffidavitFormBaseProps = {
   documentId: number
   initialData?: unknown
   readOnly?: boolean
+  employeeMeta?: EmployeeMeta
 }
 
 type AffidavitFormPublicProps = AffidavitFormBaseProps & {
@@ -69,7 +77,8 @@ export function AffidavitForm(props: AffidavitFormProps) {
   const form = useForm<AffidavitSchema>({
     resolver: zodResolver(affidavitSchema),
     defaultValues: (props.initialData as AffidavitSchema | undefined) ?? {
-      militaryService: "NONE",
+      experience: [{ employer: "", jobType: "", from: "", to: "" }],
+      militaryService: [{ service: undefined, from: "", to: "" }],
       maternityParental: [
         { childName: "", childBirthDate: "", from: "", to: "" },
       ],
@@ -77,6 +86,10 @@ export function AffidavitForm(props: AffidavitFormProps) {
       disabledChildCare: [
         { childName: "", childBirthDate: "", from: "", to: "" },
       ],
+      closeRelativeCare: [
+        { personName: "", dependencyLevel: undefined, from: "", to: "" },
+      ],
+      doctoralStudy: [{ schoolName: "", studyProgram: "", from: "", to: "" }],
       unpaidLeave: [{ reason: "", from: "", to: "" }],
     },
   })
@@ -84,15 +97,21 @@ export function AffidavitForm(props: AffidavitFormProps) {
   const {
     register,
     handleSubmit,
-    watch,
     setValue,
     control,
     formState: { errors },
   } = form
 
-  const militaryService = watch("militaryService")
-  const isTruthful = watch("isTruthful") as boolean | undefined
+  const isTruthful = form.watch("isTruthful") as boolean | undefined
 
+  const experienceArray = useFieldArray<AffidavitSchema, "experience">({
+    control,
+    name: "experience",
+  })
+  const militaryArray = useFieldArray<AffidavitSchema, "militaryService">({
+    control,
+    name: "militaryService",
+  })
   const maternityArray = useFieldArray<AffidavitSchema, "maternityParental">({
     control,
     name: "maternityParental",
@@ -104,6 +123,17 @@ export function AffidavitForm(props: AffidavitFormProps) {
   const disabledArray = useFieldArray<AffidavitSchema, "disabledChildCare">({
     control,
     name: "disabledChildCare",
+  })
+  const closeRelativeArray = useFieldArray<
+    AffidavitSchema,
+    "closeRelativeCare"
+  >({
+    control,
+    name: "closeRelativeCare",
+  })
+  const doctoralArray = useFieldArray<AffidavitSchema, "doctoralStudy">({
+    control,
+    name: "doctoralStudy",
   })
   const unpaidArray = useFieldArray<AffidavitSchema, "unpaidLeave">({
     control,
@@ -207,13 +237,12 @@ export function AffidavitForm(props: AffidavitFormProps) {
               height={100}
             />
             <h1 className="text-xl font-semibold text-foreground">
-              Čestné prohlášení
+              Česté prohlášení
             </h1>
           </div>
-
-          <p>Vážená paní, vážený pane,</p>
+          <p>Važena paní, važený pane,</p>
           <p>
-            dovolujeme si Vás požádat o vyplnění následujících údajů pro účely
+            dovolujeme si Vás požádat o vyplnění následujícich údajů pro účely
             zpracování personální a mzdové agendy. Vaše údaje budou k dispozici
             pouze tajemníkovi úřadu, zaměstnancům personálního oddělení, mzdové
             účtárně a HR specialistce. Data jsou přenášena šifrovaná a uložena
@@ -227,52 +256,354 @@ export function AffidavitForm(props: AffidavitFormProps) {
           </p>
           <p>Personální oddělení, v přímém řízení tajemníka</p>
           <p>Oddělení účetnictví, Odbor ekonomický</p>
+          <br />
+          <p>Já, níže podepsaný/á</p>
+          <DocumentEmployeeHeader
+            fullName={props.employeeMeta?.fullName}
+            position={props.employeeMeta?.position}
+            unitName={props.employeeMeta?.unitName}
+            department={props.employeeMeta?.department}
+          />
+          <p>čestně prohlašuji,</p>
+          <p>
+            že beru na vědomí, že Úřad městské části Praha 6 jako zaměstnavatel
+            je povinen zařadit zaměstnance do platových stupňů při zařazení do
+            platových tříd na základě délky praxe, kvalifikačních předpokladů a
+            druhu výkonu práce v souladu s platnými právními předpisy, tj.
+            zejména zákonem č. 262/2006 Sb., zákoník práce, ve znění pozdějších
+            předpisů, nařízením vlády č. 341/2017 Sb., o platových poměrech
+            zaměstnanců ve veřejných službách a správě a nařízením vlády č.
+            222/2010 Sb., o katalogu prací ve veřejných službách a správě.
+          </p>
+          <p>
+            V souladu s uvedenými právními předpisy a na základě příkazu
+            tajemníka č. 3/2025 dále prohlašuji, že všechny níže specifikované
+            pracovní činnosti (druh práce), které jsem vykonával/a od prvního
+            dne výkonu práce, uvádím pravdivě a úplně za účelem správného
+            zařazení do příslušné platové třídy a platového stupně.
+          </p>
         </header>
 
-        <section className="space-y-2 rounded-md border p-4">
-          <h2 className="text-sm font-medium">
-            Výkon základní – náhradní – civilní vojenské služby
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            (zák. 18/1992 Sb. o civilní službě)
-          </p>
+        <section className="space-y-3 rounded-md border p-4">
+          <h2 className="text-sm font-medium">Praxe</h2>
 
-          <div className="mt-3 space-y-1">
-            <Label>
-              Druh <span className="text-destructive">*</span>
-            </Label>
-            <Select
-              value={militaryService}
-              onValueChange={(value) =>
-                setValue(
-                  "militaryService",
-                  value as AffidavitSchema["militaryService"],
-                  { shouldValidate: true }
-                )
-              }
-              disabled={isDisabled}
+          {experienceArray.fields.map((field, index) => (
+            <div
+              key={field.id}
+              className="mt-3 space-y-3 rounded-md border bg-muted/30 p-4"
             >
-              <SelectTrigger className="w-full max-w-xs">
-                <SelectValue placeholder="Vyberte možnost" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="NONE">není</SelectItem>
-                <SelectItem value="BASIC">základní</SelectItem>
-                <SelectItem value="ALTERNATIVE">náhradní</SelectItem>
-                <SelectItem value="CIVIL">civilní</SelectItem>
-              </SelectContent>
-            </Select>
-            {errors.militaryService && (
-              <p className="text-xs text-destructive">
-                {errors.militaryService.message as string}
-              </p>
-            )}
-          </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>
+                    Zaměstnavatel <span className="text-destructive">*</span>{" "}
+                    <span className="text-muted-foreground">[1]</span>
+                  </Label>
+                  <Input
+                    {...register(`experience.${index}.employer` as const)}
+                    placeholder="např. ÚMČ Praha 6"
+                    disabled={isDisabled}
+                  />
+                  {errors.experience?.[index]?.employer && (
+                    <p className="text-xs text-destructive">
+                      {errors.experience[index]?.employer?.message as string}
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <Label>
+                    Druh práce (pracovní činnost){" "}
+                    <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    {...register(`experience.${index}.jobType` as const)}
+                    placeholder="např. referent IT"
+                    disabled={isDisabled}
+                  />
+                  {errors.experience?.[index]?.jobType && (
+                    <p className="text-xs text-destructive">
+                      {errors.experience[index]?.jobType?.message as string}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>
+                    Od <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    type="date"
+                    {...register(`experience.${index}.from` as const)}
+                    disabled={isDisabled}
+                  />
+                  {errors.experience?.[index]?.from && (
+                    <p className="text-xs text-destructive">
+                      {errors.experience[index]?.from?.message as string}
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <Label>Do</Label>
+                  <Input
+                    type="date"
+                    {...register(`experience.${index}.to` as const)}
+                    disabled={isDisabled}
+                  />
+                  {errors.experience?.[index]?.to && (
+                    <p className="text-xs text-destructive">
+                      {errors.experience[index]?.to?.message as string}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                {experienceArray.fields.length > 1 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => experienceArray.remove(index)}
+                    disabled={isDisabled}
+                  >
+                    Odebrat řádek
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              experienceArray.append({
+                employer: "",
+                jobType: "",
+                from: "",
+                to: "",
+              } as ExperienceEntry)
+            }
+            disabled={isDisabled}
+          >
+            Přidat další řádek
+          </Button>
+
+          {errors.experience?.message && (
+            <p className="pt-2 text-xs text-destructive">
+              {errors.experience.message as string}
+            </p>
+          )}
+
+          <p className="pt-2 text-xs text-muted-foreground">
+            [1] Uveďte prosím rovněž zkratku u soustavné činnosti provozované
+            samostatně jako živnost (OSVČ) nebo výkonu práce na základě dohody o
+            provedení práce (DPP) nebo dohody o pracovní činnosti (DPČ) a rozsah
+            práce – např. 10 dnů/měs., denně apod.
+          </p>
         </section>
 
         <section className="space-y-3 rounded-md border p-4">
           <h2 className="text-sm font-medium">
-            Doba mateřské dovolené a rodičovské dovolené
+            Výkon vojenské základní (náhradní) služby nebo civilní služby{" "}
+            <span className="text-muted-foreground">[1]</span>
+          </h2>
+
+          {militaryArray.fields.map((field, idx) => (
+            <div
+              key={field.id}
+              className="mt-3 space-y-3 rounded-md border bg-muted/30 p-4"
+            >
+              <div className="space-y-1">
+                <Label>Druh služby</Label>
+                <Select
+                  value={
+                    form.watch(`militaryService.${idx}.service` as const) ?? ""
+                  }
+                  onValueChange={(value) =>
+                    setValue(
+                      `militaryService.${idx}.service` as const,
+                      value as MilitaryEntry["service"],
+                      { shouldValidate: true }
+                    )
+                  }
+                  disabled={isDisabled}
+                >
+                  <SelectTrigger className="w-full max-w-xs">
+                    <SelectValue placeholder="Vyberte druh služby" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="BASIC">základní</SelectItem>
+                    <SelectItem value="ALTERNATIVE">náhradní</SelectItem>
+                    <SelectItem value="CIVIL">civilní</SelectItem>
+                  </SelectContent>
+                </Select>
+                {errors.militaryService?.[idx]?.service && (
+                  <p className="text-xs text-destructive">
+                    {errors.militaryService[idx]?.service?.message as string}
+                  </p>
+                )}
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>Od</Label>
+                  <Input
+                    type="date"
+                    {...register(`militaryService.${idx}.from` as const)}
+                    disabled={isDisabled}
+                  />
+                  {errors.militaryService?.[idx]?.from && (
+                    <p className="text-xs text-destructive">
+                      {errors.militaryService[idx]?.from?.message as string}
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <Label>Do</Label>
+                  <Input
+                    type="date"
+                    {...register(`militaryService.${idx}.to` as const)}
+                    disabled={isDisabled}
+                  />
+                  {errors.militaryService?.[idx]?.to && (
+                    <p className="text-xs text-destructive">
+                      {errors.militaryService[idx]?.to?.message as string}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                {militaryArray.fields.length > 1 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => militaryArray.remove(idx)}
+                    disabled={isDisabled}
+                  >
+                    Odebrat záznam
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="mt-2"
+            onClick={() =>
+              militaryArray.append({
+                service: undefined,
+                from: "",
+                to: "",
+              } as MilitaryEntry)
+            }
+            disabled={isDisabled}
+          >
+            Přidat záznam
+          </Button>
+
+          <p className="pt-2 text-xs text-muted-foreground">
+            [1] dle § 4 odst. 4 nařízení vlády č. 341/2017 Sb.
+          </p>
+        </section>
+
+        <section className="space-y-3 rounded-md border p-4">
+          <h2 className="text-sm font-medium">
+            Pracovní volno bez náhrady platu/mzdy
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            např. následování manžela do ciziny, péče o dítě bez nároku na
+            příspěvek
+          </p>
+
+          {unpaidArray.fields.map((field, idx) => (
+            <div
+              key={field.id}
+              className="mt-3 space-y-3 rounded-md border bg-muted/30 p-4"
+            >
+              <div className="space-y-1">
+                <Label>Důvod</Label>
+                <Input
+                  {...register(`unpaidLeave.${idx}.reason` as const)}
+                  placeholder="Důvod"
+                  disabled={isDisabled}
+                />
+                {errors.unpaidLeave?.[idx]?.reason && (
+                  <p className="text-xs text-destructive">
+                    {errors.unpaidLeave[idx]?.reason?.message as string}
+                  </p>
+                )}
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>Od</Label>
+                  <Input
+                    type="date"
+                    {...register(`unpaidLeave.${idx}.from` as const)}
+                    disabled={isDisabled}
+                  />
+                  {errors.unpaidLeave?.[idx]?.from && (
+                    <p className="text-xs text-destructive">
+                      {errors.unpaidLeave[idx]?.from?.message as string}
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <Label>Do</Label>
+                  <Input
+                    type="date"
+                    {...register(`unpaidLeave.${idx}.to` as const)}
+                    disabled={isDisabled}
+                  />
+                  {errors.unpaidLeave?.[idx]?.to && (
+                    <p className="text-xs text-destructive">
+                      {errors.unpaidLeave[idx]?.to?.message as string}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="flex justify-end">
+                {unpaidArray.fields.length > 1 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => unpaidArray.remove(idx)}
+                    disabled={isDisabled}
+                  >
+                    Odebrat záznam
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="mt-2"
+            onClick={() => unpaidArray.append({ reason: "", from: "", to: "" })}
+            disabled={isDisabled}
+          >
+            Přidat záznam
+          </Button>
+        </section>
+
+        <section className="space-y-3 rounded-md border p-4">
+          <h2 className="text-sm font-medium">
+            Doba skutečného čerpání mateřské dovolené, další mateřské dovolené
+            nebo rodičovské dovolené
           </h2>
           <p className="text-xs text-muted-foreground">
             včetně doby péče o dítě do 4 let jeho věku za podmínky nároku na
@@ -283,44 +614,74 @@ export function AffidavitForm(props: AffidavitFormProps) {
           {maternityArray.fields.map((field, idx) => (
             <div
               key={field.id}
-              className="mt-3 grid gap-3 md:grid-cols-4 md:items-end"
+              className="mt-3 space-y-3 rounded-md border bg-muted/30 p-4"
             >
-              <div className="space-y-1 md:col-span-2">
-                <Label>Jméno a příjmení dítěte {idx + 1}</Label>
-                <Input
-                  {...register(`maternityParental.${idx}.childName` as const)}
-                  placeholder="Jméno a příjmení"
-                  disabled={isDisabled}
-                />
-              </div>
-              <div className="space-y-1 md:col-span-2">
-                <Label>Datum narození dítěte {idx + 1}</Label>
-                <Input
-                  type="date"
-                  {...register(
-                    `maternityParental.${idx}.childBirthDate` as const
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>Jméno a příjmení dítěte</Label>
+                  <Input
+                    {...register(`maternityParental.${idx}.childName` as const)}
+                    placeholder="Jméno a příjmení"
+                    disabled={isDisabled}
+                  />
+                  {errors.maternityParental?.[idx]?.childName && (
+                    <p className="text-xs text-destructive">
+                      {
+                        errors.maternityParental[idx]?.childName
+                          ?.message as string
+                      }
+                    </p>
                   )}
-                  disabled={isDisabled}
-                />
+                </div>
+                <div className="space-y-1">
+                  <Label>Datum narození dítěte</Label>
+                  <Input
+                    type="date"
+                    {...register(
+                      `maternityParental.${idx}.childBirthDate` as const
+                    )}
+                    disabled={isDisabled}
+                  />
+                  {errors.maternityParental?.[idx]?.childBirthDate && (
+                    <p className="text-xs text-destructive">
+                      {
+                        errors.maternityParental[idx]?.childBirthDate
+                          ?.message as string
+                      }
+                    </p>
+                  )}
+                </div>
               </div>
-              <div className="space-y-1">
-                <Label>Od (dítě {idx + 1})</Label>
-                <Input
-                  type="date"
-                  {...register(`maternityParental.${idx}.from` as const)}
-                  disabled={isDisabled}
-                />
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>Od</Label>
+                  <Input
+                    type="date"
+                    {...register(`maternityParental.${idx}.from` as const)}
+                    disabled={isDisabled}
+                  />
+                  {errors.maternityParental?.[idx]?.from && (
+                    <p className="text-xs text-destructive">
+                      {errors.maternityParental[idx]?.from?.message as string}
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <Label>Do</Label>
+                  <Input
+                    type="date"
+                    {...register(`maternityParental.${idx}.to` as const)}
+                    disabled={isDisabled}
+                  />
+                  {errors.maternityParental?.[idx]?.to && (
+                    <p className="text-xs text-destructive">
+                      {errors.maternityParental[idx]?.to?.message as string}
+                    </p>
+                  )}
+                </div>
               </div>
-              <div className="space-y-1">
-                <Label>Do (dítě {idx + 1})</Label>
-                <Input
-                  type="date"
-                  {...register(`maternityParental.${idx}.to` as const)}
-                  disabled={isDisabled}
-                />
-              </div>
-              {maternityArray.fields.length > 1 && (
-                <div className="flex justify-end md:col-span-4">
+              <div className="flex justify-end">
+                {maternityArray.fields.length > 1 && (
                   <Button
                     type="button"
                     variant="outline"
@@ -330,8 +691,8 @@ export function AffidavitForm(props: AffidavitFormProps) {
                   >
                     Odebrat záznam
                   </Button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           ))}
 
@@ -350,7 +711,7 @@ export function AffidavitForm(props: AffidavitFormProps) {
             }
             disabled={isDisabled}
           >
-            Přidat další záznam
+            Přidat záznam
           </Button>
         </section>
 
@@ -366,42 +727,71 @@ export function AffidavitForm(props: AffidavitFormProps) {
           {continuousArray.fields.map((field, idx) => (
             <div
               key={field.id}
-              className="mt-3 grid gap-3 md:grid-cols-4 md:items-end"
+              className="mt-3 space-y-3 rounded-md border bg-muted/30 p-4"
             >
-              <div className="space-y-1 md:col-span-2">
-                <Label>Jméno a příjmení dítěte {idx + 1}</Label>
-                <Input
-                  {...register(`continuousCare.${idx}.childName` as const)}
-                  placeholder="Jméno a příjmení"
-                  disabled={isDisabled}
-                />
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>Jméno a příjmení dítěte</Label>
+                  <Input
+                    {...register(`continuousCare.${idx}.childName` as const)}
+                    placeholder="Jméno a příjmení"
+                    disabled={isDisabled}
+                  />
+                  {errors.continuousCare?.[idx]?.childName && (
+                    <p className="text-xs text-destructive">
+                      {errors.continuousCare[idx]?.childName?.message as string}
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <Label>Datum narození dítěte</Label>
+                  <Input
+                    type="date"
+                    {...register(
+                      `continuousCare.${idx}.childBirthDate` as const
+                    )}
+                    disabled={isDisabled}
+                  />
+                  {errors.continuousCare?.[idx]?.childBirthDate && (
+                    <p className="text-xs text-destructive">
+                      {
+                        errors.continuousCare[idx]?.childBirthDate
+                          ?.message as string
+                      }
+                    </p>
+                  )}
+                </div>
               </div>
-              <div className="space-y-1 md:col-span-2">
-                <Label>Datum narození dítěte {idx + 1}</Label>
-                <Input
-                  type="date"
-                  {...register(`continuousCare.${idx}.childBirthDate` as const)}
-                  disabled={isDisabled}
-                />
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>Od</Label>
+                  <Input
+                    type="date"
+                    {...register(`continuousCare.${idx}.from` as const)}
+                    disabled={isDisabled}
+                  />
+                  {errors.continuousCare?.[idx]?.from && (
+                    <p className="text-xs text-destructive">
+                      {errors.continuousCare[idx]?.from?.message as string}
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <Label>Do</Label>
+                  <Input
+                    type="date"
+                    {...register(`continuousCare.${idx}.to` as const)}
+                    disabled={isDisabled}
+                  />
+                  {errors.continuousCare?.[idx]?.to && (
+                    <p className="text-xs text-destructive">
+                      {errors.continuousCare[idx]?.to?.message as string}
+                    </p>
+                  )}
+                </div>
               </div>
-              <div className="space-y-1">
-                <Label>Od (dítě {idx + 1})</Label>
-                <Input
-                  type="date"
-                  {...register(`continuousCare.${idx}.from` as const)}
-                  disabled={isDisabled}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>Do (dítě {idx + 1})</Label>
-                <Input
-                  type="date"
-                  {...register(`continuousCare.${idx}.to` as const)}
-                  disabled={isDisabled}
-                />
-              </div>
-              {continuousArray.fields.length > 1 && (
-                <div className="flex justify-end md:col-span-4">
+              <div className="flex justify-end">
+                {continuousArray.fields.length > 1 && (
                   <Button
                     type="button"
                     variant="outline"
@@ -411,8 +801,8 @@ export function AffidavitForm(props: AffidavitFormProps) {
                   >
                     Odebrat záznam
                   </Button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           ))}
 
@@ -431,7 +821,7 @@ export function AffidavitForm(props: AffidavitFormProps) {
             }
             disabled={isDisabled}
           >
-            Přidat další záznam
+            Přidat záznam
           </Button>
         </section>
 
@@ -442,50 +832,81 @@ export function AffidavitForm(props: AffidavitFormProps) {
           </h2>
           <p className="text-xs text-muted-foreground">
             které vyžadovalo mimořádnou péči, pokud nebylo umístěno v ústavu pro
-            takové děti
+            takové děti, pokud tato péče neprobíhala současně s přípravou na
+            povolání v denním/prezenčním studiu
           </p>
 
           {disabledArray.fields.map((field, idx) => (
             <div
               key={field.id}
-              className="mt-3 grid gap-3 md:grid-cols-4 md:items-end"
+              className="mt-3 space-y-3 rounded-md border bg-muted/30 p-4"
             >
-              <div className="space-y-1 md:col-span-2">
-                <Label>Jméno a příjmení dítěte {idx + 1}</Label>
-                <Input
-                  {...register(`disabledChildCare.${idx}.childName` as const)}
-                  placeholder="Jméno a příjmení"
-                  disabled={isDisabled}
-                />
-              </div>
-              <div className="space-y-1 md:col-span-2">
-                <Label>Datum narození dítěte {idx + 1}</Label>
-                <Input
-                  type="date"
-                  {...register(
-                    `disabledChildCare.${idx}.childBirthDate` as const
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>Jméno a příjmení dítěte</Label>
+                  <Input
+                    {...register(`disabledChildCare.${idx}.childName` as const)}
+                    placeholder="Jméno a příjmení"
+                    disabled={isDisabled}
+                  />
+                  {errors.disabledChildCare?.[idx]?.childName && (
+                    <p className="text-xs text-destructive">
+                      {
+                        errors.disabledChildCare[idx]?.childName
+                          ?.message as string
+                      }
+                    </p>
                   )}
-                  disabled={isDisabled}
-                />
+                </div>
+                <div className="space-y-1">
+                  <Label>Datum narození dítěte</Label>
+                  <Input
+                    type="date"
+                    {...register(
+                      `disabledChildCare.${idx}.childBirthDate` as const
+                    )}
+                    disabled={isDisabled}
+                  />
+                  {errors.disabledChildCare?.[idx]?.childBirthDate && (
+                    <p className="text-xs text-destructive">
+                      {
+                        errors.disabledChildCare[idx]?.childBirthDate
+                          ?.message as string
+                      }
+                    </p>
+                  )}
+                </div>
               </div>
-              <div className="space-y-1">
-                <Label>Od (dítě {idx + 1})</Label>
-                <Input
-                  type="date"
-                  {...register(`disabledChildCare.${idx}.from` as const)}
-                  disabled={isDisabled}
-                />
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>Od</Label>
+                  <Input
+                    type="date"
+                    {...register(`disabledChildCare.${idx}.from` as const)}
+                    disabled={isDisabled}
+                  />
+                  {errors.disabledChildCare?.[idx]?.from && (
+                    <p className="text-xs text-destructive">
+                      {errors.disabledChildCare[idx]?.from?.message as string}
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <Label>Do</Label>
+                  <Input
+                    type="date"
+                    {...register(`disabledChildCare.${idx}.to` as const)}
+                    disabled={isDisabled}
+                  />
+                  {errors.disabledChildCare?.[idx]?.to && (
+                    <p className="text-xs text-destructive">
+                      {errors.disabledChildCare[idx]?.to?.message as string}
+                    </p>
+                  )}
+                </div>
               </div>
-              <div className="space-y-1">
-                <Label>Do (dítě {idx + 1})</Label>
-                <Input
-                  type="date"
-                  {...register(`disabledChildCare.${idx}.to` as const)}
-                  disabled={isDisabled}
-                />
-              </div>
-              {disabledArray.fields.length > 1 && (
-                <div className="flex justify-end md:col-span-4">
+              <div className="flex justify-end">
+                {disabledArray.fields.length > 1 && (
                   <Button
                     type="button"
                     variant="outline"
@@ -495,8 +916,8 @@ export function AffidavitForm(props: AffidavitFormProps) {
                   >
                     Odebrat záznam
                   </Button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           ))}
 
@@ -515,59 +936,121 @@ export function AffidavitForm(props: AffidavitFormProps) {
             }
             disabled={isDisabled}
           >
-            Přidat další záznam
+            Přidat záznam
           </Button>
         </section>
 
         <section className="space-y-3 rounded-md border p-4">
           <h2 className="text-sm font-medium">
-            Pracovní volno bez náhrady platu/mzdy
+            Doba péče o osobu blízkou podle § 22 odst. 1 občanského zákoníku{" "}
+            <span className="text-muted-foreground">[1]</span>
           </h2>
           <p className="text-xs text-muted-foreground">
-            např. následování manžela do ciziny, péče o dítě bez nároku na
-            příspěvek
+            která je závislá na pomoci jiné osoby ve stupni III (těžká
+            závislost) nebo ve stupni IV (úplná závislost) podle § 8 zákona o
+            sociálních službách <span>[2]</span>
           </p>
 
-          {unpaidArray.fields.map((field, idx) => (
-            <div key={field.id} className="mt-3 space-y-3">
-              <div className="space-y-1">
-                <Label>Důvod (případ {idx + 1})</Label>
-                <Input
-                  {...register(`unpaidLeave.${idx}.reason` as const)}
-                  placeholder="Důvod"
-                  disabled={isDisabled}
-                />
+          {closeRelativeArray.fields.map((field, idx) => (
+            <div
+              key={field.id}
+              className="mt-3 space-y-3 rounded-md border bg-muted/30 p-4"
+            >
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>Jméno a příjmení osoby</Label>
+                  <Input
+                    {...register(
+                      `closeRelativeCare.${idx}.personName` as const
+                    )}
+                    placeholder="Jméno a příjmení"
+                    disabled={isDisabled}
+                  />
+                  {errors.closeRelativeCare?.[idx]?.personName && (
+                    <p className="text-xs text-destructive">
+                      {
+                        errors.closeRelativeCare[idx]?.personName
+                          ?.message as string
+                      }
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <Label>Stupeň závislosti</Label>
+                  <Select
+                    value={
+                      form.watch(
+                        `closeRelativeCare.${idx}.dependencyLevel` as const
+                      ) ?? ""
+                    }
+                    onValueChange={(value) =>
+                      setValue(
+                        `closeRelativeCare.${idx}.dependencyLevel` as const,
+                        value as CloseRelativeCareEntry["dependencyLevel"],
+                        { shouldValidate: true }
+                      )
+                    }
+                    disabled={isDisabled}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Vyberte stupeň" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="III">III – těžká závislost</SelectItem>
+                      <SelectItem value="IV">IV – úplná závislost</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {errors.closeRelativeCare?.[idx]?.dependencyLevel && (
+                    <p className="text-xs text-destructive">
+                      {
+                        errors.closeRelativeCare[idx]?.dependencyLevel
+                          ?.message as string
+                      }
+                    </p>
+                  )}
+                </div>
               </div>
-              <div className="space-y-1">
-                <Label>Od (případ {idx + 1})</Label>
-                <Input
-                  type="date"
-                  {...register(`unpaidLeave.${idx}.from` as const)}
-                  disabled={isDisabled}
-                />
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>Od</Label>
+                  <Input
+                    type="date"
+                    {...register(`closeRelativeCare.${idx}.from` as const)}
+                    disabled={isDisabled}
+                  />
+                  {errors.closeRelativeCare?.[idx]?.from && (
+                    <p className="text-xs text-destructive">
+                      {errors.closeRelativeCare[idx]?.from?.message as string}
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <Label>Do</Label>
+                  <Input
+                    type="date"
+                    {...register(`closeRelativeCare.${idx}.to` as const)}
+                    disabled={isDisabled}
+                  />
+                  {errors.closeRelativeCare?.[idx]?.to && (
+                    <p className="text-xs text-destructive">
+                      {errors.closeRelativeCare[idx]?.to?.message as string}
+                    </p>
+                  )}
+                </div>
               </div>
-              <div className="space-y-1">
-                <Label>Do (případ {idx + 1})</Label>
-                <Input
-                  type="date"
-                  {...register(`unpaidLeave.${idx}.to` as const)}
-                  disabled={isDisabled}
-                />
-              </div>
-
-              {unpaidArray.fields.length > 1 && (
-                <div className="flex justify-end">
+              <div className="flex justify-end">
+                {closeRelativeArray.fields.length > 1 && (
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => unpaidArray.remove(idx)}
+                    onClick={() => closeRelativeArray.remove(idx)}
                     disabled={isDisabled}
                   >
                     Odebrat záznam
                   </Button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           ))}
 
@@ -576,11 +1059,140 @@ export function AffidavitForm(props: AffidavitFormProps) {
             variant="secondary"
             size="sm"
             className="mt-2"
-            onClick={() => unpaidArray.append({ reason: "", from: "", to: "" })}
+            onClick={() =>
+              closeRelativeArray.append({
+                personName: "",
+                dependencyLevel: undefined,
+                from: "",
+                to: "",
+              } as CloseRelativeCareEntry)
+            }
             disabled={isDisabled}
           >
-            Přidat další záznam
+            Přidat záznam
           </Button>
+
+          <div className="pt-2 text-xs text-muted-foreground">
+            <p>
+              [1] zákon č. 89/2012 Sb., občanský zákoník, ve znění pozdějších
+              předpisů
+            </p>
+            <p>
+              [2] zákon č. 108/2006 Sb., o sociálních službách, ve znění
+              pozdějších předpisů
+            </p>
+          </div>
+        </section>
+
+        <section className="space-y-3 rounded-md border p-4">
+          <h2 className="text-sm font-medium">
+            Doba řádně ukončeného studia v doktorském studijním programu podle §
+            47 zákona o vysokých školách{" "}
+            <span className="text-muted-foreground">[1]</span>
+          </h2>
+
+          {doctoralArray.fields.map((field, idx) => (
+            <div
+              key={field.id}
+              className="mt-3 space-y-3 rounded-md border bg-muted/30 p-4"
+            >
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>Název vysoké školy</Label>
+                  <Input
+                    {...register(`doctoralStudy.${idx}.schoolName` as const)}
+                    placeholder="např. Vysoká škola ekonomická v Praha"
+                    disabled={isDisabled}
+                  />
+                  {errors.doctoralStudy?.[idx]?.schoolName && (
+                    <p className="text-xs text-destructive">
+                      {errors.doctoralStudy[idx]?.schoolName?.message as string}
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <Label>Studijní program</Label>
+                  <Input
+                    {...register(`doctoralStudy.${idx}.studyProgram` as const)}
+                    placeholder="např. Ekonomická teorie"
+                    disabled={isDisabled}
+                  />
+                  {errors.doctoralStudy?.[idx]?.studyProgram && (
+                    <p className="text-xs text-destructive">
+                      {
+                        errors.doctoralStudy[idx]?.studyProgram
+                          ?.message as string
+                      }
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>Od</Label>
+                  <Input
+                    type="date"
+                    {...register(`doctoralStudy.${idx}.from` as const)}
+                    disabled={isDisabled}
+                  />
+                  {errors.doctoralStudy?.[idx]?.from && (
+                    <p className="text-xs text-destructive">
+                      {errors.doctoralStudy[idx]?.from?.message as string}
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <Label>Do</Label>
+                  <Input
+                    type="date"
+                    {...register(`doctoralStudy.${idx}.to` as const)}
+                    disabled={isDisabled}
+                  />
+                  {errors.doctoralStudy?.[idx]?.to && (
+                    <p className="text-xs text-destructive">
+                      {errors.doctoralStudy[idx]?.to?.message as string}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="flex justify-end">
+                {doctoralArray.fields.length > 1 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => doctoralArray.remove(idx)}
+                    disabled={isDisabled}
+                  >
+                    Odebrat záznam
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="mt-2"
+            onClick={() =>
+              doctoralArray.append({
+                schoolName: "",
+                studyProgram: "",
+                from: "",
+                to: "",
+              } as DoctoralStudyEntry)
+            }
+            disabled={isDisabled}
+          >
+            Přidat záznam
+          </Button>
+
+          <p className="pt-2 text-xs text-muted-foreground">
+            [1] zákon č. 111/1998 Sb., o vysokých školách a o změně a doplnění
+            dalších zákonů, ve znění pozdějších předpisů
+          </p>
         </section>
 
         <section className="space-y-3 rounded-md border p-4">

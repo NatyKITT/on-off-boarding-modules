@@ -33,8 +33,13 @@ export default async function InternalDocumentPage({ params }: PageProps) {
       onboarding: {
         select: {
           id: true,
+          titleBefore: true,
           name: true,
           surname: true,
+          titleAfter: true,
+          department: true,
+          unitName: true,
+          positionName: true,
         },
       },
     },

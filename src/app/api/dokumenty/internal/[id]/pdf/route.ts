@@ -43,30 +43,95 @@ type ChildCareItem = {
   to?: string | null
 }
 
+type MilitaryServiceItem = {
+  service?: "BASIC" | "ALTERNATIVE" | "CIVIL" | string | null
+  from?: string | null
+  to?: string | null
+}
+
+type CloseRelativeCareItem = {
+  personName?: string | null
+  dependencyLevel?: "III" | "IV" | string | null
+  from?: string | null
+  to?: string | null
+}
+
+type DoctoralStudyItem = {
+  schoolName?: string | null
+  studyProgram?: string | null
+  from?: string | null
+  to?: string | null
+}
+
 type UnpaidLeaveItem = {
   reason?: string | null
   from?: string | null
   to?: string | null
 }
 
+type ExperienceItem = {
+  employer?: string | null
+  jobType?: string | null
+  from?: string | null
+  to?: string | null
+}
+
 type AffidavitData = {
-  militaryService?: "NONE" | "BASIC" | "ALTERNATIVE" | "CIVIL" | string
+  experience?: ExperienceItem[]
+  militaryService?: MilitaryServiceItem[]
   maternityParental?: ChildCareItem[]
   continuousCare?: ChildCareItem[]
   disabledChildCare?: ChildCareItem[]
+  closeRelativeCare?: CloseRelativeCareItem[]
+  doctoralStudy?: DoctoralStudyItem[]
   unpaidLeave?: UnpaidLeaveItem[]
   isTruthful?: boolean
   [key: string]: unknown
 }
 
-type ChildEntry = {
+type PayrollChildItem = {
+  childName?: string | null
+  childBirthDate?: string | null
+}
+
+type PayrollInfoData = {
   fullName?: string | null
-  birthDate?: string | null
+  maidenName?: string | null
+  birthPlace?: string | null
+  birthNumber?: string | null
+  maritalStatus?:
+    | "SINGLE"
+    | "MARRIED"
+    | "DIVORCED"
+    | "WIDOWED"
+    | "REGISTERED"
+    | "UNSTATED"
+    | string
+  permanentStreet?: string | null
+  permanentHouseNumber?: string | null
+  permanentCity?: string | null
+  permanentPostcode?: string | null
+  children?: PayrollChildItem[]
+  healthInsuranceCompany?: string | null
+  bankAccountNumber?: string | null
+  bankName?: string | null
+  confirmTruthfulness?: boolean
+  signatureDate?: string | null
+  [key: string]: unknown
 }
 
 type LanguageEntry = {
   name?: string | null
   level?: string | null
+}
+
+type EducationEntry = {
+  level?: string | null
+  schoolType?: string | null
+  semesters?: string | null
+  studyForm?: string | null
+  graduationYear?: string | null
+  examType?: string | null
 }
 
 type PersonalQuestionnaireData = {
@@ -96,68 +161,33 @@ type PersonalQuestionnaireData = {
   foreignPermitFrom?: string | null
   foreignPermitTo?: string | null
   foreignPermitAuthority?: string | null
-
   permanentStreet?: string | null
   permanentHouseNumber?: string | null
   permanentCity?: string | null
   permanentPostcode?: string | null
-
   correspondenceStreet?: string | null
   correspondenceHouseNumber?: string | null
   correspondenceCity?: string | null
   correspondencePostcode?: string | null
-
   healthInsuranceCompany?: string | null
   bankAccountNumber?: string | null
   bankName?: string | null
   maintenanceInfo?: string | null
-
   receivesPensionBenefits?: boolean
   typePensionBenefits?: string | null
-
   isDisabledPerson?: boolean
   disabilityDegree?: "NONE" | "I" | "II" | "III" | string
-
-  children?: ChildEntry[]
+  education?: EducationEntry[]
   languages?: LanguageEntry[]
-
   dataBoxDelivery?: boolean
   hasCertificateManagement?: boolean
   hasCertificateSpecial?: boolean
   hasCertificateTraining?: boolean
   hasCertificateGeneral?: boolean
-
   familyRelations?: string | null
   finalRequestPayrollTransfer?: boolean
   finalReadAndUnderstood?: boolean
   finalTruthfulnessConfirm?: boolean
-
-  [key: string]: unknown
-}
-
-type EducationEntry = {
-  level?: string | null
-  schoolType?: string | null
-  semesters?: string | null
-  studyForm?: string | null
-  graduationYear?: string | null
-  examType?: string | null
-}
-
-type EducationData = {
-  education?: EducationEntry[]
-  [key: string]: unknown
-}
-
-type ExperienceEntry = {
-  employer?: string | null
-  jobType?: string | null
-  from?: string | null
-  to?: string | null
-}
-
-type ExperienceData = {
-  experience?: ExperienceEntry[]
   [key: string]: unknown
 }
 
@@ -259,9 +289,58 @@ function generateAffidavitPDF(
     font: fontBold,
     color: rgb(0.1, 0.1, 0.1),
   })
-  y -= 40
+  y -= 35
+
+  const introLines = [
+    "Vážená paní, vážený pane,",
+    "",
+    "dovolujeme si Vás požádat o vyplnění následujících údajů pro účely",
+    "zpracování personální a mzdové agendy. Vaše údaje budou k dispozici",
+    "pouze tajemníkovi úřadu, zaměstnancům personálního oddělení, mzdové",
+    "účtárně a HR specialistce. Data jsou přenášena šifrovaná a uložena",
+    "na zabezpečeném úložišti.",
+    "",
+    "Dotazník Vám zabere maximálně 30 minut.",
+    "",
+    "Děkujeme a těšíme se na spolupráci.",
+    "",
+    "Městská část Praha 6, Úřad městské části, Čs. armády 23, 160 52",
+    "Praha 6, IČO 00063703",
+    "",
+    "Personální oddělení, v přímém řízení tajemníka",
+    "Oddělení účetnictví, Odbor ekonomický",
+  ]
+
+  introLines.forEach((line) => {
+    checkPage()
+    if (line === "") {
+      y -= 8
+    } else {
+      page.drawText(line, {
+        x: margin,
+        y,
+        size: 9,
+        font,
+        color: rgb(0.3, 0.3, 0.3),
+      })
+      y -= 12
+    }
+  })
+
+  y -= 10
+  checkPage()
+
+  page.drawText("Já, níže podepsaný/á", {
+    x: margin,
+    y,
+    size: 10,
+    font,
+    color: rgb(0, 0, 0),
+  })
+  y -= 20
 
   if (docInfo.employeeName) {
+    checkPage()
     page.drawText(docInfo.employeeName, {
       x: margin,
       y,
@@ -294,6 +373,66 @@ function generateAffidavitPDF(
     y -= 8
   }
 
+  y -= 10
+  checkPage()
+
+  page.drawText("čestně prohlašuji,", {
+    x: margin,
+    y,
+    size: 10,
+    font,
+    color: rgb(0, 0, 0),
+  })
+  y -= 20
+
+  const legalPara1 = [
+    "že beru na vědomí, že Úřad městské části Praha 6 jako zaměstnavatel",
+    "je povinen zařadit zaměstnance do platových stupňů při zařazení do",
+    "platových tříd na základě délky praxe, kvalifikačních předpokladů a",
+    "druhu výkonu práce v souladu s platnými právními předpisy, tj.",
+    "zejména zákonem č. 262/2006 Sb., zákoník práce, ve znění pozdějších",
+    "předpisů, nařízením vlády č. 341/2017 Sb., o platových poměrech",
+    "zaměstnanců ve veřejných službách a správě a nařízením vlády č.",
+    "222/2010 Sb., o katalogu prací ve veřejných službách a správě.",
+  ]
+
+  legalPara1.forEach((line) => {
+    checkPage()
+    page.drawText(line, {
+      x: margin,
+      y,
+      size: 9,
+      font,
+      color: rgb(0.3, 0.3, 0.3),
+    })
+    y -= 12
+  })
+
+  y -= 10
+  checkPage()
+
+  const legalPara2 = [
+    "V souladu s uvedenými právními předpisy a na základě příkazu",
+    "tajemníka č. 3/2025 dále prohlašuji, že všechny níže specifikované",
+    "pracovní činnosti (druh práce), které jsem vykonával/a od prvního",
+    "dne výkonu práce, uvádím pravdivě a úplně za účelem správného",
+    "zařazení do příslušné platové třídy a platového stupně.",
+  ]
+
+  legalPara2.forEach((line) => {
+    checkPage()
+    page.drawText(line, {
+      x: margin,
+      y,
+      size: 9,
+      font,
+      color: rgb(0.3, 0.3, 0.3),
+    })
+    y -= 12
+  })
+
+  y -= 15
+
   page.drawLine({
     start: { x: margin, y },
     end: { x: pageWidth - margin, y },
@@ -302,241 +441,452 @@ function generateAffidavitPDF(
   })
   y -= 25
 
-  checkPage()
-  y = drawSectionHeader(
-    page,
-    "Výkon základní – náhradní – civilní vojenské služby",
-    y,
-    fontBold,
-    pageWidth,
-    margin
-  )
+  const experienceList: ExperienceItem[] =
+    Array.isArray(data.experience) && data.experience.length > 0
+      ? data.experience.filter((e) => e.employer || e.jobType || e.from || e.to)
+      : []
 
-  const militaryMap: Record<string, string> = {
-    NONE: "není",
-    BASIC: "základní",
-    ALTERNATIVE: "náhradní",
-    CIVIL: "civilní",
+  if (experienceList.length > 0) {
+    checkPage()
+    y = drawSectionHeader(page, "Praxe", y, fontBold, pageWidth, margin)
+
+    experienceList.forEach((exp, idx) => {
+      checkPage()
+      page.drawText(`${idx + 1}. Zaměstnání:`, {
+        x: margin + 10,
+        y,
+        size: 9,
+        font: fontBold,
+        color: rgb(0.3, 0.3, 0.3),
+      })
+      y -= 16
+
+      y = drawField(
+        page,
+        "Zaměstnavatel",
+        exp.employer ?? "",
+        y,
+        font,
+        fontBold,
+        margin
+      )
+      checkPage()
+
+      y = drawField(
+        page,
+        "Druh práce",
+        exp.jobType ?? "",
+        y,
+        font,
+        fontBold,
+        margin
+      )
+      checkPage()
+
+      const period =
+        exp.from || exp.to
+          ? `${formatDate(exp.from ?? "")} - ${formatDate(exp.to ?? "")}`
+          : ""
+      y = drawField(page, "Období", period, y, font, fontBold, margin)
+      y -= 8
+    })
   }
 
-  const militaryKey = data.militaryService ?? "NONE"
-  const militaryValue = militaryMap[militaryKey] ?? militaryKey
+  const militaryList: MilitaryServiceItem[] =
+    Array.isArray(data.militaryService) && data.militaryService.length > 0
+      ? data.militaryService.filter((m) => m.service || m.from || m.to)
+      : []
 
-  y = drawField(
-    page,
-    "Druh vojenské služby",
-    militaryValue,
-    y,
-    font,
-    fontBold,
-    margin
-  )
-  y -= 10
+  if (militaryList.length > 0) {
+    checkPage()
+    y = drawSectionHeader(
+      page,
+      "Výkon vojenské základní (náhradní) služby nebo civilní služby",
+      y,
+      fontBold,
+      pageWidth,
+      margin
+    )
+
+    const serviceMap: Record<string, string> = {
+      BASIC: "základní",
+      ALTERNATIVE: "náhradní",
+      CIVIL: "civilní",
+    }
+
+    militaryList.forEach((mil, idx) => {
+      checkPage()
+      page.drawText(`${idx + 1}. Služba:`, {
+        x: margin + 10,
+        y,
+        size: 9,
+        font: fontBold,
+        color: rgb(0.3, 0.3, 0.3),
+      })
+      y -= 16
+
+      const serviceText =
+        mil.service && serviceMap[mil.service]
+          ? serviceMap[mil.service]
+          : (mil.service ?? "")
+
+      y = drawField(page, "Druh služby", serviceText, y, font, fontBold, margin)
+      checkPage()
+
+      const period =
+        mil.from || mil.to
+          ? `${formatDate(mil.from ?? "")} - ${formatDate(mil.to ?? "")}`
+          : ""
+      y = drawField(page, "Období", period, y, font, fontBold, margin)
+      y -= 8
+    })
+  }
 
   const maternityList: ChildCareItem[] =
     Array.isArray(data.maternityParental) && data.maternityParental.length > 0
-      ? data.maternityParental
-      : [{ childName: "", childBirthDate: "", from: "", to: "" }]
+      ? data.maternityParental.filter(
+          (m) => m.childName || m.childBirthDate || m.from || m.to
+        )
+      : []
 
-  checkPage()
-  y = drawSectionHeader(
-    page,
-    "Doba mateřské a rodičovské dovolené",
-    y,
-    fontBold,
-    pageWidth,
-    margin
-  )
-
-  maternityList.forEach((item, idx) => {
+  if (maternityList.length > 0) {
     checkPage()
-    page.drawText(`${idx + 1}. Záznam:`, {
-      x: margin + 10,
+    y = drawSectionHeader(
+      page,
+      "Doba mateřské a rodičovské dovolené",
       y,
-      size: 9,
-      font: fontBold,
-      color: rgb(0.3, 0.3, 0.3),
+      fontBold,
+      pageWidth,
+      margin
+    )
+
+    maternityList.forEach((item, idx) => {
+      checkPage()
+      page.drawText(`${idx + 1}. Záznam:`, {
+        x: margin + 10,
+        y,
+        size: 9,
+        font: fontBold,
+        color: rgb(0.3, 0.3, 0.3),
+      })
+      y -= 16
+
+      y = drawField(
+        page,
+        "Jméno a příjmení dítěte",
+        item.childName ?? "",
+        y,
+        font,
+        fontBold,
+        margin
+      )
+      checkPage()
+
+      y = drawField(
+        page,
+        "Datum narození",
+        formatDate(item.childBirthDate ?? ""),
+        y,
+        font,
+        fontBold,
+        margin
+      )
+      checkPage()
+
+      const period =
+        item.from || item.to
+          ? `${formatDate(item.from ?? "")} - ${formatDate(item.to ?? "")}`
+          : ""
+      y = drawField(page, "Období", period, y, font, fontBold, margin)
+      y -= 8
     })
-    y -= 16
-
-    y = drawField(
-      page,
-      "Jméno a příjmení dítěte",
-      item.childName ?? "",
-      y,
-      font,
-      fontBold,
-      margin
-    )
-    checkPage()
-
-    y = drawField(
-      page,
-      "Datum narození",
-      formatDate(item.childBirthDate ?? ""),
-      y,
-      font,
-      fontBold,
-      margin
-    )
-    checkPage()
-
-    const period =
-      item.from || item.to
-        ? `${formatDate(item.from ?? "")} - ${formatDate(item.to ?? "")}`
-        : ""
-    y = drawField(page, "Období", period, y, font, fontBold, margin)
-    y -= 8
-  })
+  }
 
   const continuousList: ChildCareItem[] =
     Array.isArray(data.continuousCare) && data.continuousCare.length > 0
-      ? data.continuousCare
-      : [{ childName: "", childBirthDate: "", from: "", to: "" }]
+      ? data.continuousCare.filter(
+          (c) => c.childName || c.childBirthDate || c.from || c.to
+        )
+      : []
 
-  checkPage()
-  y = drawSectionHeader(
-    page,
-    "Doba trvalé péče o dítě nebo děti",
-    y,
-    fontBold,
-    pageWidth,
-    margin
-  )
-
-  continuousList.forEach((item, idx) => {
+  if (continuousList.length > 0) {
     checkPage()
-    page.drawText(`${idx + 1}. Záznam:`, {
-      x: margin + 10,
+    y = drawSectionHeader(
+      page,
+      "Doba trvalé péče o dítě nebo děti",
       y,
-      size: 9,
-      font: fontBold,
-      color: rgb(0.3, 0.3, 0.3),
+      fontBold,
+      pageWidth,
+      margin
+    )
+
+    continuousList.forEach((item, idx) => {
+      checkPage()
+      page.drawText(`${idx + 1}. Záznam:`, {
+        x: margin + 10,
+        y,
+        size: 9,
+        font: fontBold,
+        color: rgb(0.3, 0.3, 0.3),
+      })
+      y -= 16
+
+      y = drawField(
+        page,
+        "Jméno a příjmení dítěte",
+        item.childName ?? "",
+        y,
+        font,
+        fontBold,
+        margin
+      )
+      checkPage()
+
+      y = drawField(
+        page,
+        "Datum narození",
+        formatDate(item.childBirthDate ?? ""),
+        y,
+        font,
+        fontBold,
+        margin
+      )
+      checkPage()
+
+      const period =
+        item.from || item.to
+          ? `${formatDate(item.from ?? "")} - ${formatDate(item.to ?? "")}`
+          : ""
+      y = drawField(page, "Období", period, y, font, fontBold, margin)
+      y -= 8
     })
-    y -= 16
-
-    y = drawField(
-      page,
-      "Jméno a příjmení dítěte",
-      item.childName ?? "",
-      y,
-      font,
-      fontBold,
-      margin
-    )
-    checkPage()
-
-    y = drawField(
-      page,
-      "Datum narození",
-      formatDate(item.childBirthDate ?? ""),
-      y,
-      font,
-      fontBold,
-      margin
-    )
-    checkPage()
-
-    const period =
-      item.from || item.to
-        ? `${formatDate(item.from ?? "")} - ${formatDate(item.to ?? "")}`
-        : ""
-    y = drawField(page, "Období", period, y, font, fontBold, margin)
-    y -= 8
-  })
+  }
 
   const disabledList: ChildCareItem[] =
     Array.isArray(data.disabledChildCare) && data.disabledChildCare.length > 0
-      ? data.disabledChildCare
-      : [{ childName: "", childBirthDate: "", from: "", to: "" }]
+      ? data.disabledChildCare.filter(
+          (d) => d.childName || d.childBirthDate || d.from || d.to
+        )
+      : []
 
-  checkPage()
-  y = drawSectionHeader(
-    page,
-    "Doba osobní péče o dlouhodobě těžce zdravotně postižené nezletilé dítě",
-    y,
-    fontBold,
-    pageWidth,
-    margin
-  )
-
-  disabledList.forEach((item, idx) => {
+  if (disabledList.length > 0) {
     checkPage()
-    page.drawText(`${idx + 1}. Záznam:`, {
-      x: margin + 10,
+    y = drawSectionHeader(
+      page,
+      "Doba osobní péče o dlouhodobě těžce zdravotně postižené nezletilé dítě",
       y,
-      size: 9,
-      font: fontBold,
-      color: rgb(0.3, 0.3, 0.3),
+      fontBold,
+      pageWidth,
+      margin
+    )
+
+    disabledList.forEach((item, idx) => {
+      checkPage()
+      page.drawText(`${idx + 1}. Záznam:`, {
+        x: margin + 10,
+        y,
+        size: 9,
+        font: fontBold,
+        color: rgb(0.3, 0.3, 0.3),
+      })
+      y -= 16
+
+      y = drawField(
+        page,
+        "Jméno a příjmení dítěte",
+        item.childName ?? "",
+        y,
+        font,
+        fontBold,
+        margin
+      )
+      checkPage()
+
+      y = drawField(
+        page,
+        "Datum narození",
+        formatDate(item.childBirthDate ?? ""),
+        y,
+        font,
+        fontBold,
+        margin
+      )
+      checkPage()
+
+      const period =
+        item.from || item.to
+          ? `${formatDate(item.from ?? "")} - ${formatDate(item.to ?? "")}`
+          : ""
+      y = drawField(page, "Období", period, y, font, fontBold, margin)
+      y -= 8
     })
-    y -= 16
+  }
 
-    y = drawField(
+  const closeRelativeList: CloseRelativeCareItem[] =
+    Array.isArray(data.closeRelativeCare) && data.closeRelativeCare.length > 0
+      ? data.closeRelativeCare.filter(
+          (c) => c.personName || c.dependencyLevel || c.from || c.to
+        )
+      : []
+
+  if (closeRelativeList.length > 0) {
+    checkPage()
+    y = drawSectionHeader(
       page,
-      "Jméno a příjmení dítěte",
-      item.childName ?? "",
+      "Doba péče o osobu blízkou",
       y,
-      font,
       fontBold,
+      pageWidth,
       margin
     )
-    checkPage()
 
-    y = drawField(
+    closeRelativeList.forEach((item, idx) => {
+      checkPage()
+      page.drawText(`${idx + 1}. Záznam:`, {
+        x: margin + 10,
+        y,
+        size: 9,
+        font: fontBold,
+        color: rgb(0.3, 0.3, 0.3),
+      })
+      y -= 16
+
+      y = drawField(
+        page,
+        "Jméno a příjmení osoby",
+        item.personName ?? "",
+        y,
+        font,
+        fontBold,
+        margin
+      )
+      checkPage()
+
+      const depLevel =
+        item.dependencyLevel === "III"
+          ? "III (těžká závislost)"
+          : item.dependencyLevel === "IV"
+            ? "IV (úplná závislost)"
+            : (item.dependencyLevel ?? "")
+
+      y = drawField(
+        page,
+        "Stupeň závislosti",
+        depLevel,
+        y,
+        font,
+        fontBold,
+        margin
+      )
+      checkPage()
+
+      const period =
+        item.from || item.to
+          ? `${formatDate(item.from ?? "")} - ${formatDate(item.to ?? "")}`
+          : ""
+      y = drawField(page, "Období", period, y, font, fontBold, margin)
+      y -= 8
+    })
+  }
+
+  const doctoralList: DoctoralStudyItem[] =
+    Array.isArray(data.doctoralStudy) && data.doctoralStudy.length > 0
+      ? data.doctoralStudy.filter(
+          (d) => d.schoolName || d.studyProgram || d.from || d.to
+        )
+      : []
+
+  if (doctoralList.length > 0) {
+    checkPage()
+    y = drawSectionHeader(
       page,
-      "Datum narození",
-      formatDate(item.childBirthDate ?? ""),
+      "Doba řádně ukončeného studia v doktorském studijním programu",
       y,
-      font,
       fontBold,
+      pageWidth,
       margin
     )
-    checkPage()
 
-    const period =
-      item.from || item.to
-        ? `${formatDate(item.from ?? "")} - ${formatDate(item.to ?? "")}`
-        : ""
-    y = drawField(page, "Období", period, y, font, fontBold, margin)
-    y -= 8
-  })
+    doctoralList.forEach((item, idx) => {
+      checkPage()
+      page.drawText(`${idx + 1}. Studium:`, {
+        x: margin + 10,
+        y,
+        size: 9,
+        font: fontBold,
+        color: rgb(0.3, 0.3, 0.3),
+      })
+      y -= 16
+
+      y = drawField(
+        page,
+        "Název vysoké školy",
+        item.schoolName ?? "",
+        y,
+        font,
+        fontBold,
+        margin
+      )
+      checkPage()
+
+      y = drawField(
+        page,
+        "Studijní program",
+        item.studyProgram ?? "",
+        y,
+        font,
+        fontBold,
+        margin
+      )
+      checkPage()
+
+      const period =
+        item.from || item.to
+          ? `${formatDate(item.from ?? "")} - ${formatDate(item.to ?? "")}`
+          : ""
+      y = drawField(page, "Období", period, y, font, fontBold, margin)
+      y -= 8
+    })
+  }
 
   const unpaidList: UnpaidLeaveItem[] =
     Array.isArray(data.unpaidLeave) && data.unpaidLeave.length > 0
-      ? data.unpaidLeave
-      : [{ reason: "", from: "", to: "" }]
+      ? data.unpaidLeave.filter((u) => u.reason || u.from || u.to)
+      : []
 
-  checkPage()
-  y = drawSectionHeader(
-    page,
-    "Pracovní volno bez náhrady platu/mzdy",
-    y,
-    fontBold,
-    pageWidth,
-    margin
-  )
-
-  unpaidList.forEach((item, idx) => {
+  if (unpaidList.length > 0) {
     checkPage()
-    page.drawText(`${idx + 1}. Případ:`, {
-      x: margin + 10,
+    y = drawSectionHeader(
+      page,
+      "Pracovní volno bez náhrady platu/mzdy",
       y,
-      size: 9,
-      font: fontBold,
-      color: rgb(0.3, 0.3, 0.3),
+      fontBold,
+      pageWidth,
+      margin
+    )
+
+    unpaidList.forEach((item, idx) => {
+      checkPage()
+      page.drawText(`${idx + 1}. Případ:`, {
+        x: margin + 10,
+        y,
+        size: 9,
+        font: fontBold,
+        color: rgb(0.3, 0.3, 0.3),
+      })
+      y -= 16
+
+      y = drawField(page, "Důvod", item.reason ?? "", y, font, fontBold, margin)
+      checkPage()
+
+      const period =
+        item.from || item.to
+          ? `${formatDate(item.from ?? "")} - ${formatDate(item.to ?? "")}`
+          : ""
+      y = drawField(page, "Období", period, y, font, fontBold, margin)
+      y -= 8
     })
-    y -= 16
-
-    y = drawField(page, "Důvod", item.reason ?? "", y, font, fontBold, margin)
-    checkPage()
-
-    const period =
-      item.from || item.to
-        ? `${formatDate(item.from ?? "")} - ${formatDate(item.to ?? "")}`
-        : ""
-    y = drawField(page, "Období", period, y, font, fontBold, margin)
-    y -= 8
-  })
+  }
 
   checkPage()
   y = drawSectionHeader(
@@ -555,6 +905,359 @@ function generateAffidavitPDF(
     page,
     "Potvrzuji pravdivost uvedených údajů",
     truthfulText,
+    y,
+    font,
+    fontBold,
+    margin
+  )
+}
+
+function generatePayrollInfoPDF(
+  pdfDoc: PDFDocument,
+  font: PDFFont,
+  fontBold: PDFFont,
+  rawData: unknown,
+  docInfo: DocumentInfo
+): void {
+  const data = (rawData ?? {}) as PayrollInfoData
+
+  const pageWidth = 595
+  const pageHeight = 842
+  const margin = 40
+
+  let page = pdfDoc.addPage([pageWidth, pageHeight])
+  let y = pageHeight - margin - 40
+
+  const checkPage = () => {
+    if (y < margin + 80) {
+      page = pdfDoc.addPage([pageWidth, pageHeight])
+      y = pageHeight - margin - 40
+    }
+  }
+
+  const title = "Nástup zaměstnance do pracovního poměru"
+  const titleSize = 16
+  const titleWidth = fontBold.widthOfTextAtSize(title, titleSize)
+  const titleX = (pageWidth - titleWidth) / 2
+
+  page.drawText(title, {
+    x: titleX,
+    y,
+    size: titleSize,
+    font: fontBold,
+    color: rgb(0.1, 0.1, 0.1),
+  })
+  y -= 20
+
+  const subtitle = "(nezbytné zákonné údaje pro vedení mzdové agendy)"
+  const subtitleSize = 10
+  const subtitleWidth = font.widthOfTextAtSize(subtitle, subtitleSize)
+  const subtitleX = (pageWidth - subtitleWidth) / 2
+
+  page.drawText(subtitle, {
+    x: subtitleX,
+    y,
+    size: subtitleSize,
+    font,
+    color: rgb(0.5, 0.5, 0.5),
+  })
+  y -= 35
+
+  const introLines = [
+    "Vážená paní, vážený pane,",
+    "",
+    "dovolujeme si Vás požádat o vyplnění následujících údajů pro účely",
+    "zpracování personální a mzdové agendy. Vaše údaje budou k dispozici",
+    "pouze tajemníkovi úřadu, zaměstnancům personálního oddělení, mzdové",
+    "účtárně a HR specialistce. Data jsou přenášena šifrovaná a uložena",
+    "na zabezpečeném úložišti.",
+    "",
+    "Dotazník Vám zabere maximálně 30 minut.",
+    "",
+    "Děkujeme a těšíme se na spolupráci.",
+    "",
+    "Městská část Praha 6, Úřad městské části, Čs. armády 23, 160 52",
+    "Praha 6, IČO 00063703",
+    "",
+    "Personální oddělení, v přímém řízení tajemníka",
+    "Oddělení účetnictví, Odbor ekonomický",
+  ]
+
+  introLines.forEach((line) => {
+    checkPage()
+    if (line === "") {
+      y -= 8
+    } else {
+      page.drawText(line, {
+        x: margin,
+        y,
+        size: 9,
+        font,
+        color: rgb(0.3, 0.3, 0.3),
+      })
+      y -= 12
+    }
+  })
+
+  y -= 15
+  checkPage()
+
+  if (docInfo.employeeName) {
+    page.drawText(docInfo.employeeName, {
+      x: margin,
+      y,
+      size: 12,
+      font: fontBold,
+      color: rgb(0.15, 0.39, 0.92),
+    })
+    y -= 18
+  }
+
+  page.drawText(`ID: ${docInfo.id} | Stav: ${docInfo.status}`, {
+    x: margin,
+    y,
+    size: 8,
+    font,
+    color: rgb(0.5, 0.5, 0.5),
+  })
+  y -= 12
+
+  if (docInfo.completedAt) {
+    page.drawText(`Vyplněno: ${formatDate(docInfo.completedAt)}`, {
+      x: margin,
+      y,
+      size: 8,
+      font,
+      color: rgb(0.5, 0.5, 0.5),
+    })
+    y -= 20
+  } else {
+    y -= 8
+  }
+
+  page.drawLine({
+    start: { x: margin, y },
+    end: { x: pageWidth - margin, y },
+    thickness: 1,
+    color: rgb(0.8, 0.8, 0.8),
+  })
+  y -= 25
+
+  checkPage()
+  y = drawSectionHeader(
+    page,
+    "1. Základní údaje zaměstnance",
+    y,
+    fontBold,
+    pageWidth,
+    margin
+  )
+
+  y = drawField(
+    page,
+    "Jméno a příjmení",
+    data.fullName ?? "",
+    y,
+    font,
+    fontBold,
+    margin
+  )
+  checkPage()
+
+  y = drawField(
+    page,
+    "Rodné příjmení",
+    data.maidenName ?? "",
+    y,
+    font,
+    fontBold,
+    margin
+  )
+  checkPage()
+
+  y = drawField(
+    page,
+    "Místo narození",
+    data.birthPlace ?? "",
+    y,
+    font,
+    fontBold,
+    margin
+  )
+  checkPage()
+
+  y = drawField(
+    page,
+    "Rodné číslo",
+    data.birthNumber ?? "",
+    y,
+    font,
+    fontBold,
+    margin
+  )
+  checkPage()
+
+  const maritalStatusMap: Record<string, string> = {
+    SINGLE: "Svobodný/á",
+    MARRIED: "Vdaná / ženatý",
+    DIVORCED: "Rozvedený/á",
+    WIDOWED: "Vdova / vdovec",
+    REGISTERED: "Registrované partnerství",
+    UNSTATED: "Neuvádím",
+  }
+
+  const maritalText =
+    data.maritalStatus && maritalStatusMap[data.maritalStatus]
+      ? maritalStatusMap[data.maritalStatus]
+      : (data.maritalStatus ?? "")
+
+  y = drawField(page, "Rodinný stav", maritalText, y, font, fontBold, margin)
+  checkPage()
+
+  checkPage()
+  y = drawSectionHeader(page, "Trvalé bydliště", y, fontBold, pageWidth, margin)
+
+  const address = [
+    data.permanentStreet,
+    data.permanentHouseNumber,
+    data.permanentCity,
+    data.permanentPostcode,
+  ]
+    .filter(Boolean)
+    .join(", ")
+
+  y = drawField(page, "Adresa", address, y, font, fontBold, margin)
+  checkPage()
+
+  const childrenList: PayrollChildItem[] =
+    Array.isArray(data.children) && data.children.length > 0
+      ? data.children.filter((c) => c.childName || c.childBirthDate)
+      : []
+
+  if (childrenList.length > 0) {
+    checkPage()
+    y = drawSectionHeader(
+      page,
+      "Jméno dětí a datum narození (pro účely daňového zvýhodnění)",
+      y,
+      fontBold,
+      pageWidth,
+      margin
+    )
+
+    childrenList.forEach((child, idx) => {
+      checkPage()
+      page.drawText(`${idx + 1}. Dítě:`, {
+        x: margin + 10,
+        y,
+        size: 9,
+        font: fontBold,
+        color: rgb(0.3, 0.3, 0.3),
+      })
+      y -= 16
+
+      y = drawField(
+        page,
+        "Jméno dítěte",
+        child.childName ?? "",
+        y,
+        font,
+        fontBold,
+        margin
+      )
+      checkPage()
+
+      y = drawField(
+        page,
+        "Datum narození",
+        formatDate(child.childBirthDate ?? ""),
+        y,
+        font,
+        fontBold,
+        margin
+      )
+      y -= 8
+    })
+  }
+
+  checkPage()
+  y = drawSectionHeader(
+    page,
+    "2. Zdravotní pojišťovna",
+    y,
+    fontBold,
+    pageWidth,
+    margin
+  )
+
+  y = drawField(
+    page,
+    "Název zdravotní pojišťovny",
+    data.healthInsuranceCompany ?? "",
+    y,
+    font,
+    fontBold,
+    margin
+  )
+  checkPage()
+
+  checkPage()
+  y = drawSectionHeader(
+    page,
+    "3. Zasílání platu/odměny na bankovní účet",
+    y,
+    fontBold,
+    pageWidth,
+    margin
+  )
+
+  y = drawField(
+    page,
+    "Číslo účtu",
+    data.bankAccountNumber ?? "",
+    y,
+    font,
+    fontBold,
+    margin
+  )
+  checkPage()
+
+  y = drawField(
+    page,
+    "Bankovní ústav",
+    data.bankName ?? "",
+    y,
+    font,
+    fontBold,
+    margin
+  )
+  checkPage()
+
+  checkPage()
+  y = drawSectionHeader(page, "Prohlášení", y, fontBold, pageWidth, margin)
+
+  const truthfulText =
+    data.confirmTruthfulness === true
+      ? "Ano"
+      : data.confirmTruthfulness === false
+        ? "Ne"
+        : ""
+
+  y = drawField(
+    page,
+    "Potvrzuji prohlášení",
+    truthfulText,
+    y,
+    font,
+    fontBold,
+    margin
+  )
+  checkPage()
+
+  drawField(
+    page,
+    "Datum",
+    formatDate(data.signatureDate ?? ""),
     y,
     font,
     fontBold,
@@ -597,7 +1300,46 @@ function generatePersonalQuestionnairePDF(
     font: fontBold,
     color: rgb(0.1, 0.1, 0.1),
   })
-  y -= 40
+  y -= 35
+
+  const introLines = [
+    "Vážená paní, vážený pane,",
+    "",
+    "dovolujeme si Vás požádat o vyplnění následujících údajů pro účely",
+    "zpracování personální a mzdové agendy. Vaše údaje budou k dispozici",
+    "pouze tajemníkovi úřadu, zaměstnancům personálního oddělení, mzdové",
+    "účtárně a HR specialistce. Data jsou přenášena šifrovaná a uložena",
+    "na zabezpečeném úložišti.",
+    "",
+    "Dotazník Vám zabere maximálně 30 minut.",
+    "",
+    "Děkujeme a těšíme se na spolupráci.",
+    "",
+    "Městská část Praha 6, Úřad městské části, Čs. armády 23, 160 52",
+    "Praha 6, IČO 00063703",
+    "",
+    "Personální oddělení, v přímém řízení tajemníka",
+    "Oddělení účetnictví, Odbor ekonomický",
+  ]
+
+  introLines.forEach((line) => {
+    checkPage()
+    if (line === "") {
+      y -= 8
+    } else {
+      page.drawText(line, {
+        x: margin,
+        y,
+        size: 9,
+        font,
+        color: rgb(0.3, 0.3, 0.3),
+      })
+      y -= 12
+    }
+  })
+
+  y -= 15
+  checkPage()
 
   if (docInfo.employeeName) {
     page.drawText(docInfo.employeeName, {
@@ -617,7 +1359,20 @@ function generatePersonalQuestionnairePDF(
     font,
     color: rgb(0.5, 0.5, 0.5),
   })
-  y -= 20
+  y -= 12
+
+  if (docInfo.completedAt) {
+    page.drawText(`Vyplněno: ${formatDate(docInfo.completedAt)}`, {
+      x: margin,
+      y,
+      size: 8,
+      font,
+      color: rgb(0.5, 0.5, 0.5),
+    })
+    y -= 20
+  } else {
+    y -= 8
+  }
 
   page.drawLine({
     start: { x: margin, y },
@@ -1057,69 +1812,141 @@ function generatePersonalQuestionnairePDF(
   )
   checkPage()
 
-  const children: ChildEntry[] =
-    Array.isArray(data.children) && data.children.length > 0
-      ? data.children
-      : [{ fullName: "", birthDate: "" }]
+  const levelMap: Record<string, string> = {
+    ZAKLADNI: "Základní",
+    STREDNI_VYUCNI_LIST: "Střední vzdělání s výučním listem",
+    STREDNI: "Střední",
+    STREDNI_MATURITA: "Střední s maturitní zkouškou",
+    VYSSI_ODBORNE: "Vyšší odborné",
+    VYSOKOSKOLSKE: "Vysokoškolské",
+    BAKALAR: "Bakalářský studijní program",
+    MAGISTR: "Magisterský studijní program",
+    DOKTORSKE: "Doktorský studijní program",
+    PROBIHAJICI: "Probíhající studium",
+    CELOZIVOTNI: "Celoživotní kariérní vzdělávání",
+  }
 
-  checkPage()
-  y = drawSectionHeader(page, "Děti", y, fontBold, pageWidth, margin)
+  const studyFormMap: Record<string, string> = {
+    DENNI: "Denní",
+    VECERNI: "Večerní",
+    DALKOVE: "Dálkové",
+    DISTANCNI: "Distanční",
+    KOMBINOVANE: "Kombinované",
+  }
 
-  children.forEach((child, idx) => {
+  const educationList: EducationEntry[] =
+    Array.isArray(data.education) && data.education.length > 0
+      ? data.education.filter(
+          (e) =>
+            e.level ||
+            e.schoolType ||
+            e.semesters ||
+            e.studyForm ||
+            e.graduationYear ||
+            e.examType
+        )
+      : []
+
+  if (educationList.length > 0) {
     checkPage()
-    page.drawText(`${idx + 1}. Dítě:`, {
-      x: margin + 10,
-      y,
-      size: 9,
-      font: fontBold,
-      color: rgb(0.3, 0.3, 0.3),
+    y = drawSectionHeader(page, "Vzdělání", y, fontBold, pageWidth, margin)
+
+    educationList.forEach((edu, idx) => {
+      checkPage()
+      page.drawText(`${idx + 1}. Vzdělání:`, {
+        x: margin + 10,
+        y,
+        size: 9,
+        font: fontBold,
+        color: rgb(0.3, 0.3, 0.3),
+      })
+      y -= 16
+
+      const levelText =
+        edu.level && levelMap[edu.level]
+          ? levelMap[edu.level]
+          : (edu.level ?? "")
+
+      y = drawField(page, "Stupeň", levelText, y, font, fontBold, margin)
+      checkPage()
+
+      y = drawField(
+        page,
+        "Druh školy / obor",
+        edu.schoolType ?? "",
+        y,
+        font,
+        fontBold,
+        margin
+      )
+      checkPage()
+
+      const formText =
+        edu.studyForm && studyFormMap[edu.studyForm]
+          ? studyFormMap[edu.studyForm]
+          : (edu.studyForm ?? "")
+
+      y = drawField(page, "Forma studia", formText, y, font, fontBold, margin)
+      checkPage()
+
+      y = drawField(
+        page,
+        "Počet tříd (semestrů)",
+        edu.semesters ?? "",
+        y,
+        font,
+        fontBold,
+        margin
+      )
+      checkPage()
+
+      y = drawField(
+        page,
+        "Rok ukončení",
+        edu.graduationYear ?? "",
+        y,
+        font,
+        fontBold,
+        margin
+      )
+      checkPage()
+
+      y = drawField(
+        page,
+        "Druh zkoušky",
+        edu.examType ?? "",
+        y,
+        font,
+        fontBold,
+        margin
+      )
+      y -= 12
     })
-    y -= 16
-
-    y = drawField(
-      page,
-      "Jméno a příjmení",
-      child.fullName ?? "",
-      y,
-      font,
-      fontBold,
-      margin
-    )
-    checkPage()
-
-    y = drawField(
-      page,
-      "Datum narození",
-      formatDate(child.birthDate ?? ""),
-      y,
-      font,
-      fontBold,
-      margin
-    )
-    y -= 8
-  })
+  }
 
   const languages: LanguageEntry[] =
     Array.isArray(data.languages) && data.languages.length > 0
-      ? data.languages
-      : [{ name: "", level: "" }]
+      ? data.languages.filter((l) => l.name || l.level)
+      : []
 
-  checkPage()
-  y = drawSectionHeader(
-    page,
-    "Znalost cizích jazyků",
-    y,
-    fontBold,
-    pageWidth,
-    margin
-  )
-
-  languages.forEach((lang) => {
-    const label = lang.name ?? "Jazyk"
-    const value = lang.level ?? ""
-    y = drawField(page, label, value, y, font, fontBold, margin)
+  if (languages.length > 0) {
     checkPage()
-  })
+    y = drawSectionHeader(
+      page,
+      "Znalost cizích jazyků",
+      y,
+      fontBold,
+      pageWidth,
+      margin
+    )
+
+    languages.forEach((lang) => {
+      const label = lang.name ?? "Jazyk"
+      const value = lang.level ?? ""
+      y = drawField(page, label, value, y, font, fontBold, margin)
+      checkPage()
+    })
+  }
 
   checkPage()
   y = drawSectionHeader(page, "Osvědčení", y, fontBold, pageWidth, margin)
@@ -1215,286 +2042,6 @@ function generatePersonalQuestionnairePDF(
   )
 }
 
-function generateEducationPDF(
-  pdfDoc: PDFDocument,
-  font: PDFFont,
-  fontBold: PDFFont,
-  rawData: unknown,
-  docInfo: DocumentInfo
-): void {
-  const data = (rawData ?? {}) as EducationData
-
-  const pageWidth = 595
-  const pageHeight = 842
-  const margin = 40
-
-  let page = pdfDoc.addPage([pageWidth, pageHeight])
-  let y = pageHeight - margin - 40
-
-  const checkPage = () => {
-    if (y < margin + 80) {
-      page = pdfDoc.addPage([pageWidth, pageHeight])
-      y = pageHeight - margin - 40
-    }
-  }
-
-  const title = "Přehled vzdělání"
-  const titleSize = 18
-  const titleWidth = fontBold.widthOfTextAtSize(title, titleSize)
-  const titleX = (pageWidth - titleWidth) / 2
-
-  page.drawText(title, {
-    x: titleX,
-    y,
-    size: titleSize,
-    font: fontBold,
-    color: rgb(0.1, 0.1, 0.1),
-  })
-  y -= 40
-
-  if (docInfo.employeeName) {
-    page.drawText(docInfo.employeeName, {
-      x: margin,
-      y,
-      size: 12,
-      font: fontBold,
-      color: rgb(0.15, 0.39, 0.92),
-    })
-    y -= 18
-  }
-
-  page.drawText(`ID: ${docInfo.id} | Stav: ${docInfo.status}`, {
-    x: margin,
-    y,
-    size: 8,
-    font,
-    color: rgb(0.5, 0.5, 0.5),
-  })
-  y -= 20
-
-  page.drawLine({
-    start: { x: margin, y },
-    end: { x: pageWidth - margin, y },
-    thickness: 1,
-    color: rgb(0.8, 0.8, 0.8),
-  })
-  y -= 25
-
-  const levelMap: Record<string, string> = {
-    ZAKLADNI: "Základní",
-    STREDNI: "Střední",
-    STREDNI_ODBORNE: "Střední odborné",
-    VOŠ: "Vyšší odborná škola",
-    BAKALARSKE: "Bakalářské",
-    MAGISTERSKE: "Magisterské",
-    DOKTORSKE: "Doktorské",
-  }
-
-  const studyFormMap: Record<string, string> = {
-    DENNI: "Denní",
-    VECERNI: "Večerní",
-    DISTANCNI: "Distanční",
-    KOMBINOVANA: "Kombinovaná",
-  }
-
-  const educationList: EducationEntry[] =
-    Array.isArray(data.education) && data.education.length > 0
-      ? data.education
-      : [
-          {
-            level: "",
-            schoolType: "",
-            semesters: "",
-            studyForm: "",
-            graduationYear: "",
-            examType: "",
-          },
-        ]
-
-  educationList.forEach((edu, idx) => {
-    checkPage()
-    y = drawSectionHeader(
-      page,
-      `Vzdělání ${idx + 1}`,
-      y,
-      fontBold,
-      pageWidth,
-      margin
-    )
-
-    const levelText =
-      edu.level && levelMap[edu.level] ? levelMap[edu.level] : (edu.level ?? "")
-
-    y = drawField(page, "Stupeň", levelText, y, font, fontBold, margin)
-    checkPage()
-
-    y = drawField(
-      page,
-      "Druh školy / obor",
-      edu.schoolType ?? "",
-      y,
-      font,
-      fontBold,
-      margin
-    )
-    checkPage()
-
-    const formText =
-      edu.studyForm && studyFormMap[edu.studyForm]
-        ? studyFormMap[edu.studyForm]
-        : (edu.studyForm ?? "")
-
-    y = drawField(page, "Forma studia", formText, y, font, fontBold, margin)
-    checkPage()
-
-    y = drawField(
-      page,
-      "Počet tříd (semestrů)",
-      edu.semesters ?? "",
-      y,
-      font,
-      fontBold,
-      margin
-    )
-    checkPage()
-
-    y = drawField(
-      page,
-      "Rok ukončení",
-      edu.graduationYear ?? "",
-      y,
-      font,
-      fontBold,
-      margin
-    )
-    checkPage()
-
-    y = drawField(
-      page,
-      "Druh zkoušky",
-      edu.examType ?? "",
-      y,
-      font,
-      fontBold,
-      margin
-    )
-    y -= 12
-  })
-}
-
-function generateExperiencePDF(
-  pdfDoc: PDFDocument,
-  font: PDFFont,
-  fontBold: PDFFont,
-  rawData: unknown,
-  docInfo: DocumentInfo
-): void {
-  const data = (rawData ?? {}) as ExperienceData
-
-  const pageWidth = 595
-  const pageHeight = 842
-  const margin = 40
-
-  let page = pdfDoc.addPage([pageWidth, pageHeight])
-  let y = pageHeight - margin - 40
-
-  const checkPage = () => {
-    if (y < margin + 80) {
-      page = pdfDoc.addPage([pageWidth, pageHeight])
-      y = pageHeight - margin - 40
-    }
-  }
-
-  const title = "Přehled praxe"
-  const titleSize = 18
-  const titleWidth = fontBold.widthOfTextAtSize(title, titleSize)
-  const titleX = (pageWidth - titleWidth) / 2
-
-  page.drawText(title, {
-    x: titleX,
-    y,
-    size: titleSize,
-    font: fontBold,
-    color: rgb(0.1, 0.1, 0.1),
-  })
-  y -= 40
-
-  if (docInfo.employeeName) {
-    page.drawText(docInfo.employeeName, {
-      x: margin,
-      y,
-      size: 12,
-      font: fontBold,
-      color: rgb(0.15, 0.39, 0.92),
-    })
-    y -= 18
-  }
-
-  page.drawText(`ID: ${docInfo.id} | Stav: ${docInfo.status}`, {
-    x: margin,
-    y,
-    size: 8,
-    font,
-    color: rgb(0.5, 0.5, 0.5),
-  })
-  y -= 20
-
-  page.drawLine({
-    start: { x: margin, y },
-    end: { x: pageWidth - margin, y },
-    thickness: 1,
-    color: rgb(0.8, 0.8, 0.8),
-  })
-  y -= 25
-
-  const experienceList: ExperienceEntry[] =
-    Array.isArray(data.experience) && data.experience.length > 0
-      ? data.experience
-      : [{ employer: "", jobType: "", from: "", to: "" }]
-
-  experienceList.forEach((exp, idx) => {
-    checkPage()
-    y = drawSectionHeader(
-      page,
-      `Pracovní zkušenost ${idx + 1}`,
-      y,
-      fontBold,
-      pageWidth,
-      margin
-    )
-
-    y = drawField(
-      page,
-      "Zaměstnavatel",
-      exp.employer ?? "",
-      y,
-      font,
-      fontBold,
-      margin
-    )
-    checkPage()
-
-    y = drawField(
-      page,
-      "Druh práce",
-      exp.jobType ?? "",
-      y,
-      font,
-      fontBold,
-      margin
-    )
-    checkPage()
-
-    const period =
-      exp.from || exp.to
-        ? `${formatDate(exp.from ?? "")} - ${formatDate(exp.to ?? "")}`
-        : ""
-
-    y = drawField(page, "Období", period, y, font, fontBold, margin)
-    y -= 12
-  })
-}
-
 export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string } }
@@ -1569,40 +2116,19 @@ export async function GET(
 
     switch (doc.type) {
       case "AFFIDAVIT":
-        generateAffidavitPDF(
-          pdfDoc,
-          font,
-          fontBold,
-          doc.data as AffidavitData,
-          docInfo
-        )
+        generateAffidavitPDF(pdfDoc, font, fontBold, doc.data, docInfo)
         break
       case "PERSONAL_QUESTIONNAIRE":
         generatePersonalQuestionnairePDF(
           pdfDoc,
           font,
           fontBold,
-          doc.data as PersonalQuestionnaireData,
+          doc.data,
           docInfo
         )
         break
-      case "EDUCATION":
-        generateEducationPDF(
-          pdfDoc,
-          font,
-          fontBold,
-          doc.data as EducationData,
-          docInfo
-        )
-        break
-      case "EXPERIENCE":
-        generateExperiencePDF(
-          pdfDoc,
-          font,
-          fontBold,
-          doc.data as ExperienceData,
-          docInfo
-        )
+      case "PAYROLL_INFO":
+        generatePayrollInfoPDF(pdfDoc, font, fontBold, doc.data, docInfo)
         break
       default:
         throw new Error("Neznámý typ dokumentu")

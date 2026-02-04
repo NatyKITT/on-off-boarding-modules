@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import type { DocumentStatus, EmploymentDocumentType } from "@prisma/client"
 import { format } from "date-fns"
 import { cs } from "date-fns/locale"
-import { FileText, Lock, Trash2, Unlock } from "lucide-react"
+import { FileText, Lock, RotateCw, Trash2, Unlock } from "lucide-react"
 
 import { useToast } from "@/hooks/use-toast"
 
@@ -37,11 +37,11 @@ type EmploymentDocumentLite = {
   type: EmploymentDocumentType
   status: DocumentStatus
   createdAt: string
-  completedAt?: string | null
-  fileUrl?: string | null
-  publicUrl?: string | null
-  isLocked?: boolean
-  accessHash?: string | null
+  completedAt: string | null
+  fileUrl: string | null
+  publicUrl: string | null
+  isLocked: boolean
+  accessHash: string | null
 }
 
 type EmployeeDocumentsDialogProps = {
@@ -54,8 +54,7 @@ type EmployeeDocumentsDialogProps = {
 const ALL_TYPES: EmploymentDocumentType[] = [
   "AFFIDAVIT",
   "PERSONAL_QUESTIONNAIRE",
-  "EDUCATION",
-  "EXPERIENCE",
+  "PAYROLL_INFO",
 ]
 
 function typeLabel(t: EmploymentDocumentType) {
@@ -64,10 +63,8 @@ function typeLabel(t: EmploymentDocumentType) {
       return "Čestné prohlášení"
     case "PERSONAL_QUESTIONNAIRE":
       return "Osobní dotazník"
-    case "EDUCATION":
-      return "Přehled vzdělání"
-    case "EXPERIENCE":
-      return "Přehled praxe"
+    case "PAYROLL_INFO":
+      return "Dotazník pro vedení mzdové agendy"
     default:
       return t
   }
@@ -97,6 +94,7 @@ export function EmployeeDocumentsDialog({
   const [sending, setSending] = useState(false)
   const [assigning, setAssigning] = useState(false)
   const [resettingId, setResettingId] = useState<number | null>(null)
+  const [regeneratingId, setRegeneratingId] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [lockingId, setLockingId] = useState<number | null>(null)
 
@@ -105,21 +103,24 @@ export function EmployeeDocumentsDialog({
     EmploymentDocumentType[]
   >([])
   const [sentTypes, setSentTypes] = useState<EmploymentDocumentType[]>([])
+  const [needsResendTypes, setNeedsResendTypes] = useState<
+    EmploymentDocumentType[]
+  >([])
   const [createSelection, setCreateSelection] =
     useState<EmploymentDocumentType[]>(ALL_TYPES)
 
   const [docToReset, setDocToReset] = useState<EmploymentDocumentLite | null>(
     null
   )
+  const [docToRegenerate, setDocToRegenerate] =
+    useState<EmploymentDocumentLite | null>(null)
 
   const { toast } = useToast()
   const router = useRouter()
 
   const documentsByType = useMemo(() => {
     const map = new Map<EmploymentDocumentType, EmploymentDocumentLite>()
-    for (const d of documents) {
-      map.set(d.type, d)
-    }
+    for (const d of documents) map.set(d.type, d)
     return map
   }, [documents])
 
@@ -128,19 +129,25 @@ export function EmployeeDocumentsDialog({
     [documents]
   )
 
+  function getPublicUrlForDoc(doc: EmploymentDocumentLite): string | null {
+    return doc.publicUrl ?? null
+  }
+
   const loadDocuments = useCallback(
     async (opts?: { silent?: boolean }) => {
-      if (!opts?.silent) {
-        setLoading(true)
-      }
+      if (!opts?.silent) setLoading(true)
       setError(null)
+
       try {
         const res = await fetch(`/api/dokumenty?onboardingId=${onboardingId}`, {
           cache: "no-store",
         })
         if (!res.ok) throw new Error("Nepodařilo se načíst dokumenty.")
         const json = await res.json()
-        setDocuments((json?.documents as EmploymentDocumentLite[]) ?? [])
+
+        const list = (json?.documents as EmploymentDocumentLite[]) ?? []
+        setDocuments(list)
+        return list
       } catch (e) {
         setError(
           e instanceof Error
@@ -148,43 +155,31 @@ export function EmployeeDocumentsDialog({
             : "Nepodařilo se načíst dokumenty. Zkuste to prosím znovu."
         )
         setDocuments([])
+        return []
       } finally {
-        if (!opts?.silent) {
-          setLoading(false)
-        }
+        if (!opts?.silent) setLoading(false)
       }
     },
     [onboardingId]
   )
 
   useEffect(() => {
-    if (open) {
-      setEmailInput(email)
-      setSentTypes([])
-      void loadDocuments()
-    }
-  }, [open, email, loadDocuments])
-
-  useEffect(() => {
     if (!open) return
-    const typesWithUrl = documents
-      .filter((d) => getPublicUrlForDoc(d))
-      .map((d) => d.type)
-    setEmailSelection(typesWithUrl)
-  }, [documents, open])
 
-  function getPublicUrlForDoc(doc: EmploymentDocumentLite): string | null {
-    if (doc.publicUrl) return doc.publicUrl
+    setEmailInput(email)
+    setSentTypes([])
+    setNeedsResendTypes([])
+    setError(null)
+    ;(async () => {
+      const list = await loadDocuments()
 
-    if (doc.accessHash) {
-      const origin = typeof window !== "undefined" ? window.location.origin : ""
-      return origin
-        ? `${origin}/dokumenty/${doc.accessHash}`
-        : `/dokumenty/${doc.accessHash}`
-    }
+      const defaultSelection = list
+        .filter((d) => Boolean(getPublicUrlForDoc(d)))
+        .map((d) => d.type)
 
-    return null
-  }
+      setEmailSelection(defaultSelection)
+    })()
+  }, [open, email, loadDocuments])
 
   async function handleGenerateSelected() {
     const toCreate = createSelection.filter((t) => !existingTypes.has(t))
@@ -192,16 +187,15 @@ export function EmployeeDocumentsDialog({
 
     setAssigning(true)
     setError(null)
+
     try {
       for (const type of toCreate) {
         const res = await fetch("/api/dokumenty/assign", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            onboardingId,
-            documentType: type,
-          }),
+          body: JSON.stringify({ onboardingId, documentType: type }),
         })
+
         if (!res.ok) {
           const j = await res.json().catch(() => null)
           throw new Error(
@@ -210,6 +204,7 @@ export function EmployeeDocumentsDialog({
           )
         }
       }
+
       await loadDocuments()
 
       toast({
@@ -235,20 +230,25 @@ export function EmployeeDocumentsDialog({
   async function handleToggleLock(doc: EmploymentDocumentLite) {
     setLockingId(doc.id)
     setError(null)
+
     try {
       const res = await fetch(`/api/dokumenty/internal/${doc.id}/lock`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ locked: !doc.isLocked }),
       })
+
       if (!res.ok) {
         const j = await res.json().catch(() => null)
         throw new Error(
           j?.message ?? "Nepodařilo se změnit stav zámku dokumentu."
         )
       }
-      const j = await res.json()
-      const updated = j.document as { id: number; isLocked: boolean }
+
+      const j = (await res.json()) as {
+        document: { id: number; isLocked: boolean }
+      }
+      const updated = j.document
 
       setDocuments((prev) =>
         prev.map((d) =>
@@ -292,6 +292,7 @@ export function EmployeeDocumentsDialog({
 
     setSending(true)
     setError(null)
+
     try {
       const res = await fetch("/api/dokumenty/send-link", {
         method: "POST",
@@ -307,16 +308,20 @@ export function EmployeeDocumentsDialog({
           })),
         }),
       })
+
       if (!res.ok) {
         const j = await res.json().catch(() => null)
         throw new Error(j?.message ?? "Odeslání e-mailu se nezdařilo.")
       }
 
-      setSentTypes(selectedDocs.map((d) => d.type))
+      const justSentTypes = selectedDocs.map((d) => d.type)
+      setSentTypes(justSentTypes)
 
-      if (typeof onSent === "function") {
-        onSent()
-      }
+      setNeedsResendTypes((prev) =>
+        prev.filter((t) => !justSentTypes.includes(t))
+      )
+
+      if (typeof onSent === "function") onSent()
 
       toast({
         title: "E-mail odeslán",
@@ -341,11 +346,13 @@ export function EmployeeDocumentsDialog({
   async function handleResetDocumentConfirmed(doc: EmploymentDocumentLite) {
     setResettingId(doc.id)
     setError(null)
+
     try {
       const res = await fetch(`/api/dokumenty/internal/${doc.id}/reset`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
       })
+
       if (!res.ok) {
         const j = await res.json().catch(() => null)
         throw new Error(j?.message ?? "Reset dokumentu se nezdařil.")
@@ -356,6 +363,7 @@ export function EmployeeDocumentsDialog({
         status: DocumentStatus
         completedAt: string | null
         type: EmploymentDocumentType
+        isLocked?: boolean
       }
 
       setDocuments((prev) =>
@@ -366,15 +374,19 @@ export function EmployeeDocumentsDialog({
         )
       )
 
+      setSentTypes((prev) => prev.filter((t) => t !== updated.type))
+      setNeedsResendTypes((prev) =>
+        prev.includes(updated.type) ? prev : [...prev, updated.type]
+      )
+
       setEmailSelection((prev) =>
         prev.includes(updated.type) ? prev : [...prev, updated.type]
       )
-      setSentTypes((prev) => prev.filter((t) => t !== updated.type))
 
       toast({
         title: "Dokument obnoven",
         description:
-          "Vyplněná data byla smazána. Dokument je znovu ve stavu „Čeká na vyplnění“.",
+          "Vyplněná data byla smazána. Odkaz zůstává stejný (není nutné posílat e-mail znovu).",
       })
     } catch (e) {
       const msg =
@@ -390,6 +402,53 @@ export function EmployeeDocumentsDialog({
     } finally {
       setResettingId(null)
       setDocToReset(null)
+    }
+  }
+
+  async function handleRegenerateConfirmed(doc: EmploymentDocumentLite) {
+    setRegeneratingId(doc.id)
+    setError(null)
+
+    try {
+      const res = await fetch(`/api/dokumenty/internal/${doc.id}/regenerate`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+      })
+
+      if (!res.ok) {
+        const j = await res.json().catch(() => null)
+        throw new Error(j?.message ?? "Obnovení odkazu se nezdařilo.")
+      }
+
+      await loadDocuments({ silent: true })
+
+      setSentTypes((prev) => prev.filter((t) => t !== doc.type))
+      setNeedsResendTypes((prev) =>
+        prev.includes(doc.type) ? prev : [...prev, doc.type]
+      )
+      setEmailSelection((prev) =>
+        prev.includes(doc.type) ? prev : [...prev, doc.type]
+      )
+
+      toast({
+        title: "Odkaz obnoven",
+        description:
+          "Byl vygenerován nový odkaz. Nezapomeňte znovu odeslat e-mail s odkazem na tento dokument.",
+      })
+    } catch (e) {
+      const msg =
+        e instanceof Error
+          ? e.message
+          : "Obnovení odkazu se nezdařilo. Zkuste to prosím znovu."
+      setError(msg)
+      toast({
+        title: "Chyba při obnově odkazu",
+        description: msg,
+        variant: "destructive",
+      })
+    } finally {
+      setRegeneratingId(null)
+      setDocToRegenerate(null)
     }
   }
 
@@ -414,8 +473,8 @@ export function EmployeeDocumentsDialog({
             {employeeName ? ` – ${employeeName}` : ""}
           </DialogTitle>
           <DialogDescription>
-            Správa všech dokumentů k nástupu (čestné prohlášení, osobní
-            dotazník, vzdělání, praxe).
+            Správa všech dokumentů k nástupu (čestné prohlášení, osobní dotazník
+            a praxe).
           </DialogDescription>
         </DialogHeader>
 
@@ -438,6 +497,7 @@ export function EmployeeDocumentsDialog({
                 Obnovit
               </Button>
             </div>
+
             <p className="text-xs text-muted-foreground">
               Vyberte, které typy dokumentů chcete vytvořit. Pokud některý
               dokument již existuje, nebude znovu vytvořen.
@@ -504,6 +564,7 @@ export function EmployeeDocumentsDialog({
               <div className="max-h-[300px] space-y-2 overflow-auto pr-1 text-sm">
                 {documents.map((doc) => {
                   const statusText = statusLabel(doc.status)
+                  const needsResend = needsResendTypes.includes(doc.type)
 
                   return (
                     <div
@@ -527,7 +588,9 @@ export function EmployeeDocumentsDialog({
                               {format(
                                 new Date(doc.completedAt),
                                 "d.M.yyyy H:mm",
-                                { locale: cs }
+                                {
+                                  locale: cs,
+                                }
                               )}
                             </div>
                           )}
@@ -562,6 +625,21 @@ export function EmployeeDocumentsDialog({
                           )}
                         </Button>
 
+                        <Button
+                          size="icon"
+                          variant="outline"
+                          className="size-7"
+                          onClick={() => setDocToRegenerate(doc)}
+                          disabled={regeneratingId === doc.id}
+                          title="Obnovit odkaz (vygeneruje nový link a prodlouží platnost)"
+                        >
+                          {regeneratingId === doc.id ? (
+                            <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                          ) : (
+                            <RotateCw className="size-3" />
+                          )}
+                        </Button>
+
                         {doc.status !== "DRAFT" && (
                           <Button
                             size="sm"
@@ -578,7 +656,13 @@ export function EmployeeDocumentsDialog({
                           </Button>
                         )}
 
-                        {sentTypes.includes(doc.type) && (
+                        {needsResend && (
+                          <span className="text-[10px] text-amber-600">
+                            po změně odešli odkaz znovu
+                          </span>
+                        )}
+
+                        {sentTypes.includes(doc.type) && !needsResend && (
                           <span className="text-[10px] text-emerald-600">
                             odkaz odeslán
                           </span>
@@ -680,7 +764,7 @@ export function EmployeeDocumentsDialog({
                 !emailInput ||
                 !emailSelection.some((t) => {
                   const d = documentsByType.get(t)
-                  return d && getPublicUrlForDoc(d)
+                  return Boolean(d && getPublicUrlForDoc(d))
                 })
               }
               className="mt-1 flex items-center gap-2"
@@ -695,8 +779,8 @@ export function EmployeeDocumentsDialog({
 
         <AlertDialog
           open={!!docToReset}
-          onOpenChange={(open) => {
-            if (!open) setDocToReset(null)
+          onOpenChange={(isOpen) => {
+            if (!isOpen) setDocToReset(null)
           }}
         >
           <AlertDialogContent>
@@ -705,9 +789,12 @@ export function EmployeeDocumentsDialog({
                 Vymazat vyplněná data dokumentu?
               </AlertDialogTitle>
               <AlertDialogDescription>
-                Vyplněné údaje zaměstnance budou z tohoto dokumentu trvale
-                odstraněny. Dokument zůstane přiřazený k nástupu a bude znovu ve
-                stavu „Čeká na vyplnění“.
+                Vyplněné údaje budou odstraněny a dokument se vrátí do stavu
+                „Čeká na vyplnění“. <br />
+                <strong>
+                  Odkaz bude stále platný po dobu 14 dní od zaslání emailů s
+                  dokumenty.
+                </strong>
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -715,12 +802,41 @@ export function EmployeeDocumentsDialog({
               <AlertDialogAction
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                 onClick={() => {
-                  if (docToReset) {
-                    void handleResetDocumentConfirmed(docToReset)
-                  }
+                  if (docToReset) void handleResetDocumentConfirmed(docToReset)
                 }}
               >
                 Vymazat data
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog
+          open={!!docToRegenerate}
+          onOpenChange={(isOpen) => {
+            if (!isOpen) setDocToRegenerate(null)
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Obnovit odkaz na dokument?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Vygeneruje se <strong>nový odkaz</strong> (a prodlouží se jeho
+                platnost). Starý odkaz přestane být aktuální. <br />
+                <strong>
+                  Poté je potřeba zaměstnanci znovu odeslat e-mail s odkazem.
+                </strong>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Zrušit</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  if (docToRegenerate)
+                    void handleRegenerateConfirmed(docToRegenerate)
+                }}
+              >
+                Obnovit odkaz
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

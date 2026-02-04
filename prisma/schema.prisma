@@ -14,7 +14,6 @@ enum Role {
   HR
   IT
   ADMIN
-  READONLY
 }
 
 enum OnboardingStatus {
@@ -73,6 +72,7 @@ enum EmploymentDocumentType {
   PERSONAL_QUESTIONNAIRE
   EDUCATION
   EXPERIENCE
+  PAYROLL_INFO
 }
 
 enum OffboardingDocumentType {

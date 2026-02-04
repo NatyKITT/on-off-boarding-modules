@@ -3,6 +3,7 @@ import { redirect } from "next/navigation"
 import { getCurrentUser } from "@/lib/session"
 
 import { DashboardHeader } from "@/components/dashboard/header"
+import { UserRoleManagement } from "@/components/forms/user-role-management"
 
 export default async function AdminPage() {
   const user = await getCurrentUser()
@@ -19,12 +20,10 @@ export default async function AdminPage() {
     <>
       <DashboardHeader
         heading="Administrace"
-        text="Přístup pouze pro uživatele s rolí ADMIN."
+        text="Správa uživatelských rolí a oprávnění."
       />
       <div className="flex flex-col gap-5">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          Placeholder
-        </div>
+        <UserRoleManagement />
       </div>
     </>
   )

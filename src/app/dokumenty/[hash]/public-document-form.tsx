@@ -2,9 +2,10 @@
 
 import { EmploymentDocumentType } from "@prisma/client"
 
+import { EmployeeMeta } from "@/lib/employee-meta"
+
 import { AffidavitForm } from "@/components/forms/affidavit-form"
-import { EducationForm } from "@/components/forms/education-form"
-import { ExperienceForm } from "@/components/forms/experience-form"
+import { PayrollInfoForm } from "@/components/forms/payroll-info-form"
 import { PersonalQuestionnaireForm } from "@/components/forms/personal-questionnaire-form"
 
 type PublicDocumentFormProps = {
@@ -12,6 +13,7 @@ type PublicDocumentFormProps = {
   hash: string
   type: EmploymentDocumentType
   onSubmitted?: () => void
+  employeeMeta?: EmployeeMeta
 }
 
 export function PublicDocumentForm({
@@ -19,6 +21,7 @@ export function PublicDocumentForm({
   hash,
   type,
   onSubmitted,
+  employeeMeta,
 }: PublicDocumentFormProps) {
   switch (type) {
     case EmploymentDocumentType.AFFIDAVIT:
@@ -28,26 +31,18 @@ export function PublicDocumentForm({
           documentId={documentId}
           hash={hash}
           onSubmitted={onSubmitted}
+          employeeMeta={employeeMeta}
         />
       )
 
-    case EmploymentDocumentType.EDUCATION:
+    case EmploymentDocumentType.PAYROLL_INFO:
       return (
-        <EducationForm
+        <PayrollInfoForm
           mode="public"
           documentId={documentId}
           hash={hash}
           onSubmitted={onSubmitted}
-        />
-      )
-
-    case EmploymentDocumentType.EXPERIENCE:
-      return (
-        <ExperienceForm
-          mode="public"
-          documentId={documentId}
-          hash={hash}
-          onSubmitted={onSubmitted}
+          employeeMeta={employeeMeta}
         />
       )
 
@@ -58,6 +53,7 @@ export function PublicDocumentForm({
           documentId={documentId}
           hash={hash}
           onSubmitted={onSubmitted}
+          employeeMeta={employeeMeta}
         />
       )
 

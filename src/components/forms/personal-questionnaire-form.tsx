@@ -4,10 +4,16 @@ import * as React from "react"
 import { useTransition } from "react"
 import Image from "next/image"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { CheckCircle, PlusCircle, Trash2, XCircle } from "lucide-react"
+import { CheckCircle, PlusCircle, XCircle } from "lucide-react"
 import { useFieldArray, useForm } from "react-hook-form"
 
+import {
+  EDUCATION_LEVEL_OPTIONS,
+  STUDY_FORM_OPTIONS,
+} from "@/types/education-options"
+
 import { useToast } from "@/hooks/use-toast"
+import { EmployeeMeta } from "@/lib/employee-meta"
 import {
   languageLevelEnum,
   personalQuestionnaireSchema,
@@ -32,11 +38,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { DocumentEmployeeHeader } from "@/components/common/document-employee-header"
 
 type PersonalQuestionnaireBaseProps = {
   documentId: number
   initialData?: unknown
   readOnly?: boolean
+  employeeMeta?: EmployeeMeta
 }
 
 type PersonalQuestionnairePublicProps = PersonalQuestionnaireBaseProps & {
@@ -56,6 +64,8 @@ type PersonalQuestionnaireInternalProps = PersonalQuestionnaireBaseProps & {
 export type PersonalQuestionnaireFormProps =
   | PersonalQuestionnairePublicProps
   | PersonalQuestionnaireInternalProps
+
+type EducationEntry = PersonalQuestionnaireSchema["education"][number]
 
 export function PersonalQuestionnaireForm(
   props: PersonalQuestionnaireFormProps
@@ -88,6 +98,7 @@ export function PersonalQuestionnaireForm(
       birthState: "",
       phone: "",
       citizenship: "",
+      dataBoxDelivery: undefined,
       dataBoxId: "",
       maritalStatus: "SINGLE",
       foreignPermitFrom: "",
@@ -105,15 +116,30 @@ export function PersonalQuestionnaireForm(
       bankAccountNumber: "",
       bankName: "",
       maintenanceInfo: "",
+      isDisabledPerson: undefined,
+      receivesPensionBenefits: undefined,
       typePensionBenefits: "",
       disabilityDegree: "NONE",
-      children: [{ fullName: "", birthDate: "" }],
+      hasCertificateManagement: undefined,
+      hasCertificateSpecial: undefined,
+      hasCertificateTraining: undefined,
+      hasCertificateGeneral: undefined,
       languages: [
         { name: "Angličtina" },
         { name: "Němčina" },
         { name: "Španělština" },
         { name: "Francouzština" },
       ] as PersonalQuestionnaireSchema["languages"],
+      education: [
+        {
+          level: "ZAKLADNI",
+          schoolType: "",
+          semesters: "",
+          studyForm: "DENNI",
+          graduationYear: "",
+          examType: "",
+        },
+      ],
       familyRelations: "",
       finalRequestPayrollTransfer: undefined,
       finalReadAndUnderstood: undefined,
@@ -167,12 +193,12 @@ export function PersonalQuestionnaireForm(
     props.readOnly === true
 
   const {
-    fields: childrenFields,
-    append: appendChild,
-    remove: removeChild,
-  } = useFieldArray<PersonalQuestionnaireSchema, "children">({
+    fields: educationFields,
+    append: appendEducation,
+    remove: removeEducation,
+  } = useFieldArray<PersonalQuestionnaireSchema, "education">({
     control,
-    name: "children",
+    name: "education",
   })
 
   const handleSubmitForm = (values: PersonalQuestionnaireSchema) => {
@@ -271,6 +297,13 @@ export function PersonalQuestionnaireForm(
             </h1>
           </div>
 
+          <DocumentEmployeeHeader
+            fullName={props.employeeMeta?.fullName}
+            position={props.employeeMeta?.position}
+            unitName={props.employeeMeta?.unitName}
+            department={props.employeeMeta?.department}
+          />
+
           <p>Vážená paní, vážený pane,</p>
           <p>
             dovolujeme si Vás požádat o vyplnění následujících údajů pro účely
@@ -294,6 +327,10 @@ export function PersonalQuestionnaireForm(
               prosím označené sekce.
             </p>
           )}
+          <p className="text-xs text-muted-foreground">
+            Položky označené <span className="text-destructive">*</span> jsou
+            povinné.
+          </p>
         </header>
 
         <section className="space-y-4 rounded-md border p-4">
@@ -350,9 +387,11 @@ export function PersonalQuestionnaireForm(
               />
             </div>
             <div className="space-y-1">
-              <Label>
-                Rodné číslo <span className="text-destructive">*</span>
-              </Label>
+              <Label>Rodné číslo</Label>
+              <p className="text-xs text-muted-foreground">
+                Pokud nemáte rodné číslo (např. jste cizinec/cizinka), ponechte
+                pole prázdné.
+              </p>
               <Input {...register("birthNumber")} disabled={isFormDisabled} />
             </div>
             <div className="space-y-1">
@@ -391,11 +430,13 @@ export function PersonalQuestionnaireForm(
 
           <div className="space-y-2">
             <Label>
-              Žádám o doručování datovou schránkou a prohlašuji, že se jedná o
-              moji datovou schránku fyzické osoby a datová schránka není pro
-              doručování znepřístupněna.{" "}
+              Žádám o doručování datovou schránkou{" "}
               <span className="text-destructive">*</span>
             </Label>
+            <p className="text-xs text-muted-foreground">
+              Prohlašuji, že se jedná o moji datovou schránku fyzické osoby a
+              datová schránka není pro doručování znepřístupněna.
+            </p>
             <RadioGroup
               value={
                 dataBoxDelivery === true
@@ -682,6 +723,9 @@ export function PersonalQuestionnaireForm(
               Jste osobou se zdravotním postižením?{" "}
               <span className="text-destructive">*</span>
             </Label>
+            <p className="text-xs text-muted-foreground">
+              Dále vyplňte pouze v případě kladné odpovědi
+            </p>
             <RadioGroup
               value={
                 isDisabledPerson === true
@@ -741,71 +785,246 @@ export function PersonalQuestionnaireForm(
           )}
         </section>
 
-        <section className="space-y-4 rounded-md border p-4">
-          <h2 className="text-sm font-medium">Děti</h2>
+        <section className="space-y-3 rounded-md border p-4">
+          <h2 className="text-sm font-medium">Vzdělání</h2>
           <p className="text-xs text-muted-foreground">
-            Informace o dětech pro mzdové účely. Pokud nemáte děti, tuto část
-            nemusíte vyplňovat.
+            Uveďte prosím alespoň jedno ukončené vzdělání. V případě potřeby
+            přidejte další řádky.
           </p>
 
-          <div className="space-y-3">
-            {childrenFields.map((field, index) => (
-              <div
-                key={field.id}
-                className="grid items-end gap-3 md:grid-cols-[2.5fr,1.5fr,auto]"
-              >
+          <div className="space-y-2 rounded-md bg-muted/20 p-3 text-xs text-muted-foreground">
+            <p className="font-medium">Vysvětlivky k formám studia:</p>
+            <ul className="ml-4 list-disc space-y-1">
+              <li>
+                <strong>Denní forma:</strong> Výuka organizovaná pravidelně
+                každý den v pětidenním vyučovacím týdnu v průběhu školního roku.
+              </li>
+              <li>
+                <strong>Večerní forma:</strong> Výuka organizovaná pravidelně
+                několikrát v týdnu v rozsahu 10 až 18 hodin týdně v průběhu
+                školního roku zpravidla v odpoledních a večerních hodinách.
+              </li>
+              <li>
+                <strong>Dálková forma:</strong> Samostatné studium spojené s
+                konzultacemi ve školním roce.
+              </li>
+              <li>
+                <strong>Distanční forma:</strong> Samostatné studium
+                uskutečňované převážně nebo zcela prostřednictvím informačních
+                technologií, popřípadě spojené s individuálními konzultacemi.
+              </li>
+              <li>
+                <strong>Kombinovaná forma:</strong> Střídání denní a jiné formy
+                vzdělávání. Výuka probíhá obvykle o víkendech nebo pátcích a
+                sobotách, jednou za 14 dní nebo jednou za měsíc.
+              </li>
+            </ul>
+            <p className="mt-2">
+              <strong>Vysokoškolské vzdělání:</strong> Studium prezenční
+              (denní), distanční nebo jejich kombinace.
+            </p>
+          </div>
+
+          {educationFields.map((field, index) => (
+            <div
+              key={field.id}
+              className="mt-3 space-y-3 rounded-md border bg-muted/30 p-4"
+            >
+              <div className="space-y-1">
+                <Label>
+                  Stupeň <span className="text-destructive">*</span>
+                </Label>
+                <Select
+                  value={watch(`education.${index}.level`)}
+                  onValueChange={(val) =>
+                    setValue(
+                      `education.${index}.level`,
+                      val as EducationEntry["level"],
+                      {
+                        shouldValidate: true,
+                      }
+                    )
+                  }
+                  disabled={isFormDisabled}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Vyberte stupeň" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {EDUCATION_LEVEL_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {errors.education?.[index]?.level && (
+                  <p className="text-xs text-destructive">
+                    {errors.education[index]?.level?.message as string}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <Label>
+                  Druh školy, výchovy, obor{" "}
+                  <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  {...register(`education.${index}.schoolType` as const)}
+                  placeholder="např. gymnázium, sociální práce…"
+                  disabled={isFormDisabled}
+                />
+                {errors.education?.[index]?.schoolType && (
+                  <p className="text-xs text-destructive">
+                    {errors.education[index]?.schoolType?.message as string}
+                  </p>
+                )}
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-1">
-                  <Label>Jméno a příjmení dítěte {index + 1}</Label>
+                  <Label>Počet tříd (semestrů)</Label>
                   <Input
-                    {...register(`children.${index}.fullName` as const)}
+                    {...register(`education.${index}.semesters` as const)}
+                    placeholder="např. 4"
                     disabled={isFormDisabled}
                   />
                 </div>
+
                 <div className="space-y-1">
-                  <Label>Datum narození dítěte {index + 1}</Label>
-                  <Input
-                    type="date"
-                    {...register(`children.${index}.birthDate` as const)}
+                  <Label>
+                    Forma studia <span className="text-destructive">*</span>
+                  </Label>
+                  <Select
+                    value={watch(`education.${index}.studyForm`)}
+                    onValueChange={(val) =>
+                      setValue(
+                        `education.${index}.studyForm`,
+                        val as EducationEntry["studyForm"],
+                        { shouldValidate: true }
+                      )
+                    }
                     disabled={isFormDisabled}
-                  />
-                </div>
-                <div className="flex justify-end">
-                  {childrenFields.length > 1 && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      onClick={() => removeChild(index)}
-                      disabled={isFormDisabled}
-                      aria-label="Odebrat řádek"
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Vyberte formu" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {STUDY_FORM_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  {errors.education?.[index]?.studyForm && (
+                    <p className="text-xs text-destructive">
+                      {errors.education[index]?.studyForm?.message as string}
+                    </p>
                   )}
                 </div>
               </div>
-            ))}
 
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => appendChild({ fullName: "", birthDate: "" })}
-              disabled={isFormDisabled}
-            >
-              <PlusCircle className="mr-2 size-4" />
-              Přidat další záznam
-            </Button>
-          </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>Rok ukončení</Label>
+                  <Input
+                    {...register(`education.${index}.graduationYear` as const)}
+                    placeholder="např. 2018"
+                    disabled={isFormDisabled}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label>Druh zkoušky</Label>
+                  <Input
+                    {...register(`education.${index}.examType` as const)}
+                    placeholder="maturita, státní zkouška…"
+                    disabled={isFormDisabled}
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                {educationFields.length > 1 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => removeEducation(index)}
+                    disabled={isFormDisabled}
+                  >
+                    Odebrat řádek
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              appendEducation({
+                level: "ZAKLADNI",
+                schoolType: "",
+                semesters: "",
+                studyForm: "DENNI",
+                graduationYear: "",
+                examType: "",
+              } as EducationEntry)
+            }
+            disabled={isFormDisabled}
+          >
+            Přidat další řádek
+          </Button>
+
+          {errors.education?.message && (
+            <p className="pt-2 text-xs text-destructive">
+              {errors.education.message as string}
+            </p>
+          )}
         </section>
 
         <section className="space-y-4 rounded-md border p-4">
-          <h2 className="text-sm font-medium">Znalost cizího jazyka</h2>
+          <h2 className="text-sm font-medium">Znalost cizích jazyků</h2>
           <p className="text-xs text-muted-foreground">
             Dobrovolný údaj. Vyplňte pouze v případě, že chcete uvést znalost
-            cizích jazyků. Stupně znalosti dle evropského systému hodnocení –{" "}
-            <b>A0 znamená prakticky žádnou znalost / úplný začátečník.</b>
+            cizích jazyků.
           </p>
+
+          <div className="space-y-2 rounded-md bg-muted/20 p-3 text-xs text-muted-foreground">
+            <p className="font-medium">
+              Stupně znalosti dle evropského systému hodnocení:
+            </p>
+            <div className="grid gap-1 md:grid-cols-2">
+              <div>
+                <strong>A0:</strong> Žádná znalost / úplný začátečník
+              </div>
+              <div>
+                <strong>A1:</strong> Začátečník
+              </div>
+              <div>
+                <strong>A2:</strong> Mírně pokročilý
+              </div>
+              <div>
+                <strong>B1:</strong> Středně pokročilý
+              </div>
+              <div>
+                <strong>B2:</strong> Pokročilý
+              </div>
+              <div>
+                <strong>C1:</strong> Velmi pokročilý
+              </div>
+              <div>
+                <strong>C2:</strong> Rodilý mluvčí / perfektní znalost
+              </div>
+            </div>
+          </div>
 
           <div className="space-y-4">
             {languages.map((lang, index) => (
@@ -1004,14 +1223,14 @@ export function PersonalQuestionnaireForm(
           <h2 className="text-sm font-medium">Závěrečná informace</h2>
 
           <div className="space-y-2">
-            <Label>
-              Vaši příbuzní zaměstnaní na ÚMČ Praha 6 (uveďte název práce/pozice
-              a odbor)
-              <p className="text-xs text-muted-foreground">
-                Osoba blízká je příbuzný v řadě přímé, manžel/manželka nebo
-                partner/partnerka (registr. partnerství), sourozenec
-              </p>
-            </Label>
+            <Label>Vaši příbuzní zaměstnaní na ÚMČ Praha 6</Label>
+            <p className="text-xs text-muted-foreground">
+              Uveďte název práce/pozice a odbor
+            </p>
+            <p className="text-xs text-muted-foreground">
+              <strong>Osoba blízká:</strong> je příbuzný v řadě přímé -
+              manžel/manželka nebo partner/partnerka (registr.partnerství).
+            </p>
             <Input {...register("familyRelations")} disabled={isFormDisabled} />
           </div>
 
@@ -1142,7 +1361,7 @@ export function PersonalQuestionnaireForm(
                 ? "Odesílám…"
                 : "Ukládám…"
               : props.mode === "public"
-                ? "Odeslat čestné prohlášení"
+                ? "Odeslat osobní dotazník"
                 : "Uložit úpravy"}
           </Button>
         </div>

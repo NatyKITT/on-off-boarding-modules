@@ -4,6 +4,8 @@ import { useState } from "react"
 import type { EmploymentDocumentType } from "@prisma/client"
 import { CheckCircle } from "lucide-react"
 
+import { EmployeeMeta } from "@/lib/employee-meta"
+
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -19,9 +21,15 @@ type Props = {
   documentId: number
   hash: string
   type: EmploymentDocumentType
+  employeeMeta?: EmployeeMeta
 }
 
-export function PublicDocumentShell({ documentId, hash, type }: Props) {
+export function PublicDocumentShell({
+  documentId,
+  hash,
+  type,
+  employeeMeta,
+}: Props) {
   const [submitted, setSubmitted] = useState(false)
 
   return (
@@ -31,6 +39,7 @@ export function PublicDocumentShell({ documentId, hash, type }: Props) {
           documentId={documentId}
           hash={hash}
           type={type}
+          employeeMeta={employeeMeta}
           onSubmitted={() => setSubmitted(true)}
         />
       </div>

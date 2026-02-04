@@ -18,6 +18,11 @@ export const env = createEnv({
     REPORT_RECIPIENTS_ACTUAL: z.string().optional(),
     REPORT_RECIPIENTS_ALL: z.string().optional(),
     HR_NOTIFICATION_EMAILS: z.string().optional(),
+    PAYROLL_NOTIFICATION_EMAILS: z.string().optional(),
+    SUPER_ADMIN_EMAILS: z.string().optional(),
+    HR_EMAILS: z.string().optional(),
+    IT_EMAILS: z.string().optional(),
+    READONLY_EMAILS: z.string().optional(),
 
     SENTRY_ENVIRONMENT: z.string().optional(),
     SENTRY_ENABLED: z.enum(["true", "false"]).optional(),
@@ -48,6 +53,11 @@ export const env = createEnv({
     REPORT_RECIPIENTS_ACTUAL: process.env.REPORT_RECIPIENTS_ACTUAL,
     REPORT_RECIPIENTS_ALL: process.env.REPORT_RECIPIENTS_ALL,
     HR_NOTIFICATION_EMAILS: process.env.HR_NOTIFICATION_EMAILS,
+    PAYROLL_NOTIFICATION_EMAILS: process.env.PAYROLL_NOTIFICATION_EMAILS,
+    SUPER_ADMIN_EMAILS: process.env.SUPER_ADMIN_EMAILS,
+    HR_EMAILS: process.env.HR_EMAILS,
+    IT_EMAILS: process.env.IT_EMAILS,
+    READONLY_EMAILS: process.env.READONLY_EMAILS,
 
     SENTRY_ENVIRONMENT: process.env.SENTRY_ENVIRONMENT,
     SENTRY_ENABLED: process.env.SENTRY_ENABLED,

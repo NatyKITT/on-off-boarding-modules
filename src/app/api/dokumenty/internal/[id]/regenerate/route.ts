@@ -1,3 +1,5 @@
+import { randomBytes } from "crypto"
+
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { DocumentStatus, Prisma, Role } from "@prisma/client"
@@ -10,8 +12,12 @@ export const dynamic = "force-dynamic"
 type Params = { params: { id: string } }
 type SessionUserWithRole = { role?: Role }
 
-function canReset(role?: Role) {
+function canRegenerate(role?: Role) {
   return role === "ADMIN" || role === "HR"
+}
+
+function createHash() {
+  return randomBytes(16).toString("hex")
 }
 
 export async function PATCH(_req: NextRequest, { params }: Params) {
@@ -24,7 +30,7 @@ export async function PATCH(_req: NextRequest, { params }: Params) {
   }
 
   const role = (session.user as SessionUserWithRole).role
-  if (!canReset(role)) {
+  if (!canRegenerate(role)) {
     return NextResponse.json({ message: "Nemáte oprávnění." }, { status: 403 })
   }
 
@@ -55,22 +61,52 @@ export async function PATCH(_req: NextRequest, { params }: Params) {
     )
   }
 
-  const updated = await prisma.employmentDocument.update({
-    where: { id },
-    data: {
-      data: {} as Prisma.InputJsonValue,
-      status: DocumentStatus.DRAFT,
-      completedAt: null,
-      fileUrl: null,
-    },
-    select: {
-      id: true,
-      status: true,
-      completedAt: true,
-      type: true,
-      isLocked: true,
-    },
-  })
+  const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
 
-  return NextResponse.json(updated)
+  let lastError: unknown = null
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const updated = await prisma.employmentDocument.update({
+        where: { id },
+        data: {
+          accessHash: createHash(),
+          expiresAt,
+          status: DocumentStatus.DRAFT,
+          completedAt: null,
+          fileUrl: null,
+          isLocked: false,
+          data: {} as Prisma.InputJsonValue,
+        },
+        select: {
+          id: true,
+          type: true,
+          status: true,
+          createdAt: true,
+          completedAt: true,
+          isLocked: true,
+          accessHash: true,
+          expiresAt: true,
+        },
+      })
+
+      return NextResponse.json({ document: updated })
+    } catch (e) {
+      lastError = e
+      if (
+        typeof e === "object" &&
+        e !== null &&
+        "code" in e &&
+        (e as { code?: string }).code === "P2002"
+      ) {
+        continue
+      }
+      break
+    }
+  }
+
+  console.error("Regenerate failed:", lastError)
+  return NextResponse.json(
+    { message: "Obnovení odkazu se nezdařilo." },
+    { status: 500 }
+  )
 }

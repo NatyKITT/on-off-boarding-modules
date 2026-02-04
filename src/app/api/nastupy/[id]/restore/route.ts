@@ -67,7 +67,6 @@ export async function POST(
       )
     }
 
-    // ✅ Kontrola duplicity - zda už neexistuje aktivní záznam s tímto osobním číslem
     if (employee.personalNumber) {
       const existing = await prisma.employeeOnboarding.findFirst({
         where: {

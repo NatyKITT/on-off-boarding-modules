@@ -5,19 +5,15 @@ import { z } from "zod"
 
 import { prisma } from "@/lib/db"
 import { sendMail } from "@/lib/email"
+import { buildEmployeeMeta } from "@/lib/employee-meta"
 import { absoluteUrl } from "@/lib/url"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-const getSchema = z.object({
-  onboardingId: z.coerce.number().int(),
-})
-
 const postSchema = z.object({
   onboardingId: z.number().int(),
   email: z.string().email(),
-  employeeName: z.string().optional(),
   documents: z
     .array(
       z.object({
@@ -35,58 +31,11 @@ function docTypeLabel(t: EmploymentDocumentType) {
       return "Čestné prohlášení"
     case "PERSONAL_QUESTIONNAIRE":
       return "Osobní dotazník"
-    case "EDUCATION":
-      return "Přehled vzdělání"
-    case "EXPERIENCE":
-      return "Přehled praxe"
+    case "PAYROLL_INFO":
+      return "Dotazník pro vedení mzdové agendy"
     default:
       return t
   }
-}
-
-export async function GET(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json(
-      { message: "Nejste přihlášen(a)." },
-      { status: 401 }
-    )
-  }
-
-  const parsed = getSchema.safeParse({
-    onboardingId: req.nextUrl.searchParams.get("onboardingId"),
-  })
-
-  if (!parsed.success) {
-    return NextResponse.json(
-      { message: "Neplatný parametr onboardingId." },
-      { status: 400 }
-    )
-  }
-
-  const documents = await prisma.employmentDocument.findMany({
-    where: { onboardingId: parsed.data.onboardingId },
-    select: {
-      id: true,
-      type: true,
-      status: true,
-      createdAt: true,
-      completedAt: true,
-      fileUrl: true,
-      accessHash: true,
-      isLocked: true,
-    },
-    orderBy: { createdAt: "desc" },
-  })
-
-  const docsWithUrl = documents.map((d) => ({
-    ...d,
-    publicUrl: d.accessHash
-      ? absoluteUrl(`/dokumenty/${d.accessHash}`, req)
-      : null,
-  }))
-
-  return NextResponse.json({ documents: docsWithUrl })
 }
 
 export async function POST(req: NextRequest) {
@@ -108,8 +57,35 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const { onboardingId, email, employeeName, documents } = parsed.data
+  const { onboardingId, email, documents } = parsed.data
   const ids = documents.map((d) => d.id)
+
+  const onboarding = await prisma.employeeOnboarding.findUnique({
+    where: { id: onboardingId },
+    select: {
+      id: true,
+      titleBefore: true,
+      name: true,
+      surname: true,
+      titleAfter: true,
+      department: true,
+      unitName: true,
+      positionName: true,
+      email: true,
+      userEmail: true,
+    },
+  })
+
+  if (!onboarding) {
+    return NextResponse.json(
+      { message: "Nástup nebyl nalezen." },
+      { status: 404 }
+    )
+  }
+
+  const meta = buildEmployeeMeta(onboarding)
+  const employeeName =
+    meta.fullName || `${onboarding.name} ${onboarding.surname}`.trim()
 
   const docsFromDb = await prisma.employmentDocument.findMany({
     where: { id: { in: ids }, onboardingId },
@@ -129,6 +105,7 @@ export async function POST(req: NextRequest) {
       id: d.id,
       type: d.type,
       url: absoluteUrl(`/dokumenty/${d.accessHash}`, req),
+      label: docTypeLabel(d.type),
     }))
 
   if (!mapped.length) {
@@ -138,34 +115,58 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const safeEmployeeName = (employeeName ?? "").trim()
-  const subject = safeEmployeeName
-    ? `Dokumenty k nástupu – ${safeEmployeeName}`
+  const subject = employeeName
+    ? `Dokumenty k nástupu – ${employeeName}`
     : "Dokumenty k nástupu"
+
+  const departmentText = meta.department?.trim()
+  const positionText = meta.position?.trim()
+
+  const infoBlock =
+    departmentText || positionText
+      ? `
+        <div style="margin: 12px 0 0 0; padding: 10px 12px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
+          <div style="font-size: 12px; color: #374151;">
+            ${positionText ? `<div><strong>Pozice:</strong> ${positionText}</div>` : ""}
+            ${departmentText ? `<div><strong>Odbor / oddělení:</strong> ${departmentText}</div>` : ""}
+          </div>
+        </div>
+      `
+      : ""
 
   const html = `
     <div style="font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #111827;">
       <h2 style="margin: 0 0 10px 0;">Dokumenty k nástupu</h2>
+
       <p style="margin: 0 0 12px 0;">
-        Dobrý den${safeEmployeeName ? `, <strong>${safeEmployeeName}</strong>` : ""},<br/>
-        prosíme o vyplnění následujících dokumentů:
+        Dobrý den${employeeName ? `, <strong>${employeeName}</strong>` : ""},<br/>
+        prosíme o vyplnění následujících dokumentů pro uvedenou pozici:
       </p>
 
-      <ul style="padding-left: 18px; margin: 0 0 14px 0;">
+      ${infoBlock}
+
+      <ul style="padding-left: 18px; margin: 14px 0 14px 0;">
         ${mapped
           .map(
             (d) => `
           <li style="margin: 6px 0;">
-            <strong>${docTypeLabel(d.type)}</strong> –
+            <strong>${d.label}</strong> –
             <a href="${d.url}" target="_blank" rel="noopener noreferrer">${d.url}</a>
           </li>`
           )
           .join("")}
       </ul>
 
-      <p style="margin: 0 0 12px 0; color: #374151;">
-        Odkazy jsou určené pouze pro vás. Po odeslání formuláře už není potřeba vyplňovat znovu.
-      </p>
+      <div style="margin: 14px 0 12px 0; padding: 12px 12px; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px;">
+        <div style="font-size: 12px; color: #9a3412;">
+          <strong>Důležité:</strong>
+          <ul style="margin: 8px 0 0 18px; padding: 0;">
+            <li>Odkazy jsou určeny pouze pro vás – <strong>nepřeposílejte je</strong> dalším osobám.</li>
+            <li>Formuláře vyplňte <strong>osobně</strong>, <strong>pravdivě</strong> a <strong>pečlivě</strong>.</li>
+            <li>Po odeslání už zpravidla není potřeba dokumenty vyplňovat znovu.</li>
+          </ul>
+        </div>
+      </div>
 
       <p style="margin: 0; color: #6b7280; font-size: 12px;">
         Tento e-mail byl automaticky vygenerován systémem On-Boarding Modul ÚMČ Praha 6.

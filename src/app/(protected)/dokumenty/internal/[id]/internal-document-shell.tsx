@@ -1,9 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import type { DocumentStatus, EmploymentDocumentType } from "@prisma/client"
 import { AlertCircle, CheckCircle, Lock } from "lucide-react"
+
+import { buildEmployeeMeta } from "@/lib/employee-meta"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -13,9 +15,19 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { AffidavitForm } from "@/components/forms/affidavit-form"
-import { EducationForm } from "@/components/forms/education-form"
-import { ExperienceForm } from "@/components/forms/experience-form"
+import { PayrollInfoForm } from "@/components/forms/payroll-info-form"
 import { PersonalQuestionnaireForm } from "@/components/forms/personal-questionnaire-form"
+
+type OnboardingMeta = {
+  id: number
+  titleBefore: string | null
+  name: string
+  surname: string
+  titleAfter: string | null
+  department: string
+  unitName: string
+  positionName: string
+}
 
 type InternalDocument = {
   id: number
@@ -23,14 +35,26 @@ type InternalDocument = {
   status: DocumentStatus
   isLocked: boolean
   data: unknown
-  onboarding?: {
-    name: string | null
-    surname: string | null
-  } | null
+  createdAt?: Date
+  completedAt?: Date | null
+  onboarding?: OnboardingMeta | null
 }
 
 type Props = {
   document: InternalDocument
+}
+
+function docTypeLabel(t: EmploymentDocumentType) {
+  switch (t) {
+    case "AFFIDAVIT":
+      return "Čestné prohlášení"
+    case "PERSONAL_QUESTIONNAIRE":
+      return "Osobní dotazník"
+    case "PAYROLL_INFO":
+      return "Dotazník pro vedení mzdové agendy"
+    default:
+      return t
+  }
 }
 
 export function InternalDocumentShell({ document }: Props) {
@@ -43,9 +67,13 @@ export function InternalDocumentShell({ document }: Props) {
 
   const router = useRouter()
 
-  const employeeName = `${doc.onboarding?.name ?? ""} ${
-    doc.onboarding?.surname ?? ""
-  }`.trim()
+  const employeeMeta = useMemo(() => {
+    return doc.onboarding ? buildEmployeeMeta(doc.onboarding) : undefined
+  }, [doc.onboarding])
+
+  const titleName = employeeMeta?.fullName?.trim()
+  const departmentText = employeeMeta?.department?.trim()
+  const positionText = employeeMeta?.position?.trim()
 
   const readOnly = doc.isLocked
 
@@ -102,15 +130,14 @@ export function InternalDocumentShell({ document }: Props) {
       initialData: doc.data,
       readOnly,
       onSubmitInternal: handleSave,
+      employeeMeta,
     }
 
     switch (doc.type) {
       case "AFFIDAVIT":
         return <AffidavitForm {...commonProps} />
-      case "EDUCATION":
-        return <EducationForm {...commonProps} />
-      case "EXPERIENCE":
-        return <ExperienceForm {...commonProps} />
+      case "PAYROLL_INFO":
+        return <PayrollInfoForm {...commonProps} />
       case "PERSONAL_QUESTIONNAIRE":
         return <PersonalQuestionnaireForm {...commonProps} />
       default:
@@ -174,7 +201,7 @@ export function InternalDocumentShell({ document }: Props) {
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
             {error ??
-              "Dokument se nepodařilo uložit. Zkuste to prosím znovu nebo kontaktujte IT/HR."}
+              "Dokument se nepodařilo uložit. Zkuste to prosím znovu nebo kontaktujte IT."}
           </p>
           <div className="mt-4 flex justify-end">
             <Button size="sm" onClick={() => setResultModal(null)}>
@@ -186,9 +213,18 @@ export function InternalDocumentShell({ document }: Props) {
 
       <header className="space-y-1">
         <h1 className="text-xl font-semibold">
-          {employeeName ? `${employeeName} – ` : ""}
-          Interní dokument
+          {titleName ? `${titleName} – ` : ""}
+          {docTypeLabel(doc.type)}
         </h1>
+
+        {(positionText || departmentText) && (
+          <p className="text-sm text-muted-foreground">
+            {positionText ? <span>{positionText}</span> : null}
+            {positionText && departmentText ? <span> · </span> : null}
+            {departmentText ? <span>{departmentText}</span> : null}
+          </p>
+        )}
+
         <p className="text-sm text-muted-foreground">
           Zde vidíte formulář tak, jak ho vyplnil zaměstnanec. V případě potřeby
           ho můžete upravit a uložit.
