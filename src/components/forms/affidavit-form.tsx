@@ -75,6 +75,7 @@ export function AffidavitForm(props: AffidavitFormProps) {
   const [isPending, startTransition] = useTransition()
 
   const form = useForm<AffidavitSchema>({
+    mode: "onChange",
     resolver: zodResolver(affidavitSchema),
     defaultValues: (props.initialData as AffidavitSchema | undefined) ?? {
       experience: [{ employer: "", jobType: "", from: "", to: "" }],
@@ -284,8 +285,29 @@ export function AffidavitForm(props: AffidavitFormProps) {
           </p>
         </header>
 
-        <section className="space-y-3 rounded-md border p-4">
-          <h2 className="text-sm font-medium">Praxe</h2>
+        {Object.keys(errors).length > 0 && (
+          <p className="mt-2 text-sm text-destructive">
+            Formulář obsahuje nevyplněné nebo chybné údaje. Zkontrolujte prosím
+            označené sekce.
+          </p>
+        )}
+        <p className="text-xs text-muted-foreground">
+          Položky označené <span className="text-destructive">*</span> jsou
+          povinné.
+        </p>
+
+        <section
+          className={`space-y-3 rounded-md border p-4 ${errors.experience?.message ? "border-destructive" : ""}`}
+        >
+          <h2 className="text-sm font-medium">
+            Praxe <span className="text-destructive">*</span>
+          </h2>
+
+          {errors.experience?.message && (
+            <p className="text-sm text-destructive">
+              {errors.experience.message as string}
+            </p>
+          )}
 
           {experienceArray.fields.map((field, index) => (
             <div
@@ -392,12 +414,6 @@ export function AffidavitForm(props: AffidavitFormProps) {
           >
             Přidat další řádek
           </Button>
-
-          {errors.experience?.message && (
-            <p className="pt-2 text-xs text-destructive">
-              {errors.experience.message as string}
-            </p>
-          )}
 
           <p className="pt-2 text-xs text-muted-foreground">
             [1] Uveďte prosím rovněž zkratku u soustavné činnosti provozované

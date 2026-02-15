@@ -33,6 +33,11 @@ type DocumentInfo = {
   status: string
   completedAt: Date | string | null
   employeeName: string
+  titleBefore?: string | null
+  titleAfter?: string | null
+  positionName?: string | null
+  department?: string | null
+  unitName?: string | null
 }
 
 type PayrollChildItem = {
@@ -45,6 +50,9 @@ type PayrollInfoData = {
   maidenName?: string | null
   birthPlace?: string | null
   birthNumber?: string | null
+  birthDay?: string | null
+  birthMonth?: string | null
+  birthYear?: string | null
   maritalStatus?:
     | "SINGLE"
     | "MARRIED"
@@ -74,7 +82,9 @@ function drawSectionHeader(
   pageWidth: number,
   margin: number
 ): number {
-  const rectHeight = 18
+  y -= 12
+
+  const rectHeight = 20
   const rectY = y - 4
 
   page.drawRectangle({
@@ -93,7 +103,7 @@ function drawSectionHeader(
     color: rgb(0.15, 0.39, 0.92),
   })
 
-  return y - (rectHeight + 8)
+  return y - (rectHeight + 14)
 }
 
 function drawField(
@@ -123,10 +133,10 @@ function drawField(
       font,
       color: rgb(0, 0, 0),
     })
-    return y - 28
+    return y - 34
   }
 
-  return y - 22
+  return y - 26
 }
 
 function generatePayrollInfoPDF(
@@ -178,49 +188,11 @@ function generatePayrollInfoPDF(
     font,
     color: rgb(0.5, 0.5, 0.5),
   })
-  y -= 35
+  y -= 25
 
-  const introLines = [
-    "Vážená paní, vážený pane,",
-    "",
-    "dovolujeme si Vás požádat o vyplnění následujících údajů pro účely",
-    "zpracování personální a mzdové agendy. Vaše údaje budou k dispozici",
-    "pouze tajemníkovi úřadu, zaměstnancům personálního oddělení, mzdové",
-    "účtárně a HR specialistce. Data jsou přenášena šifrovaná a uložena",
-    "na zabezpečeném úložišti.",
-    "",
-    "Dotazník Vám zabere maximálně 30 minut.",
-    "",
-    "Děkujeme a těšíme se na spolupráci.",
-    "",
-    "Městská část Praha 6, Úřad městské části, Čs. armády 23, 160 52",
-    "Praha 6, IČO 00063703",
-    "",
-    "Personální oddělení, v přímém řízení tajemníka",
-    "Oddělení účetnictví, Odbor ekonomický",
-  ]
-
-  introLines.forEach((line) => {
-    checkPage()
-    if (line === "") {
-      y -= 8
-    } else {
-      page.drawText(line, {
-        x: margin,
-        y,
-        size: 9,
-        font,
-        color: rgb(0.3, 0.3, 0.3),
-      })
-      y -= 12
-    }
-  })
-
-  y -= 15
-  checkPage()
-
-  if (docInfo.employeeName) {
-    page.drawText(docInfo.employeeName, {
+  const payrollDisplayName = data.fullName ?? docInfo.employeeName
+  if (payrollDisplayName) {
+    page.drawText(payrollDisplayName, {
       x: margin,
       y,
       size: 12,
@@ -230,14 +202,23 @@ function generatePayrollInfoPDF(
     y -= 18
   }
 
-  page.drawText(`ID: ${docInfo.id} | Stav: ${docInfo.status}`, {
-    x: margin,
-    y,
-    size: 8,
-    font,
-    color: rgb(0.5, 0.5, 0.5),
+  const payrollOrgLines: string[] = []
+  if (docInfo.department) payrollOrgLines.push(docInfo.department)
+  if (docInfo.positionName) payrollOrgLines.push(docInfo.positionName)
+
+  payrollOrgLines.forEach((line) => {
+    checkPage()
+    page.drawText(line, {
+      x: margin,
+      y,
+      size: 9,
+      font,
+      color: rgb(0.4, 0.4, 0.4),
+    })
+    y -= 13
   })
-  y -= 12
+
+  if (payrollOrgLines.length > 0) y -= 4
 
   if (docInfo.completedAt) {
     page.drawText(`Vyplněno: ${formatDate(docInfo.completedAt)}`, {
@@ -258,12 +239,12 @@ function generatePayrollInfoPDF(
     thickness: 1,
     color: rgb(0.8, 0.8, 0.8),
   })
-  y -= 25
+  y -= 30
 
   checkPage()
   y = drawSectionHeader(
     page,
-    "1. Základní údaje zaměstnance",
+    "Základní údaje zaměstnance",
     y,
     fontBold,
     pageWidth,
@@ -307,6 +288,27 @@ function generatePayrollInfoPDF(
     page,
     "Rodné číslo",
     data.birthNumber ?? "",
+    y,
+    font,
+    fontBold,
+    margin
+  )
+  checkPage()
+
+  const birthDateParts = [
+    data.birthDay,
+    data.birthMonth,
+    data.birthYear,
+  ].filter(Boolean)
+  const birthDateDisplay =
+    birthDateParts.length > 0
+      ? `${data.birthDay ?? ""}. ${data.birthMonth ?? ""}. ${data.birthYear ?? ""}`.trim()
+      : ""
+
+  y = drawField(
+    page,
+    "Datum narození",
+    birthDateDisplay,
     y,
     font,
     fontBold,
@@ -400,7 +402,7 @@ function generatePayrollInfoPDF(
   checkPage()
   y = drawSectionHeader(
     page,
-    "2. Zdravotní pojišťovna",
+    "Zdravotní pojišťovna",
     y,
     fontBold,
     pageWidth,
@@ -421,7 +423,7 @@ function generatePayrollInfoPDF(
   checkPage()
   y = drawSectionHeader(
     page,
-    "3. Zasílání platu/odměny na bankovní účet",
+    "Zasílání platu/odměny na bankovní účet",
     y,
     fontBold,
     pageWidth,
@@ -512,6 +514,11 @@ export async function GET(
           select: {
             name: true,
             surname: true,
+            titleBefore: true,
+            titleAfter: true,
+            positionName: true,
+            department: true,
+            unitName: true,
           },
         },
       },
@@ -561,6 +568,11 @@ export async function GET(
       employeeName: [doc.onboarding?.name, doc.onboarding?.surname]
         .filter(Boolean)
         .join(" "),
+      titleBefore: doc.onboarding?.titleBefore ?? null,
+      titleAfter: doc.onboarding?.titleAfter ?? null,
+      positionName: doc.onboarding?.positionName ?? null,
+      department: doc.onboarding?.department ?? null,
+      unitName: doc.onboarding?.unitName ?? null,
     }
 
     generatePayrollInfoPDF(pdfDoc, font, fontBold, doc.data, docInfo)

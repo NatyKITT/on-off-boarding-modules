@@ -391,7 +391,21 @@ const unpaidLeaveEntrySchema = z
   })
 
 export const affidavitSchema = z.object({
-  experience: z.array(experienceEntrySchema).default([]),
+  experience: z
+    .array(experienceEntrySchema)
+    .default([])
+    .superRefine((arr, ctx) => {
+      const hasAnyFilled = arr.some(
+        (e) => !!e.employer || !!e.jobType || !!e.from
+      )
+      if (!hasAnyFilled) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "Vyplňte alespoň jeden záznam praxe (zaměstnavatel, druh práce a datum Od).",
+        })
+      }
+    }),
 
   militaryService: z.array(militaryEntrySchema).default([]),
 
@@ -454,6 +468,9 @@ export const payrollInfoSchema = z.object({
   maidenName: requiredTrimmedString("Rodné příjmení je povinné."),
   birthPlace: requiredTrimmedString("Místo narození je povinné."),
   birthNumber: optionalTrimmedString,
+  birthDay: requiredTrimmedString("Den narození je povinný."),
+  birthMonth: requiredTrimmedString("Měsíc narození je povinný."),
+  birthYear: requiredTrimmedString("Rok narození je povinný."),
   maritalStatus: maritalStatusEnum,
 
   permanentStreet: requiredTrimmedString("Ulice je povinná."),
@@ -476,7 +493,7 @@ export const payrollInfoSchema = z.object({
     (val) => val,
     "Pro odeslání musíte potvrdit prohlášení."
   ),
-  signatureDate: requiredTrimmedString("Datum je povinné."),
+  signatureDate: requiredTrimmedString("Datum odeslání je povinné."),
 })
 
 export type PayrollInfoSchema = z.infer<typeof payrollInfoSchema>

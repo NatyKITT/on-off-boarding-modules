@@ -20,6 +20,10 @@ function isPraha6(email?: string | null) {
   return getDomain(email) === "praha6.cz"
 }
 
+function isKitt6(email?: string | null) {
+  return getDomain(email) === "kitt6.cz"
+}
+
 function jsonError(status: number, message: string) {
   return new NextResponse(JSON.stringify({ message }), {
     status,
@@ -29,6 +33,13 @@ function jsonError(status: number, message: string) {
 
 function isMutatingMethod(method: string) {
   return ["POST", "PUT", "PATCH", "DELETE"].includes(method.toUpperCase())
+}
+
+function isVystupniList(path: string) {
+  return (
+    /^\/odchody\/\d+\/vystupni-list(\/.*)?$/.test(path) ||
+    /^\/api\/odchody\/\d+\/exit-checklist(\/.*)?$/.test(path)
+  )
 }
 
 export default auth((req) => {
@@ -53,10 +64,11 @@ export default auth((req) => {
 
   if (!session?.user) {
     if (isApi) return jsonError(401, "Nejste přihlášen(a).")
-
     const signInUrl = new URL("/signin", req.url)
-    const callbackUrl = `${req.nextUrl.pathname}${req.nextUrl.search}`
-    signInUrl.searchParams.set("callbackUrl", callbackUrl)
+    signInUrl.searchParams.set(
+      "callbackUrl",
+      `${req.nextUrl.pathname}${req.nextUrl.search}`
+    )
     return NextResponse.redirect(signInUrl)
   }
 
@@ -68,7 +80,7 @@ export default auth((req) => {
     path.startsWith("/public/exit") || path.startsWith("/api/public/exit")
 
   if (isPublicExit) {
-    if (!isPraha6(email)) {
+    if (!isPraha6(email) && !isKitt6(email)) {
       return isApi
         ? jsonError(403, "Nemáte oprávnění k podpisové části.")
         : NextResponse.redirect(new URL("/prehled", req.url))
@@ -78,6 +90,15 @@ export default auth((req) => {
 
   if (path === "/") {
     return NextResponse.redirect(new URL("/prehled", req.url))
+  }
+
+  if (isVystupniList(path)) {
+    if (!isPraha6(email) && !isKitt6(email)) {
+      return isApi
+        ? jsonError(403, "Přístup pouze pro zaměstnance ÚMČ Praha 6.")
+        : NextResponse.redirect(new URL("/no-access", req.url))
+    }
+    return NextResponse.next()
   }
 
   if (role === "USER" || !canAccessApp) {
@@ -99,8 +120,10 @@ export default auth((req) => {
     if (path.startsWith("/api/public/exit")) {
       return NextResponse.next()
     }
-
-    return jsonError(403, "Máte pouze režim pro čtení (read-only).")
+    return jsonError(
+      403,
+      "Máte pouze režim pro čtení. Pro úpravy kontaktujte administrátora."
+    )
   }
 
   return NextResponse.next()

@@ -212,16 +212,11 @@ export async function PATCH(
     let pdfBuffer: ArrayBuffer | null = null
 
     try {
-      const origin =
-        req.headers.get("origin") ||
-        req.headers.get("x-forwarded-host")?.toString() ||
-        "http://localhost:3000"
-
+      const origin = (
+        process.env.NEXTAUTH_URL ?? "http://localhost:3001"
+      ).replace(/\/$/, "")
       const pdfUrl = `${origin}/api/dokumenty/public/${hash}/pdf`
-
-      const pdfResponse = await fetch(pdfUrl, {
-        cache: "no-store",
-      })
+      const pdfResponse = await fetch(pdfUrl)
 
       if (pdfResponse.ok) {
         pdfBuffer = await pdfResponse.arrayBuffer()

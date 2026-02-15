@@ -2,12 +2,13 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { LayoutDashboard, Lock, LogOut, Settings } from "lucide-react"
+import { Eye, LayoutDashboard, Lock, LogOut, Settings } from "lucide-react"
 import { signOut, useSession } from "next-auth/react"
 import { Drawer } from "vaul"
 
 import { useMediaQuery } from "@/hooks/use-media-query"
 
+import { Badge } from "@/components/ui/badge"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,6 +17,27 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { UserAvatar } from "@/components/shared/user-avatar"
+
+const ROLE_CONFIG: Record<
+  string,
+  { label: string; variant: "secondary" | "outline" }
+> = {
+  HR: { label: "HR", variant: "secondary" },
+  IT: { label: "IT", variant: "secondary" },
+  READONLY: { label: "Pouze čtení", variant: "outline" },
+}
+
+function RoleBadge({ role }: { role?: string | null }) {
+  if (!role) return null
+  const config = ROLE_CONFIG[role]
+  if (!config) return null
+  return (
+    <Badge variant={config.variant} className="w-fit text-xs">
+      {role === "READONLY" && <Eye className="mr-1 size-3" />}
+      {config.label}
+    </Badge>
+  )
+}
 
 export function UserAccountNav() {
   const { data: session } = useSession()
@@ -29,6 +51,18 @@ export function UserAccountNav() {
   if (!user) {
     return <div className="size-8 animate-pulse rounded-full border bg-muted" />
   }
+
+  const userInfo = (
+    <div className="flex flex-col gap-1">
+      {user.name && <p className="font-medium">{user.name}</p>}
+      {user.email && (
+        <p className="w-[200px] truncate text-sm text-muted-foreground">
+          {user.email}
+        </p>
+      )}
+      <RoleBadge role={user.role} />
+    </div>
+  )
 
   if (isMobile) {
     return (
@@ -56,18 +90,11 @@ export function UserAccountNav() {
             </div>
 
             <div className="flex items-center justify-start gap-2 p-2">
-              <div className="flex flex-col">
-                {user.name && <p className="font-medium">{user.name}</p>}
-                {user.email && (
-                  <p className="w-[200px] truncate text-muted-foreground">
-                    {user.email}
-                  </p>
-                )}
-              </div>
+              {userInfo}
             </div>
 
             <ul role="list" className="mb-14 mt-1 w-full text-muted-foreground">
-              {user.role === "ADMIN" ? (
+              {user.role === "ADMIN" && (
                 <li className="rounded-lg text-foreground hover:bg-muted">
                   <Link
                     href="/admin"
@@ -78,8 +105,7 @@ export function UserAccountNav() {
                     <p className="text-sm">Administrace</p>
                   </Link>
                 </li>
-              ) : null}
-
+              )}
               <li className="rounded-lg text-foreground hover:bg-muted">
                 <Link
                   href="/prehled"
@@ -90,7 +116,6 @@ export function UserAccountNav() {
                   <p className="text-sm">Přehled</p>
                 </Link>
               </li>
-
               <li className="rounded-lg text-foreground hover:bg-muted">
                 <Link
                   href="/nastaveni"
@@ -101,7 +126,6 @@ export function UserAccountNav() {
                   <p className="text-sm">Nastavení</p>
                 </Link>
               </li>
-
               <li
                 className="rounded-lg text-foreground hover:bg-muted"
                 onClick={(event) => {
@@ -140,25 +164,18 @@ export function UserAccountNav() {
 
       <DropdownMenuContent align="end">
         <div className="flex items-center justify-start gap-2 p-2">
-          <div className="flex flex-col space-y-1 leading-none">
-            {user.name && <p className="font-medium">{user.name}</p>}
-            {user.email && (
-              <p className="w-[200px] truncate text-sm text-muted-foreground">
-                {user.email}
-              </p>
-            )}
-          </div>
+          {userInfo}
         </div>
         <DropdownMenuSeparator />
 
-        {user.role === "ADMIN" ? (
+        {user.role === "ADMIN" && (
           <DropdownMenuItem asChild>
             <Link href="/admin" className="flex items-center space-x-2.5">
               <Lock className="size-4" />
               <p className="text-sm">Administrace</p>
             </Link>
           </DropdownMenuItem>
-        ) : null}
+        )}
 
         <DropdownMenuItem asChild>
           <Link href="/prehled" className="flex items-center space-x-2.5">

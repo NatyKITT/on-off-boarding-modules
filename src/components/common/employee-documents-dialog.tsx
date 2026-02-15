@@ -117,16 +117,20 @@ export function EmployeeDocumentsDialog({
 
   const { toast } = useToast()
   const router = useRouter()
+  const knownDocuments = useMemo(
+    () => documents.filter((d) => (ALL_TYPES as string[]).includes(d.type)),
+    [documents]
+  )
 
   const documentsByType = useMemo(() => {
     const map = new Map<EmploymentDocumentType, EmploymentDocumentLite>()
-    for (const d of documents) map.set(d.type, d)
+    for (const d of knownDocuments) map.set(d.type, d)
     return map
-  }, [documents])
+  }, [knownDocuments])
 
   const existingTypes = useMemo(
-    () => new Set(documents.map((d) => d.type)),
-    [documents]
+    () => new Set(knownDocuments.map((d) => d.type)),
+    [knownDocuments]
   )
 
   function getPublicUrlForDoc(doc: EmploymentDocumentLite): string | null {
@@ -172,8 +176,10 @@ export function EmployeeDocumentsDialog({
     setError(null)
     ;(async () => {
       const list = await loadDocuments()
-
-      const defaultSelection = list
+      const knownList = list.filter((d) =>
+        (ALL_TYPES as string[]).includes(d.type)
+      )
+      const defaultSelection = knownList
         .filter((d) => Boolean(getPublicUrlForDoc(d)))
         .map((d) => d.type)
 
@@ -279,7 +285,7 @@ export function EmployeeDocumentsDialog({
   }
 
   async function handleSendEmail() {
-    const selectedDocs = documents
+    const selectedDocs = knownDocuments
       .map((d) => {
         const url = getPublicUrlForDoc(d)
         return url && emailSelection.includes(d.type)
@@ -316,7 +322,6 @@ export function EmployeeDocumentsDialog({
 
       const justSentTypes = selectedDocs.map((d) => d.type)
       setSentTypes(justSentTypes)
-
       setNeedsResendTypes((prev) =>
         prev.filter((t) => !justSentTypes.includes(t))
       )
@@ -378,15 +383,13 @@ export function EmployeeDocumentsDialog({
       setNeedsResendTypes((prev) =>
         prev.includes(updated.type) ? prev : [...prev, updated.type]
       )
-
       setEmailSelection((prev) =>
         prev.includes(updated.type) ? prev : [...prev, updated.type]
       )
 
       toast({
         title: "Dokument obnoven",
-        description:
-          "Vyplněná data byla smazána. Odkaz zůstává stejný (není nutné posílat e-mail znovu).",
+        description: "Vyplněná data byla smazána. Odkaz zůstává stejný.",
       })
     } catch (e) {
       const msg =
@@ -433,7 +436,7 @@ export function EmployeeDocumentsDialog({
       toast({
         title: "Odkaz obnoven",
         description:
-          "Byl vygenerován nový odkaz. Nezapomeňte znovu odeslat e-mail s odkazem na tento dokument.",
+          "Byl vygenerován nový odkaz. Nezapomeňte znovu odeslat e-mail.",
       })
     } catch (e) {
       const msg =
@@ -469,12 +472,11 @@ export function EmployeeDocumentsDialog({
       <DialogContent className="max-h-[80vh] max-w-3xl overflow-auto">
         <DialogHeader>
           <DialogTitle>
-            Dokumenty k nástupu
-            {employeeName ? ` – ${employeeName}` : ""}
+            Dokumenty k nástupu{employeeName ? ` – ${employeeName}` : ""}
           </DialogTitle>
           <DialogDescription>
             Správa všech dokumentů k nástupu (čestné prohlášení, osobní dotazník
-            a praxe).
+            a dokumenty potřebné pro vedení mzdové agendy).
           </DialogDescription>
         </DialogHeader>
 
@@ -556,13 +558,13 @@ export function EmployeeDocumentsDialog({
               <div className="flex items-center justify-center py-4 text-sm text-muted-foreground">
                 Načítám dokumenty…
               </div>
-            ) : documents.length === 0 ? (
+            ) : knownDocuments.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 Zatím nejsou k tomuto nástupu přiřazeny žádné dokumenty.
               </p>
             ) : (
               <div className="max-h-[300px] space-y-2 overflow-auto pr-1 text-sm">
-                {documents.map((doc) => {
+                {knownDocuments.map((doc) => {
                   const statusText = statusLabel(doc.status)
                   const needsResend = needsResendTypes.includes(doc.type)
 
@@ -588,9 +590,7 @@ export function EmployeeDocumentsDialog({
                               {format(
                                 new Date(doc.completedAt),
                                 "d.M.yyyy H:mm",
-                                {
-                                  locale: cs,
-                                }
+                                { locale: cs }
                               )}
                             </div>
                           )}
@@ -631,7 +631,7 @@ export function EmployeeDocumentsDialog({
                           className="size-7"
                           onClick={() => setDocToRegenerate(doc)}
                           disabled={regeneratingId === doc.id}
-                          title="Obnovit odkaz (vygeneruje nový link a prodlouží platnost)"
+                          title="Obnovit odkaz (vygeneruje nový link)"
                         >
                           {regeneratingId === doc.id ? (
                             <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -685,7 +685,7 @@ export function EmployeeDocumentsDialog({
                           className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
                           onClick={() => setDocToReset(doc)}
                           disabled={resettingId === doc.id}
-                          title="Vymazat vyplněná data a vrátit dokument do stavu „Čeká na vyplnění“"
+                          title="Vymazat vyplněná data"
                         >
                           {resettingId === doc.id &&
                           docToReset?.id === doc.id ? (
@@ -708,18 +708,15 @@ export function EmployeeDocumentsDialog({
             </div>
             <p className="text-xs text-muted-foreground">
               Na níže uvedenou adresu bude odeslán e-mail s odkazy na vybrané
-              dokumenty. E-mail i výběr dokumentů můžete upravit.
+              dokumenty.
             </p>
 
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <Input
-                type="email"
-                className="sm:flex-1"
-                value={emailInput}
-                onChange={(e) => setEmailInput(e.target.value)}
-                placeholder="email zaměstnance"
-              />
-            </div>
+            <Input
+              type="email"
+              value={emailInput}
+              onChange={(e) => setEmailInput(e.target.value)}
+              placeholder="email zaměstnance"
+            />
 
             <div className="mt-2 grid gap-2 md:grid-cols-2">
               {ALL_TYPES.map((type) => {
@@ -790,7 +787,8 @@ export function EmployeeDocumentsDialog({
               </AlertDialogTitle>
               <AlertDialogDescription>
                 Vyplněné údaje budou odstraněny a dokument se vrátí do stavu
-                „Čeká na vyplnění“. <br />
+                „Čeká na vyplnění“.
+                <br />
                 <strong>
                   Odkaz bude stále platný po dobu 14 dní od zaslání emailů s
                   dokumenty.
@@ -821,10 +819,10 @@ export function EmployeeDocumentsDialog({
             <AlertDialogHeader>
               <AlertDialogTitle>Obnovit odkaz na dokument?</AlertDialogTitle>
               <AlertDialogDescription>
-                Vygeneruje se <strong>nový odkaz</strong> (a prodlouží se jeho
-                platnost). Starý odkaz přestane být aktuální. <br />
+                Vygeneruje se <strong>nový odkaz</strong> (platnost
+                prodloužena). Starý odkaz přestane fungovat.{" "}
                 <strong>
-                  Poté je potřeba zaměstnanci znovu odeslat e-mail s odkazem.
+                  Poté je potřeba zaměstnanci znovu odeslat e-mail.
                 </strong>
               </AlertDialogDescription>
             </AlertDialogHeader>

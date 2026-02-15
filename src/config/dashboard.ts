@@ -12,30 +12,15 @@ export const sidebarLinks: SidebarNavItem[] = [
         authorizeOnly: Role.ADMIN,
       },
       { href: "/prehled", icon: "dashboard", title: "Přehled" },
-      {
-        href: "/nastupy",
-        icon: "userPlus",
-        title: "Nástupy",
-      },
-      {
-        href: "/odchody",
-        icon: "userMinus",
-        title: "Odchody",
-      },
+      { href: "/nastupy", icon: "userPlus", title: "Nástupy" },
+      { href: "/odchody", icon: "userMinus", title: "Odchody" },
     ],
   },
   {
     title: "Systém",
     items: [
       { href: "/nastaveni", icon: "settings", title: "Nastavení" },
-      { href: "/", icon: "home", title: "Domů" },
-      {
-        href: "#",
-        icon: "messages",
-        title: "Podpora",
-        authorizeOnly: Role.USER,
-        disabled: true,
-      },
+      { href: "/prehled", icon: "home", title: "Domů" },
     ],
   },
 ]

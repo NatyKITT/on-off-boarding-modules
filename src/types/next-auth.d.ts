@@ -7,12 +7,15 @@ declare module "next-auth" {
       id: string
       role: Role
       canAccessApp: boolean
+      name?: string | null
     }
   }
 
   interface User extends DefaultUser {
     role?: Role | null
     canAccessApp?: boolean | null
+    name?: string | null
+    surname?: string | null
   }
 }
 
@@ -22,5 +25,6 @@ declare module "next-auth/jwt" {
     role?: Role
     canAccessApp?: boolean
     email?: string | null
+    name?: string | null
   }
 }

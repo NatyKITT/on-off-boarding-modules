@@ -285,7 +285,6 @@ function buildGroupLabel(
     const a = counts.actualStart
     const total = p + a
 
-    // ✅ DENNÍ REŽIM: dlouhé texty pro VŠECHNY tier
     if (view === "day") {
       const parts: string[] = []
       if (p > 0) parts.push(`Plánované ${p}${mul}`)
@@ -293,32 +292,27 @@ function buildGroupLabel(
       return `Nástupy: ${parts.join(", ")}`
     }
 
-    // MOBILE: ultra krátké
     if (tier === "mobile") {
       return `N ${total}${mul}`
     }
 
-    // TABLET: bez pl./sk.
     if (tier === "tablet") {
       return `Nástupy ${total}${mul}`
     }
 
-    // LAPTOP: zkratky
     if (tier === "laptop") {
       const parts: string[] = []
-      if (p > 0) parts.push(`pl. ${p}${mul}`) // ✅ Přidány závorky
-      if (a > 0) parts.push(`sk. ${a}${mul}`) // ✅ Přidány závorky
+      if (p > 0) parts.push(`pl. ${p}${mul}`)
+      if (a > 0) parts.push(`sk. ${a}${mul}`)
       return `Nástupy: ${parts.join(" + ")}`
     }
 
-    // DESKTOP: plné texty
     const parts: string[] = []
-    if (p > 0) parts.push(`Plánované ${p}${mul}`) // ✅ Přidány závorky
-    if (a > 0) parts.push(`Skutečné ${a}${mul}`) // ✅ Přidány závorky
+    if (p > 0) parts.push(`Plánované ${p}${mul}`)
+    if (a > 0) parts.push(`Skutečné ${a}${mul}`)
     return `Nástupy: ${parts.join(", ")}`
   }
 
-  // ODCHODY
   const p = counts.plannedEnd
   const a = counts.actualEnd
   const total = p + a
@@ -340,14 +334,14 @@ function buildGroupLabel(
 
   if (tier === "laptop") {
     const parts: string[] = []
-    if (p > 0) parts.push(`pl. ${p}${mul}`) // ✅ Přidány závorky
-    if (a > 0) parts.push(`sk. ${a}${mul}`) // ✅ Přidány závorky
+    if (p > 0) parts.push(`pl. ${p}${mul}`)
+    if (a > 0) parts.push(`sk. ${a}${mul}`)
     return `Odchody: ${parts.join(" + ")}`
   }
 
   const parts: string[] = []
-  if (p > 0) parts.push(`Plánované ${p}${mul}`) // ✅ Přidány závorky
-  if (a > 0) parts.push(`Skutečné ${a}${mul}`) // ✅ Přidány závorky
+  if (p > 0) parts.push(`Plánované ${p}${mul}`)
+  if (a > 0) parts.push(`Skutečné ${a}${mul}`)
   return `Odchody: ${parts.join(", ")}`
 }
 
@@ -506,9 +500,7 @@ export default function DashboardPage(): JSX.Element {
     const el = bigRef.current
     const ro = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect?.width ?? 0
-      // ✅ Použít přímo konstantu místo WIDE_CALENDAR_MIN
-      setIsDesktopMonthWide(w >= 1700) // DESKTOP_MONTH_WIDE_WIDTH_PX
-
+      setIsDesktopMonthWide(w >= 1700)
       requestAnimationFrame(() => window.dispatchEvent(new Event("resize")))
     })
 
@@ -703,19 +695,7 @@ export default function DashboardPage(): JSX.Element {
     }
   }, [])
 
-  /**
-   * ✅ Měsíc:
-   * - Desktop + wide: do 4 událostí ukazuj jména (bez group). Pokud >4, groupuj po typech (pl/sk nástupy a pl/sk odchody),
-   *   single nech jako jméno.
-   * - Desktop + užší políčka: fallback 2 groupy (Nástupy / Odchody)
-   * - Laptop/Tablet/Mobile: zachovej compact chování = 2 groupy
-   *
-   * ✅ Týden/Den:
-   * - logika slotů zůstává, cluster vzniká jen při kolizi (stejný slot).
-   * - na desktopu se u jednotlivých událostí ukazuje jméno.
-   */
   const displayEvents = useMemo<CalendarEvent[]>(() => {
-    // MONTH
     if (bigView === "month") {
       const perDay = new Map<string, CalendarEvent[]>()
       for (const ev of events) {
@@ -812,7 +792,6 @@ export default function DashboardPage(): JSX.Element {
           }
         })
 
-        // extra bezpečnost: kdyby bylo pořád moc segmentů, spadni do 2 skupin
         if (itemsOut.length > GROUP_AFTER) {
           pushStartEndGroups(ordered, dk)
           return
@@ -828,8 +807,6 @@ export default function DashboardPage(): JSX.Element {
             a.title.localeCompare(b.title, "cs")
         )
 
-        // ✅ Na velkých monitorech (1200px+) s širokým kalendářem (>1100px)
-        // zobrazit do 2 událostí jména, víc = groupy po typech
         if (tier === "desktop" && isDesktopMonthWide) {
           if (ordered.length <= GROUP_AFTER) {
             out.push(...ordered)
@@ -839,14 +816,12 @@ export default function DashboardPage(): JSX.Element {
           return
         }
 
-        // Všechny ostatní případy: 2 groupy (Nástupy/Odchody)
         pushStartEndGroups(ordered, dk)
       })
 
       return out
     }
 
-    // WEEK / DAY
     if (bigView === "week" || bigView === "day") {
       const out: CalendarEvent[] = []
       const perDay = new Map<string, CalendarEvent[]>()
@@ -924,7 +899,6 @@ export default function DashboardPage(): JSX.Element {
         untimedOrdered.forEach((ev) => addToSlot(ev, nextFreeSlotStart()))
 
         slots.forEach((slotEvents, sk) => {
-          // Desktop + široký kalendář = zobrazit jména
           if (tier === "desktop" && isDesktopMonthWide) {
             out.push(...slotEvents)
             return
@@ -943,7 +917,6 @@ export default function DashboardPage(): JSX.Element {
           let type: EventType = slotEvents[0]!.type
           let groupKind: "onb" | "off" | undefined
 
-          // ✅ POUŽÍT buildSlotClusterLabel místo buildGroupLabel
           if (hasStart && !hasEnd) {
             title = buildSlotClusterLabel({
               kind: "onb",
@@ -1384,7 +1357,6 @@ export default function DashboardPage(): JSX.Element {
               ? "12px"
               : "13px"
 
-      // Den: vždy jméno
       if (bigView === "day") {
         return (
           <div
@@ -1408,8 +1380,6 @@ export default function DashboardPage(): JSX.Element {
         )
       }
 
-      // ✅ Desktop (velké monitory): v týdnu i měsíci u jednotlivých událostí ukazuj jméno
-      // Group/cluster samozřejmě zůstává label.
       let displayText = event.title
 
       if (event.entity === "group" || event.entity === "cluster") {
@@ -1420,7 +1390,6 @@ export default function DashboardPage(): JSX.Element {
       ) {
         displayText = event.title
       } else {
-        // Laptop/Tablet/Mobile: typy/zkratky
         if (tier === "mobile" && bigView === "week") {
           displayText = TYPE_LABEL_ULTRA_SHORT[event.type]
         } else if (tier === "mobile" || tier === "tablet") {
@@ -1457,20 +1426,18 @@ export default function DashboardPage(): JSX.Element {
   )
 
   const calendarHeight = useMemo(() => {
-    if (bigView === "month") {
-      return tier === "mobile"
-        ? "h-[520px]"
-        : "h-[440px] sm:h-[560px] md:h-[680px] lg:h-[calc(100vh-10rem)]"
+    if (tier === "mobile") {
+      return bigView === "month" ? "h-[480px]" : "h-[560px]"
     }
-    if (tier === "mobile") return "h-[600px]"
-    if (tier === "tablet") return "h-[700px]"
-    return "h-[calc(100vh-10rem)]"
+    if (tier === "tablet") {
+      return bigView === "month" ? "h-[560px]" : "h-[640px]"
+    }
+    return "h-[calc(100vh-6rem)]"
   }, [bigView, tier])
 
   return (
-    <div className="flex flex-col gap-4 p-2 sm:p-3 md:p-4 xl:flex-row xl:gap-6 xl:p-6">
-      {/* Sidebar s mini kalendářem */}
-      <aside className="w-full shrink-0 rounded-2xl bg-white/90 p-3 shadow-md ring-1 ring-black/5 dark:bg-neutral-900 lg:w-[280px] lg:p-4">
+    <div className="flex flex-col gap-4 p-2 sm:p-3 md:p-4 xl:flex-row xl:items-start xl:gap-6 xl:p-6">
+      <aside className="w-full shrink-0 rounded-2xl bg-white/90 p-3 shadow-md ring-1 ring-black/5 dark:bg-neutral-900 xl:w-[280px] xl:p-4">
         <div ref={miniCalRef}>
           <MiniCalendar
             locale="cs-CZ"
@@ -1517,12 +1484,11 @@ export default function DashboardPage(): JSX.Element {
         </div>
       </aside>
 
-      {/* Main calendar */}
       <section
         ref={bigRef}
-        className="min-w-0 max-w-full flex-1 overflow-hidden rounded-2xl bg-white p-2 shadow-lg ring-1 ring-black/5 dark:bg-neutral-900 sm:p-3 lg:p-4"
+        className="min-w-0 max-w-full flex-1 rounded-2xl bg-white p-2 shadow-lg ring-1 ring-black/5 dark:bg-neutral-900 sm:p-3 lg:p-4"
       >
-        <div className={`min-w-0 ${calendarHeight}`}>
+        <div className={`w-full ${calendarHeight}`}>
           <Calendar<CalendarEvent>
             localizer={localizer}
             events={displayEvents}
@@ -1530,6 +1496,7 @@ export default function DashboardPage(): JSX.Element {
             endAccessor="end"
             titleAccessor="title"
             selectable="ignoreEvents"
+            longPressThreshold={10}
             onSelectSlot={handleSelectSlot}
             onSelectEvent={(e) => void onSelectEvent(e)}
             date={currentDate}
@@ -1543,6 +1510,7 @@ export default function DashboardPage(): JSX.Element {
             timeslots={2}
             min={minTime}
             max={maxTime}
+            scrollToTime={minTime}
             components={{ event: EventCell }}
             tooltipAccessor={null}
             dayLayoutAlgorithm="no-overlap"
@@ -1574,7 +1542,7 @@ export default function DashboardPage(): JSX.Element {
                     tier === "mobile" ? 10 : bigView === "month" ? 11 : 12,
                   fontWeight: 800,
                   textShadow: "0 1px 1px rgba(0,0,0,0.22)",
-                  overflow: "visible",
+                  overflow: "hidden",
                   height: "auto",
                   minHeight:
                     tier === "mobile"
@@ -1591,44 +1559,248 @@ export default function DashboardPage(): JSX.Element {
           />
         </div>
       </section>
-
       <style jsx global>{`
+        .rbc-month-view,
+        .rbc-time-view,
+        .rbc-calendar {
+          touch-action: manipulation;
+        }
+        .rbc-day-bg,
+        .rbc-date-cell {
+          touch-action: manipulation;
+          cursor: pointer;
+        }
+        .rbc-time-slot,
+        .rbc-day-slot {
+          touch-action: pan-y;
+          cursor: pointer;
+        }
         .touch-scroll {
           -webkit-overflow-scrolling: touch;
           overscroll-behavior: contain;
           touch-action: pan-y;
         }
-
-        .rbc-time-content,
-        .rbc-time-view,
         .rbc-calendar {
-          touch-action: pan-y;
+          min-width: 100%;
+          width: 100%;
+          height: 100% !important;
+          display: flex !important;
+          flex-direction: column !important;
+        }
+        .rbc-toolbar {
+          flex-shrink: 0;
+        }
+        .rbc-event {
+          white-space: normal !important;
+          word-break: break-word !important;
+          overflow-wrap: anywhere !important;
+          overflow: hidden !important;
+          box-sizing: border-box !important;
+        }
+        .rbc-event-label {
+          display: none !important;
+        }
+        .rbc-show-more {
+          font-size: 11px;
+          padding: 1px 3px;
+          margin-top: 1px;
+          cursor: pointer;
+          background: transparent;
+        }
+        .rbc-month-view {
+          display: flex !important;
+          flex-direction: column !important;
+          flex: 1 1 auto !important;
+          min-height: 0 !important;
+          overflow: hidden !important;
+          border: 1px solid #e5e7eb;
+          border-radius: 8px;
+        }
+        .rbc-month-header {
+          flex-shrink: 0 !important;
+          border-bottom: 1px solid #e5e7eb;
+        }
+        .rbc-month-row {
+          flex: 1 1 0% !important;
+          min-height: 0 !important;
+          max-height: none !important;
+          overflow: hidden !important;
+          position: relative !important;
+          border-bottom: 1px solid #e5e7eb;
+        }
+        .rbc-month-row:last-child {
+          border-bottom: none !important;
+        }
+        .rbc-row-bg {
+          display: flex !important;
+          position: absolute !important;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+        }
+        .rbc-row-content {
+          position: relative !important;
+          z-index: 1 !important;
+          padding-bottom: 2px;
+        }
+        .rbc-row-segment {
+          padding: 1px 2px !important;
+        }
+        .rbc-month-view .rbc-event {
+          height: auto !important;
+          min-height: 20px !important;
+          padding: 2px 5px !important;
+          margin-bottom: 1px !important;
+          font-size: 11px !important;
+          line-height: 1.3 !important;
+          border-radius: 4px !important;
+        }
+        .rbc-date-cell {
+          padding: 2px 4px !important;
+          font-size: 12px;
+          text-align: right;
+        }
+        .rbc-time-view {
+          display: flex !important;
+          flex-direction: column !important;
+          flex: 1 1 auto !important;
+          min-height: 0 !important;
+          overflow: clip !important;
+          border: 1px solid #e5e7eb;
+          border-radius: 8px;
+        }
+        .rbc-time-header {
+          flex-shrink: 0 !important;
+          overflow: visible !important;
+          border-bottom: 1px solid #e5e7eb;
+        }
+        .rbc-time-content {
+          flex: 1 1 auto !important;
+          min-height: 0 !important;
+          overflow-x: hidden !important;
+          overflow-y: scroll !important;
+        }
+        .rbc-timeslot-group {
+          min-height: 92px !important;
+          border-bottom: 1px solid #f3f4f6;
+        }
+        .rbc-time-slot {
+          min-height: 46px !important;
+        }
+        .rbc-time-gutter {
+          width: 56px !important;
+          font-size: 11px !important;
+          flex-shrink: 0 !important;
+        }
+        .rbc-time-view .rbc-event {
+          font-size: 12px !important;
+          padding: 2px 5px !important;
+          border-radius: 4px !important;
+          overflow: hidden !important;
+        }
+        .rbc-time-view .rbc-event-content {
+          white-space: normal !important;
+          overflow: hidden !important;
+          word-break: break-word !important;
+        }
+        .react-calendar__tile {
+          position: relative !important;
+          overflow: visible !important;
+          display: block !important;
+          padding: 5px 2px !important;
+          text-align: center !important;
+        }
+        .react-calendar__tile abbr {
+          display: inline-block !important;
+          font-size: 13px !important;
+          width: 26px !important;
+          height: 26px !important;
+          line-height: 26px !important;
+          text-align: center !important;
+          border-radius: 50% !important;
+          position: relative !important;
+          z-index: 2 !important;
+        }
+        .mini-marker {
+          position: absolute !important;
+          top: 50% !important;
+          left: 50% !important;
+          transform: translate(-50%, -50%) !important;
+          width: 26px !important;
+          height: 26px !important;
+          border-radius: 50% !important;
+          pointer-events: none !important;
+          z-index: 1 !important;
+          display: block !important;
+          opacity: 0.4 !important;
+        }
+
+        .react-calendar__month-view__days__day--weekend abbr {
+          color: #dc2626 !important;
+        }
+        .react-calendar__month-view__days__day--weekend.mini-outside abbr,
+        .react-calendar__month-view__days__day--weekend.mini-outside-weekend
+          abbr {
+          color: #fca5a5 !important;
+        }
+
+        .mini-today abbr {
+          font-weight: 700 !important;
+        }
+        .mini-selected {
+          background: rgba(59, 130, 246, 0.15) !important;
+          border: 2px solid rgb(59, 130, 246) !important;
+          border-radius: 4px !important;
+        }
+        .mini-weekend {
+          background: rgba(220, 38, 38, 0.03);
+        }
+        .mini-outside {
+          opacity: 0.4;
+        }
+        .mini-outside-weekend {
+          opacity: 0.35;
+        }
+        .react-calendar {
+          width: 100%;
+          border: none;
+          font-family: inherit;
+        }
+        .react-calendar__navigation button {
+          font-size: 14px;
+          font-weight: 600;
+          min-width: 36px;
+          height: 36px;
+        }
+        .react-calendar__month-view__weekdays {
+          font-size: 11px;
+          font-weight: 600;
+          text-transform: lowercase;
+        }
+        .react-calendar__month-view__days__day {
+          color: inherit;
         }
 
         @media (max-width: 640px) {
           .rbc-calendar {
-            width: 100%;
             font-size: 11px;
           }
-
           .rbc-toolbar {
             flex-direction: column;
             align-items: stretch;
             gap: 0.25rem;
             padding: 0.25rem;
           }
-
           .rbc-toolbar .rbc-btn-group {
             flex-wrap: nowrap;
             justify-content: center;
             width: 100%;
           }
-
           .rbc-toolbar button {
             font-size: 10px;
             padding: 0.25rem 0.5rem;
           }
-
           .rbc-toolbar .rbc-toolbar-label {
             font-size: 12px;
             font-weight: 600;
@@ -1636,179 +1808,54 @@ export default function DashboardPage(): JSX.Element {
             width: 100%;
             padding: 0.25rem 0;
           }
-
           .rbc-header {
             padding: 3px !important;
             font-size: 10px !important;
             font-weight: 700;
-            min-height: 24px;
           }
-
           .rbc-date-cell {
-            padding: 2px !important;
-            font-size: 11px;
+            padding: 1px 2px !important;
+            font-size: 10px !important;
           }
-
-          .rbc-month-view {
-            border: 1px solid rgba(0, 0, 0, 0.1);
+          .rbc-month-view .rbc-event {
+            font-size: 9px !important;
+            padding: 1px 2px !important;
+            min-height: 14px !important;
           }
-
-          .rbc-month-row {
-            min-height: 60px !important;
-            overflow: visible;
-            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-          }
-
-          .rbc-day-bg {
-            border-left: 1px solid rgba(0, 0, 0, 0.1);
-          }
-
-          .rbc-row-content {
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
-          }
-
-          .rbc-row-segment {
-            padding: 1px;
-          }
-
           .rbc-time-gutter {
             width: 34px !important;
-            font-size: 9px;
+            font-size: 9px !important;
           }
-
-          .rbc-event {
-            padding: 1px 3px !important;
-            min-height: 16px !important;
+          .rbc-timeslot-group {
+            min-height: 56px !important;
+          }
+          .rbc-time-slot {
+            min-height: 28px !important;
+          }
+          .rbc-time-view .rbc-event {
             font-size: 10px !important;
-            margin-bottom: 2px;
-          }
-
-          .rbc-event-label {
-            display: none;
-          }
-
-          .rbc-show-more {
-            font-size: 9px;
-            padding: 1px 2px;
-            margin-top: 1px;
+            padding: 1px 3px !important;
           }
         }
 
-        @media (max-width: 768px) {
-          .rbc-month-view {
-            border: 1px solid rgba(0, 0, 0, 0.1);
-          }
-          .rbc-month-row {
-            min-height: 60px !important;
-            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-          }
-          .rbc-day-bg {
-            border-left: 1px solid rgba(0, 0, 0, 0.08);
-          }
-        }
-
-        @media (min-width: 641px) and (max-width: 768px) {
+        @media (min-width: 641px) and (max-width: 860px) {
           .rbc-toolbar button {
             font-size: 11px;
             padding: 0.35rem 0.75rem;
           }
-
           .rbc-header {
             padding: 3px !important;
             font-size: 10px !important;
           }
-
-          .rbc-month-row {
-            min-height: 70px !important;
+          .rbc-month-view .rbc-event {
+            font-size: 10px !important;
           }
-
-          .rbc-event {
-            font-size: 11px !important;
+          .rbc-timeslot-group {
+            min-height: 80px !important;
           }
-        }
-
-        .rbc-calendar {
-          min-width: 100%;
-        }
-
-        .mini-marker {
-          position: absolute;
-          left: 50%;
-          top: 50%;
-          transform: translate(-50%, -50%);
-          border-radius: 9999px;
-          z-index: 10;
-          pointer-events: none;
-        }
-
-        .react-calendar__tile {
-          position: relative;
-          overflow: visible;
-        }
-
-        .mini-today {
-          font-weight: 700 !important;
-        }
-
-        .mini-today abbr {
-          box-shadow: none;
-        }
-
-        .mini-selected {
-          background: rgba(59, 130, 246, 0.2) !important;
-          border: 2px solid rgb(59, 130, 246) !important;
-        }
-
-        .mini-weekend {
-          background: rgba(0, 0, 0, 0.02);
-        }
-
-        .mini-outside {
-          opacity: 0.4;
-        }
-
-        .mini-outside-weekend {
-          opacity: 0.3;
-          background: rgba(0, 0, 0, 0.01);
-        }
-
-        .react-calendar {
-          width: 100%;
-          border: none;
-          font-family: inherit;
-        }
-
-        .react-calendar__tile {
-          padding: 8px 2px;
-          font-size: 13px;
-          position: relative;
-        }
-
-        .react-calendar__tile abbr {
-          font-size: 13px;
-        }
-
-        .react-calendar__navigation button {
-          font-size: 14px;
-          font-weight: 600;
-          min-width: 36px;
-          height: 36px;
-        }
-
-        .react-calendar__month-view__weekdays {
-          font-size: 11px;
-          font-weight: 600;
-          text-transform: lowercase;
-        }
-
-        .react-calendar__month-view__days__day {
-          color: inherit;
         }
       `}</style>
 
-      {/* Plan overlay */}
       {planOpen && (
         <div
           className="fixed inset-0 z-[200] grid place-items-center bg-black/40 p-4"
@@ -1882,7 +1929,6 @@ export default function DashboardPage(): JSX.Element {
         </div>
       )}
 
-      {/* DIALOGS */}
       <Dialog open={openNewOnbPlanned} onOpenChange={setOpenNewOnbPlanned}>
         <DialogContent
           className={`z-[300] max-h-[90vh] ${tier === "mobile" ? "max-w-[95vw]" : "max-w-5xl"} touch-scroll overflow-y-auto p-0`}

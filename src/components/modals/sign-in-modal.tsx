@@ -20,23 +20,20 @@ function SignInModal({
   setShowSignInModal: Dispatch<SetStateAction<boolean>>
 }) {
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   async function handleSignIn() {
     try {
       setLoading(true)
-      const res = await signIn("google", {
+      setError(null)
+      await signIn("google", {
         callbackUrl: DEFAULT_SIGNIN_REDIRECT,
-        redirect: false,
+        redirect: true,
       })
-      if (res?.ok && res.url) {
-        window.location.assign(res.url)
-      } else {
-        setLoading(false)
-      }
-    } catch {
+    } catch (err) {
+      console.error("SignIn error:", err)
+      setError("Přihlášení se nezdařilo. Zkuste to prosím znovu.")
       setLoading(false)
-    } finally {
-      setShowSignInModal(false)
     }
   }
 
@@ -62,6 +59,9 @@ function SignInModal({
         </div>
 
         <div className="flex flex-col space-y-4 bg-secondary/50 px-4 py-8 md:px-16">
+          {error && (
+            <p className="text-center text-sm text-destructive">{error}</p>
+          )}
           <Button variant="default" disabled={loading} onClick={handleSignIn}>
             {loading ? (
               <Icons.spinner className="mr-2 size-4 animate-spin" />

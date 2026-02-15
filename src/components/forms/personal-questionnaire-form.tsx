@@ -80,6 +80,7 @@ export function PersonalQuestionnaireForm(
   const [isPending, startTransition] = useTransition()
 
   const form = useForm<PersonalQuestionnaireSchema>({
+    mode: "onChange",
     resolver: zodResolver(personalQuestionnaireSchema),
     defaultValues: (props.initialData as
       | PersonalQuestionnaireSchema
@@ -336,7 +337,7 @@ export function PersonalQuestionnaireForm(
         <section className="space-y-4 rounded-md border p-4">
           <h2 className="text-sm font-medium">Základní údaje</h2>
           <p className="text-xs text-muted-foreground">
-            základní identifikační údaje zaměstnankyně/zaměstnance
+            Základní identifikační údaje zaměstnankyně/zaměstnance
           </p>
 
           <div className="grid gap-3 md:grid-cols-2">
@@ -345,12 +346,22 @@ export function PersonalQuestionnaireForm(
                 Příjmení <span className="text-destructive">*</span>
               </Label>
               <Input {...register("lastName")} disabled={isFormDisabled} />
+              {errors.lastName && (
+                <p className="text-xs text-destructive">
+                  {errors.lastName.message as string}
+                </p>
+              )}
             </div>
             <div className="space-y-1">
               <Label>
                 Křestní jméno <span className="text-destructive">*</span>
               </Label>
               <Input {...register("firstName")} disabled={isFormDisabled} />
+              {errors.firstName && (
+                <p className="text-xs text-destructive">
+                  {errors.firstName.message as string}
+                </p>
+              )}
             </div>
             <div className="space-y-1">
               <Label>Titul před jménem</Label>
@@ -385,6 +396,11 @@ export function PersonalQuestionnaireForm(
                 {...register("birthDate")}
                 disabled={isFormDisabled}
               />
+              {errors.birthDate && (
+                <p className="text-xs text-destructive">
+                  {errors.birthDate.message as string}
+                </p>
+              )}
             </div>
             <div className="space-y-1">
               <Label>Rodné číslo</Label>
@@ -399,18 +415,33 @@ export function PersonalQuestionnaireForm(
                 Místo narození <span className="text-destructive">*</span>
               </Label>
               <Input {...register("birthPlace")} disabled={isFormDisabled} />
+              {errors.birthPlace && (
+                <p className="text-xs text-destructive">
+                  {errors.birthPlace.message as string}
+                </p>
+              )}
             </div>
             <div className="space-y-1">
               <Label>
                 Okres narození <span className="text-destructive">*</span>
               </Label>
               <Input {...register("birthDistrict")} disabled={isFormDisabled} />
+              {errors.birthDistrict && (
+                <p className="text-xs text-destructive">
+                  {errors.birthDistrict.message as string}
+                </p>
+              )}
             </div>
             <div className="space-y-1">
               <Label>
                 Stát narození <span className="text-destructive">*</span>
               </Label>
               <Input {...register("birthState")} disabled={isFormDisabled} />
+              {errors.birthState && (
+                <p className="text-xs text-destructive">
+                  {errors.birthState.message as string}
+                </p>
+              )}
             </div>
             <div className="space-y-1">
               <Label>Telefon (dobrovolný údaj)</Label>
@@ -421,10 +452,20 @@ export function PersonalQuestionnaireForm(
                 Státní občanství <span className="text-destructive">*</span>
               </Label>
               <Input {...register("citizenship")} disabled={isFormDisabled} />
+              {errors.citizenship && (
+                <p className="text-xs text-destructive">
+                  {errors.citizenship.message as string}
+                </p>
+              )}
             </div>
             <div className="space-y-1 md:col-span-2">
               <Label>Datová schránka (pokud je zřízena)</Label>
               <Input {...register("dataBoxId")} disabled={isFormDisabled} />
+              {errors.dataBoxId && (
+                <p className="text-xs text-destructive">
+                  {errors.dataBoxId.message as string}
+                </p>
+              )}
             </div>
           </div>
 
@@ -462,6 +503,11 @@ export function PersonalQuestionnaireForm(
                 <Label htmlFor="databox-no">Ne</Label>
               </div>
             </RadioGroup>
+            {errors.dataBoxDelivery && (
+              <p className="text-xs text-destructive">
+                {errors.dataBoxDelivery.message as string}
+              </p>
+            )}
           </div>
 
           <div className="space-y-3">
@@ -474,7 +520,9 @@ export function PersonalQuestionnaireForm(
                 setValue(
                   "maritalStatus",
                   value as PersonalQuestionnaireSchema["maritalStatus"],
-                  { shouldValidate: true }
+                  {
+                    shouldValidate: true,
+                  }
                 )
               }
               className="flex flex-wrap gap-4"
@@ -505,6 +553,11 @@ export function PersonalQuestionnaireForm(
                 <Label htmlFor="ms-na">Neuvádím</Label>
               </div>
             </RadioGroup>
+            {errors.maritalStatus && (
+              <p className="text-xs text-destructive">
+                {errors.maritalStatus.message as string}
+              </p>
+            )}
           </div>
 
           <div className="space-y-3">
@@ -517,6 +570,11 @@ export function PersonalQuestionnaireForm(
                 {...register("foreignPermitFrom")}
                 disabled={isFormDisabled}
               />
+              {errors.foreignPermitFrom && (
+                <p className="text-xs text-destructive">
+                  {errors.foreignPermitFrom.message as string}
+                </p>
+              )}
             </div>
             <div className="space-y-1">
               <Label>
@@ -527,6 +585,11 @@ export function PersonalQuestionnaireForm(
                 {...register("foreignPermitTo")}
                 disabled={isFormDisabled}
               />
+              {errors.foreignPermitTo && (
+                <p className="text-xs text-destructive">
+                  {errors.foreignPermitTo.message as string}
+                </p>
+              )}
             </div>
             <div className="space-y-1">
               <Label>
@@ -537,6 +600,11 @@ export function PersonalQuestionnaireForm(
                 {...register("foreignPermitAuthority")}
                 disabled={isFormDisabled}
               />
+              {errors.foreignPermitAuthority && (
+                <p className="text-xs text-destructive">
+                  {errors.foreignPermitAuthority.message as string}
+                </p>
+              )}
             </div>
           </div>
         </section>
@@ -553,6 +621,11 @@ export function PersonalQuestionnaireForm(
                 {...register("permanentStreet")}
                 disabled={isFormDisabled}
               />
+              {errors.permanentStreet && (
+                <p className="text-xs text-destructive">
+                  {errors.permanentStreet.message as string}
+                </p>
+              )}
             </div>
             <div className="space-y-1">
               <Label>
@@ -563,12 +636,22 @@ export function PersonalQuestionnaireForm(
                 {...register("permanentHouseNumber")}
                 disabled={isFormDisabled}
               />
+              {errors.permanentHouseNumber && (
+                <p className="text-xs text-destructive">
+                  {errors.permanentHouseNumber.message as string}
+                </p>
+              )}
             </div>
             <div className="space-y-1">
               <Label>
                 Obec / část obce <span className="text-destructive">*</span>
               </Label>
               <Input {...register("permanentCity")} disabled={isFormDisabled} />
+              {errors.permanentCity && (
+                <p className="text-xs text-destructive">
+                  {errors.permanentCity.message as string}
+                </p>
+              )}
             </div>
             <div className="space-y-1">
               <Label>
@@ -578,6 +661,11 @@ export function PersonalQuestionnaireForm(
                 {...register("permanentPostcode")}
                 disabled={isFormDisabled}
               />
+              {errors.permanentPostcode && (
+                <p className="text-xs text-destructive">
+                  {errors.permanentPostcode.message as string}
+                </p>
+              )}
             </div>
           </div>
         </section>
@@ -641,6 +729,11 @@ export function PersonalQuestionnaireForm(
                 {...register("healthInsuranceCompany")}
                 disabled={isFormDisabled}
               />
+              {errors.healthInsuranceCompany && (
+                <p className="text-xs text-destructive">
+                  {errors.healthInsuranceCompany.message as string}
+                </p>
+              )}
             </div>
             <div className="space-y-1 md:col-span-2">
               <Label>
@@ -652,16 +745,23 @@ export function PersonalQuestionnaireForm(
                 {...register("bankAccountNumber")}
                 disabled={isFormDisabled}
               />
+              {errors.bankAccountNumber && (
+                <p className="text-xs text-destructive">
+                  {errors.bankAccountNumber.message as string}
+                </p>
+              )}
             </div>
             <div className="space-y-1 md:col-span-2">
               <Label>
                 Vedený u bankovního ústavu:{" "}
                 <span className="text-destructive">*</span>
-                <p className="text-xs text-muted-foreground">
-                  Jméno bankovního ústavu
-                </p>
               </Label>
               <Input {...register("bankName")} disabled={isFormDisabled} />
+              {errors.bankName && (
+                <p className="text-xs text-destructive">
+                  {errors.bankName.message as string}
+                </p>
+              )}
             </div>
           </div>
 
@@ -705,6 +805,11 @@ export function PersonalQuestionnaireForm(
                   <Label htmlFor="pension-no">Ne</Label>
                 </div>
               </RadioGroup>
+              {errors.receivesPensionBenefits && (
+                <p className="text-xs text-destructive">
+                  {errors.receivesPensionBenefits.message as string}
+                </p>
+              )}
             </div>
 
             <div className="space-y-1">
@@ -715,6 +820,11 @@ export function PersonalQuestionnaireForm(
                 {...register("typePensionBenefits")}
                 disabled={isFormDisabled}
               />
+              {errors.typePensionBenefits && (
+                <p className="text-xs text-destructive">
+                  {errors.typePensionBenefits.message as string}
+                </p>
+              )}
             </div>
           </div>
 
@@ -751,11 +861,19 @@ export function PersonalQuestionnaireForm(
                 <Label htmlFor="disabled-no">Ne</Label>
               </div>
             </RadioGroup>
+            {errors.isDisabledPerson && (
+              <p className="text-xs text-destructive">
+                {errors.isDisabledPerson.message as string}
+              </p>
+            )}
           </div>
 
           {isDisabledPerson && (
             <div className="space-y-2">
-              <Label>Stupeň zdravotního postižení</Label>
+              <Label>
+                Stupeň zdravotního postižení{" "}
+                <span className="text-destructive">*</span>
+              </Label>
               <RadioGroup
                 value={watch("disabilityDegree")}
                 onValueChange={(value) =>
@@ -781,6 +899,11 @@ export function PersonalQuestionnaireForm(
                   <Label htmlFor="inv3">III. stupeň</Label>
                 </div>
               </RadioGroup>
+              {errors.disabilityDegree && (
+                <p className="text-xs text-destructive">
+                  {errors.disabilityDegree.message as string}
+                </p>
+              )}
             </div>
           )}
         </section>
@@ -792,37 +915,78 @@ export function PersonalQuestionnaireForm(
             přidejte další řádky.
           </p>
 
-          <div className="space-y-2 rounded-md bg-muted/20 p-3 text-xs text-muted-foreground">
+          <div className="space-y-3 rounded-md bg-muted/20 p-3 text-xs text-muted-foreground">
             <p className="font-medium">Vysvětlivky k formám studia:</p>
-            <ul className="ml-4 list-disc space-y-1">
-              <li>
-                <strong>Denní forma:</strong> Výuka organizovaná pravidelně
-                každý den v pětidenním vyučovacím týdnu v průběhu školního roku.
-              </li>
-              <li>
-                <strong>Večerní forma:</strong> Výuka organizovaná pravidelně
-                několikrát v týdnu v rozsahu 10 až 18 hodin týdně v průběhu
-                školního roku zpravidla v odpoledních a večerních hodinách.
-              </li>
-              <li>
-                <strong>Dálková forma:</strong> Samostatné studium spojené s
-                konzultacemi ve školním roce.
-              </li>
-              <li>
-                <strong>Distanční forma:</strong> Samostatné studium
-                uskutečňované převážně nebo zcela prostřednictvím informačních
-                technologií, popřípadě spojené s individuálními konzultacemi.
-              </li>
-              <li>
-                <strong>Kombinovaná forma:</strong> Střídání denní a jiné formy
-                vzdělávání. Výuka probíhá obvykle o víkendech nebo pátcích a
-                sobotách, jednou za 14 dní nebo jednou za měsíc.
-              </li>
-            </ul>
-            <p className="mt-2">
-              <strong>Vysokoškolské vzdělání:</strong> Studium prezenční
-              (denní), distanční nebo jejich kombinace.
-            </p>
+
+            <div className="space-y-1">
+              <p className="font-medium">Základní vzdělání</p>
+              <p>Základní vzdělání se uskutečňuje v denní formě studia.</p>
+            </div>
+
+            <div className="space-y-1">
+              <p className="font-medium">Střední a vyšší odborné vzdělání</p>
+              <p>
+                Střední a vyšší odborné vzdělání se uskutečňuje v denní,
+                večerní, dálkové, distanční a kombinované formě:
+              </p>
+              <ul className="ml-4 list-[lower-alpha] space-y-1">
+                <li>
+                  <strong>denní formou</strong> – výuka organizovaná pravidelně
+                  každý den v pětidenním vyučovacím týdnu v průběhu školního
+                  roku,
+                </li>
+                <li>
+                  <strong>večerní formou</strong> – výuka organizovaná
+                  pravidelně několikrát v týdnu v rozsahu 10 až 18 hodin týdně v
+                  průběhu školního roku zpravidla v odpoledních a večerních
+                  hodinách,
+                </li>
+                <li>
+                  <strong>dálkovou formou</strong> – samostatné studium spojené
+                  s konzultacemi ve školním roce,
+                </li>
+                <li>
+                  <strong>distanční formou</strong> – samostatné studium
+                  uskutečňované převážně nebo zcela prostřednictvím informačních
+                  technologií, popřípadě spojené s individuálními konzultacemi,
+                </li>
+                <li>
+                  <strong>kombinovanou formou</strong> – střídání denní a jiné
+                  formy vzdělávání stanovené zákonem.
+                </li>
+              </ul>
+            </div>
+
+            <div className="space-y-1">
+              <p className="font-medium">Vysokoškolské vzdělání</p>
+              <p>
+                Vysokoškolské vzdělání se uskutečňuje formou výuky – studium
+                prezenční, distanční nebo jejich kombinací:
+              </p>
+              <ul className="ml-4 list-[lower-alpha] space-y-1">
+                <li>
+                  <strong>prezenční (denní)</strong> – výuka probíhá kterýkoliv
+                  den, dopoledne i odpoledne; převážná část je organizována
+                  formou přednášek, laboratorních prací a dalších cvičení,
+                  seminářů, kurzů, praxí a dalších forem. Během výuky je student
+                  v přímém kontaktu s učitelem a své poznatky získává přímo.
+                </li>
+                <li>
+                  <strong>distanční studium</strong> – multimediální forma
+                  řízeného studia, v němž jsou vyučující a konzultanti v průběhu
+                  vzdělávání trvale nebo převážně odděleni od vzdělávaných.
+                </li>
+                <li>
+                  <strong>kombinované</strong> – výuka probíhá obvykle o
+                  víkendech nebo pátcích a sobotách, jednou za 14 dní nebo
+                  jednou za měsíc. Vyučující probere pouze stěžejní část látky,
+                  zbytek zůstává na samostudium; studenti jsou upozorněni na
+                  odbornou literaturu a dostávají samostatné úkoly. Systém může
+                  být doplněn o prvky distančního studia, např. e-learning či
+                  konzultace s vyučujícími.
+                </li>
+              </ul>
+            </div>
           </div>
 
           {educationFields.map((field, index) => (
@@ -858,7 +1022,6 @@ export function PersonalQuestionnaireForm(
                     ))}
                   </SelectContent>
                 </Select>
-
                 {errors.education?.[index]?.level && (
                   <p className="text-xs text-destructive">
                     {errors.education[index]?.level?.message as string}
@@ -903,7 +1066,9 @@ export function PersonalQuestionnaireForm(
                       setValue(
                         `education.${index}.studyForm`,
                         val as EducationEntry["studyForm"],
-                        { shouldValidate: true }
+                        {
+                          shouldValidate: true,
+                        }
                       )
                     }
                     disabled={isFormDisabled}
@@ -919,7 +1084,6 @@ export function PersonalQuestionnaireForm(
                       ))}
                     </SelectContent>
                   </Select>
-
                   {errors.education?.[index]?.studyForm && (
                     <p className="text-xs text-destructive">
                       {errors.education[index]?.studyForm?.message as string}
@@ -937,7 +1101,6 @@ export function PersonalQuestionnaireForm(
                     disabled={isFormDisabled}
                   />
                 </div>
-
                 <div className="space-y-1">
                   <Label>Druh zkoušky</Label>
                   <Input
@@ -996,35 +1159,6 @@ export function PersonalQuestionnaireForm(
             Dobrovolný údaj. Vyplňte pouze v případě, že chcete uvést znalost
             cizích jazyků.
           </p>
-
-          <div className="space-y-2 rounded-md bg-muted/20 p-3 text-xs text-muted-foreground">
-            <p className="font-medium">
-              Stupně znalosti dle evropského systému hodnocení:
-            </p>
-            <div className="grid gap-1 md:grid-cols-2">
-              <div>
-                <strong>A0:</strong> Žádná znalost / úplný začátečník
-              </div>
-              <div>
-                <strong>A1:</strong> Začátečník
-              </div>
-              <div>
-                <strong>A2:</strong> Mírně pokročilý
-              </div>
-              <div>
-                <strong>B1:</strong> Středně pokročilý
-              </div>
-              <div>
-                <strong>B2:</strong> Pokročilý
-              </div>
-              <div>
-                <strong>C1:</strong> Velmi pokročilý
-              </div>
-              <div>
-                <strong>C2:</strong> Rodilý mluvčí / perfektní znalost
-              </div>
-            </div>
-          </div>
 
           <div className="space-y-4">
             {languages.map((lang, index) => (
@@ -1090,133 +1224,64 @@ export function PersonalQuestionnaireForm(
             Originál osvědčení vezměte prosím s sebou.
           </p>
 
-          <div className="space-y-2">
-            <Label>
-              Získal/a jste osvědčení o vzdělávání vedoucích úředníků dle zák.
-              č. 312/2002 Sb.? <span className="text-destructive">*</span>
-            </Label>
-            <RadioGroup
-              value={
-                hasCertificateManagement === true
-                  ? "yes"
-                  : hasCertificateManagement === false
-                    ? "no"
-                    : ""
-              }
-              onValueChange={(value) =>
-                setValue("hasCertificateManagement", value === "yes", {
-                  shouldValidate: true,
-                })
-              }
-              className="flex gap-4"
-              disabled={isFormDisabled}
-            >
-              <div className="flex items-center gap-2">
-                <RadioGroupItem id="cert-man-yes" value="yes" />
-                <Label htmlFor="cert-man-yes">Ano</Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <RadioGroupItem id="cert-man-no" value="no" />
-                <Label htmlFor="cert-man-no">Ne</Label>
-              </div>
-            </RadioGroup>
-          </div>
-
-          <div className="space-y-2">
-            <Label>
-              Získal/a jste osvědčení o zvláštní odborné způsobilosti dle zák.
-              č. 312/2002 Sb.? <span className="text-destructive">*</span>
-            </Label>
-            <RadioGroup
-              value={
-                hasCertificateSpecial === true
-                  ? "yes"
-                  : hasCertificateSpecial === false
-                    ? "no"
-                    : ""
-              }
-              onValueChange={(value) =>
-                setValue("hasCertificateSpecial", value === "yes", {
-                  shouldValidate: true,
-                })
-              }
-              className="flex gap-4"
-              disabled={isFormDisabled}
-            >
-              <div className="flex items-center gap-2">
-                <RadioGroupItem id="cert-spec-yes" value="yes" />
-                <Label htmlFor="cert-spec-yes">Ano</Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <RadioGroupItem id="cert-spec-no" value="no" />
-                <Label htmlFor="cert-spec-no">Ne</Label>
-              </div>
-            </RadioGroup>
-          </div>
-
-          <div className="space-y-2">
-            <Label>
-              Získal/a jste osvědčení o vstupním školení dle zák. č. 312/2002
-              Sb.?<span className="text-destructive">*</span>
-            </Label>
-            <RadioGroup
-              value={
-                hasCertificateTraining === true
-                  ? "yes"
-                  : hasCertificateTraining === false
-                    ? "no"
-                    : ""
-              }
-              onValueChange={(value) =>
-                setValue("hasCertificateTraining", value === "yes", {
-                  shouldValidate: true,
-                })
-              }
-              className="flex gap-4"
-              disabled={isFormDisabled}
-            >
-              <div className="flex items-center gap-2">
-                <RadioGroupItem id="cert-train-yes" value="yes" />
-                <Label htmlFor="cert-train-yes">Ano</Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <RadioGroupItem id="cert-train-no" value="no" />
-                <Label htmlFor="cert-train-no">Ne</Label>
-              </div>
-            </RadioGroup>
-          </div>
-
-          <div className="space-y-2">
-            <Label>
-              Získal/a jste osvědčení o vykonání úřednické zkoušky dle zák. č.
-              234/2014 Sb.?<span className="text-destructive">*</span>
-            </Label>
-            <RadioGroup
-              value={
-                hasCertificateGeneral === true
-                  ? "yes"
-                  : hasCertificateGeneral === false
-                    ? "no"
-                    : ""
-              }
-              onValueChange={(value) =>
-                setValue("hasCertificateGeneral", value === "yes", {
-                  shouldValidate: true,
-                })
-              }
-              className="flex gap-4"
-              disabled={isFormDisabled}
-            >
-              <div className="flex items-center gap-2">
-                <RadioGroupItem id="cert-gen-yes" value="yes" />
-                <Label htmlFor="cert-gen-yes">Ano</Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <RadioGroupItem id="cert-gen-no" value="no" />
-                <Label htmlFor="cert-gen-no">Ne</Label>
-              </div>
-            </RadioGroup>
-          </div>
+          {[
+            {
+              id: "cert-man",
+              field: "hasCertificateManagement" as const,
+              value: hasCertificateManagement,
+              label:
+                "Získal/a jste osvědčení o vzdělávání vedoucích úředníků dle zák. č. 312/2002 Sb.?",
+            },
+            {
+              id: "cert-spec",
+              field: "hasCertificateSpecial" as const,
+              value: hasCertificateSpecial,
+              label:
+                "Získal/a jste osvědčení o zvláštní odborné způsobilosti dle zák. č. 312/2002 Sb.?",
+            },
+            {
+              id: "cert-train",
+              field: "hasCertificateTraining" as const,
+              value: hasCertificateTraining,
+              label:
+                "Získal/a jste osvědčení o vstupním školení dle zák. č. 312/2002 Sb.?",
+            },
+            {
+              id: "cert-gen",
+              field: "hasCertificateGeneral" as const,
+              value: hasCertificateGeneral,
+              label:
+                "Získal/a jste osvědčení o vykonání úřednické zkoušky dle zák. č. 234/2014 Sb.?",
+            },
+          ].map(({ id, field, value, label }) => (
+            <div key={id} className="space-y-2">
+              <Label>
+                {label} <span className="text-destructive">*</span>
+              </Label>
+              <RadioGroup
+                value={value === true ? "yes" : value === false ? "no" : ""}
+                onValueChange={(v) =>
+                  setValue(field, v === "yes", { shouldValidate: true })
+                }
+                className="flex gap-4"
+                disabled={isFormDisabled}
+              >
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem id={`${id}-yes`} value="yes" />
+                  <Label htmlFor={`${id}-yes`}>Ano</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem id={`${id}-no`} value="no" />
+                  <Label htmlFor={`${id}-no`}>Ne</Label>
+                </div>
+              </RadioGroup>
+              {errors[field] && (
+                <p className="text-xs text-destructive">
+                  {errors[field]?.message as string}
+                </p>
+              )}
+            </div>
+          ))}
         </section>
 
         <section className="space-y-4 rounded-md border p-4">
@@ -1229,109 +1294,62 @@ export function PersonalQuestionnaireForm(
             </p>
             <p className="text-xs text-muted-foreground">
               <strong>Osoba blízká:</strong> je příbuzný v řadě přímé -
-              manžel/manželka nebo partner/partnerka (registr.partnerství).
+              manžel/manželka nebo partner/partnerka.
             </p>
             <Input {...register("familyRelations")} disabled={isFormDisabled} />
           </div>
 
-          <div className="space-y-2">
-            <Label>
-              Žádám ve smyslu ust. § 143 ZP, aby mé vyúčtování platu bylo
-              převáděno na platební účet, který jsem uvedl/a v tomto dotazníku.
-              <span className="text-destructive">*</span>
-            </Label>
-            <RadioGroup
-              value={
-                finalRequestPayrollTransfer === true
-                  ? "yes"
-                  : finalRequestPayrollTransfer === false
-                    ? "no"
-                    : ""
-              }
-              onValueChange={(value) =>
-                setValue("finalRequestPayrollTransfer", value === "yes", {
-                  shouldValidate: true,
-                })
-              }
-              className="flex gap-4"
-              disabled={isFormDisabled}
-            >
-              <div className="flex items-center gap-2">
-                <RadioGroupItem id="final-payroll-yes" value="yes" />
-                <Label htmlFor="final-payroll-yes">Ano</Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <RadioGroupItem id="final-payroll-no" value="no" />
-                <Label htmlFor="final-payroll-no">Ne</Label>
-              </div>
-            </RadioGroup>
-          </div>
-
-          <div className="space-y-2">
-            <Label>
-              Prohlašuji, že jsem nic nezamlčel(a) a všechny mnou uvedené údaje
-              jsou pravdivé.<span className="text-destructive">*</span>
-            </Label>
-            <RadioGroup
-              value={
-                finalReadAndUnderstood === true
-                  ? "yes"
-                  : finalReadAndUnderstood === false
-                    ? "no"
-                    : ""
-              }
-              onValueChange={(value) =>
-                setValue("finalReadAndUnderstood", value === "yes", {
-                  shouldValidate: true,
-                })
-              }
-              className="flex gap-4"
-              disabled={isFormDisabled}
-            >
-              <div className="flex items-center gap-2">
-                <RadioGroupItem id="final-true-yes" value="yes" />
-                <Label htmlFor="final-true-yes">Ano</Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <RadioGroupItem id="final-true-no" value="no" />
-                <Label htmlFor="final-true-no">Ne</Label>
-              </div>
-            </RadioGroup>
-          </div>
-
-          <div className="space-y-2">
-            <Label>
-              Prohlašuji, že změnu jakéhokoli z mnou uvedených údajů oznámím
-              bezodkladně na personálním oddělení a na mzdové účtárně. Pokud by
-              nesplnění této povinnosti způsobilo škodu, nesu za ni plnou
-              odpovědnost.<span className="text-destructive">*</span>
-            </Label>
-            <RadioGroup
-              value={
-                finalTruthfulnessConfirm === true
-                  ? "yes"
-                  : finalTruthfulnessConfirm === false
-                    ? "no"
-                    : ""
-              }
-              onValueChange={(value) =>
-                setValue("finalTruthfulnessConfirm", value === "yes", {
-                  shouldValidate: true,
-                })
-              }
-              className="flex gap-4"
-              disabled={isFormDisabled}
-            >
-              <div className="flex items-center gap-2">
-                <RadioGroupItem id="final-behaviour-yes" value="yes" />
-                <Label htmlFor="final-behaviour-yes">Ano</Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <RadioGroupItem id="final-behaviour-no" value="no" />
-                <Label htmlFor="final-behaviour-no">Ne</Label>
-              </div>
-            </RadioGroup>
-          </div>
+          {[
+            {
+              id: "final-payroll",
+              field: "finalRequestPayrollTransfer" as const,
+              value: finalRequestPayrollTransfer,
+              label:
+                "Žádám ve smyslu ust. § 143 ZP, aby mé vyúčtování platu bylo převáděno na platební účet, který jsem uvedl/a v tomto dotazníku.",
+            },
+            {
+              id: "final-true",
+              field: "finalReadAndUnderstood" as const,
+              value: finalReadAndUnderstood,
+              label:
+                "Prohlašuji, že jsem nic nezamlčel(a) a všechny mnou uvedené údaje jsou pravdivé.",
+            },
+            {
+              id: "final-behaviour",
+              field: "finalTruthfulnessConfirm" as const,
+              value: finalTruthfulnessConfirm,
+              label:
+                "Prohlašuji, že změnu jakéhokoli z mnou uvedených údajů oznámím bezodkladně na personálním oddělení a na mzdové účtárně. Pokud by nesplnění této povinnosti způsobilo škodu, nesu za ni plnou odpovědnost.",
+            },
+          ].map(({ id, field, value, label }) => (
+            <div key={id} className="space-y-2">
+              <Label>
+                {label} <span className="text-destructive">*</span>
+              </Label>
+              <RadioGroup
+                value={value === true ? "yes" : value === false ? "no" : ""}
+                onValueChange={(v) =>
+                  setValue(field, v === "yes", { shouldValidate: true })
+                }
+                className="flex gap-4"
+                disabled={isFormDisabled}
+              >
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem id={`${id}-yes`} value="yes" />
+                  <Label htmlFor={`${id}-yes`}>Ano</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem id={`${id}-no`} value="no" />
+                  <Label htmlFor={`${id}-no`}>Ne</Label>
+                </div>
+              </RadioGroup>
+              {errors[field] && (
+                <p className="text-xs text-destructive">
+                  {errors[field]?.message as string}
+                </p>
+              )}
+            </div>
+          ))}
         </section>
 
         <section className="space-y-2 rounded-md border p-4 text-sm text-muted-foreground">

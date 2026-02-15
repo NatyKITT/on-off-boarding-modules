@@ -60,23 +60,14 @@ function isInternalRole(role: Role | null | undefined): boolean {
   )
 }
 
-function getRoleForEmail(email: string): Role {
+function getEnvRoleForEmail(email: string): Role | null {
   const lower = email.toLowerCase()
-
-  if (isKitt6(lower) || SUPER_ADMIN_EMAILS.has(lower)) {
-    return "ADMIN"
-  }
-  if (HR_EMAILS.has(lower)) {
-    return "HR"
-  }
-  if (IT_EMAILS.has(lower)) {
-    return "IT"
-  }
-  if (READONLY_EMAILS.has(lower)) {
-    return "READONLY"
-  }
-
-  return "USER"
+  if (isKitt6(lower)) return "ADMIN"
+  if (SUPER_ADMIN_EMAILS.has(lower)) return "ADMIN"
+  if (HR_EMAILS.has(lower)) return "HR"
+  if (IT_EMAILS.has(lower)) return "IT"
+  if (READONLY_EMAILS.has(lower)) return "READONLY"
+  return null
 }
 
 export const authConfig = {
@@ -85,7 +76,7 @@ export const authConfig = {
   session: {
     strategy: "jwt",
     maxAge: 8 * 60 * 60,
-    updateAge: 0,
+    updateAge: 60 * 60,
   },
 
   trustHost: true,
@@ -110,29 +101,25 @@ export const authConfig = {
         const email = user.email?.toLowerCase() ?? ""
         if (!email) return
 
-        const assignedRole = getRoleForEmail(email)
+        const envRole = getEnvRoleForEmail(email)
 
-        const existingUser = await prisma.user.findUnique({
-          where: { id: String(user.id) },
-          select: { role: true, canAccessApp: true },
-        })
-
-        if (assignedRole !== "USER") {
+        if (envRole !== null) {
           await prisma.user.update({
             where: { id: String(user.id) },
-            data: {
-              role: assignedRole,
-              canAccessApp: true,
-            },
+            data: { role: envRole, canAccessApp: true },
           })
-        } else if (!existingUser || !existingUser.role) {
-          await prisma.user.update({
+        } else {
+          const existingUser = await prisma.user.findUnique({
             where: { id: String(user.id) },
-            data: {
-              role: "USER",
-              canAccessApp: false,
-            },
+            select: { role: true },
           })
+
+          if (!existingUser?.role) {
+            await prisma.user.update({
+              where: { id: String(user.id) },
+              data: { role: "USER", canAccessApp: false },
+            })
+          }
         }
       } catch (e) {
         console.warn("signIn role sync (non-fatal):", e)
@@ -151,13 +138,20 @@ export const authConfig = {
       return ALLOWED_DOMAINS.has(domain)
     },
 
-    async jwt({ token, user, profile }) {
+    async redirect({ url, baseUrl }) {
+      if (url.startsWith("/")) return `${baseUrl}${url}`
+      try {
+        if (new URL(url).origin === new URL(baseUrl).origin) return url
+      } catch {}
+      return baseUrl
+    },
+
+    async jwt({ token, user, profile, trigger }) {
       const email =
         (typeof token.email === "string" && token.email) ||
         (typeof user?.email === "string" && user.email) ||
         (typeof profile?.email === "string" && profile.email) ||
         null
-
       if (email) token.email = email
 
       const userId =
@@ -168,23 +162,34 @@ export const authConfig = {
             : null
       if (userId) token.id = userId
 
-      if (
-        userId &&
-        (!token.role || typeof token.canAccessApp === "undefined")
-      ) {
+      if (user?.name && !token.name) {
+        token.name = user.name
+      }
+
+      const needsDbLoad =
+        !!user ||
+        trigger === "update" ||
+        !token.role ||
+        typeof token.canAccessApp === "undefined"
+
+      if (needsDbLoad && userId) {
         const dbUser = await getUserById(userId)
         if (dbUser) {
           token.role = dbUser.role as Role
           token.canAccessApp = isInternalRole(dbUser.role)
             ? true
             : (dbUser.canAccessApp ?? false)
+
+          if (!token.name && (dbUser.name || dbUser.surname)) {
+            token.name = [dbUser.name, dbUser.surname].filter(Boolean).join(" ")
+          }
         }
       }
 
       if (token.email) {
-        const assignedRole = getRoleForEmail(token.email)
-        if (assignedRole !== "USER") {
-          token.role = assignedRole
+        const envRole = getEnvRoleForEmail(token.email)
+        if (envRole !== null) {
+          token.role = envRole
           token.canAccessApp = true
         }
       }
@@ -202,6 +207,9 @@ export const authConfig = {
           (token.email as string | null) ?? session.user.email
         session.user.role = token.role as Role
         session.user.canAccessApp = Boolean(token.canAccessApp)
+        if (token.name) {
+          session.user.name = token.name as string
+        }
       }
       return session
     },

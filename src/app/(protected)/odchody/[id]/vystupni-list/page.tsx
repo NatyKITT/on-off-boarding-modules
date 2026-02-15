@@ -1,65 +1,51 @@
-import { cookies } from "next/headers"
 import { notFound, redirect } from "next/navigation"
+import { auth } from "@/auth"
 
-import type { ExitChecklistData } from "@/types/exit-checklist"
+import { prisma } from "@/lib/db"
 
-import { getSession } from "@/lib/session"
+import { ExitChecklistPageClient } from "./exit-checklist-page-client"
 
-import { ExitChecklistForm } from "@/components/forms/exit-checklist-form"
+type Props = {
+  params: { id: string }
+}
 
-type Props = { params: { id: string } }
+export default async function VystupniListPage({ params }: Props) {
+  const session = await auth()
 
-export default async function ExitChecklistPage({ params }: Props) {
-  const session = await getSession()
   if (!session?.user) {
-    notFound()
+    redirect("/signin")
   }
 
-  const offId = Number(params.id)
-  if (Number.isNaN(offId)) {
-    notFound()
-  }
+  const offboardingId = Number(params.id)
+  if (Number.isNaN(offboardingId)) notFound()
 
-  const base = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3001"
-
-  const cookieHeader = cookies().toString()
-
-  const res = await fetch(`${base}/api/odchody/${offId}/exit-checklist`, {
-    cache: "no-store",
-    headers: {
-      cookie: cookieHeader,
+  const offboarding = await prisma.employeeOffboarding.findUnique({
+    where: { id: offboardingId },
+    select: {
+      id: true,
+      name: true,
+      surname: true,
+      titleBefore: true,
+      titleAfter: true,
     },
   })
 
-  if (!res.ok) {
-    notFound()
-  }
+  if (!offboarding) notFound()
 
-  const json = (await res.json()) as {
-    status?: string
-    data?: ExitChecklistData
-  }
-
-  if (!json.data) {
-    notFound()
-  }
-
-  const data = json.data
-
-  const role = session.user.role
-  const isAdmin = role === "ADMIN" || role === "HR" || role === "IT"
-
-  if (data.lockedAt && !isAdmin) {
-    redirect(`/api/odchody/${offId}/vystupni-list`)
-  }
+  const employeeName = [
+    offboarding.titleBefore,
+    offboarding.name,
+    offboarding.surname,
+    offboarding.titleAfter,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .trim()
 
   return (
-    <div
-      className="mx-auto w-full max-w-5xl space-y-6 px-4 py-8"
-      data-lenis-prevent="true"
-      data-lenis-prevent-wheel="true"
-    >
-      <ExitChecklistForm offboardingId={offId} initialData={data} />
-    </div>
+    <ExitChecklistPageClient
+      offboardingId={offboardingId}
+      employeeName={employeeName}
+    />
   )
 }

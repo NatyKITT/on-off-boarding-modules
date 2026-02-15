@@ -59,6 +59,18 @@ export type PayrollInfoFormProps =
   | PayrollInfoFormPublicProps
   | PayrollInfoFormInternalProps
 
+function todayIso() {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+function formatDateCz(iso: string): string {
+  if (!iso) return ""
+  const [y, m, d] = iso.split("-")
+  return `${d}.${m}.${y}`
+}
+
 export function PayrollInfoForm(props: PayrollInfoFormProps) {
   const { toast } = useToast()
   const [status, setStatus] = React.useState<
@@ -69,19 +81,25 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
   >(null)
   const [isPending, startTransition] = useTransition()
 
-  const today = React.useMemo(() => {
-    const d = new Date()
-    const pad = (n: number) => String(n).padStart(2, "0")
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-  }, [])
+  const today = React.useMemo(() => todayIso(), [])
 
-  const form = useForm<PayrollInfoSchema>({
-    resolver: zodResolver(payrollInfoSchema),
+  const form = useForm<PayrollInfoSchema, unknown, PayrollInfoSchema>({
+    mode: "onChange",
+    resolver: zodResolver(
+      payrollInfoSchema
+    ) as import("react-hook-form").Resolver<
+      PayrollInfoSchema,
+      unknown,
+      PayrollInfoSchema
+    >,
     defaultValues: (props.initialData as PayrollInfoSchema | undefined) ?? {
       fullName: props.employeeMeta?.fullName ?? "",
       maidenName: "",
       birthPlace: "",
       birthNumber: "",
+      birthDay: "",
+      birthMonth: "",
+      birthYear: "",
       maritalStatus: "UNSTATED",
 
       permanentStreet: "",
@@ -96,7 +114,7 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
       bankAccountNumber: "",
       bankName: "",
 
-      confirmTruthfulness: false,
+      confirmTruthfulness: undefined,
       signatureDate: today,
     },
   })
@@ -125,7 +143,12 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
     name: "children",
   })
 
-  const handleSubmitForm = (values: PayrollInfoSchema) => {
+  const handleSubmitForm: import("react-hook-form").SubmitHandler<
+    PayrollInfoSchema
+  > = (values) => {
+    setValue("signatureDate", todayIso())
+    const finalValues = { ...values, signatureDate: todayIso() }
+
     startTransition(async () => {
       setStatus("loading")
       try {
@@ -136,7 +159,7 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
             body: JSON.stringify({
               documentId: props.documentId,
               type: "PAYROLL_INFO",
-              data: values,
+              data: finalValues,
             }),
           })
 
@@ -148,7 +171,7 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
           setResultModal("success")
           props.onSubmitted?.()
         } else {
-          await props.onSubmitInternal?.(values)
+          await props.onSubmitInternal?.(finalValues)
           setStatus("completed")
           setResultModal("success")
         }
@@ -260,7 +283,7 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
         </header>
 
         <section className="space-y-4 rounded-md border p-4">
-          <h2 className="text-sm font-medium">1. Základní údaje zaměstnance</h2>
+          <h2 className="text-sm font-medium">Základní údaje zaměstnance</h2>
 
           <div className="space-y-3">
             <div className="space-y-1">
@@ -302,10 +325,18 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
               </div>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-3">
               <div className="space-y-1">
                 <Label>Rodné číslo</Label>
-                <Input {...register("birthNumber")} disabled={isDisabled} />
+                <Input
+                  {...register("birthNumber")}
+                  placeholder="např. 900101/1234"
+                  disabled={isDisabled}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Cizinci, kteří nemají přiděleno rodné číslo, ponechají toto
+                  pole prázdné a vyplní pouze datum narození níže.
+                </p>
                 {errors.birthNumber && (
                   <p className="text-xs text-destructive">
                     {errors.birthNumber.message as string}
@@ -315,41 +346,86 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
 
               <div className="space-y-1">
                 <Label>
-                  Rodinný stav <span className="text-destructive">*</span>
+                  Datum narození <span className="text-destructive">*</span>
                 </Label>
-                <Select
-                  value={watch("maritalStatus")}
-                  onValueChange={(val) =>
-                    setValue(
-                      "maritalStatus",
-                      val as PayrollInfoSchema["maritalStatus"],
-                      {
-                        shouldValidate: true,
-                      }
-                    )
-                  }
-                  disabled={isDisabled}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Vyberte" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="SINGLE">Svobodný/á</SelectItem>
-                    <SelectItem value="MARRIED">Vdaná / ženatý</SelectItem>
-                    <SelectItem value="DIVORCED">Rozvedený/á</SelectItem>
-                    <SelectItem value="WIDOWED">Vdova / vdovec</SelectItem>
-                    <SelectItem value="REGISTERED">
-                      Registrované partnerství
-                    </SelectItem>
-                    <SelectItem value="UNSTATED">Neuvádím</SelectItem>
-                  </SelectContent>
-                </Select>
-                {errors.maritalStatus && (
-                  <p className="text-xs text-destructive">
-                    {errors.maritalStatus.message as string}
-                  </p>
-                )}
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="space-y-1">
+                    <Input
+                      {...register("birthDay")}
+                      placeholder="Den"
+                      maxLength={2}
+                      disabled={isDisabled}
+                    />
+                    {errors.birthDay && (
+                      <p className="text-xs text-destructive">
+                        {errors.birthDay.message as string}
+                      </p>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <Input
+                      {...register("birthMonth")}
+                      placeholder="Měsíc"
+                      maxLength={2}
+                      disabled={isDisabled}
+                    />
+                    {errors.birthMonth && (
+                      <p className="text-xs text-destructive">
+                        {errors.birthMonth.message as string}
+                      </p>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <Input
+                      {...register("birthYear")}
+                      placeholder="Rok"
+                      maxLength={4}
+                      disabled={isDisabled}
+                    />
+                    {errors.birthYear && (
+                      <p className="text-xs text-destructive">
+                        {errors.birthYear.message as string}
+                      </p>
+                    )}
+                  </div>
+                </div>
               </div>
+            </div>
+
+            <div className="space-y-1">
+              <Label>
+                Rodinný stav <span className="text-destructive">*</span>
+              </Label>
+              <Select
+                value={watch("maritalStatus")}
+                onValueChange={(val) =>
+                  setValue(
+                    "maritalStatus",
+                    val as PayrollInfoSchema["maritalStatus"],
+                    { shouldValidate: true }
+                  )
+                }
+                disabled={isDisabled}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Vyberte" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="SINGLE">Svobodný/á</SelectItem>
+                  <SelectItem value="MARRIED">Vdaná / ženatý</SelectItem>
+                  <SelectItem value="DIVORCED">Rozvedený/á</SelectItem>
+                  <SelectItem value="WIDOWED">Vdova / vdovec</SelectItem>
+                  <SelectItem value="REGISTERED">
+                    Registrované partnerství
+                  </SelectItem>
+                  <SelectItem value="UNSTATED">Neuvádím</SelectItem>
+                </SelectContent>
+              </Select>
+              {errors.maritalStatus && (
+                <p className="text-xs text-destructive">
+                  {errors.maritalStatus.message as string}
+                </p>
+              )}
             </div>
           </div>
 
@@ -489,7 +565,7 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
         </section>
 
         <section className="space-y-4 rounded-md border p-4">
-          <h2 className="text-sm font-medium">2. Zdravotní pojišťovna</h2>
+          <h2 className="text-sm font-medium">Zdravotní pojišťovna</h2>
           <p className="text-xs text-muted-foreground">
             Stvrzuji, že jsem ke dni nástupu do zaměstnání pojištěncem zdravotní
             pojišťovny:
@@ -501,6 +577,7 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
             </Label>
             <Input
               {...register("healthInsuranceCompany")}
+              placeholder="např. Všeobecná zdravotní pojišťovna"
               disabled={isDisabled}
             />
             {errors.healthInsuranceCompany && (
@@ -524,7 +601,11 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
               <Label>
                 Číslo účtu <span className="text-destructive">*</span>
               </Label>
-              <Input {...register("bankAccountNumber")} disabled={isDisabled} />
+              <Input
+                {...register("bankAccountNumber")}
+                placeholder="např. 1234567890/0100"
+                disabled={isDisabled}
+              />
               {errors.bankAccountNumber && (
                 <p className="text-xs text-destructive">
                   {errors.bankAccountNumber.message as string}
@@ -535,7 +616,11 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
               <Label>
                 Bankovní ústav <span className="text-destructive">*</span>
               </Label>
-              <Input {...register("bankName")} disabled={isDisabled} />
+              <Input
+                {...register("bankName")}
+                placeholder="např. Komerční banka"
+                disabled={isDisabled}
+              />
               {errors.bankName && (
                 <p className="text-xs text-destructive">
                   {errors.bankName.message as string}
@@ -575,7 +660,7 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
             >
               <div className="flex items-center gap-2">
                 <RadioGroupItem id="truth-yes" value="yes" />
-                <Label htmlFor="truth-yes">Ano</Label>
+                <Label htmlFor="truth-yes">Ano, potvrzuji</Label>
               </div>
               <div className="flex items-center gap-2">
                 <RadioGroupItem id="truth-no" value="no" />
@@ -590,19 +675,12 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
           </div>
 
           <div className="space-y-1">
-            <Label>
-              Datum <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              type="date"
-              {...register("signatureDate")}
-              disabled={isDisabled}
-            />
-            {errors.signatureDate && (
-              <p className="text-xs text-destructive">
-                {errors.signatureDate.message as string}
-              </p>
-            )}
+            <Label>Datum odeslání</Label>
+            <p className="text-sm text-muted-foreground">
+              Datum bude automaticky zaznamenáno při odeslání formuláře:{" "}
+              <strong>{formatDateCz(today)}</strong>
+            </p>
+            <input type="hidden" {...register("signatureDate")} />
           </div>
         </section>
 
