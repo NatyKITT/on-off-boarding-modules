@@ -15,6 +15,7 @@ import {
 } from "@/lib/validations/employment-documents"
 
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -78,6 +79,7 @@ export function AffidavitForm(props: AffidavitFormProps) {
     mode: "onChange",
     resolver: zodResolver(affidavitSchema),
     defaultValues: (props.initialData as AffidavitSchema | undefined) ?? {
+      noExperience: false,
       experience: [{ employer: "", jobType: "", from: "", to: "" }],
       militaryService: [{ service: undefined, from: "", to: "" }],
       maternityParental: [
@@ -104,6 +106,7 @@ export function AffidavitForm(props: AffidavitFormProps) {
   } = form
 
   const isTruthful = form.watch("isTruthful") as boolean | undefined
+  const noExperience = form.watch("noExperience") as boolean
 
   const experienceArray = useFieldArray<AffidavitSchema, "experience">({
     control,
@@ -297,130 +300,180 @@ export function AffidavitForm(props: AffidavitFormProps) {
         </p>
 
         <section
-          className={`space-y-3 rounded-md border p-4 ${errors.experience?.message ? "border-destructive" : ""}`}
+          className={`space-y-3 rounded-md border p-4 ${!noExperience && errors.experience?.message ? "border-destructive" : ""}`}
         >
           <h2 className="text-sm font-medium">
             Praxe <span className="text-destructive">*</span>
           </h2>
 
-          {errors.experience?.message && (
+          <div className="flex items-start gap-2 rounded-md border bg-muted/30 p-3">
+            <Checkbox
+              id="no-experience"
+              checked={noExperience}
+              onCheckedChange={(checked) =>
+                setValue("noExperience", checked === true, {
+                  shouldValidate: true,
+                })
+              }
+              disabled={isDisabled}
+              className="mt-0.5"
+            />
+            <div className="space-y-0.5">
+              <Label
+                htmlFor="no-experience"
+                className="cursor-pointer font-normal leading-snug"
+              >
+                Nemám žádnou praxi (jsem čerstvě po škole)
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Zaškrtněte pokud ještě nemáte žádnou pracovní zkušenost.
+              </p>
+            </div>
+          </div>
+
+          {noExperience && (
+            <div className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800 dark:border-green-800 dark:bg-green-950/30 dark:text-green-400">
+              <svg
+                className="size-4 shrink-0"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+              Sekce praxe bude přeskočena — formulář lze odeslat bez vyplnění
+              pracovních zkušeností.
+            </div>
+          )}
+
+          {!noExperience && errors.experience?.message && (
             <p className="text-sm text-destructive">
               {errors.experience.message as string}
             </p>
           )}
 
-          {experienceArray.fields.map((field, index) => (
-            <div
-              key={field.id}
-              className="mt-3 space-y-3 rounded-md border bg-muted/30 p-4"
+          {!noExperience &&
+            experienceArray.fields.map((field, index) => (
+              <div
+                key={field.id}
+                className="mt-3 space-y-3 rounded-md border bg-muted/30 p-4"
+              >
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label>
+                      Zaměstnavatel <span className="text-destructive">*</span>{" "}
+                      <span className="text-muted-foreground">[1]</span>
+                    </Label>
+                    <Input
+                      {...register(`experience.${index}.employer` as const)}
+                      placeholder="např. ÚMČ Praha 6"
+                      disabled={isDisabled}
+                    />
+                    {errors.experience?.[index]?.employer && (
+                      <p className="text-xs text-destructive">
+                        {errors.experience[index]?.employer?.message as string}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label>
+                      Druh práce (pracovní činnost){" "}
+                      <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      {...register(`experience.${index}.jobType` as const)}
+                      placeholder="např. referent IT"
+                      disabled={isDisabled}
+                    />
+                    {errors.experience?.[index]?.jobType && (
+                      <p className="text-xs text-destructive">
+                        {errors.experience[index]?.jobType?.message as string}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label>
+                      Od <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      type="date"
+                      {...register(`experience.${index}.from` as const)}
+                      disabled={isDisabled}
+                    />
+                    {errors.experience?.[index]?.from && (
+                      <p className="text-xs text-destructive">
+                        {errors.experience[index]?.from?.message as string}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label>Do</Label>
+                    <Input
+                      type="date"
+                      {...register(`experience.${index}.to` as const)}
+                      disabled={isDisabled}
+                    />
+                    {errors.experience?.[index]?.to && (
+                      <p className="text-xs text-destructive">
+                        {errors.experience[index]?.to?.message as string}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  {experienceArray.fields.length > 1 && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => experienceArray.remove(index)}
+                      disabled={isDisabled}
+                    >
+                      Odebrat řádek
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+
+          {!noExperience && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                experienceArray.append({
+                  employer: "",
+                  jobType: "",
+                  from: "",
+                  to: "",
+                } as ExperienceEntry)
+              }
+              disabled={isDisabled}
             >
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-1">
-                  <Label>
-                    Zaměstnavatel <span className="text-destructive">*</span>{" "}
-                    <span className="text-muted-foreground">[1]</span>
-                  </Label>
-                  <Input
-                    {...register(`experience.${index}.employer` as const)}
-                    placeholder="např. ÚMČ Praha 6"
-                    disabled={isDisabled}
-                  />
-                  {errors.experience?.[index]?.employer && (
-                    <p className="text-xs text-destructive">
-                      {errors.experience[index]?.employer?.message as string}
-                    </p>
-                  )}
-                </div>
+              Přidat další řádek
+            </Button>
+          )}
 
-                <div className="space-y-1">
-                  <Label>
-                    Druh práce (pracovní činnost){" "}
-                    <span className="text-destructive">*</span>
-                  </Label>
-                  <Input
-                    {...register(`experience.${index}.jobType` as const)}
-                    placeholder="např. referent IT"
-                    disabled={isDisabled}
-                  />
-                  {errors.experience?.[index]?.jobType && (
-                    <p className="text-xs text-destructive">
-                      {errors.experience[index]?.jobType?.message as string}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-1">
-                  <Label>
-                    Od <span className="text-destructive">*</span>
-                  </Label>
-                  <Input
-                    type="date"
-                    {...register(`experience.${index}.from` as const)}
-                    disabled={isDisabled}
-                  />
-                  {errors.experience?.[index]?.from && (
-                    <p className="text-xs text-destructive">
-                      {errors.experience[index]?.from?.message as string}
-                    </p>
-                  )}
-                </div>
-
-                <div className="space-y-1">
-                  <Label>Do</Label>
-                  <Input
-                    type="date"
-                    {...register(`experience.${index}.to` as const)}
-                    disabled={isDisabled}
-                  />
-                  {errors.experience?.[index]?.to && (
-                    <p className="text-xs text-destructive">
-                      {errors.experience[index]?.to?.message as string}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex justify-end">
-                {experienceArray.fields.length > 1 && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => experienceArray.remove(index)}
-                    disabled={isDisabled}
-                  >
-                    Odebrat řádek
-                  </Button>
-                )}
-              </div>
-            </div>
-          ))}
-
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              experienceArray.append({
-                employer: "",
-                jobType: "",
-                from: "",
-                to: "",
-              } as ExperienceEntry)
-            }
-            disabled={isDisabled}
-          >
-            Přidat další řádek
-          </Button>
-
-          <p className="pt-2 text-xs text-muted-foreground">
-            [1] Uveďte prosím rovněž zkratku u soustavné činnosti provozované
-            samostatně jako živnost (OSVČ) nebo výkonu práce na základě dohody o
-            provedení práce (DPP) nebo dohody o pracovní činnosti (DPČ) a rozsah
-            práce – např. 10 dnů/měs., denně apod.
-          </p>
+          {!noExperience && (
+            <p className="pt-2 text-xs text-muted-foreground">
+              [1] Uveďte prosím rovněž zkratku u soustavné činnosti provozované
+              samostatně jako živnost (OSVČ) nebo výkonu práce na základě dohody
+              o provedení práce (DPP) nebo dohody o pracovní činnosti (DPČ) a
+              rozsah práce – např. 10 dnů/měs., denně apod.
+            </p>
+          )}
         </section>
 
         <section className="space-y-3 rounded-md border p-4">

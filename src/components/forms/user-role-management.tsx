@@ -26,14 +26,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import { Icons } from "@/components/shared/icons"
 
 type DbUser = {
@@ -68,11 +60,11 @@ const ROLE_BADGE_CLASS: Record<Role, string> = {
 }
 
 const ROLE_ACCESS: Record<Role, string> = {
-  ADMIN: "Plný přístup + správa rolí (/admin)",
+  ADMIN: "Plný přístup + správa rolí",
   HR: "Celá aplikace, čtení i zápis",
   IT: "Celá aplikace, čtení i zápis",
   READONLY: "Celá aplikace, pouze čtení",
-  USER: "Pouze výstupní listy (public URL)",
+  USER: "Pouze výstupní listy",
 }
 
 function RoleLegend() {
@@ -112,7 +104,6 @@ function AddUserDialog({ onAdded }: { onAdded: () => void }) {
 
   const handleSubmit = async () => {
     setError(null)
-
     const normalized = email.trim().toLowerCase()
     if (!normalized) {
       setError("Zadejte email.")
@@ -130,14 +121,11 @@ function AddUserDialog({ onAdded }: { onAdded: () => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: normalized, role }),
       })
-
       const data = await res.json()
-
       if (!res.ok) {
         setError(data.error ?? "Chyba při přidávání uživatele.")
         return
       }
-
       toast.success(
         `Uživatel ${normalized} byl přidán s rolí ${ROLE_LABELS[role]}.`
       )
@@ -243,13 +231,7 @@ function AddUserDialog({ onAdded }: { onAdded: () => void }) {
   )
 }
 
-function EnvUsersTable({
-  envUsers,
-  dbUsers,
-}: {
-  envUsers: EnvUser[]
-  dbUsers: DbUser[]
-}) {
+function EnvUsersList({ envUsers }: { envUsers: EnvUser[] }) {
   if (envUsers.length === 0) {
     return (
       <p className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
@@ -259,66 +241,28 @@ function EnvUsersTable({
   }
 
   return (
-    <div className="rounded-md border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Email</TableHead>
-            <TableHead>Role (ENV)</TableHead>
-            <TableHead>Jméno</TableHead>
-            <TableHead className="text-right">Status</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {envUsers.map((envUser) => {
-            const dbRecord = dbUsers.find((u) => u.email === envUser.email)
-
-            return (
-              <TableRow key={envUser.email} className="bg-muted/20">
-                <TableCell>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium">{envUser.email}</span>
-                    <ShieldCheck className="size-3.5 shrink-0 text-muted-foreground" />
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <Badge className={ROLE_BADGE_CLASS[envUser.role]}>
-                    {ROLE_LABELS[envUser.role]}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-sm text-muted-foreground">
-                  {dbRecord ? (
-                    [dbRecord.name, dbRecord.surname]
-                      .filter(Boolean)
-                      .join(" ") || "—"
-                  ) : (
-                    <span className="italic">Nepřihlášen/a</span>
-                  )}
-                </TableCell>
-                <TableCell className="text-right">
-                  {dbRecord ? (
-                    <Badge variant="secondary" className="text-xs">
-                      Registrován/a
-                    </Badge>
-                  ) : (
-                    <Badge
-                      variant="outline"
-                      className="text-xs text-muted-foreground"
-                    >
-                      Čeká na přihlášení
-                    </Badge>
-                  )}
-                </TableCell>
-              </TableRow>
-            )
-          })}
-        </TableBody>
-      </Table>
+    <div className="divide-y rounded-md border">
+      {envUsers.map((envUser) => (
+        <div
+          key={envUser.email}
+          className="flex items-center justify-between gap-3 px-4 py-3"
+        >
+          <div className="flex min-w-0 items-center gap-2">
+            <ShieldCheck className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate text-sm font-medium">
+              {envUser.email}
+            </span>
+          </div>
+          <Badge className={`${ROLE_BADGE_CLASS[envUser.role]} shrink-0`}>
+            {ROLE_LABELS[envUser.role]}
+          </Badge>
+        </div>
+      ))}
     </div>
   )
 }
 
-function DbUsersTable({
+function DbUsersList({
   users,
   updatingUserId,
   onRoleChange,
@@ -337,55 +281,50 @@ function DbUsersTable({
   }
 
   return (
-    <div className="rounded-md border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Jméno</TableHead>
-            <TableHead>Email</TableHead>
-            <TableHead>Přístup</TableHead>
-            <TableHead>Aktuální role</TableHead>
-            <TableHead>Změnit roli</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {users.map((user) => (
-            <TableRow key={user.id}>
-              <TableCell>
-                {[user.name, user.surname].filter(Boolean).join(" ") || (
-                  <span className="text-sm italic text-muted-foreground">
-                    Nepřihlášen/a
-                  </span>
-                )}
-              </TableCell>
-              <TableCell className="text-sm text-muted-foreground">
-                {user.email}
-              </TableCell>
-              <TableCell>
-                {user.canAccessApp ? (
-                  <Badge className="border-green-200 bg-green-100 text-green-800">
-                    Aplikace
-                  </Badge>
-                ) : (
-                  <Badge variant="outline" className="text-muted-foreground">
-                    Výstupní listy
-                  </Badge>
-                )}
-              </TableCell>
-              <TableCell>
-                <Badge className={ROLE_BADGE_CLASS[user.role]}>
+    <>
+      <div className="space-y-3 md:hidden">
+        {users.map((user) => {
+          const fullName = [user.name, user.surname].filter(Boolean).join(" ")
+          return (
+            <div key={user.id} className="space-y-3 rounded-md border p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  {fullName ? (
+                    <p className="truncate text-sm font-medium">{fullName}</p>
+                  ) : (
+                    <p className="text-sm italic text-muted-foreground">
+                      Nepřihlášen/a
+                    </p>
+                  )}
+                  <p className="truncate text-xs text-muted-foreground">
+                    {user.email}
+                  </p>
+                </div>
+                <Badge className={`${ROLE_BADGE_CLASS[user.role]} shrink-0`}>
                   {ROLE_LABELS[user.role]}
                 </Badge>
-              </TableCell>
-              <TableCell>
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <Badge
+                  variant={user.canAccessApp ? "default" : "outline"}
+                  className={
+                    user.canAccessApp
+                      ? "border-green-200 bg-green-100 text-xs text-green-800"
+                      : "text-xs text-muted-foreground"
+                  }
+                >
+                  {user.canAccessApp ? "Aplikace" : "Výstupní listy"}
+                </Badge>
+
                 <Select
                   value={user.role}
                   onValueChange={(value: Role) => onRoleChange(user.id, value)}
                   disabled={updatingUserId === user.id}
                 >
-                  <SelectTrigger className="w-[160px]">
+                  <SelectTrigger className="h-8 w-[150px] text-xs">
                     {updatingUserId === user.id ? (
-                      <Icons.spinner className="size-4 animate-spin" />
+                      <Icons.spinner className="size-3 animate-spin" />
                     ) : (
                       <SelectValue />
                     )}
@@ -393,19 +332,101 @@ function DbUsersTable({
                   <SelectContent>
                     {(Object.entries(ROLE_LABELS) as [Role, string][]).map(
                       ([r, label]) => (
-                        <SelectItem key={r} value={r}>
+                        <SelectItem key={r} value={r} className="text-xs">
                           {label}
                         </SelectItem>
                       )
                     )}
                   </SelectContent>
                 </Select>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="hidden overflow-x-auto rounded-md border md:block">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b bg-muted/50">
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                Jméno
+              </th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                Email
+              </th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                Přístup
+              </th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                Role
+              </th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                Změnit roli
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {users.map((user) => (
+              <tr key={user.id}>
+                <td className="px-4 py-3">
+                  {[user.name, user.surname].filter(Boolean).join(" ") || (
+                    <span className="italic text-muted-foreground">
+                      Nepřihlášen/a
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-muted-foreground">
+                  {user.email}
+                </td>
+                <td className="px-4 py-3">
+                  {user.canAccessApp ? (
+                    <Badge className="border-green-200 bg-green-100 text-green-800">
+                      Aplikace
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-muted-foreground">
+                      Výstupní listy
+                    </Badge>
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  <Badge className={ROLE_BADGE_CLASS[user.role]}>
+                    {ROLE_LABELS[user.role]}
+                  </Badge>
+                </td>
+                <td className="px-4 py-3">
+                  <Select
+                    value={user.role}
+                    onValueChange={(value: Role) =>
+                      onRoleChange(user.id, value)
+                    }
+                    disabled={updatingUserId === user.id}
+                  >
+                    <SelectTrigger className="w-[160px]">
+                      {updatingUserId === user.id ? (
+                        <Icons.spinner className="size-4 animate-spin" />
+                      ) : (
+                        <SelectValue />
+                      )}
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(Object.entries(ROLE_LABELS) as [Role, string][]).map(
+                        ([r, label]) => (
+                          <SelectItem key={r} value={r}>
+                            {label}
+                          </SelectItem>
+                        )
+                      )}
+                    </SelectContent>
+                  </Select>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   )
 }
 
@@ -421,7 +442,6 @@ export function UserRoleManagement() {
         fetch("/api/admin/env-roles"),
         fetch("/api/admin/users"),
       ])
-
       const envData = envRes.ok ? await envRes.json() : { envUsers: [] }
       const dbData = dbRes.ok ? await dbRes.json() : { users: [] }
 
@@ -451,12 +471,10 @@ export function UserRoleManagement() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: newRole }),
       })
-
       if (!res.ok) {
         const err = await res.json()
         throw new Error(err.error ?? "Chyba při aktualizaci.")
       }
-
       toast.success("Role byla aktualizována.")
       await fetchAll()
     } catch (error) {
@@ -481,34 +499,34 @@ export function UserRoleManagement() {
   return (
     <div className="space-y-6">
       <RoleLegend />
+
       <div className="space-y-3">
         <div className="flex items-center gap-2">
           <Lock className="size-4 text-muted-foreground" />
           <h3 className="font-medium">Uživatelé definovaní v ENV</h3>
           <Badge variant="outline" className="text-xs">
-            {envUsers.length} uživatelů
+            {envUsers.length}
           </Badge>
         </div>
 
         <Alert>
           <InfoIcon className="size-4" />
           <AlertDescription className="text-sm">
-            Tyto role jsou definovány v konfiguračním souboru serveru (ENV
-            proměnné). Nelze je měnit ani mazat přes toto rozhraní — změna
-            vyžaduje editaci ENV a restart aplikace.
+            Role definované v ENV proměnných. Nelze měnit přes toto rozhraní —
+            vyžaduje editaci ENV a restart.
           </AlertDescription>
         </Alert>
 
-        <EnvUsersTable envUsers={envUsers} dbUsers={dbUsers} />
+        <EnvUsersList envUsers={envUsers} />
       </div>
 
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <Plus className="size-4 text-muted-foreground" />
             <h3 className="font-medium">Ostatní uživatelé @praha6.cz</h3>
             <Badge variant="secondary" className="text-xs">
-              {dbUsers.length} uživatelů
+              {dbUsers.length}
             </Badge>
           </div>
           <AddUserDialog onAdded={fetchAll} />
@@ -519,7 +537,7 @@ export function UserRoleManagement() {
           adminem. Jejich roli lze měnit.
         </p>
 
-        <DbUsersTable
+        <DbUsersList
           users={dbUsers}
           updatingUserId={updatingUserId}
           onRoleChange={updateUserRole}

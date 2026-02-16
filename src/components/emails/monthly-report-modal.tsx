@@ -77,11 +77,9 @@ function formatFullName(r: ReportRecord): string {
   const before = r.titleBefore?.trim()
   const after = r.titleAfter?.trim()
   const base = `${r.name} ${r.surname}`.trim()
-
   let full = base
   if (before) full = `${before} ${full}`
   if (after) full = `${full}, ${after}`
-
   return full
 }
 
@@ -257,12 +255,7 @@ export function MonthlyReportModal({
         throw new Error(text || "Chyba při odesílání reportu.")
       }
 
-      setSuccessState({
-        open: true,
-        mode,
-        total: payloadRows.length,
-      })
-
+      setSuccessState({ open: true, mode, total: payloadRows.length })
       void loadRecords()
     } catch (e) {
       setErrorState({
@@ -278,152 +271,152 @@ export function MonthlyReportModal({
   return (
     <>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="flex max-h-[90vh] max-w-5xl flex-col">
-          <DialogHeader>
+        <DialogContent
+          className="flex max-h-[95svh] w-full max-w-5xl flex-col gap-0 p-0"
+          style={{ overscrollBehavior: "contain" }}
+        >
+          <DialogHeader className="shrink-0 border-b p-4 sm:px-6">
             <DialogTitle>Měsíční report – {monthLabel}</DialogTitle>
           </DialogHeader>
 
-          <div className="mt-3 flex flex-wrap gap-4">
-            <div className="min-w-[200px] flex-1">
-              <Label htmlFor="month">Měsíc</Label>
-              <input
-                id="month"
-                type="month"
-                value={month}
-                onChange={(e) => setMonth(e.target.value)}
-                className={cn(
-                  "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm",
-                  focusRing
-                )}
-              />
-            </div>
-
-            <div className="min-w-[200px] flex-1">
-              <Label>Režim</Label>
-              <Tabs
-                value={kind}
-                onValueChange={(v) => setKind(v as Kind)}
-                className="mt-1"
-              >
-                <TabsList className="grid grid-cols-2">
-                  <TabsTrigger value="actual" disabled={combineBoth}>
-                    Skutečné
-                  </TabsTrigger>
-                  <TabsTrigger value="planned" disabled={combineBoth}>
-                    Plánované
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
-            </div>
-
-            <div className="min-w-[200px] flex-1">
-              <Label>Hlavní typ</Label>
-              <Tabs
-                value={type}
-                onValueChange={(v) => setType(v as TypeFilter)}
-                className="mt-1"
-              >
-                <TabsList className="grid grid-cols-2">
-                  <TabsTrigger value="nastupy">Nástupy</TabsTrigger>
-                  <TabsTrigger value="odchody">Odchody</TabsTrigger>
-                </TabsList>
-              </Tabs>
-            </div>
-
-            <div className="flex flex-col justify-end gap-2">
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="includeOther"
-                  checked={includeOtherType}
-                  onCheckedChange={(c) => setIncludeOtherType(!!c)}
-                />
-                <Label htmlFor="includeOther" className="cursor-pointer">
-                  Zahrnout i {type === "nastupy" ? "odchody" : "nástupy"}
-                </Label>
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="combineBoth"
-                  checked={combineBoth}
-                  onCheckedChange={(c) => setCombineBoth(!!c)}
-                />
-                <Label htmlFor="combineBoth" className="cursor-pointer">
-                  Zaslat společně (plánované + skutečné)
-                </Label>
-              </div>
-            </div>
-          </div>
-
           <div
-            className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden pr-1"
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
             data-lenis-prevent=""
             onWheelCapture={(e) => e.stopPropagation()}
           >
-            {sentCount > 0 && (
-              <Alert>
-                <AlertCircle className="size-4" />
-                <AlertDescription>
-                  {sentCount} z {records.length} záznamů už bylo odesláno.
-                  {selectedSentCount > 0 && (
-                    <span className="ml-1 font-semibold">
-                      Vybráno {selectedSentCount} již odeslaných.
-                    </span>
-                  )}
-                </AlertDescription>
-              </Alert>
-            )}
+            <div className="space-y-4 p-4 sm:px-6">
+              <div className="flex flex-wrap gap-3">
+                <div className="min-w-[160px] flex-1">
+                  <Label htmlFor="month">Měsíc</Label>
+                  <input
+                    id="month"
+                    type="month"
+                    value={month}
+                    onChange={(e) => setMonth(e.target.value)}
+                    className={cn(
+                      "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm",
+                      focusRing
+                    )}
+                  />
+                </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={toggleAll}
-                disabled={loading}
-                className="inline-flex items-center justify-center gap-2"
-              >
-                {selectedKeys.length === records.length && records.length > 0
-                  ? "Odznačit vše"
-                  : "Vybrat vše"}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={toggleUnsent}
-                disabled={loading}
-                className="inline-flex items-center justify-center gap-2"
-              >
-                Vybrat neodeslané
-              </Button>
-              <div className="ml-auto text-sm text-muted-foreground">
-                Vybráno: {selectedKeys.length} / {records.length}
+                <div className="min-w-[160px] flex-1">
+                  <Label>Režim</Label>
+                  <Tabs
+                    value={kind}
+                    onValueChange={(v) => setKind(v as Kind)}
+                    className="mt-1"
+                  >
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="actual" disabled={combineBoth}>
+                        Skutečné
+                      </TabsTrigger>
+                      <TabsTrigger value="planned" disabled={combineBoth}>
+                        Plánované
+                      </TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                </div>
+
+                <div className="min-w-[160px] flex-1">
+                  <Label>Hlavní typ</Label>
+                  <Tabs
+                    value={type}
+                    onValueChange={(v) => setType(v as TypeFilter)}
+                    className="mt-1"
+                  >
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="nastupy">Nástupy</TabsTrigger>
+                      <TabsTrigger value="odchody">Odchody</TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                </div>
+
+                <div className="flex min-w-[160px] flex-1 flex-col justify-end gap-2">
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="includeOther"
+                      checked={includeOtherType}
+                      onCheckedChange={(c) => setIncludeOtherType(!!c)}
+                    />
+                    <Label htmlFor="includeOther" className="cursor-pointer">
+                      Zahrnout i {type === "nastupy" ? "odchody" : "nástupy"}
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="combineBoth"
+                      checked={combineBoth}
+                      onCheckedChange={(c) => setCombineBoth(!!c)}
+                    />
+                    <Label htmlFor="combineBoth" className="cursor-pointer">
+                      Zaslat společně (plánované + skutečné)
+                    </Label>
+                  </div>
+                </div>
               </div>
-            </div>
 
-            <div
-              className="overflow-hidden rounded-lg border bg-background"
-              aria-busy={loading}
-            >
-              {loading ? (
-                <div className="p-8 text-center text-muted-foreground">
-                  Načítám…
-                </div>
-              ) : records.length === 0 ? (
-                <div className="p-8 text-center text-muted-foreground">
-                  Žádné záznamy
-                </div>
-              ) : (
-                <div
-                  className="w-full overflow-x-auto overflow-y-hidden
-                    [-webkit-overflow-scrolling:touch]
-                    [overscroll-behavior-x:contain]
-                    [touch-action:pan-x]
-                  "
+              {sentCount > 0 && (
+                <Alert>
+                  <AlertCircle className="size-4" />
+                  <AlertDescription>
+                    {sentCount} z {records.length} záznamů už bylo odesláno.
+                    {selectedSentCount > 0 && (
+                      <span className="ml-1 font-semibold">
+                        Vybráno {selectedSentCount} již odeslaných.
+                      </span>
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={toggleAll}
+                  disabled={loading}
                 >
-                  <table className="w-full min-w-[720px] text-xs sm:text-sm">
-                    <thead className="sticky top-0 z-10 bg-background">
-                      <tr className="border-b">
-                        <th className="w-12 p-2">
+                  {selectedKeys.length === records.length && records.length > 0
+                    ? "Odznačit vše"
+                    : "Vybrat vše"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={toggleUnsent}
+                  disabled={loading}
+                >
+                  Vybrat neodeslané
+                </Button>
+                <div className="ml-auto text-sm text-muted-foreground">
+                  Vybráno: {selectedKeys.length} / {records.length}
+                </div>
+              </div>
+
+              <div
+                className={cn(
+                  "rounded-lg border bg-background",
+                  "overflow-auto",
+                  "max-h-[40vh]",
+                  "[-webkit-overflow-scrolling:touch]",
+                  "[overscroll-behavior:contain]"
+                )}
+                aria-busy={loading}
+              >
+                {loading ? (
+                  <div className="p-8 text-center text-muted-foreground">
+                    Načítám…
+                  </div>
+                ) : records.length === 0 ? (
+                  <div className="p-8 text-center text-muted-foreground">
+                    Žádné záznamy
+                  </div>
+                ) : (
+                  <table className="w-full min-w-[680px] text-xs sm:text-sm">
+                    <thead className="sticky top-0 z-10 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
+                      <tr>
+                        <th className="w-10 p-2">
                           <Checkbox
                             checked={
                               selectedKeys.length === records.length &&
@@ -433,13 +426,21 @@ export function MonthlyReportModal({
                             aria-label="Vybrat všechny"
                           />
                         </th>
-                        <th className="p-2 text-left">Jméno</th>
-                        <th className="p-2 text-left">Pozice</th>
-                        <th className="p-2 text-left">Oddělení</th>
-                        <th className="p-2 text-left">Datum</th>
-                        <th className="p-2 text-left">Typ</th>
-                        <th className="p-2 text-left">Režim</th>
-                        <th className="w-40 p-2 text-left">Status</th>
+                        <th className="p-2 text-left font-medium">Jméno</th>
+                        <th className="p-2 text-left font-medium">Pozice</th>
+                        <th className="hidden p-2 text-left font-medium sm:table-cell">
+                          Oddělení
+                        </th>
+                        <th className="p-2 text-left font-medium">Datum</th>
+                        <th className="hidden p-2 text-left font-medium sm:table-cell">
+                          Typ
+                        </th>
+                        <th className="hidden p-2 text-left font-medium sm:table-cell">
+                          Režim
+                        </th>
+                        <th className="w-32 p-2 text-left font-medium">
+                          Status
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -463,18 +464,16 @@ export function MonthlyReportModal({
                             <td className="p-2 font-medium">
                               {formatFullName(r)}
                             </td>
-                            <td className="p-2 text-xs sm:text-sm">
-                              {r.position ?? "—"}
-                            </td>
-                            <td className="p-2 text-xs sm:text-sm">
+                            <td className="p-2">{r.position ?? "—"}</td>
+                            <td className="hidden p-2 sm:table-cell">
                               {r.department ?? "—"}
                             </td>
-                            <td className="whitespace-nowrap p-2 text-xs sm:text-sm">
+                            <td className="whitespace-nowrap p-2">
                               {r.date
                                 ? fmt(new Date(r.date), "dd.MM.yyyy")
                                 : "–"}
                             </td>
-                            <td className="p-2">
+                            <td className="hidden p-2 sm:table-cell">
                               <Badge
                                 variant={
                                   r.type === "onboarding"
@@ -485,7 +484,7 @@ export function MonthlyReportModal({
                                 {r.type === "onboarding" ? "Nástup" : "Odchod"}
                               </Badge>
                             </td>
-                            <td className="p-2">
+                            <td className="hidden p-2 sm:table-cell">
                               <Badge
                                 variant={r.isPlanned ? "secondary" : "default"}
                               >
@@ -494,20 +493,19 @@ export function MonthlyReportModal({
                             </td>
                             <td className="p-2">
                               {r.wasSent ? (
-                                <div className="flex min-w-[150px] flex-col gap-0.5 text-xs text-muted-foreground sm:text-sm">
+                                <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
                                   <span className="inline-flex items-center gap-1">
                                     <CheckCircle2 className="size-3 shrink-0" />
-                                    <span>Již odesláno</span>
+                                    <span>Odesláno</span>
                                   </span>
                                   {r.sentDate && (
-                                    <span className="pl-5 text-[11px] sm:text-xs">
-                                      Odesláno{" "}
+                                    <span className="pl-4 text-[10px]">
                                       {fmt(new Date(r.sentDate), "dd.MM.yyyy")}
                                     </span>
                                   )}
                                 </div>
                               ) : (
-                                <span className="text-xs font-medium text-green-600 sm:text-sm">
+                                <span className="text-xs font-medium text-green-600">
                                   Nové
                                 </span>
                               )}
@@ -517,43 +515,46 @@ export function MonthlyReportModal({
                       })}
                     </tbody>
                   </table>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
 
-          <div className="mt-4 flex flex-wrap justify-end gap-2 border-t pt-4">
-            <Button
-              variant="outline"
-              onClick={() => setOpen(false)}
-              className="inline-flex items-center justify-center gap-2"
-            >
-              Zrušit
-            </Button>
-            <Button
-              onClick={() => handleSend("unsentOnly")}
-              disabled={sending || loading}
-              className="inline-flex items-center justify-center gap-2"
-            >
-              <Mail className="size-4" />
-              <span>Odeslat jen neodeslané</span>
-            </Button>
-            <Button
-              onClick={() => handleSend("selected")}
-              disabled={selectedKeys.length === 0 || sending || loading}
-              className="inline-flex items-center justify-center gap-2"
-            >
-              <Mail className="size-4" />
-              <span>Odeslat vybrané ({selectedKeys.length})</span>
-            </Button>
-            <Button
-              onClick={() => handleSend("all")}
-              disabled={sending || loading}
-              className="inline-flex items-center justify-center gap-2"
-            >
-              <Mail className="size-4" />
-              <span>Odeslat celý měsíc</span>
-            </Button>
+          <div className="shrink-0 border-t px-4 py-3 sm:px-6">
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setOpen(false)}
+                className="mr-auto"
+              >
+                Zrušit
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => handleSend("unsentOnly")}
+                disabled={sending || loading}
+                className="inline-flex items-center gap-1.5"
+              >
+                <Mail className="size-4 shrink-0" />
+                Neodeslané
+              </Button>
+              <Button
+                onClick={() => handleSend("selected")}
+                disabled={selectedKeys.length === 0 || sending || loading}
+                className="inline-flex items-center gap-1.5"
+              >
+                <Mail className="size-4 shrink-0" />
+                Vybrané ({selectedKeys.length})
+              </Button>
+              <Button
+                onClick={() => handleSend("all")}
+                disabled={sending || loading}
+                className="inline-flex items-center gap-1.5"
+              >
+                <Mail className="size-4 shrink-0" />
+                Vše
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
@@ -579,7 +580,6 @@ export function MonthlyReportModal({
               onClick={() =>
                 setConfirmState((prev) => ({ ...prev, open: false }))
               }
-              className="inline-flex items-center justify-center gap-2"
             >
               Ne, neodesílat znovu
             </Button>
@@ -589,7 +589,6 @@ export function MonthlyReportModal({
                 setConfirmState((prev) => ({ ...prev, open: false }))
                 if (m) void handleSend(m, true)
               }}
-              className="inline-flex items-center justify-center gap-2"
             >
               Odeslat včetně nich
             </Button>
@@ -617,7 +616,6 @@ export function MonthlyReportModal({
                 setSuccessState((prev) => ({ ...prev, open: false }))
                 setOpen(false)
               }}
-              className="inline-flex items-center justify-center gap-2"
             >
               Pokračovat
             </Button>
@@ -645,7 +643,6 @@ export function MonthlyReportModal({
               onClick={() =>
                 setErrorState((prev) => ({ ...prev, open: false }))
               }
-              className="inline-flex items-center justify-center gap-2"
             >
               Zavřít
             </Button>

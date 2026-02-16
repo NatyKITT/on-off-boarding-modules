@@ -11,10 +11,14 @@ export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
 export const revalidate = 0
 
-export default async function SignInPage() {
+export default async function SignInPage({
+  searchParams,
+}: {
+  searchParams: { callbackUrl?: string }
+}) {
   const session = await getSession()
   if (session?.user) {
-    redirect("/prehled")
+    redirect(searchParams.callbackUrl ?? "/prehled")
   }
 
   return (
@@ -41,7 +45,9 @@ export default async function SignInPage() {
 
         <div className="rounded-2xl border border-emerald-500/30 bg-card/90 p-px shadow-md backdrop-blur">
           <div className="rounded-2xl bg-card p-4 sm:p-5">
-            <OAuthButtons />
+            <OAuthButtons
+              callbackUrl={searchParams.callbackUrl ?? "/prehled"}
+            />
           </div>
         </div>
 

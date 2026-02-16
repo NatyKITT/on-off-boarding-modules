@@ -396,138 +396,240 @@ export function ExitChecklistForm({
               Vyrovnání závazků zaměstnance k zaměstnavateli
             </CardTitle>
           </CardHeader>
-          <CardContent className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[260px]">
-                    Odbor / organizace
-                  </TableHead>
-                  <TableHead>Závazek</TableHead>
-                  <TableHead className="w-[110px] text-center">
-                    Vyrovnán
-                  </TableHead>
-                  <TableHead className="w-[180px]">Datum a podpis</TableHead>
-                  <TableHead className="w-[170px] text-right">Akce</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items.map((item) => {
-                  const isSigned = Boolean(item.signedAt)
-                  const signedAtDate = item.signedAt
-                    ? format(new Date(item.signedAt), "d.M.yyyy HH:mm")
-                    : ""
-                  const currentUserIsSigner =
-                    item.signedByEmail &&
-                    currentUserEmail &&
-                    item.signedByEmail === currentUserEmail
+          <CardContent className="p-0 sm:p-6">
+            <div className="divide-y sm:hidden">
+              {items.map((item) => {
+                const isSigned = Boolean(item.signedAt)
+                const signedAtDate = item.signedAt
+                  ? format(new Date(item.signedAt), "d.M.yyyy HH:mm")
+                  : ""
+                const currentUserIsSigner =
+                  item.signedByEmail &&
+                  currentUserEmail &&
+                  item.signedByEmail === currentUserEmail
+                const isSigningDisabled = SIGNING_DISABLED_KEYS.includes(
+                  item.key
+                )
+                const showSignButton = !isLocked && !isSigned
+                const showRevokeButton =
+                  !isLocked && isSigned && (isAdmin || currentUserIsSigner)
 
-                  const isSigningDisabled = SIGNING_DISABLED_KEYS.includes(
-                    item.key
-                  )
-                  const showSignButton = !isLocked && !isSigned
-                  const showRevokeButton =
-                    !isLocked && isSigned && (isAdmin || currentUserIsSigner)
+                return (
+                  <div key={item.key} className="space-y-2 px-4 py-3">
+                    <div className="text-xs font-medium text-muted-foreground">
+                      {item.organization}
+                    </div>
+                    <div className="text-sm">{item.obligation}</div>
 
-                  return (
-                    <TableRow key={item.key}>
-                      <TableCell className="align-top text-sm">
-                        {item.organization}
-                      </TableCell>
-                      <TableCell className="align-top text-sm">
-                        {item.obligation}
-                      </TableCell>
-                      <TableCell className="text-center align-top">
-                        {!isLocked && !isSigningDisabled ? (
-                          <div className="inline-flex items-center gap-1 rounded-md bg-muted px-1 py-0.5 text-xs">
-                            <button
-                              type="button"
-                              className={`rounded px-2 py-0.5 ${
-                                item.resolved === "YES"
-                                  ? "bg-green-600 text-white"
-                                  : "hover:bg-green-100 dark:hover:bg-green-900/40"
-                              }`}
-                              onClick={() => updateResolved(item.key, "YES")}
-                            >
-                              Ano
-                            </button>
-                            <button
-                              type="button"
-                              className={`rounded px-2 py-0.5 ${
-                                item.resolved === "NO"
-                                  ? "bg-red-600 text-white"
-                                  : "hover:bg-red-100 dark:hover:bg-red-900/40"
-                              }`}
-                              onClick={() => updateResolved(item.key, "NO")}
-                            >
-                              Ne
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-sm font-medium">
-                            {item.resolved === "YES"
-                              ? "Ano"
-                              : item.resolved === "NO"
-                                ? "Ne"
-                                : "–"}
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell className="align-top text-sm">
-                        {isSigned ? (
-                          <div className="flex flex-col">
-                            <span>{item.signedByName}</span>
-                            <span className="text-xs text-muted-foreground">
-                              {signedAtDate}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">
-                            Nepodepsáno
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell className="align-top">
-                        <div className="flex justify-end gap-2">
-                          {showSignButton && (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="gap-1"
-                              disabled={isSigningDisabled}
-                              title={
-                                isSigningDisabled
-                                  ? "Tato položka zatím není dostupná k podpisu."
-                                  : undefined
-                              }
-                              onClick={() =>
-                                !isSigningDisabled && signRow(item.key)
-                              }
-                            >
-                              <Check className="size-4" />
-                              Podepsat
-                            </Button>
-                          )}
-                          {showRevokeButton && (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              className="gap-1 text-xs text-muted-foreground"
-                              onClick={() => revokeSignature(item.key)}
-                            >
-                              <Undo2 className="size-4" />
-                              Zrušit podpis
-                            </Button>
-                          )}
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      {!isLocked && !isSigningDisabled ? (
+                        <div className="inline-flex items-center gap-1 rounded-md bg-muted px-1 py-0.5 text-xs">
+                          <button
+                            type="button"
+                            className={`rounded px-2 py-0.5 ${
+                              item.resolved === "YES"
+                                ? "bg-green-600 text-white"
+                                : "hover:bg-green-100 dark:hover:bg-green-900/40"
+                            }`}
+                            onClick={() => updateResolved(item.key, "YES")}
+                          >
+                            Ano
+                          </button>
+                          <button
+                            type="button"
+                            className={`rounded px-2 py-0.5 ${
+                              item.resolved === "NO"
+                                ? "bg-red-600 text-white"
+                                : "hover:bg-red-100 dark:hover:bg-red-900/40"
+                            }`}
+                            onClick={() => updateResolved(item.key, "NO")}
+                          >
+                            Ne
+                          </button>
                         </div>
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
+                      ) : (
+                        <span className="text-sm font-medium">
+                          {item.resolved === "YES"
+                            ? "✓ Ano"
+                            : item.resolved === "NO"
+                              ? "✗ Ne"
+                              : "–"}
+                        </span>
+                      )}
+
+                      <div className="flex gap-2">
+                        {showSignButton && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-7 gap-1 text-xs"
+                            disabled={isSigningDisabled}
+                            onClick={() =>
+                              !isSigningDisabled && signRow(item.key)
+                            }
+                          >
+                            <Check className="size-3" />
+                            Podepsat
+                          </Button>
+                        )}
+                        {showRevokeButton && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 gap-1 text-xs text-muted-foreground"
+                            onClick={() => revokeSignature(item.key)}
+                          >
+                            <Undo2 className="size-3" />
+                            Zrušit
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+
+                    {isSigned && (
+                      <div className="text-xs text-muted-foreground">
+                        {item.signedByName} · {signedAtDate}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            <div className="hidden overflow-x-auto sm:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[220px]">
+                      Odbor / organizace
+                    </TableHead>
+                    <TableHead>Závazek</TableHead>
+                    <TableHead className="w-[110px] text-center">
+                      Vyrovnán
+                    </TableHead>
+                    <TableHead className="w-[180px]">Datum a podpis</TableHead>
+                    <TableHead className="w-[170px] text-right">Akce</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {items.map((item) => {
+                    const isSigned = Boolean(item.signedAt)
+                    const signedAtDate = item.signedAt
+                      ? format(new Date(item.signedAt), "d.M.yyyy HH:mm")
+                      : ""
+                    const currentUserIsSigner =
+                      item.signedByEmail &&
+                      currentUserEmail &&
+                      item.signedByEmail === currentUserEmail
+                    const isSigningDisabled = SIGNING_DISABLED_KEYS.includes(
+                      item.key
+                    )
+                    const showSignButton = !isLocked && !isSigned
+                    const showRevokeButton =
+                      !isLocked && isSigned && (isAdmin || currentUserIsSigner)
+
+                    return (
+                      <TableRow key={item.key}>
+                        <TableCell className="align-top text-sm">
+                          {item.organization}
+                        </TableCell>
+                        <TableCell className="align-top text-sm">
+                          {item.obligation}
+                        </TableCell>
+                        <TableCell className="text-center align-top">
+                          {!isLocked && !isSigningDisabled ? (
+                            <div className="inline-flex items-center gap-1 rounded-md bg-muted px-1 py-0.5 text-xs">
+                              <button
+                                type="button"
+                                className={`rounded px-2 py-0.5 ${
+                                  item.resolved === "YES"
+                                    ? "bg-green-600 text-white"
+                                    : "hover:bg-green-100 dark:hover:bg-green-900/40"
+                                }`}
+                                onClick={() => updateResolved(item.key, "YES")}
+                              >
+                                Ano
+                              </button>
+                              <button
+                                type="button"
+                                className={`rounded px-2 py-0.5 ${
+                                  item.resolved === "NO"
+                                    ? "bg-red-600 text-white"
+                                    : "hover:bg-red-100 dark:hover:bg-red-900/40"
+                                }`}
+                                onClick={() => updateResolved(item.key, "NO")}
+                              >
+                                Ne
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-sm font-medium">
+                              {item.resolved === "YES"
+                                ? "Ano"
+                                : item.resolved === "NO"
+                                  ? "Ne"
+                                  : "–"}
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="align-top text-sm">
+                          {isSigned ? (
+                            <div className="flex flex-col">
+                              <span>{item.signedByName}</span>
+                              <span className="text-xs text-muted-foreground">
+                                {signedAtDate}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">
+                              Nepodepsáno
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="align-top">
+                          <div className="flex justify-end gap-2">
+                            {showSignButton && (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="gap-1"
+                                disabled={isSigningDisabled}
+                                title={
+                                  isSigningDisabled
+                                    ? "Tato položka zatím není dostupná k podpisu."
+                                    : undefined
+                                }
+                                onClick={() =>
+                                  !isSigningDisabled && signRow(item.key)
+                                }
+                              >
+                                <Check className="size-4" />
+                                Podepsat
+                              </Button>
+                            )}
+                            {showRevokeButton && (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="gap-1 text-xs text-muted-foreground"
+                                onClick={() => revokeSignature(item.key)}
+                              >
+                                <Undo2 className="size-4" />
+                                Zrušit podpis
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
 

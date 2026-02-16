@@ -1160,6 +1160,33 @@ export function PersonalQuestionnaireForm(
             cizích jazyků.
           </p>
 
+          <div className="rounded-md bg-muted/20 p-3 text-xs text-muted-foreground">
+            <p className="mb-1 font-medium">Stupně jazykové znalosti (SERR):</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 sm:grid-cols-3">
+              <span>
+                <strong>A0</strong> – žádná znalost
+              </span>
+              <span>
+                <strong>A1</strong> – začátečník
+              </span>
+              <span>
+                <strong>A2</strong> – základní
+              </span>
+              <span>
+                <strong>B1</strong> – středně pokročilý
+              </span>
+              <span>
+                <strong>B2</strong> – vyšší středně pokročilý
+              </span>
+              <span>
+                <strong>C1</strong> – pokročilý
+              </span>
+              <span>
+                <strong>C2</strong> – rodilý mluvčí / plynná znalost
+              </span>
+            </div>
+          </div>
+
           <div className="space-y-4">
             {languages.map((lang, index) => (
               <div key={index} className="space-y-2 rounded-md bg-muted/40 p-3">

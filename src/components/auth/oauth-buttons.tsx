@@ -10,12 +10,18 @@ import { useToast } from "@/hooks/use-toast"
 import { Button } from "@/components/ui/button"
 import { Icons } from "@/components/shared/icons"
 
-export function OAuthButtons(): JSX.Element {
+type Props = {
+  callbackUrl?: string
+}
+
+export function OAuthButtons({
+  callbackUrl = DEFAULT_SIGNIN_REDIRECT,
+}: Props): JSX.Element {
   const { toast } = useToast()
 
   async function handleOAuthSignIn() {
     try {
-      await signIn("google", { callbackUrl: DEFAULT_SIGNIN_REDIRECT })
+      await signIn("google", { callbackUrl })
       toast({
         title: "Přihlášení úspěšné",
         description: "Byli jste úspěšně přihlášeni přes Google účet.",

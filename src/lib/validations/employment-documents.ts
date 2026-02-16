@@ -390,40 +390,44 @@ const unpaidLeaveEntrySchema = z
     refineDateRange(val, ctx)
   })
 
-export const affidavitSchema = z.object({
-  experience: z
-    .array(experienceEntrySchema)
-    .default([])
-    .superRefine((arr, ctx) => {
-      const hasAnyFilled = arr.some(
-        (e) => !!e.employer || !!e.jobType || !!e.from
-      )
-      if (!hasAnyFilled) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message:
-            "Vyplňte alespoň jeden záznam praxe (zaměstnavatel, druh práce a datum Od).",
-        })
-      }
-    }),
+export const affidavitSchema = z
+  .object({
+    noExperience: z.boolean().default(false),
 
-  militaryService: z.array(militaryEntrySchema).default([]),
+    experience: z.array(experienceEntrySchema).default([]),
 
-  maternityParental: z.array(childCareSchema).default([]),
-  continuousCare: z.array(childCareSchema).default([]),
-  disabledChildCare: z.array(childCareSchema).default([]),
+    militaryService: z.array(militaryEntrySchema).default([]),
 
-  closeRelativeCare: z.array(closeRelativeCareSchema).default([]),
+    maternityParental: z.array(childCareSchema).default([]),
+    continuousCare: z.array(childCareSchema).default([]),
+    disabledChildCare: z.array(childCareSchema).default([]),
 
-  doctoralStudy: z.array(doctoralStudySchema).default([]),
+    closeRelativeCare: z.array(closeRelativeCareSchema).default([]),
 
-  unpaidLeave: z.array(unpaidLeaveEntrySchema).default([]),
+    doctoralStudy: z.array(doctoralStudySchema).default([]),
 
-  isTruthful: requiredBoolean("Potvrďte prosím pravdivost údajů.").refine(
-    (val) => val,
-    "Pro odeslání musíte potvrdit pravdivost údajů."
-  ),
-})
+    unpaidLeave: z.array(unpaidLeaveEntrySchema).default([]),
+
+    isTruthful: requiredBoolean("Potvrďte prosím pravdivost údajů.").refine(
+      (val) => val,
+      "Pro odeslání musíte potvrdit pravdivost údajů."
+    ),
+  })
+  .superRefine((data, ctx) => {
+    if (data.noExperience) return
+
+    const hasAnyFilled = data.experience.some(
+      (e) => !!e.employer || !!e.jobType || !!e.from
+    )
+    if (!hasAnyFilled) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["experience"],
+        message:
+          "Vyplňte alespoň jeden záznam praxe (zaměstnavatel, druh práce a datum Od), nebo zaškrtněte \u201eNemám žádnou praxi\u201c.",
+      })
+    }
+  })
 
 export type AffidavitSchema = z.infer<typeof affidavitSchema>
 

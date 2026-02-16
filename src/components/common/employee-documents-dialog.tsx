@@ -469,309 +469,317 @@ export function EmployeeDocumentsDialog({
         </Button>
       </DialogTrigger>
 
-      <DialogContent className="max-h-[80vh] max-w-3xl overflow-auto">
-        <DialogHeader>
-          <DialogTitle>
+      <DialogContent
+        className="flex max-h-[95svh] w-full max-w-3xl flex-col gap-0 p-0"
+        style={{ overscrollBehavior: "contain" }}
+      >
+        <DialogHeader className="shrink-0 border-b p-4 pr-12 sm:px-6 sm:pr-14">
+          <DialogTitle className="leading-snug">
             Dokumenty k nástupu{employeeName ? ` – ${employeeName}` : ""}
           </DialogTitle>
           <DialogDescription>
             Správa všech dokumentů k nástupu (čestné prohlášení, osobní dotazník
-            a dokumenty potřebné pro vedení mzdové agendy).
+            a praxe).
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-5">
-          {error && (
-            <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-              {error}
-            </p>
-          )}
+        <div
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+          data-lenis-prevent=""
+          onWheelCapture={(e) => e.stopPropagation()}
+        >
+          <div className="space-y-5 p-4 sm:px-6">
+            {error && (
+              <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                {error}
+              </p>
+            )}
 
-          <section className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm">
-            <div className="flex items-center justify-between gap-2">
-              <div className="font-medium">Vytvořit / přiřadit dokumenty</div>
+            <section className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <div className="font-medium">Vytvořit / přiřadit dokumenty</div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void loadDocuments()}
+                  disabled={loading}
+                >
+                  Obnovit
+                </Button>
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                Vyberte, které typy dokumentů chcete vytvořit. Pokud některý
+                dokument již existuje, nebude znovu vytvořen.
+              </p>
+
+              <div className="grid gap-2 md:grid-cols-2">
+                {ALL_TYPES.map((type) => {
+                  const exists = existingTypes.has(type)
+                  const checked = createSelection.includes(type)
+                  return (
+                    <label
+                      key={type}
+                      className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-xs md:text-sm"
+                    >
+                      <Checkbox
+                        checked={checked}
+                        onCheckedChange={(val) => {
+                          const isChecked = val === true
+                          setCreateSelection((prev) =>
+                            isChecked
+                              ? [...prev, type]
+                              : prev.filter((t) => t !== type)
+                          )
+                        }}
+                      />
+                      <span className="flex-1">{typeLabel(type)}</span>
+                      {exists && (
+                        <span className="text-[10px] text-muted-foreground">
+                          již existuje
+                        </span>
+                      )}
+                    </label>
+                  )
+                })}
+              </div>
+
               <Button
                 size="sm"
-                variant="outline"
-                onClick={() => void loadDocuments()}
-                disabled={loading}
+                onClick={() => void handleGenerateSelected()}
+                disabled={
+                  assigning ||
+                  !createSelection.some((t) => !existingTypes.has(t))
+                }
+                className="mt-1 flex items-center gap-2"
               >
-                Obnovit
+                {assigning && (
+                  <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                )}
+                Vygenerovat vybrané dokumenty
               </Button>
-            </div>
+            </section>
 
-            <p className="text-xs text-muted-foreground">
-              Vyberte, které typy dokumentů chcete vytvořit. Pokud některý
-              dokument již existuje, nebude znovu vytvořen.
-            </p>
+            <section className="space-y-2 text-sm">
+              <div className="font-medium">Přiřazené dokumenty</div>
 
-            <div className="grid gap-2 md:grid-cols-2">
-              {ALL_TYPES.map((type) => {
-                const exists = existingTypes.has(type)
-                const checked = createSelection.includes(type)
-                return (
-                  <label
-                    key={type}
-                    className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-xs md:text-sm"
-                  >
-                    <Checkbox
-                      checked={checked}
-                      onCheckedChange={(val) => {
-                        const isChecked = val === true
-                        setCreateSelection((prev) =>
-                          isChecked
-                            ? [...prev, type]
-                            : prev.filter((t) => t !== type)
-                        )
-                      }}
-                    />
-                    <span className="flex-1">{typeLabel(type)}</span>
-                    {exists && (
-                      <span className="text-[10px] text-muted-foreground">
-                        již existuje
-                      </span>
-                    )}
-                  </label>
-                )
-              })}
-            </div>
+              {loading ? (
+                <div className="flex items-center justify-center py-4 text-sm text-muted-foreground">
+                  Načítám dokumenty…
+                </div>
+              ) : knownDocuments.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Zatím nejsou k tomuto nástupu přiřazeny žádné dokumenty.
+                </p>
+              ) : (
+                <div className="space-y-2 text-sm">
+                  {knownDocuments.map((doc) => {
+                    const statusText = statusLabel(doc.status)
+                    const needsResend = needsResendTypes.includes(doc.type)
 
-            <Button
-              size="sm"
-              onClick={() => void handleGenerateSelected()}
-              disabled={
-                assigning || !createSelection.some((t) => !existingTypes.has(t))
-              }
-              className="mt-1 flex items-center gap-2"
-            >
-              {assigning && (
-                <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-              )}
-              Vygenerovat vybrané dokumenty
-            </Button>
-          </section>
-
-          <section className="space-y-2 text-sm">
-            <div className="font-medium">Přiřazené dokumenty</div>
-
-            {loading ? (
-              <div className="flex items-center justify-center py-4 text-sm text-muted-foreground">
-                Načítám dokumenty…
-              </div>
-            ) : knownDocuments.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Zatím nejsou k tomuto nástupu přiřazeny žádné dokumenty.
-              </p>
-            ) : (
-              <div className="max-h-[300px] space-y-2 overflow-auto pr-1 text-sm">
-                {knownDocuments.map((doc) => {
-                  const statusText = statusLabel(doc.status)
-                  const needsResend = needsResendTypes.includes(doc.type)
-
-                  return (
-                    <div
-                      key={doc.id}
-                      className="flex min-w-full flex-col gap-2 rounded-md border px-3 py-2 md:flex-row md:items-center md:justify-between"
-                    >
-                      <div className="space-y-1">
-                        <span className="text-sm font-medium">
-                          {typeLabel(doc.type)}
-                        </span>
-                        <div className="text-xs text-muted-foreground">
-                          <div>
-                            Vytvořeno:{" "}
-                            {format(new Date(doc.createdAt), "d.M.yyyy H:mm", {
-                              locale: cs,
-                            })}
-                          </div>
-                          {doc.completedAt && (
-                            <div>
-                              Vyplněno:{" "}
-                              {format(
-                                new Date(doc.completedAt),
-                                "d.M.yyyy H:mm",
-                                { locale: cs }
+                    return (
+                      <div
+                        key={doc.id}
+                        className="space-y-2 rounded-md border px-3 py-2.5"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 space-y-0.5">
+                            <span className="text-sm font-medium">
+                              {typeLabel(doc.type)}
+                            </span>
+                            <div className="text-xs text-muted-foreground">
+                              <div>
+                                Vytvořeno:{" "}
+                                {format(
+                                  new Date(doc.createdAt),
+                                  "d.M.yyyy H:mm",
+                                  { locale: cs }
+                                )}
+                              </div>
+                              {doc.completedAt && (
+                                <div>
+                                  Vyplněno:{" "}
+                                  {format(
+                                    new Date(doc.completedAt),
+                                    "d.M.yyyy H:mm",
+                                    { locale: cs }
+                                  )}
+                                </div>
                               )}
                             </div>
-                          )}
+                          </div>
+                          <Badge
+                            variant={
+                              doc.status === "DRAFT" ? "outline" : "default"
+                            }
+                            className="shrink-0"
+                          >
+                            {statusText}
+                          </Badge>
                         </div>
-                      </div>
 
-                      <div className="flex flex-wrap items-center justify-end gap-1 md:gap-2">
-                        <Badge
-                          variant={
-                            doc.status === "DRAFT" ? "outline" : "default"
-                          }
-                        >
-                          {statusText}
-                        </Badge>
-
-                        <Button
-                          size="icon"
-                          variant={doc.isLocked ? "default" : "outline"}
-                          className="size-7"
-                          onClick={() => void handleToggleLock(doc)}
-                          disabled={lockingId === doc.id}
-                          title={
-                            doc.isLocked
-                              ? "Odemknout pro úpravy"
-                              : "Zamknout proti úpravám"
-                          }
-                        >
-                          {doc.isLocked ? (
-                            <Lock className="size-3" />
-                          ) : (
-                            <Unlock className="size-3" />
-                          )}
-                        </Button>
-
-                        <Button
-                          size="icon"
-                          variant="outline"
-                          className="size-7"
-                          onClick={() => setDocToRegenerate(doc)}
-                          disabled={regeneratingId === doc.id}
-                          title="Obnovit odkaz (vygeneruje nový link)"
-                        >
-                          {regeneratingId === doc.id ? (
-                            <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                          ) : (
-                            <RotateCw className="size-3" />
-                          )}
-                        </Button>
-
-                        {doc.status !== "DRAFT" && (
+                        <div className="flex flex-wrap items-center gap-1.5">
                           <Button
                             size="sm"
                             variant="outline"
                             onClick={() =>
-                              window.open(
-                                `/api/dokumenty/internal/${doc.id}/pdf`,
-                                "_blank",
-                                "noopener,noreferrer"
-                              )
+                              router.push(`/dokumenty/internal/${doc.id}`)
                             }
                           >
-                            PDF
+                            Otevřít
                           </Button>
-                        )}
 
-                        {needsResend && (
-                          <span className="text-[10px] text-amber-600">
-                            po změně odešli odkaz znovu
-                          </span>
-                        )}
-
-                        {sentTypes.includes(doc.type) && !needsResend && (
-                          <span className="text-[10px] text-emerald-600">
-                            odkaz odeslán
-                          </span>
-                        )}
-
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() =>
-                            router.push(`/dokumenty/internal/${doc.id}`)
-                          }
-                          title="Otevřít interní formulář (HR)"
-                        >
-                          Otevřít
-                        </Button>
-
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                          onClick={() => setDocToReset(doc)}
-                          disabled={resettingId === doc.id}
-                          title="Vymazat vyplněná data"
-                        >
-                          {resettingId === doc.id &&
-                          docToReset?.id === doc.id ? (
-                            <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                          ) : (
-                            <Trash2 className="size-4" />
+                          {doc.status !== "DRAFT" && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                window.open(
+                                  `/api/dokumenty/internal/${doc.id}/pdf`,
+                                  "_blank",
+                                  "noopener,noreferrer"
+                                )
+                              }
+                            >
+                              PDF
+                            </Button>
                           )}
-                        </Button>
+
+                          <Button
+                            size="icon"
+                            variant={doc.isLocked ? "default" : "outline"}
+                            className="size-7"
+                            onClick={() => void handleToggleLock(doc)}
+                            disabled={lockingId === doc.id}
+                            title={doc.isLocked ? "Odemknout" : "Zamknout"}
+                          >
+                            {doc.isLocked ? (
+                              <Lock className="size-3" />
+                            ) : (
+                              <Unlock className="size-3" />
+                            )}
+                          </Button>
+
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            className="size-7"
+                            onClick={() => setDocToRegenerate(doc)}
+                            disabled={regeneratingId === doc.id}
+                            title="Obnovit odkaz"
+                          >
+                            {regeneratingId === doc.id ? (
+                              <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                            ) : (
+                              <RotateCw className="size-3" />
+                            )}
+                          </Button>
+
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                            onClick={() => setDocToReset(doc)}
+                            disabled={resettingId === doc.id}
+                            title="Vymazat data"
+                          >
+                            {resettingId === doc.id &&
+                            docToReset?.id === doc.id ? (
+                              <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                            ) : (
+                              <Trash2 className="size-4" />
+                            )}
+                          </Button>
+
+                          {needsResend && (
+                            <span className="text-[10px] text-amber-600">
+                              po změně odešli odkaz znovu
+                            </span>
+                          )}
+                          {sentTypes.includes(doc.type) && !needsResend && (
+                            <span className="text-[10px] text-emerald-600">
+                              odkaz odeslán
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    </div>
+                    )
+                  })}
+                </div>
+              )}
+            </section>
+
+            <section className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm">
+              <div className="font-medium">
+                Odeslat odkaz na vybrané dokumenty e-mailem
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Na níže uvedenou adresu bude odeslán e-mail s odkazy na vybrané
+                dokumenty.
+              </p>
+
+              <Input
+                type="email"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                placeholder="email zaměstnance"
+              />
+
+              <div className="mt-2 grid gap-2 md:grid-cols-2">
+                {ALL_TYPES.map((type) => {
+                  const doc = documentsByType.get(type)
+                  if (!doc) return null
+
+                  const publicUrl = getPublicUrlForDoc(doc)
+                  if (!publicUrl) return null
+
+                  const checked = emailSelection.includes(type)
+
+                  return (
+                    <label
+                      key={type}
+                      className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-xs md:text-sm"
+                    >
+                      <Checkbox
+                        checked={checked}
+                        onCheckedChange={(val) => {
+                          const isChecked = val === true
+                          setEmailSelection((prev) =>
+                            isChecked
+                              ? [...prev, type]
+                              : prev.filter((t) => t !== type)
+                          )
+                        }}
+                      />
+                      <span className="flex-1">{typeLabel(type)}</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {statusLabel(doc.status)}
+                      </span>
+                    </label>
                   )
                 })}
               </div>
-            )}
-          </section>
 
-          <section className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm">
-            <div className="font-medium">
-              Odeslat odkaz na vybrané dokumenty e-mailem
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Na níže uvedenou adresu bude odeslán e-mail s odkazy na vybrané
-              dokumenty.
-            </p>
-
-            <Input
-              type="email"
-              value={emailInput}
-              onChange={(e) => setEmailInput(e.target.value)}
-              placeholder="email zaměstnance"
-            />
-
-            <div className="mt-2 grid gap-2 md:grid-cols-2">
-              {ALL_TYPES.map((type) => {
-                const doc = documentsByType.get(type)
-                if (!doc) return null
-
-                const publicUrl = getPublicUrlForDoc(doc)
-                if (!publicUrl) return null
-
-                const checked = emailSelection.includes(type)
-
-                return (
-                  <label
-                    key={type}
-                    className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-xs md:text-sm"
-                  >
-                    <Checkbox
-                      checked={checked}
-                      onCheckedChange={(val) => {
-                        const isChecked = val === true
-                        setEmailSelection((prev) =>
-                          isChecked
-                            ? [...prev, type]
-                            : prev.filter((t) => t !== type)
-                        )
-                      }}
-                    />
-                    <span className="flex-1">{typeLabel(type)}</span>
-                    <span className="text-[10px] text-muted-foreground">
-                      {statusLabel(doc.status)}
-                    </span>
-                  </label>
-                )
-              })}
-            </div>
-
-            <Button
-              size="sm"
-              onClick={() => void handleSendEmail()}
-              disabled={
-                sending ||
-                !emailInput ||
-                !emailSelection.some((t) => {
-                  const d = documentsByType.get(t)
-                  return Boolean(d && getPublicUrlForDoc(d))
-                })
-              }
-              className="mt-1 flex items-center gap-2"
-            >
-              {sending && (
-                <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-              )}
-              Odeslat e-mail s odkazy
-            </Button>
-          </section>
+              <Button
+                size="sm"
+                onClick={() => void handleSendEmail()}
+                disabled={
+                  sending ||
+                  !emailInput ||
+                  !emailSelection.some((t) => {
+                    const d = documentsByType.get(t)
+                    return Boolean(d && getPublicUrlForDoc(d))
+                  })
+                }
+                className="mt-1 flex items-center gap-2"
+              >
+                {sending && (
+                  <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                )}
+                Odeslat e-mail s odkazy
+              </Button>
+            </section>
+          </div>
         </div>
 
         <AlertDialog
