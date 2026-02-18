@@ -3,10 +3,10 @@ import { z } from "zod"
 
 export const env = createEnv({
   server: {
-    NODE_ENV: z.enum(["development", "localhost", "production"]),
+    NODE_ENV: z.enum(["localhost", "development", "production"]),
     DATABASE_URL: z.string().min(1),
     AUTH_SECRET: z.string().min(1),
-    NEXTAUTH_URL: z.string().url(),
+    AUTH_URL: z.string().url(),
 
     GOOGLE_CLIENT_ID: z.string().min(1),
     GOOGLE_CLIENT_SECRET: z.string().min(1),
@@ -42,7 +42,7 @@ export const env = createEnv({
     NODE_ENV: process.env.NODE_ENV,
     DATABASE_URL: process.env.DATABASE_URL,
     AUTH_SECRET: process.env.AUTH_SECRET,
-    NEXTAUTH_URL: process.env.NEXTAUTH_URL,
+    AUTH_URL: process.env.AUTH_URL,
     GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
 

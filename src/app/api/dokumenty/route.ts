@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  const baseUrl = process.env.NEXTAUTH_URL ?? req.nextUrl.origin
+  const baseUrl = process.env.AUTH_URL ?? req.nextUrl.origin
 
   const documents = await prisma.employmentDocument.findMany({
     where: { onboardingId },

@@ -212,9 +212,10 @@ export async function PATCH(
     let pdfBuffer: ArrayBuffer | null = null
 
     try {
-      const origin = (
-        process.env.NEXTAUTH_URL ?? "http://localhost:3001"
-      ).replace(/\/$/, "")
+      const origin = (process.env.AUTH_URL ?? "http://localhost:3001").replace(
+        /\/$/,
+        ""
+      )
       const pdfUrl = `${origin}/api/dokumenty/public/${hash}/pdf`
       const pdfResponse = await fetch(pdfUrl)
 
