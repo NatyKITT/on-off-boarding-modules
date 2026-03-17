@@ -1,0 +1,62 @@
+name: Mail Worker (Every 15 min)
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+
+  workflow_dispatch:
+
+jobs:
+  mail-worker:
+    name: Process Email Queue
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 📧 Process Mail Queue
+        id: mail
+        run: |
+          echo "🚀 Starting mail worker..."
+          
+          response=$(curl -s -w "\n%{http_code}" -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            "${{ secrets.APP_URL }}/api/cron/mail-worker")
+          
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          
+          echo "📊 HTTP Status: $http_code"
+          echo "📄 Response:"
+          echo "$body" | jq '.' 2>/dev/null || echo "$body"
+          
+          if [ "$http_code" != "200" ]; then
+            echo "::warning::⚠️ Mail worker returned status $http_code"
+            echo "::warning::Response: $body"
+            # Nepřerušuj workflow, jen zaloguj warning
+          else
+            echo "::notice::✅ Mail queue processed successfully"
+          fi
+          
+          # Parsuj response (pokud je JSON)
+          processed=$(echo "$body" | jq -r '.processed // 0' 2>/dev/null || echo "0")
+          sent=$(echo "$body" | jq -r '.sent // 0' 2>/dev/null || echo "0")
+          failed=$(echo "$body" | jq -r '.failed // 0' 2>/dev/null || echo "0")
+          
+          echo "::notice::📊 Processed: $processed, Sent: $sent, Failed: $failed"
+          
+          # Ulož výstup
+          echo "processed=$processed" >> $GITHUB_OUTPUT
+          echo "sent=$sent" >> $GITHUB_OUTPUT
+          echo "failed=$failed" >> $GITHUB_OUTPUT
+
+      - name: 📝 Job Summary
+        if: always()
+        run: |
+          echo "## 📧 Mail Worker Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ steps.mail.outcome }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Processed:** ${{ steps.mail.outputs.processed }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Sent:** ${{ steps.mail.outputs.sent }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Failed:** ${{ steps.mail.outputs.failed }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run time:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY

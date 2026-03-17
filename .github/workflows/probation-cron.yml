@@ -1,0 +1,59 @@
+name: Probation Check (Daily)
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+
+  workflow_dispatch:
+
+jobs:
+  probation-check:
+    name: Check Probation Periods
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 🔍 Run Probation Check
+        id: probation
+        run: |
+          echo "🚀 Starting probation check..."
+          
+          response=$(curl -s -w "\n%{http_code}" -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            "${{ secrets.APP_URL }}/api/cron/probation-notifications")
+          
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          
+          echo "📊 HTTP Status: $http_code"
+          echo "📄 Response:"
+          echo "$body" | jq '.' 2>/dev/null || echo "$body"
+          
+          if [ "$http_code" != "200" ]; then
+            echo "::error::❌ Probation check failed with status $http_code"
+            echo "::error::Response: $body"
+            exit 1
+          fi
+          
+          # Parsuj response (pokud je JSON)
+          notifications=$(echo "$body" | jq -r '.notifications | length' 2>/dev/null || echo "0")
+          checked=$(echo "$body" | jq -r '.message' 2>/dev/null || echo "N/A")
+          
+          echo "::notice::✅ Probation check completed successfully"
+          echo "::notice::📋 $checked"
+          echo "::notice::📧 Notifications sent: $notifications"
+          
+          # Ulož výstup pro summary
+          echo "notifications=$notifications" >> $GITHUB_OUTPUT
+          echo "checked=$checked" >> $GITHUB_OUTPUT
+
+      - name: 📝 Job Summary
+        if: always()
+        run: |
+          echo "## 🎯 Probation Check Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ steps.probation.outcome }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Checked:** ${{ steps.probation.outputs.checked }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Notifications:** ${{ steps.probation.outputs.notifications }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run time:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
