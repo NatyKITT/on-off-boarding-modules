@@ -5,24 +5,46 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="2fa0485a-b24c-465b-9eec-dc67ab302403" name="Changes" comment="Commiting whole project.">
-      <change afterPath="$PROJECT_DIR$/eslint.config.mjs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.eslintrc.json" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/.gitignore" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/dataSources.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/.github/workflows/mail-worker.yml" beforeDir="false" afterPath="$PROJECT_DIR$/.github/workflows/mail-worker.yml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.github/workflows/probation-cron.yml" beforeDir="false" afterPath="$PROJECT_DIR$/.github/workflows/probation-cron.yml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/codeStyles/Project.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/codeStyles/Project.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/codeStyles/codeStyleConfig.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/codeStyles/codeStyleConfig.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/deployment.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/deployment.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/jsLinters/eslint.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/modules.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/on-off-boarding-modules.iml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/inspectionProfiles/Project_Default.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/Project_Default.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/prettier.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/prettier.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/sqldialects.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/stylesheetLinters/stylelint.xml" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/vcs.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/webServers.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/webServers.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/next-env.d.ts" beforeDir="false" afterPath="$PROJECT_DIR$/next-env.d.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/package.json" beforeDir="false" afterPath="$PROJECT_DIR$/package.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/pnpm-lock.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/pnpm-lock.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/providers/smooth-scroll-provider.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/providers/smooth-scroll-provider.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/prisma/schema.prisma" beforeDir="false" afterPath="$PROJECT_DIR$/prisma/schema.prisma" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/(protected)/dokumenty/internal/[id]/internal-document-shell.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/(protected)/dokumenty/internal/[id]/internal-document-shell.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/(protected)/nastupy/[id]/editovat/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/(protected)/nastupy/[id]/editovat/page.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/(protected)/nastupy/[id]/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/(protected)/nastupy/[id]/page.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/(protected)/nastupy/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/(protected)/nastupy/page.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/(protected)/odchody/[id]/editovat/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/(protected)/odchody/[id]/editovat/page.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/(protected)/odchody/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/(protected)/odchody/page.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/(protected)/prehled/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/(protected)/prehled/page.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/cron/mail-worker/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/cron/mail-worker/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/cron/probation-notifications/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/cron/probation-notifications/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/nastupy/[id]/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/nastupy/[id]/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/nastupy/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/nastupy/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/odchody/[id]/exit-checklist/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/odchody/[id]/exit-checklist/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/odchody/[id]/vystupni-list/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/odchody/[id]/vystupni-list/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/osobni-cislo/check/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/osobni-cislo/check/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/systematizace/route.ts" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/user/vyresit/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/user/vyresit/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/common/employee-documents-dialog.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/common/employee-documents-dialog.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/common/exit-checklist-dialog.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/common/exit-checklist-dialog.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/forms/exit-checklist-form.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/forms/exit-checklist-form.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/forms/onboarding-form-client.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/forms/onboarding-form-client.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/forms/onboarding-form.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/forms/onboarding-form.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/env.mjs" beforeDir="false" afterPath="$PROJECT_DIR$/src/env.mjs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/lib/eos-employees.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/lib/eos-employees.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/lib/systematization.ts" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/types/env.d.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/types/env.d.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/types/exit-checklist.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/types/exit-checklist.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/types/position.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/types/position.ts" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
