@@ -28,16 +28,32 @@ enum OffboardingStatus {
   COMPLETED
 }
 
+enum PersonSource {
+  USER
+  EOS
+  MANUAL
+}
+
 enum MailJobType {
   EMPLOYEE_INFO
   MONTHLY_SUMMARY
   PROBATION_WARNING
   PROBATION_REMINDER
   PROBATION_ENDING
+  PROBATION_EVALUATION_LINK
+  PROBATION_MISSING_EMAIL
+  PROBATION_SUBMITTED
   NOTICE_WARNING
   NOTICE_ENDING
   MANUAL_EMAIL
   SYSTEM_NOTIFICATION
+  PROBATION_SUPERVISOR_21_DAYS
+  PROBATION_HR_INFO_21_DAYS
+  PROBATION_HR_REMINDER_1_DAY
+  PROBATION_COMPLETED
+  PROBATION_MISSING_SUPERVISOR
+  PROBATION_FORM_COMPLETED
+  MENTOR_ASSIGNED
 }
 
 enum MailJobStatus {
@@ -59,6 +75,7 @@ enum ActionType {
   MAIL_FAILED
   STATUS_CHANGED
   PROBATION_REMINDER_SENT
+  PROBATION_EVALUATION_SENT
   NOTICE_REMINDER_SENT
 }
 
@@ -73,6 +90,7 @@ enum EmploymentDocumentType {
   EDUCATION
   EXPERIENCE
   PAYROLL_INFO
+  PROBATION_EVALUATION
 }
 
 enum OffboardingDocumentType {
@@ -91,8 +109,20 @@ enum ChecklistResolution {
   NOT_APPLICABLE
 }
 
+enum PositionType {
+  REGULAR
+  MANAGERIAL
+}
+
+enum ProbationFormType {
+  REGULAR_EMPLOYEE
+  MANAGERIAL
+}
+
 model User {
   id                String    @id @default(cuid())
+  titleBefore       String?
+  titleAfter        String?
   name              String?
   surname           String?
   email             String    @unique
@@ -104,12 +134,14 @@ model User {
   createdAt         DateTime  @default(now()) @map("created_at")
   exitChecklistKeys Json?     @map("exit_checklist_keys")
 
-  accounts            Account[]
-  sessions            Session[]
-  onboardings         EmployeeOnboarding[]
-  offboardings        EmployeeOffboarding[]
-  ExitChecklist       ExitChecklist[]
-  exitChecklistAssets ExitChecklistAsset[]
+  accounts             Account[]
+  sessions             Session[]
+  onboardings          EmployeeOnboarding[]  @relation("UserOnboardings")
+  offboardings         EmployeeOffboarding[]
+  ExitChecklist        ExitChecklist[]
+  exitChecklistAssets  ExitChecklistAsset[]
+  probationEvaluations ProbationEvaluation[] @relation("EvaluatedBy")
+  mentoredOnboardings  EmployeeOnboarding[]  @relation("MentorRelation")
 
   @@map("users")
 }
@@ -149,7 +181,7 @@ model Session {
 model EmployeeOnboarding {
   id              Int              @id @default(autoincrement())
   userId          String?
-  user            User?            @relation(fields: [userId], references: [id])
+  user            User?            @relation("UserOnboardings", fields: [userId], references: [id])
   status          OnboardingStatus @default(NEW)
   plannedStart    DateTime
   actualStart     DateTime?
@@ -175,20 +207,75 @@ model EmployeeOnboarding {
   deletedBy       String?
   deleteReason    String?
   isManager       Boolean          @default(false)
-  probationMonths Int?             @default(3)
+  probationMonths Int?             @default(4)
   probationEnd    DateTime?
 
   lastProbationReminder  DateTime?
   probationRemindersSent Int       @default(0)
 
-  OnboardingChangeLog OnboardingChangeLog[]
-  EmailHistory        EmailHistory[]
-  documents           EmploymentDocument[]
+  positionType PositionType @default(REGULAR)
+
+  mentorId                 String?
+  mentor                   User?         @relation("MentorRelation", fields: [mentorId], references: [id])
+  mentorSource             PersonSource?
+  mentorGid                String?
+  mentorTitleBefore        String?
+  mentorName               String?
+  mentorSurname            String?
+  mentorTitleAfter         String?
+  mentorEmail              String?
+  mentorPosition           String?
+  mentorDepartment         String?
+  mentorUnitName           String?
+  mentorPersonalNumber     String?
+  mentorAssignedFrom       DateTime?
+  mentorAssignedTo         DateTime?
+  mentorNotificationSentAt DateTime?
+
+  supervisorSource         PersonSource?
+  supervisorManualOverride Boolean       @default(false)
+  supervisorGid            String?
+  supervisorTitleBefore    String?
+  supervisorName           String?
+  supervisorSurname        String?
+  supervisorTitleAfter     String?
+  supervisorEmail          String?
+  supervisorPosition       String?
+  supervisorDepartment     String?
+  supervisorUnitName       String?
+  supervisorPersonalNumber String?
+
+  probationEvaluationSentAt DateTime?
+  probationEvaluationSentBy String?
+
+  probationNotification21Sent DateTime?
+  probationNotificationHRSent DateTime?
+  probationReminder1DaySent   DateTime?
+  probationCompletedNotified  DateTime?
+
+  probationEvaluationHash String?   @unique
+  probationHashExpiresAt  DateTime?
+  probationHashUsedAt     DateTime?
+
+  OnboardingChangeLog  OnboardingChangeLog[]
+  EmailHistory         EmailHistory[]
+  documents            EmploymentDocument[]
+  probationEvaluations ProbationEvaluation[]
 
   @@index([plannedStart])
   @@index([actualStart])
   @@index([deletedAt])
   @@index([probationEnd])
+  @@index([mentorId])
+  @@index([mentorGid])
+  @@index([mentorEmail])
+  @@index([mentorPersonalNumber])
+  @@index([positionType])
+  @@index([probationEvaluationHash])
+  @@index([supervisorGid])
+  @@index([supervisorEmail])
+  @@index([supervisorPersonalNumber])
+  @@index([probationEvaluationSentAt])
 }
 
 model PersonalNumberGap {
@@ -474,4 +561,34 @@ model ExitChecklistAsset {
   updatedAt DateTime @updatedAt
 
   @@index([checklistId])
+}
+
+model ProbationEvaluation {
+  id           Int                @id @default(autoincrement())
+  onboardingId Int
+  onboarding   EmployeeOnboarding @relation(fields: [onboardingId], references: [id], onDelete: Cascade)
+
+  formType ProbationFormType
+
+  workPerformance String  @db.Text
+  socialBehavior  String  @db.Text
+  recommendation  Boolean
+  reasonIfNo      String? @db.Text
+
+  evaluatedById  String?
+  evaluatedBy    User?    @relation("EvaluatedBy", fields: [evaluatedById], references: [id])
+  evaluatorName  String
+  evaluatorEmail String
+  evaluatedAt    DateTime @default(now())
+
+  pdfUrl         String?
+  pdfGeneratedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([onboardingId])
+  @@index([evaluatedById])
+  @@index([formType])
+  @@index([evaluatedAt])
 }

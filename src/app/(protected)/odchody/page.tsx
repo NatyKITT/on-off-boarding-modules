@@ -280,7 +280,7 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
 
   return (
     <TableRow>
-      <TableCell className="w-[200px]">
+      <TableCell className="w-[240px]">
         <div className="flex items-center gap-2">
           <User className="size-4 shrink-0 text-muted-foreground" />
           <div className="flex flex-col">
@@ -292,7 +292,7 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
         </div>
       </TableCell>
 
-      <TableCell className="w-[180px]">
+      <TableCell className="w-[240px]">
         <div className="flex flex-col">
           <span className="text-sm font-medium" title={departure.positionName}>
             {departure.positionName}
@@ -303,7 +303,7 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
         </div>
       </TableCell>
 
-      <TableCell className="w-[150px]">
+      <TableCell className="w-[240px]">
         <div className="flex flex-col">
           <span className="text-sm font-medium" title={departure.department}>
             {departure.department}
@@ -521,7 +521,7 @@ export default function OffboardingPage() {
     setLoading(true)
     try {
       const [posRes, offRes] = await Promise.all([
-        fetch("/api/systematizace", { cache: "no-store" }),
+        fetch("/api/systemizace", { cache: "no-store" }),
         fetch("/api/odchody", { cache: "no-store" }),
       ])
       const posJson = await posRes.json().catch(() => null)
@@ -715,7 +715,7 @@ export default function OffboardingPage() {
 
     if (!positions.length) {
       try {
-        const posRes = await fetch("/api/systematizace", { cache: "no-store" })
+        const posRes = await fetch("/api/systemizace", { cache: "no-store" })
         const posJson = await posRes.json().catch(() => null)
         setPositions(normalizePositions(posJson))
       } catch (error) {
@@ -945,13 +945,13 @@ export default function OffboardingPage() {
                                           <Table className="w-max min-w-[1320px]">
                                             <TableHeader>
                                               <TableRow>
-                                                <TableHead className="w-[200px]">
+                                                <TableHead className="w-[240px]">
                                                   Zaměstnanec
                                                 </TableHead>
-                                                <TableHead className="w-[180px]">
+                                                <TableHead className="w-[240px]">
                                                   Pozice
                                                 </TableHead>
-                                                <TableHead className="w-[150px]">
+                                                <TableHead className="w-[240px]">
                                                   Odbor / Oddělení
                                                 </TableHead>
                                                 <TableHead className="w-[140px]">

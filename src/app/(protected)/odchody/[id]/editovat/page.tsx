@@ -35,7 +35,6 @@ interface PageProps {
   params: { id: string }
 }
 
-/* ----------------------- Modal Components ----------------------- */
 interface SuccessModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void

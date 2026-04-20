@@ -11,6 +11,9 @@ import type {
   ExitAssetItem,
   ExitChecklistData,
   ExitChecklistItem,
+  ExitChecklistSignatures,
+  ExitChecklistSignatureValue,
+  HandoverAgendaData,
 } from "@/types/exit-checklist"
 import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
 
@@ -43,6 +46,167 @@ function buildHeaderFromOff(off: EmployeeOffboarding) {
     employmentEndDate: endDate
       ? new Date(endDate).toISOString()
       : new Date().toISOString(),
+  }
+}
+
+function sanitizeText(value: unknown): string {
+  return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : ""
+}
+
+function sanitizeResponsibleParty(value: unknown): "KITT6" | "OSSL_KT" | null {
+  if (value === "KITT6" || value === "OSSL_KT") return value
+  return null
+}
+
+function sanitizeIsoDate(value: unknown): string {
+  const text = sanitizeText(value)
+  if (!text) return ""
+
+  const d = new Date(text)
+  if (Number.isNaN(d.getTime())) return ""
+
+  return d.toISOString().slice(0, 10)
+}
+
+function sanitizeSignatureValueForJson(
+  value: unknown
+): Prisma.InputJsonObject {
+  const raw =
+    value && typeof value === "object" ? (value as Record<string, unknown>) : {}
+
+  return {
+    signedByName: sanitizeText(raw.signedByName),
+    signedByEmail: sanitizeText(raw.signedByEmail),
+    signedAt: sanitizeText(raw.signedAt),
+  }
+}
+
+function sanitizeSignatureValueForResponse(
+  value: unknown
+): ExitChecklistSignatureValue {
+  const raw =
+    value && typeof value === "object" ? (value as Record<string, unknown>) : {}
+
+  return {
+    signedByName: sanitizeText(raw.signedByName) || null,
+    signedByEmail: sanitizeText(raw.signedByEmail) || null,
+    signedAt: sanitizeText(raw.signedAt) || null,
+  }
+}
+
+function sanitizeHandoverForJson(
+  value: unknown
+): Prisma.InputJsonObject | null {
+  if (!value || typeof value !== "object") return null
+
+  const raw = value as Record<string, unknown>
+  const includeHandoverAgenda = Boolean(raw.includeHandoverAgenda)
+
+  if (!includeHandoverAgenda) {
+    return {
+      includeHandoverAgenda: false,
+      option1: false,
+      option2: false,
+      option2Target: "",
+      option2TargetPositionNum: "",
+      option3: false,
+      option3Reason: "",
+      responsibleParty: null,
+    }
+  }
+
+  const option1 = Boolean(raw.option1)
+  const option2 = Boolean(raw.option2)
+  const option3 = Boolean(raw.option3)
+
+  const option2Target = option2 ? sanitizeText(raw.option2Target) : ""
+  const option2TargetPositionNum = option2
+    ? sanitizeText(raw.option2TargetPositionNum)
+    : ""
+
+  const option3Reason = option3 ? sanitizeText(raw.option3Reason) : ""
+  const responsibleParty = option3
+    ? sanitizeResponsibleParty(raw.responsibleParty)
+    : null
+
+  return {
+    includeHandoverAgenda: true,
+    option1,
+    option2,
+    option2Target,
+    option2TargetPositionNum,
+    option3,
+    option3Reason,
+    responsibleParty,
+  }
+}
+
+function sanitizeHandoverForResponse(
+  value: unknown
+): HandoverAgendaData | undefined {
+  if (!value || typeof value !== "object") return undefined
+
+  const raw = value as Record<string, unknown>
+  const includeHandoverAgenda = Boolean(raw.includeHandoverAgenda)
+
+  if (!includeHandoverAgenda) {
+    return {
+      includeHandoverAgenda: false,
+      option1: false,
+      option2: false,
+      option2Target: "",
+      option2TargetPositionNum: "",
+      option3: false,
+      option3Reason: "",
+      responsibleParty: null,
+    }
+  }
+
+  const option1 = Boolean(raw.option1)
+  const option2 = Boolean(raw.option2)
+  const option3 = Boolean(raw.option3)
+
+  return {
+    includeHandoverAgenda: true,
+    option1,
+    option2,
+    option2Target: option2 ? sanitizeText(raw.option2Target) : "",
+    option2TargetPositionNum: option2
+      ? sanitizeText(raw.option2TargetPositionNum)
+      : "",
+    option3,
+    option3Reason: option3 ? sanitizeText(raw.option3Reason) : "",
+    responsibleParty: option3
+      ? sanitizeResponsibleParty(raw.responsibleParty)
+      : null,
+  }
+}
+
+function sanitizeSignaturesForJson(
+  value: unknown
+): Prisma.InputJsonObject {
+  const raw =
+    value && typeof value === "object" ? (value as Record<string, unknown>) : {}
+
+  return {
+    employee: sanitizeSignatureValueForJson(raw.employee),
+    manager: sanitizeSignatureValueForJson(raw.manager),
+    issuer: sanitizeSignatureValueForJson(raw.issuer),
+    issuedDate: sanitizeIsoDate(raw.issuedDate),
+  }
+}
+
+function sanitizeSignaturesForResponse(
+  value: unknown
+): ExitChecklistSignatures {
+  const raw =
+    value && typeof value === "object" ? (value as Record<string, unknown>) : {}
+
+  return {
+    employee: sanitizeSignatureValueForResponse(raw.employee),
+    manager: sanitizeSignatureValueForResponse(raw.manager),
+    issuer: sanitizeSignatureValueForResponse(raw.issuer),
+    issuedDate: sanitizeIsoDate(raw.issuedDate),
   }
 }
 
@@ -81,6 +245,14 @@ function mapToExitChecklistData(
     })
   )
 
+  const headerData =
+    checklist.header && typeof checklist.header === "object"
+      ? (checklist.header as Record<string, unknown>)
+      : {}
+
+  const handover = sanitizeHandoverForResponse(headerData.handover)
+  const signatures = sanitizeSignaturesForResponse(headerData.signatures)
+
   return {
     id: checklist.id,
     offboardingId: off.id,
@@ -94,6 +266,8 @@ function mapToExitChecklistData(
       : null,
     items,
     assets,
+    handover,
+    signatures,
   }
 }
 
@@ -116,12 +290,21 @@ async function getOrCreateChecklist(offboardingId: number): Promise<{
   if (!off) return null
 
   if (!off.exitChecklist) {
+    const existingChecklist = await prisma.exitChecklist.findUnique({
+      where: { offboardingId },
+      include: { items: true, assets: true },
+    })
+
+    if (existingChecklist) {
+      return { off, checklist: existingChecklist }
+    }
+
     const header = buildHeaderFromOff(off)
 
     const created = await prisma.exitChecklist.create({
       data: {
         offboardingId,
-        header,
+        header: header as Prisma.InputJsonObject,
         items: {
           create: EXIT_CHECKLIST_ROWS.map((row, index) => ({
             key: row.key,
@@ -156,21 +339,33 @@ export async function GET(
     )
   }
 
-  const result = await getOrCreateChecklist(offboardingId)
-  if (!result) {
+  try {
+    const result = await getOrCreateChecklist(offboardingId)
+    if (!result) {
+      return NextResponse.json(
+        { status: "error", message: "Odchod nenalezen." },
+        { status: 404 }
+      )
+    }
+
+    const { off, checklist } = result
+    const data = mapToExitChecklistData(off, checklist)
+
+    return NextResponse.json({
+      status: "success",
+      data,
+    })
+  } catch (error) {
+    console.error("[EXIT-CHECKLIST GET] Error:", error)
     return NextResponse.json(
-      { status: "error", message: "Odchod nenalezen." },
-      { status: 404 }
+      {
+        status: "error",
+        message: "Chyba při načítání výstupního listu.",
+        error: error instanceof Error ? error.message : String(error),
+      },
+      { status: 500 }
     )
   }
-
-  const { off, checklist } = result
-  const data = mapToExitChecklistData(off, checklist)
-
-  return NextResponse.json({
-    status: "success",
-    data,
-  })
 }
 
 export async function PUT(
@@ -200,7 +395,7 @@ export async function PUT(
     )
   }
 
-  const lock: boolean = Boolean(body.lock)
+  const lock = Boolean(body.lock)
 
   if (!canSign) {
     return NextResponse.json(
@@ -215,156 +410,177 @@ export async function PUT(
       { status: 403 }
     )
   }
+
   const items = (
     Array.isArray(body.items) ? body.items : []
   ) as ExitChecklistItem[]
+
   const assets = (
     Array.isArray(body.assets) ? body.assets : []
   ) as ExitAssetItem[]
 
-  const result = await getOrCreateChecklist(offboardingId)
-  if (!result) {
-    return NextResponse.json(
-      { status: "error", message: "Odchod nenalezen." },
-      { status: 404 }
-    )
-  }
+  const handover = sanitizeHandoverForJson(body.handover)
+  const signatures = sanitizeSignaturesForJson(body.signatures)
 
-  const { off, checklist } = result
-
-  const header = buildHeaderFromOff(off)
-
-  for (let index = 0; index < EXIT_CHECKLIST_ROWS.length; index++) {
-    const rowDef = EXIT_CHECKLIST_ROWS[index]
-    const incoming = items.find((i) => i.key === rowDef.key)
-
-    let resolution: ChecklistResolution = ChecklistResolution.NOT_APPLICABLE
-    if (incoming?.resolved === "YES") {
-      resolution = ChecklistResolution.YES
-    } else if (incoming?.resolved === "NO") {
-      resolution = ChecklistResolution.NO
+  try {
+    const result = await getOrCreateChecklist(offboardingId)
+    if (!result) {
+      return NextResponse.json(
+        { status: "error", message: "Odchod nenalezen." },
+        { status: 404 }
+      )
     }
 
-    await prisma.exitChecklistItem.upsert({
-      where: {
-        checklistId_key: {
-          checklistId: checklist.id,
-          key: rowDef.key,
-        },
-      },
-      update: {
-        department: rowDef.organization,
-        label: rowDef.obligation,
-        order: index,
-        resolution,
-        signedByName: incoming?.signedByName ?? null,
-        signedByEmail: incoming?.signedByEmail ?? null,
-        signedAt: incoming?.signedAt ? new Date(incoming.signedAt) : null,
-      },
-      create: {
-        checklistId: checklist.id,
-        key: rowDef.key,
-        department: rowDef.organization,
-        label: rowDef.obligation,
-        order: index,
-        resolution,
-        signedByName: incoming?.signedByName ?? null,
-        signedByEmail: incoming?.signedByEmail ?? null,
-        signedAt: incoming?.signedAt ? new Date(incoming.signedAt) : null,
-      },
-    })
-  }
+    const { off, checklist } = result
+    const header = buildHeaderFromOff(off)
 
-  const existingAssets = await prisma.exitChecklistAsset.findMany({
-    where: { checklistId: checklist.id },
-  })
+    const updatedHeader: Prisma.InputJsonObject = {
+      employeeName: header.employeeName,
+      personalNumber: header.personalNumber,
+      department: header.department,
+      unitName: header.unitName,
+      employmentEndDate: header.employmentEndDate,
+      handover,
+      signatures,
+    }
 
-  const existingById = new Map<number, ExitChecklistAssetModel>(
-    existingAssets.map((a) => [a.id, a])
-  )
+    for (let index = 0; index < EXIT_CHECKLIST_ROWS.length; index++) {
+      const rowDef = EXIT_CHECKLIST_ROWS[index]
+      const incoming = items.find((i) => i.key === rowDef.key)
 
-  const seenExistingIds = new Set<number>()
-
-  for (const a of assets) {
-    const subject = String(a.subject ?? "").trim()
-    const inventoryNumber = a.inventoryNumber
-      ? String(a.inventoryNumber).trim()
-      : null
-
-    if (!subject && !inventoryNumber) continue
-
-    const numericId = Number(a.id)
-
-    if (!Number.isNaN(numericId)) {
-      const existing = existingById.get(numericId)
-      if (!existing) continue
-
-      seenExistingIds.add(numericId)
-
-      const isOwner = !!userId && existing.createdById === userId
-
-      if (!canAdmin && !isOwner) {
-        continue
+      let resolution: ChecklistResolution = ChecklistResolution.NOT_APPLICABLE
+      if (incoming?.resolved === "YES") {
+        resolution = ChecklistResolution.YES
+      } else if (incoming?.resolved === "NO") {
+        resolution = ChecklistResolution.NO
       }
 
-      await prisma.exitChecklistAsset.update({
-        where: { id: numericId },
-        data: {
-          subject,
-          inventoryNumber,
+      await prisma.exitChecklistItem.upsert({
+        where: {
+          checklistId_key: {
+            checklistId: checklist.id,
+            key: rowDef.key,
+          },
         },
-      })
-    } else {
-      await prisma.exitChecklistAsset.create({
-        data: {
+        update: {
+          department: rowDef.organization,
+          label: rowDef.obligation,
+          order: index,
+          resolution,
+          signedByName: sanitizeText(incoming?.signedByName) || null,
+          signedByEmail: sanitizeText(incoming?.signedByEmail) || null,
+          signedAt: incoming?.signedAt ? new Date(incoming.signedAt) : null,
+        },
+        create: {
           checklistId: checklist.id,
-          subject,
-          inventoryNumber,
-          createdById: userId,
+          key: rowDef.key,
+          department: rowDef.organization,
+          label: rowDef.obligation,
+          order: index,
+          resolution,
+          signedByName: sanitizeText(incoming?.signedByName) || null,
+          signedByEmail: sanitizeText(incoming?.signedByEmail) || null,
+          signedAt: incoming?.signedAt ? new Date(incoming.signedAt) : null,
         },
       })
     }
-  }
 
-  const deletableIds = existingAssets
-    .filter((a) => {
-      if (seenExistingIds.has(a.id)) return false
-      const isOwner = !!userId && a.createdById === userId
-      return canAdmin || isOwner
+    const existingAssets = await prisma.exitChecklistAsset.findMany({
+      where: { checklistId: checklist.id },
     })
-    .map((a) => a.id)
 
-  if (deletableIds.length > 0) {
-    await prisma.exitChecklistAsset.deleteMany({
-      where: { id: { in: deletableIds } },
+    const existingById = new Map<number, ExitChecklistAssetModel>(
+      existingAssets.map((a) => [a.id, a])
+    )
+
+    const seenExistingIds = new Set<number>()
+
+    for (const a of assets) {
+      const subject = sanitizeText(a.subject)
+      const inventoryNumber = sanitizeText(a.inventoryNumber) || null
+
+      if (!subject && !inventoryNumber) continue
+
+      const numericId = Number(a.id)
+
+      if (!Number.isNaN(numericId)) {
+        const existing = existingById.get(numericId)
+        if (!existing) continue
+
+        seenExistingIds.add(numericId)
+
+        const isOwner = !!userId && existing.createdById === userId
+        if (!canAdmin && !isOwner) continue
+
+        await prisma.exitChecklistAsset.update({
+          where: { id: numericId },
+          data: {
+            subject,
+            inventoryNumber,
+          },
+        })
+      } else {
+        await prisma.exitChecklistAsset.create({
+          data: {
+            checklistId: checklist.id,
+            subject,
+            inventoryNumber,
+            createdById: userId,
+          },
+        })
+      }
+    }
+
+    const deletableIds = existingAssets
+      .filter((a) => {
+        if (seenExistingIds.has(a.id)) return false
+        const isOwner = !!userId && a.createdById === userId
+        return canAdmin || isOwner
+      })
+      .map((a) => a.id)
+
+    if (deletableIds.length > 0) {
+      await prisma.exitChecklistAsset.deleteMany({
+        where: { id: { in: deletableIds } },
+      })
+    }
+
+    let lockedAt = checklist.lockedAt
+    let lockedById = checklist.lockedById
+
+    if (lock && !lockedAt) {
+      lockedAt = new Date()
+      lockedById = userId
+    }
+
+    const updatedChecklist = await prisma.exitChecklist.update({
+      where: { id: checklist.id },
+      data: {
+        header: updatedHeader,
+        lockedAt,
+        lockedById,
+      },
+      include: { items: true, assets: true },
     })
+
+    const data = mapToExitChecklistData(
+      off,
+      updatedChecklist as ChecklistWithRelations
+    )
+
+    return NextResponse.json({
+      status: "success",
+      data,
+    })
+  } catch (error) {
+    console.error("[EXIT-CHECKLIST PUT] Error:", error)
+    return NextResponse.json(
+      {
+        status: "error",
+        message: "Chyba při ukládání výstupního listu.",
+        error: error instanceof Error ? error.message : String(error),
+      },
+      { status: 500 }
+    )
   }
-
-  let lockedAt = checklist.lockedAt
-  let lockedById = checklist.lockedById
-
-  if (lock && !lockedAt) {
-    lockedAt = new Date()
-    lockedById = userId
-  }
-
-  const updatedChecklist = await prisma.exitChecklist.update({
-    where: { id: checklist.id },
-    data: {
-      header,
-      lockedAt,
-      lockedById,
-    },
-    include: { items: true, assets: true },
-  })
-
-  const data = mapToExitChecklistData(
-    off,
-    updatedChecklist as ChecklistWithRelations
-  )
-
-  return NextResponse.json({
-    status: "success",
-    data,
-  })
 }

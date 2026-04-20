@@ -58,6 +58,7 @@ export function ExitChecklistDialog({ offboardingId, open }: Props) {
             credentials: "include",
           }
         )
+
         if (!res.ok) {
           const json = await res.json().catch(() => null)
           const message =
@@ -66,13 +67,16 @@ export function ExitChecklistDialog({ offboardingId, open }: Props) {
             `Nepodařilo se načíst výstupní list (${res.status}).`
           throw new Error(message)
         }
+
         const json = (await res.json()) as {
           status?: string
           data?: ExitChecklistData
         }
+
         if (!json.data) {
           throw new Error("Chybí data výstupního listu.")
         }
+
         setData(json.data)
       } catch (err) {
         console.error("[ExitChecklistDialog] fetch error:", err)
