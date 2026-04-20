@@ -29,5 +29,7 @@ declare module "@/env.mjs" {
 
     EOS_API_BASE?: string
     EOS_API_TOKEN?: string
+
+    CRON_SECRET: string
   }
 }

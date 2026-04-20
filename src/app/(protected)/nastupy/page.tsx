@@ -19,6 +19,8 @@ import {
   RotateCcw,
   Trash2,
   User,
+  UserCheck,
+  Users,
   XCircle,
 } from "lucide-react"
 
@@ -83,6 +85,14 @@ type Arrival = {
   personalNumber?: string | null
   notes?: string | null
   status?: "NEW" | "IN_PROGRESS" | "COMPLETED"
+
+  supervisorName?: string | null
+  supervisorEmail?: string | null
+  mentorName?: string | null
+  mentorEmail?: string | null
+
+  probationEvaluationSentAt?: string | null
+  probationEvaluationSentBy?: string | null
 }
 
 function arrivalToInitial(d: Arrival): Partial<FormValues> {
@@ -105,6 +115,11 @@ function arrivalToInitial(d: Arrival): Partial<FormValues> {
     personalNumber: d.personalNumber ?? "",
     notes: d.notes ?? "",
     status: d.status,
+
+    supervisorName: d.supervisorName ?? "",
+    supervisorEmail: d.supervisorEmail ?? "",
+    mentorName: d.mentorName ?? "",
+    mentorEmail: d.mentorEmail ?? "",
   }
 }
 
@@ -203,6 +218,18 @@ function normalizePositions(payload: unknown): Position[] {
       name: typeof v.name === "string" ? v.name : "",
       dept_name: typeof v.dept_name === "string" ? v.dept_name : "",
       unit_name: typeof v.unit_name === "string" ? v.unit_name : "",
+      supervisorName:
+        typeof (v as Record<string, unknown>).supervisorName === "string"
+          ? ((v as Record<string, unknown>).supervisorName as string)
+          : typeof (v as Record<string, unknown>).supervisor_name === "string"
+            ? ((v as Record<string, unknown>).supervisor_name as string)
+            : "",
+      supervisorEmail:
+        typeof (v as Record<string, unknown>).supervisorEmail === "string"
+          ? ((v as Record<string, unknown>).supervisorEmail as string)
+          : typeof (v as Record<string, unknown>).supervisor_email === "string"
+            ? ((v as Record<string, unknown>).supervisor_email as string)
+            : "",
     }
   })
 
@@ -222,7 +249,7 @@ function normalizePositions(payload: unknown): Position[] {
     const dupCount = mapped.length - deduped.length
     if (dupCount > 0) {
       console.warn(
-        `[systematizace] Deduplikováno ${dupCount} pozic. Backend vrací duplicity.`
+        `[systemizace] Deduplikováno ${dupCount} pozic. Backend vrací duplicity.`
       )
     }
   }
@@ -273,7 +300,7 @@ function getLatestYearAndMonth(
 
 function ResponsiveTableShell({
   children,
-  minWidth = "min-w-[980px] lg:min-w-[1560px]",
+  minWidth = "min-w-[1200px] lg:min-w-[1800px]",
 }: {
   children: React.ReactNode
   minWidth?: string
@@ -292,6 +319,7 @@ export default function OnboardingPage() {
   const [actual, setActual] = useState<Arrival[]>([])
   const [positions, setPositions] = useState<Position[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingPositions, setLoadingPositions] = useState(false)
 
   const [openNewPlanned, setOpenNewPlanned] = useState(false)
   const [openNewActual, setOpenNewActual] = useState(false)
@@ -356,17 +384,13 @@ export default function OnboardingPage() {
   const reload = React.useCallback(async () => {
     setLoading(true)
     try {
-      const [posRes, onbRes, metaRes] = await Promise.all([
-        fetch("/api/systematizace", { cache: "no-store" }),
+      const [onbRes, metaRes] = await Promise.all([
         fetch("/api/nastupy", { cache: "no-store" }),
         fetch("/api/osobni-cislo/meta", { cache: "no-store" }),
       ])
 
-      const posJson = await posRes.json().catch(() => null)
       const onbJson = await onbRes.json().catch(() => null)
       const metaJson = await metaRes.json().catch(() => null)
-
-      setPositions(normalizePositions(posJson))
 
       if (onbJson?.status === "success" && Array.isArray(onbJson.data)) {
         const rows = onbJson.data as Arrival[]
@@ -391,6 +415,22 @@ export default function OnboardingPage() {
       setLoading(false)
     }
   }, [showError])
+
+  const loadPositions = React.useCallback(async () => {
+    if (positions.length > 0) return
+
+    setLoadingPositions(true)
+    try {
+      const res = await fetch("/api/systemizace", { cache: "no-store" })
+      const json = await res.json().catch(() => null)
+      setPositions(normalizePositions(json))
+    } catch (error) {
+      console.error("Error loading positions:", error)
+      showError("Chyba", "Nepodařilo se načíst pozice")
+    } finally {
+      setLoadingPositions(false)
+    }
+  }, [positions.length, showError])
 
   useEffect(() => {
     void reload()
@@ -614,7 +654,7 @@ export default function OnboardingPage() {
           <div className="flex items-start gap-2">
             <User className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0">
-              <div className="truncate text-sm font-medium leading-tight">
+              <div className="truncate py-0.5 text-sm font-medium leading-normal">
                 {fullName}
               </div>
               {arrival.personalNumber && (
@@ -655,6 +695,58 @@ export default function OnboardingPage() {
               {arrival.unitName}
             </span>
           </div>
+        </TableCell>
+
+        <TableCell className="w-[180px] min-w-[180px]">
+          {arrival.supervisorName ? (
+            <div className="flex items-start gap-2">
+              <UserCheck className="mt-0.5 size-4 shrink-0 text-blue-600" />
+              <div className="min-w-0">
+                <div
+                  className="truncate py-0.5 text-sm font-medium leading-normal"
+                  title={arrival.supervisorName}
+                >
+                  {arrival.supervisorName}
+                </div>
+                {arrival.supervisorEmail && (
+                  <div
+                    className="truncate text-xs text-muted-foreground"
+                    title={arrival.supervisorEmail}
+                  >
+                    {arrival.supervisorEmail}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <span className="text-xs text-muted-foreground">–</span>
+          )}
+        </TableCell>
+
+        <TableCell className="w-[180px] min-w-[180px]">
+          {arrival.mentorName ? (
+            <div className="flex items-start gap-2">
+              <Users className="mt-0.5 size-4 shrink-0 text-purple-600" />
+              <div className="min-w-0">
+                <div
+                  className="truncate py-0.5 text-sm font-medium leading-normal"
+                  title={arrival.mentorName}
+                >
+                  {arrival.mentorName}
+                </div>
+                {arrival.mentorEmail && (
+                  <div
+                    className="truncate text-xs text-muted-foreground"
+                    title={arrival.mentorEmail}
+                  >
+                    {arrival.mentorEmail}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <span className="text-xs text-muted-foreground">–</span>
+          )}
         </TableCell>
 
         <TableCell className="w-[160px] min-w-[160px] whitespace-nowrap">
@@ -772,6 +864,14 @@ export default function OnboardingPage() {
               onboardingId={arrival.id}
               email={arrival.email}
               employeeName={fullName}
+              supervisorName={arrival.supervisorName}
+              supervisorEmail={arrival.supervisorEmail}
+              probationEvaluationSentAt={
+                arrival.probationEvaluationSentAt ?? null
+              }
+              probationEvaluationSentBy={
+                arrival.probationEvaluationSentBy ?? null
+              }
               onSent={() => {
                 showSuccess(
                   "E-mail odeslán",
@@ -834,7 +934,15 @@ export default function OnboardingPage() {
           className="min-h-0 flex-1 space-y-4 overflow-hidden"
         >
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <Dialog open={openNewPlanned} onOpenChange={setOpenNewPlanned}>
+            <Dialog
+              open={openNewPlanned}
+              onOpenChange={(open) => {
+                setOpenNewPlanned(open)
+                if (open && positions.length === 0) {
+                  void loadPositions()
+                }
+              }}
+            >
               <DialogTrigger asChild>
                 <Button className="inline-flex w-full items-center justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] sm:w-auto">
                   Přidat plánovaný nástup
@@ -846,20 +954,29 @@ export default function OnboardingPage() {
                   Nový plánovaný nástup
                 </DialogTitle>
                 <div className="p-6">
-                  <OnboardingFormClient
-                    positions={positions}
-                    mode="create-planned"
-                    prefillDate={qpDate}
-                    personalNumberMeta={personalMeta}
-                    onSuccess={async () => {
-                      setOpenNewPlanned(false)
-                      showSuccess(
-                        "Záznam vytvořen",
-                        "Plánovaný nástup byl úspěšně přidán."
-                      )
-                      await reload()
-                    }}
-                  />
+                  {loadingPositions ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
+                      <span className="ml-2 text-muted-foreground">
+                        Načítám pozice...
+                      </span>
+                    </div>
+                  ) : (
+                    <OnboardingFormClient
+                      positions={positions}
+                      mode="create-planned"
+                      prefillDate={qpDate}
+                      personalNumberMeta={personalMeta}
+                      onSuccess={async () => {
+                        setOpenNewPlanned(false)
+                        showSuccess(
+                          "Záznam vytvořen",
+                          "Plánovaný nástup byl úspěšně přidán."
+                        )
+                        await reload()
+                      }}
+                    />
+                  )}
                 </div>
               </DialogContent>
             </Dialog>
@@ -978,6 +1095,12 @@ export default function OnboardingPage() {
                                                 <TableHead className="w-[220px] min-w-[220px]">
                                                   Odbor / Oddělení
                                                 </TableHead>
+                                                <TableHead className="w-[180px] min-w-[180px]">
+                                                  Vedoucí
+                                                </TableHead>
+                                                <TableHead className="w-[180px] min-w-[180px]">
+                                                  Mentor
+                                                </TableHead>
                                                 <TableHead className="w-[160px] min-w-[160px]">
                                                   Plánovaný nástup
                                                 </TableHead>
@@ -1032,7 +1155,15 @@ export default function OnboardingPage() {
           className="min-h-0 flex-1 space-y-4 overflow-hidden"
         >
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <Dialog open={openNewActual} onOpenChange={setOpenNewActual}>
+            <Dialog
+              open={openNewActual}
+              onOpenChange={(open) => {
+                setOpenNewActual(open)
+                if (open && positions.length === 0) {
+                  void loadPositions()
+                }
+              }}
+            >
               <DialogTrigger asChild>
                 <Button className="inline-flex w-full items-center justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] sm:w-auto">
                   Přidat skutečný nástup
@@ -1042,20 +1173,29 @@ export default function OnboardingPage() {
               <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
                 <DialogTitle className="px-6 pt-6">Skutečný nástup</DialogTitle>
                 <div className="p-6">
-                  <OnboardingFormClient
-                    positions={positions}
-                    mode="create-actual"
-                    prefillDate={qpDate}
-                    personalNumberMeta={personalMeta}
-                    onSuccess={async () => {
-                      setOpenNewActual(false)
-                      showSuccess(
-                        "Záznam vytvořen",
-                        "Skutečný nástup byl úspěšně přidán."
-                      )
-                      await reload()
-                    }}
-                  />
+                  {loadingPositions ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
+                      <span className="ml-2 text-muted-foreground">
+                        Načítám pozice...
+                      </span>
+                    </div>
+                  ) : (
+                    <OnboardingFormClient
+                      positions={positions}
+                      mode="create-actual"
+                      prefillDate={qpDate}
+                      personalNumberMeta={personalMeta}
+                      onSuccess={async () => {
+                        setOpenNewActual(false)
+                        showSuccess(
+                          "Záznam vytvořen",
+                          "Skutečný nástup byl úspěšně přidán."
+                        )
+                        await reload()
+                      }}
+                    />
+                  )}
                 </div>
               </DialogContent>
             </Dialog>
@@ -1173,6 +1313,12 @@ export default function OnboardingPage() {
                                                 </TableHead>
                                                 <TableHead className="w-[220px] min-w-[220px]">
                                                   Odbor / Oddělení
+                                                </TableHead>
+                                                <TableHead className="w-[180px] min-w-[180px]">
+                                                  Vedoucí
+                                                </TableHead>
+                                                <TableHead className="w-[180px] min-w-[180px]">
+                                                  Mentor
                                                 </TableHead>
                                                 <TableHead className="w-[160px] min-w-[160px]">
                                                   Skutečný nástup
@@ -1491,11 +1637,26 @@ export default function OnboardingPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={openEdit} onOpenChange={setOpenEdit}>
+      <Dialog
+        open={openEdit}
+        onOpenChange={(open) => {
+          setOpenEdit(open)
+          if (open && positions.length === 0) {
+            void loadPositions()
+          }
+        }}
+      >
         <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
           <DialogTitle className="px-6 pt-6">Upravit záznam</DialogTitle>
           <div className="p-6">
-            {editData ? (
+            {loadingPositions ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
+                <span className="ml-2 text-muted-foreground">
+                  Načítám pozice...
+                </span>
+              </div>
+            ) : editData ? (
               <OnboardingFormClient
                 key={`edit-${editData.id}-${editData.context}`}
                 positions={positions}

@@ -34,6 +34,11 @@ type OnbRow = {
   personalNumber?: string | null
   notes?: string | null
   status?: "NEW" | "IN_PROGRESS" | "COMPLETED"
+
+  supervisorName?: string | null
+  supervisorEmail?: string | null
+  mentorName?: string | null
+  mentorEmail?: string | null
 }
 
 interface PageProps {
@@ -67,6 +72,18 @@ function normalizePositions(api: unknown): Position[] {
         name: it.name,
         dept_name: typeof it.dept_name === "string" ? it.dept_name : "",
         unit_name: typeof it.unit_name === "string" ? it.unit_name : "",
+        supervisorName:
+          typeof it.supervisorName === "string"
+            ? it.supervisorName
+            : typeof it.supervisor_name === "string"
+              ? it.supervisor_name
+              : "",
+        supervisorEmail:
+          typeof it.supervisorEmail === "string"
+            ? it.supervisorEmail
+            : typeof it.supervisor_email === "string"
+              ? it.supervisor_email
+              : "",
       })
     }
   }
@@ -78,6 +95,7 @@ export default function OnboardingEditPage({ params }: PageProps) {
   const { toast } = useToast()
 
   const [loading, setLoading] = React.useState(true)
+  const [loadingPositions, setLoadingPositions] = React.useState(false)
   const [positions, setPositions] = React.useState<Position[]>([])
   const [row, setRow] = React.useState<OnbRow | null>(null)
 
@@ -92,20 +110,38 @@ export default function OnboardingEditPage({ params }: PageProps) {
       try {
         setLoading(true)
 
-        const [posRes, recRes] = await Promise.all([
-          fetch("/api/systematizace", { cache: "no-store" }),
-          fetch(`/api/nastupy/${params.id}`, { cache: "no-store" }),
-        ])
-
-        const posJson = await posRes.json().catch(() => null)
+        const recRes = await fetch(`/api/nastupy/${params.id}`, {
+          cache: "no-store",
+        })
         const recJson = await recRes.json().catch(() => null)
 
         if (cancelled) return
 
-        setPositions(normalizePositions(posJson))
-
         if (recRes.ok && recJson?.status === "success" && recJson.data) {
           setRow(recJson.data as OnbRow)
+          setLoading(false)
+
+          setLoadingPositions(true)
+          fetch("/api/systemizace", { cache: "no-store" })
+            .then((res) => res.json())
+            .then((posJson) => {
+              if (!cancelled) {
+                setPositions(normalizePositions(posJson))
+              }
+            })
+            .catch((err) => {
+              console.error("Failed to load positions:", err)
+              if (!cancelled) {
+                toast({
+                  title: "Varování",
+                  description: "Nepodařilo se načíst seznam pozic.",
+                  variant: "destructive",
+                })
+              }
+            })
+            .finally(() => {
+              if (!cancelled) setLoadingPositions(false)
+            })
         } else {
           toast({
             title: "Nenalezeno",
@@ -114,8 +150,9 @@ export default function OnboardingEditPage({ params }: PageProps) {
           })
           router.replace("/nastupy")
         }
-      } catch {
+      } catch (err) {
         if (!cancelled) {
+          console.error("Error loading record:", err)
           toast({
             title: "Chyba",
             description: "Nepodařilo se načíst data.",
@@ -123,8 +160,6 @@ export default function OnboardingEditPage({ params }: PageProps) {
           })
           router.replace("/nastupy")
         }
-      } finally {
-        if (!cancelled) setLoading(false)
       }
     })()
 
@@ -145,7 +180,12 @@ export default function OnboardingEditPage({ params }: PageProps) {
       <Card className="border-muted shadow-sm">
         <CardContent className="p-6">
           {loading || !row ? (
-            <p className="text-sm text-muted-foreground">Načítám…</p>
+            <p className="text-sm text-muted-foreground">Načítám záznam…</p>
+          ) : loadingPositions ? (
+            <div className="flex items-center gap-3">
+              <div className="size-5 animate-spin rounded-full border-b-2 border-current" />
+              <p className="text-sm text-muted-foreground">Načítám pozice…</p>
+            </div>
           ) : (
             <OnboardingFormUnified
               key={`edit-${row.id}-${editContext}-${positions.length}`}
@@ -176,6 +216,11 @@ export default function OnboardingEditPage({ params }: PageProps) {
                 personalNumber: row.personalNumber || undefined,
                 notes: row.notes || undefined,
                 status: row.status || undefined,
+
+                supervisorName: row.supervisorName || undefined,
+                supervisorEmail: row.supervisorEmail || undefined,
+                mentorName: row.mentorName || undefined,
+                mentorEmail: row.mentorEmail || undefined,
               }}
               mode="edit"
               editContext={editContext}

@@ -8,7 +8,7 @@ export const fetchCache = "force-no-store"
 export const revalidate = 0
 
 const bodySchema = z.object({
-  ids: z.array(z.string().min(1)).max(100), // max 100 IDs najednou
+  ids: z.array(z.string().min(1)).max(100),
 })
 
 export async function POST(req: NextRequest) {

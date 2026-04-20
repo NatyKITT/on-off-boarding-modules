@@ -1,361 +1,415 @@
-import { NextResponse } from "next/server"
-import { addDays, differenceInDays, isToday } from "date-fns"
+import { NextRequest, NextResponse } from "next/server"
+import { addDays, startOfDay } from "date-fns"
 
 import { prisma } from "@/lib/db"
+import { getSuperiorByPersonalNumber } from "@/lib/eos-superior"
+import {
+  buildPersonFullName,
+  snapshotFromSuperior,
+  toSupervisorFields,
+} from "@/lib/person-snapshot"
+import {
+  ensureProbationDocumentDraft,
+  ensureProbationHash,
+  getProbationFormType,
+} from "@/lib/probation"
 
-export const dynamic = "force-dynamic"
-export const fetchCache = "force-no-store"
-export const revalidate = 0
+const HR_RECIPIENTS = Array.from(
+  new Set(
+    [
+      ...(process.env.HR_NOTIFICATION_EMAILS || "").split(","),
+      ...(process.env.HR_EMAILS || "").split(","),
+    ]
+      .map((x) => x.trim())
+      .filter(Boolean)
+  )
+)
 
-const HR_EMAILS = ["hr@company.com", "manager@company.com"]
+function buildEmployeeFullName(employee: {
+  titleBefore?: string | null
+  name: string
+  surname: string
+  titleAfter?: string | null
+}) {
+  return [
+    employee.titleBefore ?? "",
+    employee.name,
+    employee.surname,
+    employee.titleAfter ?? "",
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
 
-export async function POST() {
+export async function POST(req: NextRequest) {
+  const authHeader = req.headers.get("authorization")
+  const expectedToken = `Bearer ${process.env.CRON_SECRET}`
+
+  if (!authHeader || authHeader !== expectedToken) {
+    return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
+  }
+
   try {
-    const today = new Date()
-    const notifications = []
+    const today = startOfDay(new Date())
+    const notifications: string[] = []
 
-    const activeEmployees = await prisma.employeeOnboarding.findMany({
+    const at21Date = addDays(today, 21)
+    const at1DayDate = addDays(today, 1)
+    const completedStart = addDays(today, -1)
+
+    const employeesAt21Days = await prisma.employeeOnboarding.findMany({
       where: {
         deletedAt: null,
         actualStart: { not: null },
-        probationEnd: { not: null },
         status: "COMPLETED",
+        probationEnd: {
+          gte: at21Date,
+          lt: addDays(at21Date, 1),
+        },
+        probationNotification21Sent: null,
       },
       select: {
         id: true,
+        titleBefore: true,
         name: true,
         surname: true,
+        titleAfter: true,
         email: true,
         userEmail: true,
         probationEnd: true,
         actualStart: true,
         positionName: true,
+        positionType: true,
         department: true,
-        lastProbationReminder: true,
-        probationRemindersSent: true,
+        unitName: true,
+        personalNumber: true,
+        probationEvaluationHash: true,
+
+        supervisorManualOverride: true,
+        supervisorSource: true,
+        supervisorGid: true,
+        supervisorTitleBefore: true,
+        supervisorName: true,
+        supervisorSurname: true,
+        supervisorTitleAfter: true,
+        supervisorEmail: true,
+        supervisorPosition: true,
+        supervisorDepartment: true,
+        supervisorUnitName: true,
+        supervisorPersonalNumber: true,
       },
     })
 
-    for (const employee of activeEmployees) {
-      if (!employee.probationEnd) continue
+    for (const employee of employeesAt21Days) {
+      const employeeName = buildEmployeeFullName(employee)
+      const formType = getProbationFormType(employee.positionType)
 
-      const daysUntilEnd = differenceInDays(employee.probationEnd, today)
-      const employeeEmail = employee.userEmail || employee.email
+      let supervisorSnapshot = {
+        source: employee.supervisorSource ?? null,
+        gid: employee.supervisorGid ?? null,
+        titleBefore: employee.supervisorTitleBefore ?? null,
+        name: employee.supervisorName ?? null,
+        surname: employee.supervisorSurname ?? null,
+        titleAfter: employee.supervisorTitleAfter ?? null,
+        email: employee.supervisorEmail ?? null,
+        position: employee.supervisorPosition ?? null,
+        department: employee.supervisorDepartment ?? null,
+        unitName: employee.supervisorUnitName ?? null,
+        personalNumber: employee.supervisorPersonalNumber ?? null,
+      }
 
-      const reminderDays = [30, 14, 7, 3, 1]
+      const hasStoredSupervisor =
+        Boolean(supervisorSnapshot.email) &&
+        Boolean(supervisorSnapshot.name || supervisorSnapshot.surname)
 
-      if (reminderDays.includes(daysUntilEnd)) {
-        const lastReminder = employee.lastProbationReminder
-        const alreadySentToday = lastReminder && isToday(lastReminder)
-
-        if (!alreadySentToday) {
-          const hrMailId = await prisma.mailQueue.create({
-            data: {
-              type: "PROBATION_WARNING",
-              payload: {
-                employeeId: employee.id,
-                employeeName: `${employee.name} ${employee.surname}`,
-                position: employee.positionName,
-                department: employee.department,
-                probationEndDate: employee.probationEnd.toISOString(),
-                daysRemaining: daysUntilEnd,
-                recipients: HR_EMAILS,
-                subject: `Zkušební doba končí za ${daysUntilEnd} dní - ${employee.name} ${employee.surname}`,
-              },
-              priority: daysUntilEnd <= 3 ? 2 : 5,
-              createdBy: "system-cron",
-            },
-          })
-
-          let employeeMailId = null
-          if (employeeEmail) {
-            employeeMailId = await prisma.mailQueue.create({
-              data: {
-                type: "PROBATION_REMINDER",
-                payload: {
-                  employeeId: employee.id,
-                  employeeName: `${employee.name} ${employee.surname}`,
-                  position: employee.positionName,
-                  probationEndDate: employee.probationEnd.toISOString(),
-                  daysRemaining: daysUntilEnd,
-                  recipients: [employeeEmail],
-                  subject: `Vaše zkušební doba končí za ${daysUntilEnd} ${daysUntilEnd === 1 ? "den" : daysUntilEnd <= 4 ? "dny" : "dní"}`,
-                },
-                priority: daysUntilEnd <= 3 ? 2 : 5,
-                createdBy: "system-cron",
-              },
-            })
-          }
+      if (
+        !employee.supervisorManualOverride &&
+        !hasStoredSupervisor &&
+        employee.personalNumber
+      ) {
+        const superior = await getSuperiorByPersonalNumber(
+          employee.personalNumber
+        )
+        if (superior) {
+          supervisorSnapshot = snapshotFromSuperior(superior, "EOS")
 
           await prisma.employeeOnboarding.update({
             where: { id: employee.id },
             data: {
-              lastProbationReminder: today,
-              probationRemindersSent: employee.probationRemindersSent + 1,
+              ...toSupervisorFields(supervisorSnapshot, false),
             },
-          })
-
-          await prisma.emailHistory.create({
-            data: {
-              mailQueueId: hrMailId.id,
-              onboardingEmployeeId: employee.id,
-              emailType: "PROBATION_WARNING",
-              recipients: HR_EMAILS,
-              subject: `Zkušební doba končí za ${daysUntilEnd} dní`,
-              status: "QUEUED",
-              createdBy: "system-cron",
-            },
-          })
-
-          if (employeeMailId) {
-            await prisma.emailHistory.create({
-              data: {
-                mailQueueId: employeeMailId.id,
-                onboardingEmployeeId: employee.id,
-                emailType: "PROBATION_REMINDER",
-                recipients: [employeeEmail],
-                subject: `Zkušební doba končí za ${daysUntilEnd} dní`,
-                status: "QUEUED",
-                createdBy: "system-cron",
-              },
-            })
-          }
-
-          await prisma.onboardingChangeLog.create({
-            data: {
-              employeeId: employee.id,
-              userId: "system-cron",
-              action: "PROBATION_REMINDER_SENT",
-              field: "probation_reminder",
-              oldValue: null,
-              newValue: JSON.stringify({
-                daysRemaining: daysUntilEnd,
-                sentTo: employeeEmail
-                  ? [HR_EMAILS[0], employeeEmail]
-                  : HR_EMAILS,
-                mailIds: [hrMailId.id, employeeMailId?.id].filter(Boolean),
-              }),
-            },
-          })
-
-          notifications.push({
-            type: `probation_${daysUntilEnd}_days`,
-            employee: `${employee.name} ${employee.surname}`,
-            endDate: employee.probationEnd,
-            emailsSent: employeeEmail ? 2 : 1,
           })
         }
       }
 
-      if (isToday(employee.probationEnd)) {
+      const supervisorFullName = buildPersonFullName(supervisorSnapshot)
+      const supervisorEmail = supervisorSnapshot.email
+
+      if (!supervisorEmail) {
         await prisma.mailQueue.create({
           data: {
-            type: "PROBATION_ENDING",
+            type: "PROBATION_MISSING_SUPERVISOR",
             payload: {
+              recipients: HR_RECIPIENTS,
               employeeId: employee.id,
-              employeeName: `${employee.name} ${employee.surname}`,
+              employeeName,
               position: employee.positionName,
               department: employee.department,
-              probationEndDate: employee.probationEnd.toISOString(),
-              recipients: HR_EMAILS,
-              subject: `🚨 DNES končí zkušební doba - ${employee.name} ${employee.surname}`,
+              unitName: employee.unitName,
+              probationEndDate: employee.probationEnd?.toISOString() ?? null,
+              subject: `Chybí vedoucí pro hodnocení ZD - ${employeeName}`,
             },
             priority: 1,
             createdBy: "system-cron",
           },
         })
 
-        notifications.push({
-          type: "probation_ending_today",
-          employee: `${employee.name} ${employee.surname}`,
-          endDate: employee.probationEnd,
+        await prisma.employeeOnboarding.update({
+          where: { id: employee.id },
+          data: {
+            probationNotification21Sent: new Date(),
+          },
         })
+
+        notifications.push(`⚠️ Chybí vedoucí pro ${employeeName}`)
+        continue
       }
-    }
 
-    const departingEmployees = await prisma.employeeOffboarding.findMany({
-      where: {
-        deletedAt: null,
-        plannedEnd: { gte: today },
-        noticeEnd: { not: null },
-      },
-      select: {
-        id: true,
-        name: true,
-        surname: true,
-        userEmail: true,
-        noticeEnd: true,
-        positionName: true,
-        department: true,
-        lastNoticeReminder: true,
-        noticeRemindersSent: true,
-      },
-    })
+      await prisma.$transaction(async (tx) => {
+        await ensureProbationDocumentDraft(tx, employee.id, formType)
 
-    for (const employee of departingEmployees) {
-      if (!employee.noticeEnd) continue
+        const { hash } = await ensureProbationHash(
+          tx,
+          employee.id,
+          employee.probationEvaluationHash,
+          employee.probationEnd
+        )
 
-      const daysUntilEnd = differenceInDays(employee.noticeEnd, today)
+        const evaluationLink = `${process.env.NEXT_PUBLIC_APP_URL}/probation-evaluation/${hash}`
 
-      const noticeReminderDays = [14, 7, 3, 1]
+        await tx.mailQueue.create({
+          data: {
+            type: "PROBATION_SUPERVISOR_21_DAYS",
+            payload: {
+              recipients: [supervisorEmail],
+              supervisorName: supervisorFullName,
+              employeeId: employee.id,
+              employeeName,
+              position: employee.positionName,
+              department: employee.department,
+              unitName: employee.unitName,
+              probationEndDate: employee.probationEnd?.toISOString() ?? null,
+              evaluationLink,
+              formType,
+              subject: `Vyplňte hodnocení zkušební doby - ${employeeName}`,
+            },
+            priority: 1,
+            createdBy: "system-cron",
+          },
+        })
 
-      if (noticeReminderDays.includes(daysUntilEnd)) {
-        const lastReminder = employee.lastNoticeReminder
-        const alreadySentToday = lastReminder && isToday(lastReminder)
-
-        if (!alreadySentToday) {
-          const hrMailId = await prisma.mailQueue.create({
+        if (HR_RECIPIENTS.length > 0) {
+          await tx.mailQueue.create({
             data: {
-              type: "NOTICE_WARNING",
+              type: "PROBATION_HR_INFO_21_DAYS",
               payload: {
+                recipients: HR_RECIPIENTS,
                 employeeId: employee.id,
-                employeeName: `${employee.name} ${employee.surname}`,
+                employeeName,
                 position: employee.positionName,
                 department: employee.department,
-                noticeEndDate: employee.noticeEnd.toISOString(),
-                daysRemaining: daysUntilEnd,
-                recipients: HR_EMAILS,
-                subject: `Výpovědní lhůta končí za ${daysUntilEnd} dní - ${employee.name} ${employee.surname}`,
+                unitName: employee.unitName,
+                supervisorName: supervisorFullName,
+                supervisorEmail,
+                probationEndDate: employee.probationEnd?.toISOString() ?? null,
+                evaluationLink,
+                formType,
+                subject: `Informace HR - zahájeno hodnocení ZD - ${employeeName}`,
               },
-              priority: daysUntilEnd <= 3 ? 2 : 5,
+              priority: 2,
               createdBy: "system-cron",
             },
           })
-
-          await prisma.employeeOffboarding.update({
-            where: { id: employee.id },
-            data: {
-              lastNoticeReminder: today,
-              noticeRemindersSent: employee.noticeRemindersSent + 1,
-            },
-          })
-
-          await prisma.offboardingChangeLog.create({
-            data: {
-              employeeId: employee.id,
-              userId: "system-cron",
-              action: "NOTICE_REMINDER_SENT",
-              field: "notice_reminder",
-              oldValue: null,
-              newValue: JSON.stringify({
-                daysRemaining: daysUntilEnd,
-                mailId: hrMailId.id,
-              }),
-            },
-          })
-
-          notifications.push({
-            type: `notice_${daysUntilEnd}_days`,
-            employee: `${employee.name} ${employee.surname}`,
-            endDate: employee.noticeEnd,
-          })
         }
+
+        await tx.employeeOnboarding.update({
+          where: { id: employee.id },
+          data: {
+            probationNotification21Sent: new Date(),
+            probationNotificationHRSent:
+              HR_RECIPIENTS.length > 0 ? new Date() : null,
+            probationEvaluationSentAt: new Date(),
+            probationEvaluationSentBy: "system-cron",
+          },
+        })
+      })
+
+      notifications.push(`✅ Odesláno hodnocení vedoucímu pro ${employeeName}`)
+    }
+
+    const employeesAt1Day = await prisma.employeeOnboarding.findMany({
+      where: {
+        deletedAt: null,
+        actualStart: { not: null },
+        status: "COMPLETED",
+        probationEnd: {
+          gte: at1DayDate,
+          lt: addDays(at1DayDate, 1),
+        },
+        probationReminder1DaySent: null,
+        probationEvaluations: {
+          none: {},
+        },
+      },
+      select: {
+        id: true,
+        titleBefore: true,
+        name: true,
+        surname: true,
+        titleAfter: true,
+        positionName: true,
+        department: true,
+        unitName: true,
+        probationEnd: true,
+        supervisorTitleBefore: true,
+        supervisorName: true,
+        supervisorSurname: true,
+        supervisorTitleAfter: true,
+        supervisorEmail: true,
+      },
+    })
+
+    for (const employee of employeesAt1Day) {
+      const employeeName = buildEmployeeFullName(employee)
+      const supervisorName = buildPersonFullName({
+        titleBefore: employee.supervisorTitleBefore,
+        name: employee.supervisorName,
+        surname: employee.supervisorSurname,
+        titleAfter: employee.supervisorTitleAfter,
+      })
+
+      if (HR_RECIPIENTS.length > 0) {
+        await prisma.mailQueue.create({
+          data: {
+            type: "PROBATION_HR_REMINDER_1_DAY",
+            payload: {
+              recipients: HR_RECIPIENTS,
+              employeeId: employee.id,
+              employeeName,
+              position: employee.positionName,
+              department: employee.department,
+              unitName: employee.unitName,
+              supervisorName,
+              supervisorEmail: employee.supervisorEmail,
+              probationEndDate: employee.probationEnd?.toISOString() ?? null,
+              subject: `Připomínka HR - chybí hodnocení ZD - ${employeeName}`,
+            },
+            priority: 1,
+            createdBy: "system-cron",
+          },
+        })
       }
+
+      await prisma.employeeOnboarding.update({
+        where: { id: employee.id },
+        data: {
+          probationReminder1DaySent: new Date(),
+        },
+      })
+
+      notifications.push(`⏰ Připomínka HR pro ${employeeName}`)
+    }
+
+    const completedProbations = await prisma.employeeOnboarding.findMany({
+      where: {
+        deletedAt: null,
+        actualStart: { not: null },
+        status: "COMPLETED",
+        probationEnd: {
+          gte: completedStart,
+          lt: today,
+        },
+        probationCompletedNotified: null,
+      },
+      select: {
+        id: true,
+        titleBefore: true,
+        name: true,
+        surname: true,
+        titleAfter: true,
+        positionName: true,
+        department: true,
+        unitName: true,
+        probationEnd: true,
+        probationEvaluations: {
+          select: {
+            id: true,
+            recommendation: true,
+            evaluatorName: true,
+            evaluatorEmail: true,
+          },
+        },
+      },
+    })
+
+    for (const employee of completedProbations) {
+      const employeeName = buildEmployeeFullName(employee)
+      const evaluation = employee.probationEvaluations[0]
+
+      if (HR_RECIPIENTS.length > 0) {
+        await prisma.mailQueue.create({
+          data: {
+            type: "PROBATION_COMPLETED",
+            payload: {
+              recipients: HR_RECIPIENTS,
+              employeeId: employee.id,
+              employeeName,
+              position: employee.positionName,
+              department: employee.department,
+              unitName: employee.unitName,
+              probationEndDate: employee.probationEnd?.toISOString() ?? null,
+              hasEvaluation: Boolean(evaluation),
+              recommendation: evaluation?.recommendation ?? null,
+              evaluatorName: evaluation?.evaluatorName ?? null,
+              evaluatorEmail: evaluation?.evaluatorEmail ?? null,
+              subject: `Ukončena zkušební doba - ${employeeName}`,
+            },
+            priority: 2,
+            createdBy: "system-cron",
+          },
+        })
+      }
+
+      await prisma.employeeOnboarding.update({
+        where: { id: employee.id },
+        data: {
+          probationCompletedNotified: new Date(),
+        },
+      })
+
+      notifications.push(`📋 Ukončena ZD pro ${employeeName}`)
     }
 
     return NextResponse.json({
-      status: "success",
-      message: `Processed ${activeEmployees.length} onboarding + ${departingEmployees.length} offboarding employees`,
+      success: true,
       notifications,
-      summary: {
-        probationNotifications: notifications.filter((n) =>
-          n.type.includes("probation")
-        ).length,
-        noticeNotifications: notifications.filter((n) =>
-          n.type.includes("notice")
-        ).length,
+      stats: {
+        at21Days: employeesAt21Days.length,
+        at1Day: employeesAt1Day.length,
+        completed: completedProbations.length,
       },
     })
   } catch (error) {
-    console.error("Chyba při zpracování notifikací:", error)
+    console.error("Probation notifications error:", error)
+
     return NextResponse.json(
       {
-        status: "error",
-        message: "Chyba při zpracování notifikací",
-        error: error instanceof Error ? error.message : "Unknown error",
+        success: false,
+        message: "Internal server error",
+        error: error instanceof Error ? error.message : String(error),
       },
-      { status: 500 }
-    )
-  }
-}
-
-export async function GET() {
-  try {
-    const today = new Date()
-    const next30Days = addDays(today, 30)
-
-    const [probationEnding, noticeEnding] = await Promise.all([
-      prisma.employeeOnboarding.findMany({
-        where: {
-          deletedAt: null,
-          actualStart: { not: null },
-          probationEnd: {
-            gte: today,
-            lte: next30Days,
-          },
-          status: "COMPLETED",
-        },
-        select: {
-          id: true,
-          name: true,
-          surname: true,
-          probationEnd: true,
-          positionName: true,
-          department: true,
-          probationRemindersSent: true,
-        },
-        orderBy: { probationEnd: "asc" },
-      }),
-
-      prisma.employeeOffboarding.findMany({
-        where: {
-          deletedAt: null,
-          noticeEnd: {
-            gte: today,
-            lte: next30Days,
-          },
-        },
-        select: {
-          id: true,
-          name: true,
-          surname: true,
-          noticeEnd: true,
-          positionName: true,
-          department: true,
-          noticeRemindersSent: true,
-        },
-        orderBy: { noticeEnd: "asc" },
-      }),
-    ])
-
-    const upcoming = [
-      ...probationEnding.map((emp) => ({
-        ...emp,
-        type: "probation" as const,
-        endDate: emp.probationEnd,
-        daysUntilEnd: differenceInDays(emp.probationEnd!, today),
-      })),
-      ...noticeEnding.map((emp) => ({
-        ...emp,
-        type: "notice" as const,
-        endDate: emp.noticeEnd,
-        daysUntilEnd: differenceInDays(emp.noticeEnd!, today),
-      })),
-    ].sort((a, b) => a.daysUntilEnd - b.daysUntilEnd)
-
-    return NextResponse.json({
-      status: "success",
-      upcoming,
-      summary: {
-        totalProbationEnding: probationEnding.length,
-        totalNoticeEnding: noticeEnding.length,
-        next7Days: upcoming.filter((u) => u.daysUntilEnd <= 7).length,
-      },
-    })
-  } catch (error) {
-    console.error("Chyba při načítání přehledu:", error)
-    return NextResponse.json(
-      { status: "error", message: "Chyba při načítání dat" },
       { status: 500 }
     )
   }

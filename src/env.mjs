@@ -29,6 +29,8 @@ export const env = createEnv({
 
     EOS_API_BASE: z.string().url().optional(),
     EOS_API_TOKEN: z.string().optional(),
+
+    CRON_SECRET: z.string().min(1),
   },
   client: {
     NEXT_PUBLIC_APP_URL: z.string().url(),
@@ -64,5 +66,7 @@ export const env = createEnv({
 
     EOS_API_BASE: process.env.EOS_API_BASE,
     EOS_API_TOKEN: process.env.EOS_API_TOKEN,
+
+    CRON_SECRET: process.env.CRON_SECRET,
   },
 })

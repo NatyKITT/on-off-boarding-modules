@@ -3,7 +3,6 @@ name: Probation Check (Daily)
 on:
   schedule:
     - cron: '0 6 * * *'
-
   workflow_dispatch:
 
 jobs:
@@ -36,17 +35,21 @@ jobs:
             exit 1
           fi
           
-          # Parsuj response (pokud je JSON)
+          # Parsuj response
           notifications=$(echo "$body" | jq -r '.notifications | length' 2>/dev/null || echo "0")
-          checked=$(echo "$body" | jq -r '.message' 2>/dev/null || echo "N/A")
+          at21Days=$(echo "$body" | jq -r '.stats.at21Days // 0' 2>/dev/null || echo "0")
+          at1Day=$(echo "$body" | jq -r '.stats.at1Day // 0' 2>/dev/null || echo "0")
+          completed=$(echo "$body" | jq -r '.stats.completed // 0' 2>/dev/null || echo "0")
           
           echo "::notice::✅ Probation check completed successfully"
-          echo "::notice::📋 $checked"
-          echo "::notice::📧 Notifications sent: $notifications"
+          echo "::notice::📧 Notifications: $notifications"
+          echo "::notice::📅 21 days: $at21Days, 1 day: $at1Day, Completed: $completed"
           
           # Ulož výstup pro summary
           echo "notifications=$notifications" >> $GITHUB_OUTPUT
-          echo "checked=$checked" >> $GITHUB_OUTPUT
+          echo "at21Days=$at21Days" >> $GITHUB_OUTPUT
+          echo "at1Day=$at1Day" >> $GITHUB_OUTPUT
+          echo "completed=$completed" >> $GITHUB_OUTPUT
 
       - name: 📝 Job Summary
         if: always()
@@ -54,6 +57,8 @@ jobs:
           echo "## 🎯 Probation Check Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Status:** ${{ steps.probation.outcome }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Checked:** ${{ steps.probation.outputs.checked }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Notifications:** ${{ steps.probation.outputs.notifications }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total Notifications:** ${{ steps.probation.outputs.notifications }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **21 Days Warning:** ${{ steps.probation.outputs.at21Days }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **1 Day Reminder:** ${{ steps.probation.outputs.at1Day }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Completed:** ${{ steps.probation.outputs.completed }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Run time:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY

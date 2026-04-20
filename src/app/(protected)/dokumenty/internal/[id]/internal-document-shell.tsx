@@ -17,6 +17,7 @@ import {
 import { AffidavitForm } from "@/components/forms/affidavit-form"
 import { PayrollInfoForm } from "@/components/forms/payroll-info-form"
 import { PersonalQuestionnaireForm } from "@/components/forms/personal-questionnaire-form"
+import { ProbationEvaluationForm } from "@/components/forms/probation-evaluation-form"
 
 type OnboardingMeta = {
   id: number
@@ -27,6 +28,16 @@ type OnboardingMeta = {
   department: string
   unitName: string
   positionName: string
+  actualStart?: string | null
+}
+
+type ProbationDocumentData = {
+  evaluatorName?: string
+  evaluatorEmail?: string
+  workPerformance?: string
+  socialBehavior?: string
+  recommendation?: "yes" | "no"
+  reasonIfNo?: string
 }
 
 type InternalDocument = {
@@ -35,8 +46,8 @@ type InternalDocument = {
   status: DocumentStatus
   isLocked: boolean
   data: unknown
-  createdAt?: Date
-  completedAt?: Date | null
+  createdAt?: Date | string
+  completedAt?: Date | string | null
   onboarding?: OnboardingMeta | null
 }
 
@@ -52,9 +63,25 @@ function docTypeLabel(t: EmploymentDocumentType) {
       return "Osobní dotazník"
     case "PAYROLL_INFO":
       return "Dotazník pro vedení mzdové agendy"
+    case "PROBATION_EVALUATION":
+      return "Hodnocení zkušební doby"
     default:
       return t
   }
+}
+
+const managerialKeywords = ["vedoucí", "ředitel", "tajemník"]
+
+function isManagerialPosition(positionName?: string): boolean {
+  if (!positionName) return false
+  const lower = positionName.toLowerCase()
+  return managerialKeywords.some((kw) => lower.includes(kw))
+}
+
+function asProbationData(value: unknown): ProbationDocumentData {
+  return value && typeof value === "object"
+    ? (value as ProbationDocumentData)
+    : {}
 }
 
 export function InternalDocumentShell({ document }: Props) {
@@ -68,13 +95,19 @@ export function InternalDocumentShell({ document }: Props) {
   const router = useRouter()
 
   const employeeMeta = useMemo(() => {
-    return doc.onboarding ? buildEmployeeMeta(doc.onboarding) : undefined
+    if (!doc.onboarding) return undefined
+    const base = buildEmployeeMeta(doc.onboarding)
+    return {
+      ...base,
+      actualStart: doc.onboarding.actualStart ?? undefined,
+    }
   }, [doc.onboarding])
+
+  const probationData = useMemo(() => asProbationData(doc.data), [doc.data])
 
   const titleName = employeeMeta?.fullName?.trim()
   const departmentText = employeeMeta?.department?.trim()
   const positionText = employeeMeta?.position?.trim()
-
   const readOnly = doc.isLocked
 
   async function handleSave(data: unknown) {
@@ -108,6 +141,7 @@ export function InternalDocumentShell({ document }: Props) {
         ...prev,
         data,
         status: json.status ?? prev.status,
+        completedAt: json.completedAt ?? prev.completedAt,
       }))
 
       setResultModal("success")
@@ -136,10 +170,27 @@ export function InternalDocumentShell({ document }: Props) {
     switch (doc.type) {
       case "AFFIDAVIT":
         return <AffidavitForm {...commonProps} />
+
       case "PAYROLL_INFO":
         return <PayrollInfoForm {...commonProps} />
+
       case "PERSONAL_QUESTIONNAIRE":
         return <PersonalQuestionnaireForm {...commonProps} />
+
+      case "PROBATION_EVALUATION":
+        return (
+          <ProbationEvaluationForm
+            {...commonProps}
+            formType={
+              isManagerialPosition(doc.onboarding?.positionName)
+                ? "MANAGERIAL"
+                : "REGULAR_EMPLOYEE"
+            }
+            evaluatorName={probationData.evaluatorName ?? ""}
+            evaluatorEmail={probationData.evaluatorEmail ?? ""}
+          />
+        )
+
       default:
         return (
           <div className="flex items-center gap-2 text-sm text-red-600">
@@ -226,8 +277,9 @@ export function InternalDocumentShell({ document }: Props) {
         )}
 
         <p className="text-sm text-muted-foreground">
-          Zde vidíte formulář tak, jak ho vyplnil zaměstnanec. V případě potřeby
-          ho můžete upravit a uložit.
+          {doc.type === "PROBATION_EVALUATION"
+            ? "Zde vidíte formulář hodnocení zkušební doby. V případě potřeby ho můžete upravit a uložit."
+            : "Zde vidíte formulář tak, jak ho vyplnil zaměstnanec. V případě potřeby ho můžete upravit a uložit."}
         </p>
 
         {readOnly && (
@@ -235,13 +287,6 @@ export function InternalDocumentShell({ document }: Props) {
             <Lock className="size-3" />
             Dokument je uzamčený. Pro úpravy ho nejprve odemkněte v seznamu
             dokumentů.
-          </div>
-        )}
-
-        {doc.status !== "DRAFT" && (
-          <div className="mt-1 inline-flex items-center gap-1 text-xs text-emerald-700">
-            <CheckCircle className="size-3" />
-            Stav: {doc.status}
           </div>
         )}
 
@@ -265,23 +310,21 @@ export function InternalDocumentShell({ document }: Props) {
           Zpět na dokumenty
         </Button>
 
-        <div className="flex gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              window.open(
-                `/api/dokumenty/internal/${doc.id}/pdf`,
-                "_blank",
-                "noopener,noreferrer"
-              )
-            }
-            disabled={saving}
-          >
-            Otevřít PDF k tisku
-          </Button>
-        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() =>
+            window.open(
+              `/api/dokumenty/internal/${doc.id}/pdf`,
+              "_blank",
+              "noopener,noreferrer"
+            )
+          }
+          disabled={saving}
+        >
+          Otevřít PDF k tisku
+        </Button>
       </div>
     </div>
   )

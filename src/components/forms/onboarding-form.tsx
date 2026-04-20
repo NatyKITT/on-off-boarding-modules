@@ -6,10 +6,13 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { addMonths, format } from "date-fns"
 import {
   Calendar,
+  Check,
   CheckCircle,
   ListChecks,
+  RefreshCcw,
   Search,
   User,
+  Users,
   X,
 } from "lucide-react"
 import { useForm } from "react-hook-form"
@@ -17,6 +20,9 @@ import { z } from "zod"
 
 import { type Position } from "@/types/position"
 
+import { cn } from "@/lib/utils"
+
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -47,6 +53,7 @@ import {
 import { Input } from "@/components/ui/input"
 import {
   Popover,
+  PopoverAnchor,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
@@ -75,6 +82,11 @@ export type FormValues = {
   userEmail?: string
   userName?: string
   personalNumber?: string
+
+  supervisorName?: string
+  supervisorEmail?: string
+  mentorName?: string
+  mentorEmail?: string
 
   notes?: string
   status?: "NEW" | "IN_PROGRESS" | "COMPLETED"
@@ -122,20 +134,61 @@ type OnboardingRowForMeta = {
 
 type OnboardingPayload = Record<string, unknown> & {
   generatedSkippedPersonalNumbers?: string[]
+  supervisorManualOverride?: boolean
+}
+
+type EmployeePersonItem = {
+  id: string
+  personalNumber: string
+  name: string
+  surname: string
+  email: string
+  titleBefore?: string | null
+  titleAfter?: string | null
+  positionNum?: string
+  positionName?: string
+  department?: string
+  unitName?: string
+  label?: string
+  userName?: string | null
+}
+
+type SupervisorApiResponse = {
+  supervisor?: {
+    gid?: string | null
+    titleBefore?: string | null
+    name?: string | null
+    surname?: string | null
+    titleAfter?: string | null
+    fullName?: string | null
+    email?: string | null
+    position?: string | null
+    department?: string | null
+    unitName?: string | null
+    personalNumber?: string | null
+  }
 }
 
 const nullIfEmpty = (v?: string | null) =>
   v == null || String(v).trim() === "" ? null : v
+
 const ensure = (v?: string | null, fb = "NEUVEDENO") => (v ?? "").trim() || fb
 
 const fmt = (d: Date) => format(d, "yyyy-MM-dd")
 const todayStr = () => fmt(new Date())
 
 const managerialKeywords = ["vedení", "ředitel", "vedoucí", "tajemník"]
+
 const stripAccents = (s: string) =>
   s
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+
+const normalize = (s: string) =>
+  s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
 
 const isManagerialPosition = (positionName?: string): boolean => {
@@ -200,10 +253,10 @@ const getBaselineLastPersonalNumber = (meta?: PersonalNumberMeta): string => {
   if (!meta) return ""
   const candidates: string[] = []
 
-  if (meta.lastUsedNumber && meta.lastUsedNumber.trim()) {
+  if (meta.lastUsedNumber?.trim()) {
     candidates.push(meta.lastUsedNumber.trim())
   }
-  if (meta.lastDc2Number && meta.lastDc2Number.trim()) {
+  if (meta.lastDc2Number?.trim()) {
     candidates.push(meta.lastDc2Number.trim())
   }
   if (!candidates.length) return ""
@@ -216,9 +269,7 @@ const getBaselineLastPersonalNumber = (meta?: PersonalNumberMeta): string => {
     if (!c) continue
 
     if (!/^\d+$/.test(c)) {
-      if (Number.isNaN(bestNum)) {
-        best = c
-      }
+      if (Number.isNaN(bestNum)) best = c
       continue
     }
 
@@ -262,9 +313,7 @@ function buildPersonalNumberMetaFromOnboardings(
     lastDc2AssignedTo: base?.lastDc2AssignedTo ?? null,
   }
 
-  if (!parsed.length) {
-    return baseMeta
-  }
+  if (!parsed.length) return baseMeta
 
   parsed.sort((a, b) => a.num - b.num)
   const first = parsed[0]!
@@ -319,9 +368,295 @@ const baseSchema = z.object({
   userName: z.string().optional(),
   personalNumber: z.string().optional(),
 
+  supervisorName: z.string().optional(),
+  supervisorEmail: z
+    .string()
+    .email("Neplatný e-mail")
+    .or(z.literal(""))
+    .optional(),
+
+  mentorName: z.string().optional(),
+  mentorEmail: z.string().email("Neplatný e-mail").or(z.literal("")).optional(),
+
   notes: z.string().optional(),
   status: z.enum(["NEW", "IN_PROGRESS", "COMPLETED"]).optional(),
 })
+
+const focusRing =
+  "focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/55 focus:ring-offset-2 focus:ring-offset-background " +
+  "focus-visible:outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/55 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+const textInputClass = `${focusRing} leading-normal py-2`
+
+function cleanDisplayValue(value?: string | null): string {
+  return (value ?? "").replace(/\s+/g, " ").trim()
+}
+
+function dedupeAdjacentWords(value?: string | null): string {
+  const raw = cleanDisplayValue(value)
+  if (!raw) return ""
+
+  const parts = raw.split(" ")
+  const result: string[] = []
+
+  for (const part of parts) {
+    const prev = result[result.length - 1]
+    if (prev && prev.localeCompare(part, "cs", { sensitivity: "base" }) === 0) {
+      continue
+    }
+    result.push(part)
+  }
+
+  return result.join(" ").trim()
+}
+
+function buildDisplayName(parts: Array<string | null | undefined>): string {
+  return dedupeAdjacentWords(parts.filter(Boolean).join(" "))
+}
+
+function buildEmployeeFullName(person: Partial<EmployeePersonItem>) {
+  return buildDisplayName([
+    person.titleBefore,
+    person.name,
+    person.surname,
+    person.titleAfter,
+  ])
+}
+
+function buildSupervisorFullName(
+  supervisor?: SupervisorApiResponse["supervisor"]
+): string {
+  if (!supervisor) return ""
+
+  if (supervisor.fullName) {
+    return dedupeAdjacentWords(supervisor.fullName)
+  }
+
+  return buildDisplayName([
+    supervisor.titleBefore,
+    supervisor.name,
+    supervisor.surname,
+    supervisor.titleAfter,
+  ])
+}
+
+function PersonLookupCombobox({
+  valueName,
+  valueEmail,
+  placeholder,
+  disabled,
+  onSelect,
+  className,
+}: {
+  valueName?: string
+  valueEmail?: string
+  placeholder?: string
+  disabled?: boolean
+  onSelect: (employee: EmployeePersonItem) => void | Promise<void>
+  className?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState("")
+  const [allEmployees, setAllEmployees] = useState<EmployeePersonItem[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open || allEmployees.length > 0) return
+
+    const controller = new AbortController()
+
+    ;(async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        const url = new URL("/api/zamestnanci/hledat", window.location.origin)
+        url.searchParams.set("q", "1")
+        url.searchParams.set("limit", "500")
+
+        const res = await fetch(url.toString(), {
+          cache: "no-store",
+          signal: controller.signal,
+          headers: { Accept: "application/json" },
+        })
+
+        if (!res.ok) {
+          throw new Error(
+            res.status === 502
+              ? "EOS služba není dostupná"
+              : `Chyba při načítání zaměstnanců (${res.status})`
+          )
+        }
+
+        const json = await res.json().catch(() => null)
+        const data: EmployeePersonItem[] = Array.isArray(json?.data)
+          ? json.data
+          : []
+
+        setAllEmployees(data)
+      } catch (e) {
+        if ((e as Error).name !== "AbortError") {
+          setError((e as Error).message || "Chyba vyhledávání")
+        }
+      } finally {
+        setLoading(false)
+      }
+    })()
+
+    return () => controller.abort()
+  }, [open, allEmployees.length])
+
+  useEffect(() => {
+    if (!open) setQuery("")
+  }, [open])
+
+  const filtered = useMemo(() => {
+    const q = normalize(query.trim())
+    if (!q) return allEmployees
+
+    return allEmployees.filter((e) => {
+      const num = normalize(e.personalNumber ?? "")
+      const nm = normalize(
+        `${e.titleBefore ?? ""} ${e.name ?? ""} ${e.surname ?? ""} ${e.titleAfter ?? ""}`
+      )
+      const org = normalize(
+        `${e.positionName ?? ""} ${e.department ?? ""} ${e.unitName ?? ""}`
+      )
+      const email = normalize(e.email ?? "")
+
+      return (
+        num.includes(q) ||
+        nm.includes(q) ||
+        org.includes(q) ||
+        email.includes(q)
+      )
+    })
+  }, [allEmployees, query])
+
+  const selectedLabel =
+    valueName || valueEmail
+      ? [valueName, valueEmail].filter(Boolean).join(" • ")
+      : ""
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverAnchor asChild>
+        <div className={cn("relative", className)}>
+          <Input
+            readOnly
+            value={selectedLabel}
+            placeholder={placeholder ?? "Vybrat osobu z EOS…"}
+            disabled={disabled}
+            onClick={() => !disabled && setOpen(true)}
+            className={focusRing}
+          />
+        </div>
+      </PopoverAnchor>
+
+      <PopoverContent
+        className="w-[--radix-popover-trigger-width] p-0"
+        sideOffset={4}
+        align="start"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        onWheelCapture={(e) => e.stopPropagation()}
+      >
+        <Command shouldFilter={false}>
+          <div className="relative">
+            <CommandInput
+              placeholder="Pište číslo, jméno, příjmení nebo e-mail…"
+              value={query}
+              onValueChange={setQuery}
+              autoFocus
+              className={focusRing}
+            />
+            {query && (
+              <button
+                type="button"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm text-muted-foreground hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                title="Vymazat hledání"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setQuery("")}
+              >
+                <X className="size-4" />
+              </button>
+            )}
+          </div>
+
+          <CommandEmpty>
+            {loading ? (
+              <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
+                <div className="mr-2 size-4 animate-spin rounded-full border-b-2 border-current" />
+                Načítám zaměstnance…
+              </div>
+            ) : error ? (
+              <div className="flex flex-col items-center justify-center py-6 text-sm text-destructive">
+                <User className="mb-2 size-8 opacity-50" />
+                {error}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-6 text-sm text-muted-foreground">
+                <User className="mb-2 size-8 opacity-50" />
+                Nic nenalezeno.
+              </div>
+            )}
+          </CommandEmpty>
+
+          <CommandList className="max-h-80 overflow-y-auto overscroll-contain">
+            <CommandGroup>
+              {filtered.map((e) => (
+                <CommandItem
+                  key={e.id}
+                  value={e.personalNumber || e.id}
+                  onSelect={() => {
+                    void onSelect(e)
+                    setOpen(false)
+                    setQuery("")
+                  }}
+                  className="flex cursor-pointer items-start gap-3 py-3"
+                >
+                  <Check className="mt-0.5 size-4 shrink-0 opacity-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <User className="size-4 shrink-0 text-muted-foreground" />
+                      {e.personalNumber ? (
+                        <span className="font-mono text-sm text-muted-foreground">
+                          {e.personalNumber}
+                        </span>
+                      ) : null}
+                      <span className="truncate py-0.5 font-medium leading-normal">
+                        {buildEmployeeFullName(e)}
+                      </span>
+                    </div>
+
+                    <div className="mt-1 space-y-1 text-sm text-muted-foreground">
+                      {e.positionName ? (
+                        <div className="truncate">
+                          <span className="font-medium">Pozice:</span>{" "}
+                          {e.positionName}
+                        </div>
+                      ) : null}
+                      {e.department || e.unitName ? (
+                        <div className="truncate">
+                          {[e.department, e.unitName]
+                            .filter(Boolean)
+                            .join(" • ")}
+                        </div>
+                      ) : null}
+                      {e.email ? (
+                        <div className="truncate">
+                          <span className="font-medium">Email:</span> {e.email}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  )
+}
 
 function ClearableTimeInput({
   value,
@@ -350,8 +685,7 @@ function ClearableTimeInput({
           type="button"
           aria-label="Vymazat čas"
           onClick={() => onChange("")}
-          className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-1 text-muted-foreground hover:text-foreground
-                     focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-1 text-muted-foreground hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
           title="Vymazat čas"
         >
           <X className="size-3" />
@@ -377,6 +711,7 @@ export function OnboardingFormUnified({
     () => mode ?? defaultCreateMode ?? "create-planned",
     [mode, defaultCreateMode]
   )
+
   const isActualMode = useMemo(
     () => effectiveMode === "create-actual" || editContext === "actual",
     [effectiveMode, editContext]
@@ -386,14 +721,48 @@ export function OnboardingFormUnified({
     PersonalNumberMeta | undefined
   >(personalNumberMeta)
 
+  const [successModal, setSuccessModal] = useState<{
+    open: boolean
+    mode: "create" | "edit"
+    name: string
+  }>({ open: false, mode: "create", name: "" })
+
+  const [errorModal, setErrorModal] = useState<{
+    open: boolean
+    message: string
+  }>({ open: false, message: "" })
+
+  const [positionPickerOpen, setPositionPickerOpen] = useState(false)
+  const positionTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const [searchQuery, setSearchQuery] = useState("")
+
+  const [skippedOpen, setSkippedOpen] = useState(false)
+  const [skippedNumbersState, setSkippedNumbersState] = useState<string[]>([])
+
+  const [isSupervisorLoading, setIsSupervisorLoading] = useState(false)
+  const [supervisorLoadError, setSupervisorLoadError] = useState<string | null>(
+    null
+  )
+  const supervisorRequestRef = useRef(0)
+
+  const [supervisorManuallyChanged, setSupervisorManuallyChanged] =
+    useState(false)
+
+  const inferredManualFlag = useMemo(
+    () => inferManualDates(initial, isActualMode),
+    [initial, isActualMode]
+  )
+
+  const [manualDates, setManualDates] = useState<boolean>(
+    () => inferredManualFlag
+  )
+
   useEffect(() => {
     setResolvedPersonalMeta(personalNumberMeta)
   }, [personalNumberMeta])
 
   useEffect(() => {
-    if (personalNumberMeta && personalNumberMeta.skippedNumbers?.length) {
-      return
-    }
+    if (personalNumberMeta && personalNumberMeta.skippedNumbers?.length) return
 
     let cancelled = false
 
@@ -401,6 +770,7 @@ export function OnboardingFormUnified({
       try {
         const res = await fetch("/api/nastupy", { cache: "no-store" })
         if (!res.ok) return
+
         const json = await res.json().catch(() => null)
         const rows: OnboardingRowForMeta[] = Array.isArray(json?.data)
           ? json.data
@@ -410,6 +780,7 @@ export function OnboardingFormUnified({
           rows,
           personalNumberMeta
         )
+
         if (!cancelled) {
           setResolvedPersonalMeta(computed)
         }
@@ -423,45 +794,22 @@ export function OnboardingFormUnified({
     }
   }, [personalNumberMeta])
 
-  const suggestedPersonalNumber = useMemo(() => {
-    const last = getBaselineLastPersonalNumber(resolvedPersonalMeta)
-    if (!last.trim()) return ""
-    return incrementPersonalNumber(last)
+  useEffect(() => {
+    setSkippedNumbersState(resolvedPersonalMeta?.skippedNumbers ?? [])
   }, [resolvedPersonalMeta])
 
-  const inferredManualFlag = useMemo(
-    () => inferManualDates(initial, isActualMode),
-    [initial, isActualMode]
-  )
-
-  const [successModal, setSuccessModal] = useState<{
-    open: boolean
-    mode: "create" | "edit"
-    name: string
-  }>({ open: false, mode: "create", name: "" })
-
-  const [errorModal, setErrorModal] = useState<{
-    open: boolean
-    message: string
-  }>({ open: false, message: "" })
-
-  const [manualDates, setManualDates] = useState<boolean>(
-    () => inferredManualFlag
-  )
   useEffect(() => {
     setManualDates(inferredManualFlag)
   }, [inferredManualFlag, id])
 
-  const [positionPickerOpen, setPositionPickerOpen] = useState(false)
-  const positionTriggerRef = useRef<HTMLButtonElement | null>(null)
-  const [searchQuery, setSearchQuery] = useState("")
-
-  const [skippedOpen, setSkippedOpen] = useState(false)
-
-  const [skippedNumbersState, setSkippedNumbersState] = useState<string[]>([])
-
   useEffect(() => {
-    setSkippedNumbersState(resolvedPersonalMeta?.skippedNumbers ?? [])
+    setSupervisorManuallyChanged(false)
+  }, [id, initial?.positionNum])
+
+  const suggestedPersonalNumber = useMemo(() => {
+    const last = getBaselineLastPersonalNumber(resolvedPersonalMeta)
+    if (!last.trim()) return ""
+    return incrementPersonalNumber(last)
   }, [resolvedPersonalMeta])
 
   type PersonalCheckState =
@@ -486,6 +834,7 @@ export function OnboardingFormUnified({
       : prefillDate && !isActualMode
         ? prefillDate
         : basePlanned
+
     const actualStart = isEdit
       ? initial?.actualStart
       : prefillDate && isActualMode
@@ -518,6 +867,10 @@ export function OnboardingFormUnified({
       userEmail: "",
       userName: "",
       personalNumber: "",
+      supervisorName: "",
+      supervisorEmail: "",
+      mentorName: "",
+      mentorEmail: "",
       notes: "",
       status: "NEW",
       ...initial,
@@ -634,15 +987,92 @@ export function OnboardingFormUnified({
     form,
   ])
 
+  const loadSupervisorForPosition = useCallback(
+    async (positionNum: string, options?: { force?: boolean }) => {
+      const trimmed = positionNum.trim()
+
+      if (!trimmed) {
+        form.setValue("supervisorName", "", { shouldValidate: true })
+        form.setValue("supervisorEmail", "", { shouldValidate: true })
+        setSupervisorLoadError(null)
+        return
+      }
+
+      if (supervisorManuallyChanged && !options?.force) {
+        return
+      }
+
+      const requestId = ++supervisorRequestRef.current
+      setIsSupervisorLoading(true)
+      setSupervisorLoadError(null)
+
+      try {
+        const res = await fetch(
+          `/api/systemizace/superior?positionNum=${encodeURIComponent(trimmed)}`,
+          { cache: "no-store" }
+        )
+
+        if (!res.ok) {
+          if (requestId !== supervisorRequestRef.current) return
+
+          form.setValue("supervisorName", "", { shouldValidate: true })
+          form.setValue("supervisorEmail", "", { shouldValidate: true })
+          setSupervisorLoadError("Vedoucí nebyl pro tuto pozici nalezen.")
+          return
+        }
+
+        const json = (await res
+          .json()
+          .catch(() => null)) as SupervisorApiResponse | null
+        const supervisor = json?.supervisor
+        const fullName = buildSupervisorFullName(supervisor)
+
+        if (requestId !== supervisorRequestRef.current) return
+
+        form.setValue("supervisorName", fullName, {
+          shouldDirty: false,
+          shouldValidate: true,
+        })
+        form.setValue("supervisorEmail", supervisor?.email ?? "", {
+          shouldDirty: false,
+          shouldValidate: true,
+        })
+        setSupervisorLoadError(null)
+      } catch (error) {
+        if (requestId !== supervisorRequestRef.current) return
+
+        console.error("Nepodařilo se dohledat vedoucího:", error)
+        form.setValue("supervisorName", "", { shouldValidate: true })
+        form.setValue("supervisorEmail", "", { shouldValidate: true })
+        setSupervisorLoadError("Nepodařilo se načíst vedoucího.")
+      } finally {
+        if (requestId === supervisorRequestRef.current) {
+          setIsSupervisorLoading(false)
+        }
+      }
+    },
+    [form, supervisorManuallyChanged]
+  )
+
   useEffect(() => {
-    if (!watchPositionNum || !positions.length) return
-    const pos = positions.find((p) => p.num === watchPositionNum)
-    if (pos) {
-      form.setValue("positionName", ensure(pos.name, "(nezjištěno)"))
-      form.setValue("department", ensure(pos.dept_name, "(doplnit)"))
-      form.setValue("unitName", ensure(pos.unit_name, "(doplnit)"))
+    if (!watchPositionNum) {
+      form.setValue("supervisorName", "", { shouldValidate: true })
+      form.setValue("supervisorEmail", "", { shouldValidate: true })
+      setSupervisorLoadError(null)
+      return
     }
-  }, [watchPositionNum, positions, form])
+
+    if (!positions.length) return
+
+    const pos = positions.find((p) => p.num === watchPositionNum)
+    if (!pos) return
+
+    form.setValue("positionName", ensure(pos.name, "(nezjištěno)"))
+    form.setValue("department", ensure(pos.dept_name, "(doplnit)"))
+    form.setValue("unitName", ensure(pos.unit_name, "(doplnit)"))
+
+    void loadSupervisorForPosition(watchPositionNum)
+  }, [watchPositionNum, positions, form, loadSupervisorForPosition])
 
   const positionsForSearch: SearchablePosition[] = useMemo(
     () =>
@@ -672,26 +1102,53 @@ export function OnboardingFormUnified({
       shouldValidate: true,
     })
 
+    form.setValue("supervisorName", "", { shouldValidate: true })
+    form.setValue("supervisorEmail", "", { shouldValidate: true })
+
+    setSupervisorLoadError(null)
+    setSupervisorManuallyChanged(false)
+
     if (!manualDates) {
       const start = isActualMode
         ? form.getValues("actualStart")
         : form.getValues("plannedStart")
       const computed = computeProbationEnd(start, p.name)
-      if (computed)
+      if (computed) {
         form.setValue("probationEnd", computed, { shouldValidate: true })
+      }
     }
+
+    void loadSupervisorForPosition(p.num, { force: true })
+
     setPositionPickerOpen(false)
     requestAnimationFrame(() => positionTriggerRef.current?.focus())
+  }
+
+  const restoreSupervisorFromPosition = () => {
+    const currentPositionNum = form.getValues("positionNum")
+    if (!currentPositionNum) return
+    setSupervisorManuallyChanged(false)
+    void loadSupervisorForPosition(currentPositionNum, { force: true })
   }
 
   const checkPersonalNumber = useCallback(
     async (value: string) => {
       const v = value.trim()
+      const originalPn = (initial?.personalNumber ?? "").trim()
+      const isEditMode = Boolean(id)
+
       if (!v || !validatePersonalNumber) {
         setPersonalCheck({ status: "idle" })
         form.clearErrors("personalNumber")
         return
       }
+
+      if (isEditMode && v === originalPn) {
+        setPersonalCheck({ status: "idle" })
+        form.clearErrors("personalNumber")
+        return
+      }
+
       try {
         setPersonalCheck({ status: "checking" })
         const res = await validatePersonalNumber(v)
@@ -724,7 +1181,7 @@ export function OnboardingFormUnified({
         })
       }
     },
-    [validatePersonalNumber, form]
+    [validatePersonalNumber, form, initial?.personalNumber, id]
   )
 
   async function onSubmit(values: FormValues) {
@@ -733,10 +1190,16 @@ export function OnboardingFormUnified({
 
       if (isActualMode) {
         const pn = (values.personalNumber ?? "").trim()
+        const originalPn = (initial?.personalNumber ?? "").trim()
+        const isEditMode = Boolean(id)
+
         if (!pn) {
           throw new Error("Pro skutečný nástup je osobní číslo povinné.")
         }
-        if (validatePersonalNumber) {
+
+        const personalNumberChanged = !isEditMode || pn !== originalPn
+
+        if (personalNumberChanged && validatePersonalNumber) {
           const res = await validatePersonalNumber(pn)
           if (!res.ok) {
             throw new Error(
@@ -768,7 +1231,15 @@ export function OnboardingFormUnified({
         userEmail: nullIfEmpty(values.userEmail),
         userName: nullIfEmpty(values.userName),
         personalNumber: nullIfEmpty(values.personalNumber),
+        mentorName: nullIfEmpty(values.mentorName),
+        mentorEmail: nullIfEmpty(values.mentorEmail),
         notes: nullIfEmpty(values.notes),
+        supervisorManualOverride: supervisorManuallyChanged,
+      }
+
+      if (supervisorManuallyChanged) {
+        payload.supervisorName = nullIfEmpty(values.supervisorName)
+        payload.supervisorEmail = nullIfEmpty(values.supervisorEmail)
       }
 
       if (isActualMode) {
@@ -798,6 +1269,7 @@ export function OnboardingFormUnified({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       })
+
       const json = await res.json().catch(() => null)
       if (!res.ok) throw new Error(json?.message ?? "Operace se nezdařila.")
 
@@ -838,10 +1310,6 @@ export function OnboardingFormUnified({
     setSuccessModal((prev) => ({ ...prev, open }))
   }
 
-  const focusRing =
-    "focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/55 focus:ring-offset-2 focus:ring-offset-background " +
-    "focus-visible:outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/55 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-
   return (
     <>
       <Form {...form}>
@@ -869,7 +1337,7 @@ export function OnboardingFormUnified({
                         <Input
                           {...field}
                           placeholder="Např. Ing."
-                          className={focusRing}
+                          className={textInputClass}
                         />
                       </FormControl>
                       <FormMessage />
@@ -886,7 +1354,7 @@ export function OnboardingFormUnified({
                         <Input
                           {...field}
                           placeholder="Např. Ph.D."
-                          className={focusRing}
+                          className={textInputClass}
                         />
                       </FormControl>
                       <FormMessage />
@@ -903,7 +1371,7 @@ export function OnboardingFormUnified({
                         <Input
                           {...field}
                           placeholder="Křestní jméno"
-                          className={focusRing}
+                          className={textInputClass}
                         />
                       </FormControl>
                       <FormMessage />
@@ -920,7 +1388,7 @@ export function OnboardingFormUnified({
                         <Input
                           {...field}
                           placeholder="Příjmení"
-                          className={focusRing}
+                          className={textInputClass}
                         />
                       </FormControl>
                       <FormMessage />
@@ -941,9 +1409,7 @@ export function OnboardingFormUnified({
                           className={focusRing}
                         />
                       </FormControl>
-                      <FormDescription>
-                        Kontaktní e-mail (např. soukromý nebo pracovní).
-                      </FormDescription>
+                      <FormDescription>Kontaktní e-mail.</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -955,7 +1421,7 @@ export function OnboardingFormUnified({
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <User className="size-5" /> Organizační údaje
+                <Users className="size-5" /> Organizační údaje
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1110,6 +1576,218 @@ export function OnboardingFormUnified({
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
+                <Users className="size-5" /> Vedoucí a mentor
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="space-y-4 rounded-lg border p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold">Přímý nadřízený</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Načítá se automaticky podle vybrané pozice, ale lze ho
+                      změnit.
+                    </p>
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={restoreSupervisorFromPosition}
+                    disabled={
+                      !form.getValues("positionNum") || isSupervisorLoading
+                    }
+                  >
+                    <RefreshCcw className="mr-2 size-4" />
+                    Obnovit dle pozice
+                  </Button>
+                </div>
+
+                {isSupervisorLoading && (
+                  <Alert>
+                    <AlertDescription>
+                      Načítám vedoucího podle pozice…
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {!isSupervisorLoading && supervisorLoadError && (
+                  <Alert>
+                    <AlertDescription>{supervisorLoadError}</AlertDescription>
+                  </Alert>
+                )}
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <FormItem className="md:col-span-2">
+                    <FormLabel>Vybrat vedoucího z EOS</FormLabel>
+                    <FormControl>
+                      <PersonLookupCombobox
+                        valueName={form.watch("supervisorName")}
+                        valueEmail={form.watch("supervisorEmail")}
+                        placeholder="Vyhledejte vedoucího v EOS…"
+                        onSelect={async (employee) => {
+                          setSupervisorManuallyChanged(true)
+
+                          form.setValue(
+                            "supervisorName",
+                            buildEmployeeFullName(employee),
+                            {
+                              shouldDirty: true,
+                              shouldTouch: true,
+                              shouldValidate: true,
+                            }
+                          )
+                          form.setValue(
+                            "supervisorEmail",
+                            employee.email ?? "",
+                            {
+                              shouldDirty: true,
+                              shouldTouch: true,
+                              shouldValidate: true,
+                            }
+                          )
+                        }}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Použijte, pokud má být vedoucí jiný než automaticky
+                      dohledaný.
+                    </FormDescription>
+                  </FormItem>
+
+                  <FormField
+                    name="supervisorName"
+                    control={form.control}
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Jméno vedoucího</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            placeholder="Např. Bc. Jana Nováková"
+                            className={`${focusRing} leading-normal`}
+                            onChange={(e) => {
+                              setSupervisorManuallyChanged(true)
+                              field.onChange(e)
+                            }}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    name="supervisorEmail"
+                    control={form.control}
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>E-mail vedoucího</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="email"
+                            {...field}
+                            placeholder="vedouci@praha6.cz"
+                            className={focusRing}
+                            onChange={(e) => {
+                              setSupervisorManuallyChanged(true)
+                              field.onChange(e)
+                            }}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-4 rounded-lg border p-4">
+                <div>
+                  <h3 className="text-sm font-semibold">Mentor</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Mentora lze vybrat z EOS nebo doplnit ručně.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <FormItem className="md:col-span-2">
+                    <FormLabel>Vybrat mentora z EOS</FormLabel>
+                    <FormControl>
+                      <PersonLookupCombobox
+                        valueName={form.watch("mentorName")}
+                        valueEmail={form.watch("mentorEmail")}
+                        placeholder="Vyhledejte mentora v EOS…"
+                        onSelect={async (employee) => {
+                          form.setValue(
+                            "mentorName",
+                            buildEmployeeFullName(employee),
+                            {
+                              shouldDirty: true,
+                              shouldTouch: true,
+                              shouldValidate: true,
+                            }
+                          )
+                          form.setValue("mentorEmail", employee.email ?? "", {
+                            shouldDirty: true,
+                            shouldTouch: true,
+                            shouldValidate: true,
+                          })
+                        }}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Vyhledávání v databázi zaměstnanců.
+                    </FormDescription>
+                  </FormItem>
+
+                  <FormField
+                    name="mentorName"
+                    control={form.control}
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Jméno mentora</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            placeholder="Doplní HR"
+                            className={`${focusRing} leading-normal`}
+                          />
+                        </FormControl>
+                        <FormDescription>Lze upravit ručně.</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    name="mentorEmail"
+                    control={form.control}
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>E-mail mentora</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="email"
+                            {...field}
+                            placeholder="mentor@praha6.cz"
+                            className={focusRing}
+                          />
+                        </FormControl>
+                        <FormDescription>Nepovinné.</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
                 <User className="size-5" /> Účty a přístupy
               </CardTitle>
             </CardHeader>
@@ -1134,7 +1812,7 @@ export function OnboardingFormUnified({
                         <span className="font-mono">
                           jmeno.prijmeni@praha6.cz
                         </span>
-                        . Lze doplnit později.
+                        .
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -1155,8 +1833,7 @@ export function OnboardingFormUnified({
                       </FormControl>
                       <FormDescription>
                         Doporučený formát:{" "}
-                        <span className="font-mono">jprijmeni</span>. Lze
-                        doplnit později.
+                        <span className="font-mono">jprijmeni</span>.
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -1200,7 +1877,7 @@ export function OnboardingFormUnified({
                             >
                               <p className="text-xs text-muted-foreground">
                                 Osobní čísla, která byla přeskočena a dosud
-                                nejsou využita. Kliknutím číslo použijete.
+                                nejsou využita.
                               </p>
 
                               <div className="mt-2 max-h-[min(40vh,220px)] overflow-y-auto pr-1">
@@ -1228,6 +1905,7 @@ export function OnboardingFormUnified({
                           </Popover>
                         )}
                       </div>
+
                       <FormControl>
                         <Input
                           {...field}
@@ -1244,29 +1922,12 @@ export function OnboardingFormUnified({
                           }}
                         />
                       </FormControl>
+
                       <FormDescription>
                         {!isActualMode ? (
-                          <>
-                            Nepovinné – lze doplnit později, obvykle 4 číslice
-                            (např. <span className="font-mono">0123</span>).
-                            Před použitím ověřte správnost. Pokud jste některá
-                            čísla nevyužili, zvažte jejich použití (viz{" "}
-                            <span className="font-medium">
-                              „Přeskočená čísla“
-                            </span>
-                            ).
-                          </>
+                          <>Nepovinné – lze doplnit později.</>
                         ) : (
-                          <>
-                            Povinné u skutečného nástupu, obvykle 4 číslice
-                            (např. <span className="font-mono">0123</span>).
-                            Před uložením ověřte správnost. Pokud jste některá
-                            čísla přeskočili, zvažte jejich použití (viz{" "}
-                            <span className="font-medium">
-                              „Přeskočená čísla“
-                            </span>
-                            ).
-                          </>
+                          <>Povinné u skutečného nástupu.</>
                         )}
                       </FormDescription>
 
@@ -1276,9 +1937,7 @@ export function OnboardingFormUnified({
                           <ul className="list-disc space-y-1 pl-5">
                             {resolvedPersonalMeta?.lastUsedNumber && (
                               <li>
-                                <span className="text-muted-foreground">
-                                  Poslední použité číslo:
-                                </span>{" "}
+                                Poslední použité číslo:{" "}
                                 <span className="font-mono font-semibold">
                                   {resolvedPersonalMeta.lastUsedNumber}
                                 </span>
@@ -1290,9 +1949,7 @@ export function OnboardingFormUnified({
 
                             {resolvedPersonalMeta?.lastDc2Number && (
                               <li>
-                                <span className="text-muted-foreground">
-                                  Poslední číslo v DC2:
-                                </span>{" "}
+                                Poslední číslo v DC2:{" "}
                                 <span className="font-mono font-semibold">
                                   {resolvedPersonalMeta.lastDc2Number}
                                 </span>
@@ -1307,6 +1964,7 @@ export function OnboardingFormUnified({
                           </ul>
                         </div>
                       )}
+
                       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                         {suggestedPersonalNumber && (
                           <Button
@@ -1317,7 +1975,10 @@ export function OnboardingFormUnified({
                               form.setValue(
                                 "personalNumber",
                                 suggestedPersonalNumber,
-                                { shouldDirty: true, shouldValidate: true }
+                                {
+                                  shouldDirty: true,
+                                  shouldValidate: true,
+                                }
                               )
                               await checkPersonalNumber(suggestedPersonalNumber)
                             }}
@@ -1351,6 +2012,7 @@ export function OnboardingFormUnified({
                           </span>
                         )}
                       </div>
+
                       <FormMessage />
                     </FormItem>
                   )}
@@ -1393,8 +2055,7 @@ export function OnboardingFormUnified({
                   }}
                 />
                 <label htmlFor="manualDates" className="text-sm">
-                  Upravit vlastní datumy (vypnout automatický výpočet zkušební
-                  doby)
+                  Upravit vlastní datumy
                 </label>
               </div>
 
@@ -1417,7 +2078,7 @@ export function OnboardingFormUnified({
                           <FormDescription>
                             {manualDates
                               ? "Automatický výpočet vypnut."
-                              : "Zkušební doba se počítá automaticky od tohoto data (4 nebo 8 měsíců podle typu pozice)."}
+                              : "Zkušební doba se počítá automaticky od tohoto data."}
                           </FormDescription>
                           <FormMessage />
                         </FormItem>
@@ -1459,7 +2120,7 @@ export function OnboardingFormUnified({
                           <FormDescription>
                             {manualDates
                               ? "Automatický výpočet vypnut."
-                              : "Zkušební doba se počítá automaticky od tohoto data (4 nebo 8 měsíců podle typu pozice)."}
+                              : "Zkušební doba se počítá automaticky od tohoto data."}
                           </FormDescription>
                           <FormMessage />
                         </FormItem>

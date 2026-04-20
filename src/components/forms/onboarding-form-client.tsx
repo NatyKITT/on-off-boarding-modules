@@ -32,9 +32,16 @@ export function OnboardingFormClient(props: Props) {
         return { ok: true }
       }
 
-      const res = await fetch(
-        `/api/osobni-cislo/check?number=${encodeURIComponent(trimmed)}`
-      )
+      const url = new URL("/api/osobni-cislo/check", window.location.origin)
+      url.searchParams.set("number", trimmed)
+
+      if (props.id) {
+        url.searchParams.set("excludeOnboardingId", String(props.id))
+      }
+
+      const res = await fetch(url.toString(), {
+        cache: "no-store",
+      })
 
       if (!res.ok) {
         throw new Error("Nepodařilo se ověřit osobní číslo v EOS.")
@@ -42,7 +49,7 @@ export function OnboardingFormClient(props: Props) {
 
       return (await res.json()) as PersonalNumberCheckResult
     },
-    []
+    [props.id]
   )
 
   return (

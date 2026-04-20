@@ -552,7 +552,7 @@ export default function DashboardPage(): JSX.Element {
       setLoading(true)
       try {
         const [posRes, onbRes, offRes] = await Promise.all([
-          fetch("/api/systematizace", { cache: "no-store" }),
+          fetch("/api/systemizace", { cache: "no-store" }),
           fetch("/api/nastupy", { cache: "no-store" }),
           fetch("/api/odchody", { cache: "no-store" }),
         ])

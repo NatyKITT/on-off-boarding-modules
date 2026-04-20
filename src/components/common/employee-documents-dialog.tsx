@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import type { DocumentStatus, EmploymentDocumentType } from "@prisma/client"
 import { format } from "date-fns"
 import { cs } from "date-fns/locale"
-import { FileText, Lock, RotateCw, Trash2, Unlock } from "lucide-react"
+import { FileText, Lock, RotateCw, Trash2, Unlock, UserCog } from "lucide-react"
 
 import { useToast } from "@/hooks/use-toast"
 
@@ -32,6 +32,8 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 
+import { ProbationEvaluationSection } from "./probation-evaluation-section"
+
 type EmploymentDocumentLite = {
   id: number
   type: EmploymentDocumentType
@@ -48,13 +50,24 @@ type EmployeeDocumentsDialogProps = {
   onboardingId: number
   email: string
   employeeName?: string
+  supervisorName?: string | null
+  supervisorEmail?: string | null
+  probationEvaluationSentAt?: string | Date | null
+  probationEvaluationSentBy?: string | null
   onSent?: () => void
 }
 
-const ALL_TYPES: EmploymentDocumentType[] = [
+const ONBOARDING_TYPES: EmploymentDocumentType[] = [
   "AFFIDAVIT",
   "PERSONAL_QUESTIONNAIRE",
   "PAYROLL_INFO",
+]
+
+const PROBATION_TYPES: EmploymentDocumentType[] = ["PROBATION_EVALUATION"]
+
+const ALL_TYPES: EmploymentDocumentType[] = [
+  ...ONBOARDING_TYPES,
+  ...PROBATION_TYPES,
 ]
 
 function typeLabel(t: EmploymentDocumentType) {
@@ -65,6 +78,8 @@ function typeLabel(t: EmploymentDocumentType) {
       return "Osobní dotazník"
     case "PAYROLL_INFO":
       return "Dotazník pro vedení mzdové agendy"
+    case "PROBATION_EVALUATION":
+      return "Hodnocení zkušební doby"
     default:
       return t
   }
@@ -86,6 +101,10 @@ export function EmployeeDocumentsDialog({
   onboardingId,
   email,
   employeeName,
+  supervisorName,
+  supervisorEmail,
+  probationEvaluationSentAt,
+  probationEvaluationSentBy,
   onSent,
 }: EmployeeDocumentsDialogProps) {
   const [open, setOpen] = useState(false)
@@ -95,8 +114,8 @@ export function EmployeeDocumentsDialog({
   const [assigning, setAssigning] = useState(false)
   const [resettingId, setResettingId] = useState<number | null>(null)
   const [regeneratingId, setRegeneratingId] = useState<number | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [lockingId, setLockingId] = useState<number | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   const [emailInput, setEmailInput] = useState(email)
   const [emailSelection, setEmailSelection] = useState<
@@ -107,7 +126,7 @@ export function EmployeeDocumentsDialog({
     EmploymentDocumentType[]
   >([])
   const [createSelection, setCreateSelection] =
-    useState<EmploymentDocumentType[]>(ALL_TYPES)
+    useState<EmploymentDocumentType[]>(ONBOARDING_TYPES)
 
   const [docToReset, setDocToReset] = useState<EmploymentDocumentLite | null>(
     null
@@ -117,6 +136,7 @@ export function EmployeeDocumentsDialog({
 
   const { toast } = useToast()
   const router = useRouter()
+
   const knownDocuments = useMemo(
     () => documents.filter((d) => (ALL_TYPES as string[]).includes(d.type)),
     [documents]
@@ -148,7 +168,6 @@ export function EmployeeDocumentsDialog({
         })
         if (!res.ok) throw new Error("Nepodařilo se načíst dokumenty.")
         const json = await res.json()
-
         const list = (json?.documents as EmploymentDocumentLite[]) ?? []
         setDocuments(list)
         return list
@@ -211,7 +230,15 @@ export function EmployeeDocumentsDialog({
         }
       }
 
-      await loadDocuments()
+      const refreshed = await loadDocuments()
+      const knownList = refreshed.filter((d) =>
+        (ALL_TYPES as string[]).includes(d.type)
+      )
+      setEmailSelection(
+        knownList
+          .filter((d) => Boolean(getPublicUrlForDoc(d)))
+          .map((d) => d.type)
+      )
 
       toast({
         title: "Dokumenty vytvořeny",
@@ -254,17 +281,16 @@ export function EmployeeDocumentsDialog({
       const j = (await res.json()) as {
         document: { id: number; isLocked: boolean }
       }
-      const updated = j.document
 
       setDocuments((prev) =>
         prev.map((d) =>
-          d.id === updated.id ? { ...d, isLocked: updated.isLocked } : d
+          d.id === j.document.id ? { ...d, isLocked: j.document.isLocked } : d
         )
       )
 
       toast({
-        title: updated.isLocked ? "Dokument zamčen" : "Dokument odemčen",
-        description: updated.isLocked
+        title: j.document.isLocked ? "Dokument zamčen" : "Dokument odemčen",
+        description: j.document.isLocked
           ? "Dokument nyní nelze upravovat."
           : "Dokument je znovu otevřený k úpravám.",
       })
@@ -326,7 +352,7 @@ export function EmployeeDocumentsDialog({
         prev.filter((t) => !justSentTypes.includes(t))
       )
 
-      if (typeof onSent === "function") onSent()
+      onSent?.()
 
       toast({
         title: "E-mail odeslán",
@@ -368,7 +394,6 @@ export function EmployeeDocumentsDialog({
         status: DocumentStatus
         completedAt: string | null
         type: EmploymentDocumentType
-        isLocked?: boolean
       }
 
       setDocuments((prev) =>
@@ -478,8 +503,7 @@ export function EmployeeDocumentsDialog({
             Dokumenty k nástupu{employeeName ? ` – ${employeeName}` : ""}
           </DialogTitle>
           <DialogDescription>
-            Správa všech dokumentů k nástupu (čestné prohlášení, osobní dotazník
-            a praxe).
+            Správa všech dokumentů k nástupu a hodnocení zkušební doby.
           </DialogDescription>
         </DialogHeader>
 
@@ -495,216 +519,408 @@ export function EmployeeDocumentsDialog({
               </p>
             )}
 
-            <section className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm">
-              <div className="flex items-center justify-between gap-2">
-                <div className="font-medium">Vytvořit / přiřadit dokumenty</div>
+            {(supervisorName || supervisorEmail) && (
+              <section className="rounded-md border border-amber-200 bg-amber-50/40 p-3">
+                <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+                  <UserCog className="size-4" />
+                  Vedoucí pro hodnocení zkušební doby
+                </div>
+                <div className="space-y-1 text-xs text-muted-foreground">
+                  <div>
+                    <strong>Jméno:</strong> {supervisorName || "—"}
+                  </div>
+                  <div>
+                    <strong>E-mail:</strong> {supervisorEmail || "—"}
+                  </div>
+                </div>
+              </section>
+            )}
+
+            <section className="space-y-4">
+              <div className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-medium">Nástupní dokumenty</div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void loadDocuments()}
+                    disabled={loading}
+                  >
+                    Obnovit
+                  </Button>
+                </div>
+
+                <p className="text-xs text-muted-foreground">
+                  Dokumenty vyplňované při nástupu zaměstnance.
+                </p>
+
+                <div className="grid gap-2 md:grid-cols-2">
+                  {ONBOARDING_TYPES.map((type) => {
+                    const exists = existingTypes.has(type)
+                    const checked = createSelection.includes(type)
+
+                    return (
+                      <label
+                        key={type}
+                        className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-xs md:text-sm"
+                      >
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={(val) => {
+                            const isChecked = val === true
+                            setCreateSelection((prev) =>
+                              isChecked
+                                ? [...prev, type]
+                                : prev.filter((t) => t !== type)
+                            )
+                          }}
+                        />
+                        <span className="flex-1">{typeLabel(type)}</span>
+                        {exists && (
+                          <span className="text-[10px] text-muted-foreground">
+                            již existuje
+                          </span>
+                        )}
+                      </label>
+                    )
+                  })}
+                </div>
+
                 <Button
                   size="sm"
-                  variant="outline"
-                  onClick={() => void loadDocuments()}
-                  disabled={loading}
+                  onClick={() => void handleGenerateSelected()}
+                  disabled={
+                    assigning ||
+                    !createSelection.some(
+                      (t) =>
+                        !existingTypes.has(t) && ONBOARDING_TYPES.includes(t)
+                    )
+                  }
+                  className="mt-1 flex items-center gap-2"
                 >
-                  Obnovit
+                  {assigning && (
+                    <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                  )}
+                  Vygenerovat vybrané dokumenty
                 </Button>
               </div>
-
-              <p className="text-xs text-muted-foreground">
-                Vyberte, které typy dokumentů chcete vytvořit. Pokud některý
-                dokument již existuje, nebude znovu vytvořen.
-              </p>
-
-              <div className="grid gap-2 md:grid-cols-2">
-                {ALL_TYPES.map((type) => {
-                  const exists = existingTypes.has(type)
-                  const checked = createSelection.includes(type)
-                  return (
-                    <label
-                      key={type}
-                      className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-xs md:text-sm"
-                    >
-                      <Checkbox
-                        checked={checked}
-                        onCheckedChange={(val) => {
-                          const isChecked = val === true
-                          setCreateSelection((prev) =>
-                            isChecked
-                              ? [...prev, type]
-                              : prev.filter((t) => t !== type)
-                          )
-                        }}
-                      />
-                      <span className="flex-1">{typeLabel(type)}</span>
-                      {exists && (
-                        <span className="text-[10px] text-muted-foreground">
-                          již existuje
-                        </span>
-                      )}
-                    </label>
-                  )
-                })}
-              </div>
-
-              <Button
-                size="sm"
-                onClick={() => void handleGenerateSelected()}
-                disabled={
-                  assigning ||
-                  !createSelection.some((t) => !existingTypes.has(t))
-                }
-                className="mt-1 flex items-center gap-2"
-              >
-                {assigning && (
-                  <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                )}
-                Vygenerovat vybrané dokumenty
-              </Button>
             </section>
 
+            <ProbationEvaluationSection
+              onboardingId={onboardingId}
+              supervisorName={supervisorName}
+              supervisorEmail={supervisorEmail}
+              probationEvaluationSentAt={probationEvaluationSentAt}
+              probationEvaluationSentBy={probationEvaluationSentBy}
+              onSent={() => {
+                void loadDocuments()
+                onSent?.()
+              }}
+            />
+
             <section className="space-y-2 text-sm">
-              <div className="font-medium">Přiřazené dokumenty</div>
+              <div className="font-medium">Nástupní dokumenty</div>
 
               {loading ? (
                 <div className="flex items-center justify-center py-4 text-sm text-muted-foreground">
                   Načítám dokumenty…
                 </div>
-              ) : knownDocuments.length === 0 ? (
+              ) : knownDocuments.filter((d) =>
+                  ONBOARDING_TYPES.includes(d.type)
+                ).length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  Zatím nejsou k tomuto nástupu přiřazeny žádné dokumenty.
+                  Zatím nejsou přiřazeny žádné nástupní dokumenty.
                 </p>
               ) : (
                 <div className="space-y-2 text-sm">
-                  {knownDocuments.map((doc) => {
-                    const statusText = statusLabel(doc.status)
-                    const needsResend = needsResendTypes.includes(doc.type)
+                  {knownDocuments
+                    .filter((d) => ONBOARDING_TYPES.includes(d.type))
+                    .map((doc) => {
+                      const needsResend = needsResendTypes.includes(doc.type)
 
-                    return (
-                      <div
-                        key={doc.id}
-                        className="space-y-2 rounded-md border px-3 py-2.5"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 space-y-0.5">
-                            <span className="text-sm font-medium">
-                              {typeLabel(doc.type)}
-                            </span>
-                            <div className="text-xs text-muted-foreground">
-                              <div>
-                                Vytvořeno:{" "}
-                                {format(
-                                  new Date(doc.createdAt),
-                                  "d.M.yyyy H:mm",
-                                  { locale: cs }
-                                )}
-                              </div>
-                              {doc.completedAt && (
+                      return (
+                        <div
+                          key={doc.id}
+                          className="space-y-2 rounded-md border px-3 py-2.5"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 space-y-0.5">
+                              <span className="text-sm font-medium">
+                                {typeLabel(doc.type)}
+                              </span>
+                              <div className="text-xs text-muted-foreground">
                                 <div>
-                                  Vyplněno:{" "}
+                                  Vytvořeno:{" "}
                                   {format(
-                                    new Date(doc.completedAt),
+                                    new Date(doc.createdAt),
                                     "d.M.yyyy H:mm",
                                     { locale: cs }
                                   )}
                                 </div>
-                              )}
+                                {doc.completedAt && (
+                                  <div>
+                                    Vyplněno:{" "}
+                                    {format(
+                                      new Date(doc.completedAt),
+                                      "d.M.yyyy H:mm",
+                                      { locale: cs }
+                                    )}
+                                  </div>
+                                )}
+                              </div>
                             </div>
+
+                            <Badge
+                              variant={
+                                doc.status === "DRAFT" ? "outline" : "default"
+                              }
+                              className="shrink-0"
+                            >
+                              {statusLabel(doc.status)}
+                            </Badge>
                           </div>
-                          <Badge
-                            variant={
-                              doc.status === "DRAFT" ? "outline" : "default"
-                            }
-                            className="shrink-0"
-                          >
-                            {statusText}
-                          </Badge>
-                        </div>
 
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              router.push(`/dokumenty/internal/${doc.id}`)
-                            }
-                          >
-                            Otevřít
-                          </Button>
-
-                          {doc.status !== "DRAFT" && (
+                          <div className="flex flex-wrap items-center gap-1.5">
                             <Button
                               size="sm"
                               variant="outline"
                               onClick={() =>
-                                window.open(
-                                  `/api/dokumenty/internal/${doc.id}/pdf`,
-                                  "_blank",
-                                  "noopener,noreferrer"
-                                )
+                                router.push(`/dokumenty/internal/${doc.id}`)
                               }
                             >
-                              PDF
+                              Otevřít
                             </Button>
-                          )}
 
-                          <Button
-                            size="icon"
-                            variant={doc.isLocked ? "default" : "outline"}
-                            className="size-7"
-                            onClick={() => void handleToggleLock(doc)}
-                            disabled={lockingId === doc.id}
-                            title={doc.isLocked ? "Odemknout" : "Zamknout"}
-                          >
-                            {doc.isLocked ? (
-                              <Lock className="size-3" />
-                            ) : (
-                              <Unlock className="size-3" />
+                            {doc.status !== "DRAFT" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  window.open(
+                                    `/api/dokumenty/internal/${doc.id}/pdf`,
+                                    "_blank",
+                                    "noopener,noreferrer"
+                                  )
+                                }
+                              >
+                                PDF
+                              </Button>
                             )}
-                          </Button>
 
-                          <Button
-                            size="icon"
-                            variant="outline"
-                            className="size-7"
-                            onClick={() => setDocToRegenerate(doc)}
-                            disabled={regeneratingId === doc.id}
-                            title="Obnovit odkaz"
-                          >
-                            {regeneratingId === doc.id ? (
-                              <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                            ) : (
-                              <RotateCw className="size-3" />
+                            <Button
+                              size="icon"
+                              variant={doc.isLocked ? "default" : "outline"}
+                              className="size-7"
+                              onClick={() => void handleToggleLock(doc)}
+                              disabled={lockingId === doc.id}
+                              title={doc.isLocked ? "Odemknout" : "Zamknout"}
+                            >
+                              {doc.isLocked ? (
+                                <Lock className="size-3" />
+                              ) : (
+                                <Unlock className="size-3" />
+                              )}
+                            </Button>
+
+                            <Button
+                              size="icon"
+                              variant="outline"
+                              className="size-7"
+                              onClick={() => setDocToRegenerate(doc)}
+                              disabled={regeneratingId === doc.id}
+                              title="Obnovit odkaz"
+                            >
+                              {regeneratingId === doc.id ? (
+                                <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                              ) : (
+                                <RotateCw className="size-3" />
+                              )}
+                            </Button>
+
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              onClick={() => setDocToReset(doc)}
+                              disabled={resettingId === doc.id}
+                              title="Vymazat data"
+                            >
+                              {resettingId === doc.id &&
+                              docToReset?.id === doc.id ? (
+                                <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                              ) : (
+                                <Trash2 className="size-4" />
+                              )}
+                            </Button>
+
+                            {needsResend && (
+                              <span className="text-[10px] text-amber-600">
+                                po změně odešli odkaz znovu
+                              </span>
                             )}
-                          </Button>
 
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                            onClick={() => setDocToReset(doc)}
-                            disabled={resettingId === doc.id}
-                            title="Vymazat data"
-                          >
-                            {resettingId === doc.id &&
-                            docToReset?.id === doc.id ? (
-                              <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                            ) : (
-                              <Trash2 className="size-4" />
+                            {sentTypes.includes(doc.type) && !needsResend && (
+                              <span className="text-[10px] text-emerald-600">
+                                odkaz odeslán
+                              </span>
                             )}
-                          </Button>
-
-                          {needsResend && (
-                            <span className="text-[10px] text-amber-600">
-                              po změně odešli odkaz znovu
-                            </span>
-                          )}
-                          {sentTypes.includes(doc.type) && !needsResend && (
-                            <span className="text-[10px] text-emerald-600">
-                              odkaz odeslán
-                            </span>
-                          )}
+                          </div>
                         </div>
-                      </div>
-                    )
-                  })}
+                      )
+                    })}
+                </div>
+              )}
+            </section>
+
+            <section className="space-y-2 text-sm">
+              <div className="font-medium">Hodnocení zkušební doby</div>
+
+              {loading ? (
+                <div className="flex items-center justify-center py-4 text-sm text-muted-foreground">
+                  Načítám dokumenty…
+                </div>
+              ) : knownDocuments.filter((d) => PROBATION_TYPES.includes(d.type))
+                  .length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Formulář hodnocení zatím není vytvořen.
+                </p>
+              ) : (
+                <div className="space-y-2 text-sm">
+                  {knownDocuments
+                    .filter((d) => PROBATION_TYPES.includes(d.type))
+                    .map((doc) => {
+                      const needsResend = needsResendTypes.includes(doc.type)
+
+                      return (
+                        <div
+                          key={doc.id}
+                          className="space-y-2 rounded-md border border-amber-200 bg-amber-50/30 px-3 py-2.5"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 space-y-0.5">
+                              <span className="text-sm font-medium">
+                                {typeLabel(doc.type)}
+                              </span>
+                              <div className="text-xs text-muted-foreground">
+                                <div>
+                                  Vytvořeno:{" "}
+                                  {format(
+                                    new Date(doc.createdAt),
+                                    "d.M.yyyy H:mm",
+                                    { locale: cs }
+                                  )}
+                                </div>
+                                {doc.completedAt && (
+                                  <div>
+                                    Vyplněno:{" "}
+                                    {format(
+                                      new Date(doc.completedAt),
+                                      "d.M.yyyy H:mm",
+                                      { locale: cs }
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            <Badge
+                              variant={
+                                doc.status === "DRAFT" ? "outline" : "default"
+                              }
+                              className="shrink-0"
+                            >
+                              {statusLabel(doc.status)}
+                            </Badge>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                router.push(`/dokumenty/internal/${doc.id}`)
+                              }
+                            >
+                              Otevřít
+                            </Button>
+
+                            {doc.status !== "DRAFT" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  window.open(
+                                    `/api/dokumenty/internal/${doc.id}/pdf`,
+                                    "_blank",
+                                    "noopener,noreferrer"
+                                  )
+                                }
+                              >
+                                PDF
+                              </Button>
+                            )}
+
+                            <Button
+                              size="icon"
+                              variant={doc.isLocked ? "default" : "outline"}
+                              className="size-7"
+                              onClick={() => void handleToggleLock(doc)}
+                              disabled={lockingId === doc.id}
+                              title={doc.isLocked ? "Odemknout" : "Zamknout"}
+                            >
+                              {doc.isLocked ? (
+                                <Lock className="size-3" />
+                              ) : (
+                                <Unlock className="size-3" />
+                              )}
+                            </Button>
+
+                            <Button
+                              size="icon"
+                              variant="outline"
+                              className="size-7"
+                              onClick={() => setDocToRegenerate(doc)}
+                              disabled={regeneratingId === doc.id}
+                              title="Obnovit odkaz"
+                            >
+                              {regeneratingId === doc.id ? (
+                                <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                              ) : (
+                                <RotateCw className="size-3" />
+                              )}
+                            </Button>
+
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              onClick={() => setDocToReset(doc)}
+                              disabled={resettingId === doc.id}
+                              title="Vymazat data"
+                            >
+                              {resettingId === doc.id &&
+                              docToReset?.id === doc.id ? (
+                                <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                              ) : (
+                                <Trash2 className="size-4" />
+                              )}
+                            </Button>
+
+                            {needsResend && (
+                              <span className="text-[10px] text-amber-600">
+                                po změně odešli odkaz znovu
+                              </span>
+                            )}
+
+                            {sentTypes.includes(doc.type) && !needsResend && (
+                              <span className="text-[10px] text-emerald-600">
+                                odkaz odeslán
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
                 </div>
               )}
             </section>
@@ -715,7 +931,7 @@ export function EmployeeDocumentsDialog({
               </div>
               <p className="text-xs text-muted-foreground">
                 Na níže uvedenou adresu bude odeslán e-mail s odkazy na vybrané
-                dokumenty.
+                nástupní dokumenty.
               </p>
 
               <Input
@@ -726,7 +942,7 @@ export function EmployeeDocumentsDialog({
               />
 
               <div className="mt-2 grid gap-2 md:grid-cols-2">
-                {ALL_TYPES.map((type) => {
+                {ONBOARDING_TYPES.map((type) => {
                   const doc = documentsByType.get(type)
                   if (!doc) return null
 
@@ -827,19 +1043,17 @@ export function EmployeeDocumentsDialog({
             <AlertDialogHeader>
               <AlertDialogTitle>Obnovit odkaz na dokument?</AlertDialogTitle>
               <AlertDialogDescription>
-                Vygeneruje se <strong>nový odkaz</strong> (platnost
-                prodloužena). Starý odkaz přestane fungovat.{" "}
-                <strong>
-                  Poté je potřeba zaměstnanci znovu odeslat e-mail.
-                </strong>
+                Vygeneruje se <strong>nový odkaz</strong>. Starý odkaz přestane
+                fungovat. <strong>Poté je potřeba e-mail odeslat znovu.</strong>
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Zrušit</AlertDialogCancel>
               <AlertDialogAction
                 onClick={() => {
-                  if (docToRegenerate)
+                  if (docToRegenerate) {
                     void handleRegenerateConfirmed(docToRegenerate)
+                  }
                 }}
               >
                 Obnovit odkaz

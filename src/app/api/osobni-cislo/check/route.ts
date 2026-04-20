@@ -14,6 +14,11 @@ const querySchema = z.object({
     .trim()
     .min(1, "Číslo je povinné.")
     .regex(/^\d+$/, "Osobní číslo musí obsahovat jen číslice."),
+  excludeOnboardingId: z
+    .string()
+    .trim()
+    .regex(/^\d+$/, "excludeOnboardingId musí být číslo.")
+    .optional(),
 })
 
 type CheckResponse =
@@ -49,8 +54,14 @@ export async function GET(request: NextRequest) {
   try {
     const url = new URL(request.url)
     const rawNumber = url.searchParams.get("number")
+    const rawExcludeOnboardingId =
+      url.searchParams.get("excludeOnboardingId") ?? undefined
 
-    const parsed = querySchema.safeParse({ number: rawNumber })
+    const parsed = querySchema.safeParse({
+      number: rawNumber,
+      excludeOnboardingId: rawExcludeOnboardingId,
+    })
+
     if (!parsed.success) {
       return NextResponse.json<CheckResponse>(
         {
@@ -63,6 +74,9 @@ export async function GET(request: NextRequest) {
     }
 
     const personalNumber = parsed.data.number
+    const excludeOnboardingId = parsed.data.excludeOnboardingId
+      ? Number(parsed.data.excludeOnboardingId)
+      : null
 
     try {
       const employees = (await getEmployees(personalNumber)) as
@@ -75,6 +89,18 @@ export async function GET(request: NextRequest) {
         )
 
         if (eosEmployee) {
+          if (excludeOnboardingId) {
+            const currentOnboarding =
+              await prisma.employeeOnboarding.findUnique({
+                where: { id: excludeOnboardingId },
+                select: { personalNumber: true },
+              })
+
+            if (currentOnboarding?.personalNumber === personalNumber) {
+              return NextResponse.json<CheckResponse>({ ok: true })
+            }
+          }
+
           const usedBy = buildFullName(eosEmployee)
           return NextResponse.json<CheckResponse>({
             ok: false,
@@ -111,6 +137,7 @@ export async function GET(request: NextRequest) {
       where: {
         personalNumber,
         deletedAt: null,
+        ...(excludeOnboardingId ? { id: { not: excludeOnboardingId } } : {}),
       },
       select: {
         titleBefore: true,
