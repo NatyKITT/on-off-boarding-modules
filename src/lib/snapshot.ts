@@ -10,7 +10,7 @@ export type OldCommon = {
   department: string
   unitName: string
   notes: string | null
-  status: "NEW" | "IN_PROGRESS" | "COMPLETED" | null
+  status: "NEW" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED" | null
   email: string | null
   plannedStart?: string | null
   actualStart?: string | null

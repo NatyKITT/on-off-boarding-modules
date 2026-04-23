@@ -33,7 +33,7 @@ type OnbRow = {
   userEmail?: string | null
   personalNumber?: string | null
   notes?: string | null
-  status?: "NEW" | "IN_PROGRESS" | "COMPLETED"
+  status?: "NEW" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED"
 
   supervisorName?: string | null
   supervisorEmail?: string | null

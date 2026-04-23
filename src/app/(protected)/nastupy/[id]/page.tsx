@@ -15,7 +15,7 @@ import { HistoryDialog } from "@/components/history/history-dialog"
 
 type OnboardingDetail = {
   id: number
-  status: "NEW" | "IN_PROGRESS" | "COMPLETED"
+  status: "NEW" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED"
   plannedStart: string
   actualStart?: string | null
   probationEnd?: string | null
@@ -150,6 +150,7 @@ export default function OnboardingDetailPage({ params }: PageProps) {
     NEW: "Předpokládaný",
     IN_PROGRESS: "Zpracovává se",
     COMPLETED: "Nastoupil/a",
+    CANCELLED: "Zrušeno",
   }
 
   const fullName =

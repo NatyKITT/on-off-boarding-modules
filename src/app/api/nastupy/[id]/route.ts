@@ -67,7 +67,7 @@ const updateSchema = z.object({
     .nullable(),
 
   notes: z.union([z.string(), z.null()]).optional(),
-  status: z.enum(["NEW", "IN_PROGRESS", "COMPLETED"]).optional(),
+  status: z.enum(["NEW", "IN_PROGRESS", "COMPLETED", "CANCELLED"]).optional(),
 })
 
 type RawOnboardingBody = {
@@ -141,6 +141,10 @@ function serializeOnboarding(
       record.mentorTitleAfter,
     ]),
     mentorEmail: record.mentorEmail ?? null,
+
+    cancelledAt: record.cancelledAt?.toISOString() ?? null,
+    cancelledBy: record.cancelledBy ?? null,
+    cancelReason: record.cancelReason ?? null,
   }
 }
 

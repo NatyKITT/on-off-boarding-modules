@@ -109,9 +109,39 @@ function buildFullName(parts: Array<string | null | undefined>): string | null {
   return full || null
 }
 
-function serializeOnboardingRecord(
+async function resolveCancelledByName(
+  cancelledBy: string | null
+): Promise<string | null> {
+  if (!cancelledBy) return null
+
+  // Pokud to vypadá jako user ID (začíná cm a je dlouhé), dohledáme jméno
+  if (cancelledBy.startsWith("cm") && cancelledBy.length > 20) {
+    try {
+      const user = await prisma.user.findUnique({
+        where: { id: cancelledBy },
+        select: { name: true, surname: true, email: true },
+      })
+
+      if (user?.name && user?.surname) {
+        return `${user.name} ${user.surname}`
+      }
+      if (user?.email) {
+        return user.email
+      }
+    } catch (error) {
+      console.error("Error resolving cancelledBy user:", error)
+    }
+  }
+
+  // Jinak vrátíme co je (už je to jméno)
+  return cancelledBy
+}
+
+async function serializeOnboardingRecord(
   record: Awaited<ReturnType<typeof prisma.employeeOnboarding.findMany>>[number]
 ) {
+  const cancelledByName = await resolveCancelledByName(record.cancelledBy)
+
   return {
     ...record,
     plannedStart: record.plannedStart?.toISOString() ?? null,
@@ -137,6 +167,10 @@ function serializeOnboardingRecord(
       record.probationHashExpiresAt?.toISOString() ?? null,
     probationHashUsedAt: record.probationHashUsedAt?.toISOString() ?? null,
     lastProbationReminder: record.lastProbationReminder?.toISOString() ?? null,
+
+    cancelledAt: record.cancelledAt?.toISOString() ?? null,
+    cancelledBy: cancelledByName,
+    cancelReason: record.cancelReason ?? null,
 
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
@@ -180,7 +214,9 @@ export async function GET() {
       orderBy: [{ plannedStart: "desc" }, { id: "desc" }],
     })
 
-    const data = records.map((record) => serializeOnboardingRecord(record))
+    const data = await Promise.all(
+      records.map((record) => serializeOnboardingRecord(record))
+    )
 
     return NextResponse.json({
       status: "success",
@@ -376,7 +412,7 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({
         status: "success",
-        data: serializeOnboardingRecord(created),
+        data: await serializeOnboardingRecord(created),
       })
     }
 
@@ -527,7 +563,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       status: "success",
-      data: serializeOnboardingRecord(created),
+      data: await serializeOnboardingRecord(created),
     })
   } catch (err) {
     if (err instanceof ZodError) {

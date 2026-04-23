@@ -89,7 +89,7 @@ export type FormValues = {
   mentorEmail?: string
 
   notes?: string
-  status?: "NEW" | "IN_PROGRESS" | "COMPLETED"
+  status?: "NEW" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED"
 }
 
 export type PersonalNumberMeta = {
@@ -379,7 +379,7 @@ const baseSchema = z.object({
   mentorEmail: z.string().email("Neplatný e-mail").or(z.literal("")).optional(),
 
   notes: z.string().optional(),
-  status: z.enum(["NEW", "IN_PROGRESS", "COMPLETED"]).optional(),
+  status: z.enum(["NEW", "IN_PROGRESS", "COMPLETED", "CANCELLED"]).optional(),
 })
 
 const focusRing =

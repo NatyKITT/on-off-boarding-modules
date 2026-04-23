@@ -20,6 +20,7 @@ enum OnboardingStatus {
   NEW
   IN_PROGRESS
   COMPLETED
+  CANCELLED
 }
 
 enum OffboardingStatus {
@@ -70,6 +71,7 @@ enum ActionType {
   DELETED
   RESTORED
   REVERTED
+  CANCELLED
   MAIL_SENT
   MAIL_ENQUEUED
   MAIL_FAILED
@@ -257,6 +259,10 @@ model EmployeeOnboarding {
   probationHashExpiresAt  DateTime?
   probationHashUsedAt     DateTime?
 
+  cancelledAt  DateTime?
+  cancelledBy  String?
+  cancelReason String?
+
   OnboardingChangeLog  OnboardingChangeLog[]
   EmailHistory         EmailHistory[]
   documents            EmploymentDocument[]
@@ -276,6 +282,7 @@ model EmployeeOnboarding {
   @@index([supervisorEmail])
   @@index([supervisorPersonalNumber])
   @@index([probationEvaluationSentAt])
+  @@index([cancelledAt])
 }
 
 model PersonalNumberGap {

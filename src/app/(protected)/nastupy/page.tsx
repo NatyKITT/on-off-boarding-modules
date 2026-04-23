@@ -54,6 +54,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Textarea } from "@/components/ui/textarea"
 import { EmployeeDocumentsDialog } from "@/components/common/employee-documents-dialog"
 import { MonthlyReportLauncher } from "@/components/emails/monthly-report-launcher"
 import { SendEmailButton } from "@/components/emails/send-email-button"
@@ -84,7 +85,7 @@ type Arrival = {
   userName?: string | null
   personalNumber?: string | null
   notes?: string | null
-  status?: "NEW" | "IN_PROGRESS" | "COMPLETED"
+  status?: "NEW" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED"
 
   supervisorName?: string | null
   supervisorEmail?: string | null
@@ -93,6 +94,10 @@ type Arrival = {
 
   probationEvaluationSentAt?: string | null
   probationEvaluationSentBy?: string | null
+
+  cancelledAt?: string | null
+  cancelledBy?: string | null
+  cancelReason?: string | null
 }
 
 function arrivalToInitial(d: Arrival): Partial<FormValues> {
@@ -317,6 +322,7 @@ export default function OnboardingPage() {
 
   const [planned, setPlanned] = useState<Arrival[]>([])
   const [actual, setActual] = useState<Arrival[]>([])
+  const [cancelled, setCancelled] = useState<Arrival[]>([])
   const [positions, setPositions] = useState<Position[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingPositions, setLoadingPositions] = useState(false)
@@ -346,6 +352,20 @@ export default function OnboardingPage() {
     loading: boolean
   }>({ open: false, arrival: null, loading: false })
 
+  const [cancelDialog, setCancelDialog] = useState<{
+    open: boolean
+    arrival: Arrival | null
+    loading: boolean
+    reason: string
+  }>({ open: false, arrival: null, loading: false, reason: "" })
+
+  const [restoreCancelledDialog, setRestoreCancelledDialog] = useState<{
+    open: boolean
+    arrival: Arrival | null
+    loading: boolean
+    targetType: "planned" | "actual" | null
+  }>({ open: false, arrival: null, loading: false, targetType: null })
+
   const [successModal, setSuccessModal] = useState({
     open: false,
     title: "",
@@ -363,6 +383,12 @@ export default function OnboardingPage() {
   )
   const [expandedActualYears, setExpandedActualYears] = useState<string[]>([])
   const [expandedActualMonths, setExpandedActualMonths] = useState<string[]>([])
+  const [expandedCancelledYears, setExpandedCancelledYears] = useState<
+    string[]
+  >([])
+  const [expandedCancelledMonths, setExpandedCancelledMonths] = useState<
+    string[]
+  >([])
 
   const [personalMeta, setPersonalMeta] = useState<
     PersonalNumberMeta | undefined
@@ -394,11 +420,13 @@ export default function OnboardingPage() {
 
       if (onbJson?.status === "success" && Array.isArray(onbJson.data)) {
         const rows = onbJson.data as Arrival[]
-        setPlanned(rows.filter((e) => !e.actualStart))
-        setActual(rows.filter((e) => e.actualStart))
+        setPlanned(rows.filter((e) => !e.actualStart && !e.cancelledAt))
+        setActual(rows.filter((e) => e.actualStart && !e.cancelledAt))
+        setCancelled(rows.filter((e) => e.cancelledAt))
       } else {
         setPlanned([])
         setActual([])
+        setCancelled([])
       }
 
       if (metaJson?.status === "success") {
@@ -411,6 +439,7 @@ export default function OnboardingPage() {
       showError("Chyba při načítání", "Nepodařilo se načíst data")
       setPlanned([])
       setActual([])
+      setCancelled([])
     } finally {
       setLoading(false)
     }
@@ -449,6 +478,12 @@ export default function OnboardingPage() {
   }, [actual])
 
   useEffect(() => {
+    const { year, month } = getLatestYearAndMonth(cancelled, "plannedStart")
+    setExpandedCancelledYears(year ? [year] : [])
+    setExpandedCancelledMonths(month ? [month] : [])
+  }, [cancelled])
+
+  useEffect(() => {
     if (!qpMode) return
     if (qpMode === "create-actual") setOpenNewActual(true)
     else setOpenNewPlanned(true)
@@ -467,6 +502,10 @@ export default function OnboardingPage() {
   const actualGrouped = useMemo(
     () => groupByYearAndMonth(actual, "actualStart"),
     [actual]
+  )
+  const cancelledGrouped = useMemo(
+    () => groupByYearAndMonth(cancelled, "plannedStart"),
+    [cancelled]
   )
 
   const togglePlannedYear = (year: string) => {
@@ -487,6 +526,17 @@ export default function OnboardingPage() {
   }
   const toggleActualMonth = (month: string) => {
     setExpandedActualMonths((prev) =>
+      prev.includes(month) ? prev.filter((m) => m !== month) : [...prev, month]
+    )
+  }
+
+  const toggleCancelledYear = (year: string) => {
+    setExpandedCancelledYears((prev) =>
+      prev.includes(year) ? prev.filter((y) => y !== year) : [...prev, year]
+    )
+  }
+  const toggleCancelledMonth = (month: string) => {
+    setExpandedCancelledMonths((prev) =>
       prev.includes(month) ? prev.filter((m) => m !== month) : [...prev, month]
     )
   }
@@ -563,6 +613,94 @@ export default function OnboardingPage() {
     }
   }
 
+  async function handleCancel() {
+    const arrival = cancelDialog.arrival
+    const reason = cancelDialog.reason.trim()
+
+    if (!arrival) return
+    if (!reason) {
+      showError("Chybějící údaj", "Vyplňte prosím důvod zrušení.")
+      return
+    }
+
+    setCancelDialog((prev) => ({ ...prev, loading: true }))
+
+    try {
+      const response = await fetch(`/api/nastupy/${arrival.id}/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null)
+        throw new Error(errorData?.message ?? "Zrušení se nezdařilo")
+      }
+
+      setCancelDialog({
+        open: false,
+        arrival: null,
+        loading: false,
+        reason: "",
+      })
+      showSuccess(
+        "Nástup zrušen",
+        `Záznam "${arrival.name} ${arrival.surname}" byl přesunut do neuskutečněných.`
+      )
+      await reload()
+    } catch (error) {
+      console.error("Error cancelling arrival:", error)
+      showError(
+        "Chyba při rušení",
+        error instanceof Error ? error.message : "Zrušení se nezdařilo"
+      )
+      setCancelDialog((prev) => ({ ...prev, loading: false }))
+    }
+  }
+
+  async function handleRestoreCancelled() {
+    const arrival = restoreCancelledDialog.arrival
+
+    if (!arrival) return
+
+    setRestoreCancelledDialog((prev) => ({ ...prev, loading: true }))
+
+    try {
+      const response = await fetch(
+        `/api/nastupy/${arrival.id}/restore-cancelled`,
+        {
+          method: "POST",
+        }
+      )
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null)
+        throw new Error(errorData?.message ?? "Obnovení se nezdařilo")
+      }
+
+      setRestoreCancelledDialog({
+        open: false,
+        arrival: null,
+        loading: false,
+        targetType: null,
+      })
+
+      const wasActual = Boolean(arrival.actualStart)
+      showSuccess(
+        "Nástup obnoven",
+        `Záznam "${arrival.name} ${arrival.surname}" byl obnoven do ${wasActual ? "skutečných" : "plánovaných"}.`
+      )
+      await reload()
+    } catch (error) {
+      console.error("Error restoring cancelled arrival:", error)
+      showError(
+        "Chyba při obnovování",
+        error instanceof Error ? error.message : "Obnovení se nezdařilo"
+      )
+      setRestoreCancelledDialog((prev) => ({ ...prev, loading: false }))
+    }
+  }
+
   async function handleEdit(arrival: Arrival, context: "planned" | "actual") {
     try {
       const response = await fetch(`/api/nastupy/${arrival.id}`, {
@@ -625,7 +763,7 @@ export default function OnboardingPage() {
     variant,
   }: {
     arrival: Arrival
-    variant: "planned" | "actual"
+    variant: "planned" | "actual" | "cancelled"
   }) => {
     const startLabelDate =
       variant === "planned"
@@ -647,6 +785,120 @@ export default function OnboardingPage() {
     ]
       .filter(Boolean)
       .join(" ")
+
+    if (variant === "cancelled") {
+      return (
+        <TableRow>
+          <TableCell className="w-[220px] min-w-[220px]">
+            <div className="flex items-start gap-2">
+              <User className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              <div className="min-w-0">
+                <div className="truncate py-0.5 text-sm font-medium leading-normal">
+                  {fullName}
+                </div>
+                {arrival.personalNumber && (
+                  <div className="font-mono text-xs text-muted-foreground">
+                    #{arrival.personalNumber}
+                  </div>
+                )}
+              </div>
+            </div>
+          </TableCell>
+
+          <TableCell className="w-[220px] min-w-[220px]">
+            <div className="flex flex-col">
+              <span className="truncate text-sm font-medium">
+                {arrival.positionName}
+              </span>
+              <span className="font-mono text-xs text-muted-foreground">
+                {arrival.positionNum}
+              </span>
+            </div>
+          </TableCell>
+
+          <TableCell className="w-[220px] min-w-[220px]">
+            <div className="flex flex-col">
+              <span className="truncate text-sm font-medium">
+                {arrival.department}
+              </span>
+              <span className="truncate text-xs text-muted-foreground">
+                {arrival.unitName}
+              </span>
+            </div>
+          </TableCell>
+
+          <TableCell className="w-[200px] min-w-[200px]">
+            <span className="text-sm italic text-muted-foreground">
+              {arrival.cancelReason || "–"}
+            </span>
+          </TableCell>
+
+          <TableCell className="w-[160px] min-w-[160px] whitespace-nowrap">
+            {arrival.cancelledAt && (
+              <div className="flex flex-col">
+                <span className="text-sm">
+                  {format(new Date(arrival.cancelledAt), "d.M.yyyy")}
+                </span>
+                {arrival.cancelledBy && (
+                  <span
+                    className="truncate text-xs text-muted-foreground"
+                    title={arrival.cancelledBy}
+                  >
+                    {arrival.cancelledBy}
+                  </span>
+                )}
+              </div>
+            )}
+          </TableCell>
+
+          <TableCell className="w-[220px] min-w-[220px] whitespace-nowrap">
+            <div className="flex items-center gap-1">
+              <Mail className="size-4 text-muted-foreground" />
+              <span className="truncate text-sm">{arrival.email}</span>
+            </div>
+          </TableCell>
+
+          <TableCell className="w-[280px] min-w-[280px] whitespace-nowrap text-right">
+            <div className="flex justify-end gap-1">
+              <Button
+                size="sm"
+                variant="default"
+                onClick={() =>
+                  setRestoreCancelledDialog({
+                    open: true,
+                    arrival,
+                    loading: false,
+                    targetType: arrival.actualStart ? "actual" : "planned",
+                  })
+                }
+                className="inline-flex items-center justify-center gap-1 whitespace-nowrap bg-green-600 text-white hover:bg-green-700"
+              >
+                <RotateCcw className="size-4" />
+                <span className="hidden sm:inline">
+                  Vrátit do {arrival.actualStart ? "skutečných" : "plánovaných"}
+                </span>
+              </Button>
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  setDeleteDialog({
+                    open: true,
+                    arrival,
+                    loading: false,
+                  })
+                }
+                className="inline-flex items-center justify-center gap-1 text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950"
+              >
+                <Trash2 className="size-4" />
+                <span className="sr-only">Smazat</span>
+              </Button>
+            </div>
+          </TableCell>
+        </TableRow>
+      )
+    }
 
     return (
       <TableRow>
@@ -860,6 +1112,24 @@ export default function OnboardingPage() {
               </Button>
             )}
 
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                setCancelDialog({
+                  open: true,
+                  arrival,
+                  loading: false,
+                  reason: "",
+                })
+              }
+              title="Zaměstnanec nenastoupil"
+              className="inline-flex items-center justify-center gap-1 text-orange-600 hover:bg-orange-50 hover:text-orange-700 dark:hover:bg-orange-950"
+            >
+              <XCircle className="size-4" />
+              <span className="hidden sm:inline">Nenastoupil</span>
+            </Button>
+
             <EmployeeDocumentsDialog
               onboardingId={arrival.id}
               email={arrival.email}
@@ -918,7 +1188,7 @@ export default function OnboardingPage() {
         defaultValue="planned"
         className="flex min-h-0 flex-1 flex-col gap-4"
       >
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="planned" className="flex items-center gap-2">
             <CalendarDays className="size-4" />
             Plánované
@@ -926,6 +1196,10 @@ export default function OnboardingPage() {
           <TabsTrigger value="actual" className="flex items-center gap-2">
             <User className="size-4" />
             Skutečné
+          </TabsTrigger>
+          <TabsTrigger value="cancelled" className="flex items-center gap-2">
+            <XCircle className="size-4" />
+            Neuskutečněné
           </TabsTrigger>
         </TabsList>
 
@@ -1368,6 +1642,156 @@ export default function OnboardingPage() {
             />
           </div>
         </TabsContent>
+
+        <TabsContent
+          value="cancelled"
+          className="min-h-0 flex-1 space-y-4 overflow-hidden"
+        >
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+            {loading ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
+                <span className="ml-2 text-muted-foreground">
+                  Načítám data...
+                </span>
+              </div>
+            ) : Object.keys(cancelledGrouped).length === 0 ? (
+              <Card>
+                <CardContent className="flex flex-col items-center justify-center py-12">
+                  <XCircle className="mb-4 size-12 text-muted-foreground" />
+                  <p className="text-lg font-medium text-muted-foreground">
+                    Žádné neuskutečněné nástupy
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Všichni zaměstnanci nastoupili podle plánu
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="min-w-0 space-y-4 pb-2">
+                {Object.keys(cancelledGrouped)
+                  .sort((a, b) => parseInt(b) - parseInt(a))
+                  .map((year) => {
+                    const yearData = cancelledGrouped[year]
+                    const isYearExpanded = expandedCancelledYears.includes(year)
+                    const yearTotal = Object.values(yearData).reduce(
+                      (sum, arr) => sum + arr.length,
+                      0
+                    )
+
+                    return (
+                      <Collapsible key={year} open={isYearExpanded}>
+                        <CollapsibleTrigger
+                          onClick={() => toggleCancelledYear(year)}
+                          className="flex w-full min-w-0 items-center gap-2 rounded-lg bg-muted/50 p-3 transition-colors hover:bg-muted"
+                        >
+                          {isYearExpanded ? (
+                            <ChevronDown className="size-5" />
+                          ) : (
+                            <ChevronRight className="size-5" />
+                          )}
+                          <span className="text-lg font-semibold">{year}</span>
+                          <Badge variant="secondary" className="ml-auto">
+                            {yearTotal}
+                          </Badge>
+                        </CollapsibleTrigger>
+
+                        <CollapsibleContent className="mt-2 space-y-3">
+                          {Object.keys(yearData)
+                            .sort((a, b) => b.localeCompare(a))
+                            .map((month) => {
+                              const monthData = yearData[month]
+                              const isMonthExpanded =
+                                expandedCancelledMonths.includes(month)
+
+                              return (
+                                <Collapsible key={month} open={isMonthExpanded}>
+                                  <CollapsibleTrigger
+                                    onClick={() => toggleCancelledMonth(month)}
+                                    className="flex w-full min-w-0 items-center gap-2 rounded-lg bg-gray-100 p-2 transition-colors hover:bg-gray-200 dark:bg-gray-800/50 dark:hover:bg-gray-800/70"
+                                  >
+                                    {isMonthExpanded ? (
+                                      <ChevronDown className="size-4" />
+                                    ) : (
+                                      <ChevronRight className="size-4" />
+                                    )}
+                                    <XCircle className="size-4 text-gray-600" />
+                                    <span className="font-medium">
+                                      {format(
+                                        new Date(month + "-01"),
+                                        "LLLL yyyy",
+                                        {
+                                          locale: cs,
+                                        }
+                                      )}
+                                    </span>
+                                    <Badge
+                                      variant="outline"
+                                      className="ml-auto"
+                                    >
+                                      {monthData.length}
+                                    </Badge>
+                                  </CollapsibleTrigger>
+
+                                  <CollapsibleContent className="mt-2">
+                                    <Card className="max-w-full opacity-60">
+                                      <CardContent className="p-0">
+                                        <ResponsiveTableShell>
+                                          <Table
+                                            disableWrapperScroll
+                                            className="w-full"
+                                          >
+                                            <TableHeader>
+                                              <TableRow>
+                                                <TableHead className="w-[220px] min-w-[220px]">
+                                                  Zaměstnanec
+                                                </TableHead>
+                                                <TableHead className="w-[220px] min-w-[220px]">
+                                                  Pozice
+                                                </TableHead>
+                                                <TableHead className="w-[220px] min-w-[220px]">
+                                                  Odbor / Oddělení
+                                                </TableHead>
+                                                <TableHead className="w-[200px] min-w-[200px]">
+                                                  Důvod zrušení
+                                                </TableHead>
+                                                <TableHead className="w-[160px] min-w-[160px]">
+                                                  Zrušeno
+                                                </TableHead>
+                                                <TableHead className="w-[220px] min-w-[220px]">
+                                                  Kontakt
+                                                </TableHead>
+                                                <TableHead className="w-[280px] min-w-[280px] text-right">
+                                                  Akce
+                                                </TableHead>
+                                              </TableRow>
+                                            </TableHeader>
+
+                                            <TableBody>
+                                              {monthData.map((e) => (
+                                                <ArrivalTableRow
+                                                  key={e.id}
+                                                  arrival={e}
+                                                  variant="cancelled"
+                                                />
+                                              ))}
+                                            </TableBody>
+                                          </Table>
+                                        </ResponsiveTableShell>
+                                      </CardContent>
+                                    </Card>
+                                  </CollapsibleContent>
+                                </Collapsible>
+                              )
+                            })}
+                        </CollapsibleContent>
+                      </Collapsible>
+                    )
+                  })}
+              </div>
+            )}
+          </div>
+        </TabsContent>
       </Tabs>
 
       <Dialog
@@ -1569,6 +1993,163 @@ export default function OnboardingPage() {
                 <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
               )}
               Vrátit zpět
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={cancelDialog.open}
+        onOpenChange={(open) => setCancelDialog((prev) => ({ ...prev, open }))}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex size-10 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-900/20">
+                <XCircle className="size-5 text-orange-600 dark:text-orange-400" />
+              </div>
+              <div>
+                <DialogTitle>Zaměstnanec nenastoupil</DialogTitle>
+                {cancelDialog.arrival && (
+                  <DialogDescription className="font-medium">
+                    {[
+                      cancelDialog.arrival.titleBefore,
+                      cancelDialog.arrival.name,
+                      cancelDialog.arrival.surname,
+                      cancelDialog.arrival.titleAfter,
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                  </DialogDescription>
+                )}
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div>
+              <label
+                htmlFor="cancel-reason"
+                className="mb-2 block text-sm font-medium"
+              >
+                Důvod zrušení nástupu
+              </label>
+              <Textarea
+                id="cancel-reason"
+                value={cancelDialog.reason}
+                onChange={(e) =>
+                  setCancelDialog((prev) => ({
+                    ...prev,
+                    reason: e.target.value,
+                  }))
+                }
+                placeholder="např. Zaměstnanec odmítl nabídku, Nenastoupil bez omluvy..."
+                rows={3}
+                className="w-full"
+              />
+            </div>
+
+            <p className="text-sm text-muted-foreground">
+              Tento záznam bude přesunut do sekce &quot;Neuskutečněné
+              nástupy&quot;.
+            </p>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() =>
+                setCancelDialog({
+                  open: false,
+                  arrival: null,
+                  loading: false,
+                  reason: "",
+                })
+              }
+              disabled={cancelDialog.loading}
+            >
+              Zrušit
+            </Button>
+            <Button
+              variant="default"
+              onClick={handleCancel}
+              disabled={cancelDialog.loading || !cancelDialog.reason.trim()}
+              className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700"
+            >
+              {cancelDialog.loading && (
+                <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              )}
+              Přesunout do neuskutečněných
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={restoreCancelledDialog.open}
+        onOpenChange={(open) =>
+          setRestoreCancelledDialog((prev) => ({ ...prev, open }))
+        }
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex size-10 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/20">
+                <RotateCcw className="size-5 text-green-600 dark:text-green-400" />
+              </div>
+              <div>
+                <DialogTitle>Obnovit nástup</DialogTitle>
+                {restoreCancelledDialog.arrival && (
+                  <DialogDescription className="font-medium">
+                    {[
+                      restoreCancelledDialog.arrival.titleBefore,
+                      restoreCancelledDialog.arrival.name,
+                      restoreCancelledDialog.arrival.surname,
+                      restoreCancelledDialog.arrival.titleAfter,
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                  </DialogDescription>
+                )}
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground">
+              Chcete obnovit tento nástup zpět do{" "}
+              {restoreCancelledDialog.targetType === "actual"
+                ? "skutečných"
+                : "plánovaných"}{" "}
+              nástupů?
+            </p>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() =>
+                setRestoreCancelledDialog({
+                  open: false,
+                  arrival: null,
+                  loading: false,
+                  targetType: null,
+                })
+              }
+              disabled={restoreCancelledDialog.loading}
+            >
+              Zrušit
+            </Button>
+            <Button
+              variant="default"
+              onClick={handleRestoreCancelled}
+              disabled={restoreCancelledDialog.loading}
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700"
+            >
+              {restoreCancelledDialog.loading && (
+                <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              )}
+              Obnovit
             </Button>
           </DialogFooter>
         </DialogContent>
