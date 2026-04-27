@@ -11,6 +11,7 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   const session = await auth()
+
   if (!session?.user) {
     return NextResponse.json({ error: "Nejste přihlášen." }, { status: 401 })
   }
@@ -29,8 +30,8 @@ export async function POST(
   }
 
   const body = await req.json().catch(() => null)
-  const inviteeEmail: string = body?.inviteeEmail?.trim() ?? ""
-  const inviteeName: string = body?.inviteeName?.trim() ?? ""
+  const inviteeEmail = body?.inviteeEmail?.trim() ?? ""
+  const inviteeName = body?.inviteeName?.trim() ?? ""
 
   if (!inviteeEmail) {
     return NextResponse.json(
@@ -49,12 +50,8 @@ export async function POST(
 
   const offboarding = await prisma.employeeOffboarding.findUnique({
     where: { id: offboardingId },
-    select: {
-      id: true,
-      name: true,
-      surname: true,
-      titleBefore: true,
-      titleAfter: true,
+    include: {
+      exitChecklist: true,
     },
   })
 
@@ -75,11 +72,31 @@ export async function POST(
     .join(" ")
     .trim()
 
+  let checklist = offboarding.exitChecklist
+
+  if (!checklist) {
+    checklist = await prisma.exitChecklist.create({
+      data: {
+        offboardingId: offboarding.id,
+        header: {
+          employeeName,
+          personalNumber: offboarding.personalNumber ?? null,
+          department: offboarding.department,
+          unitName: offboarding.unitName,
+          employmentEndDate: (
+            offboarding.actualEnd ?? offboarding.plannedEnd
+          ).toISOString(),
+        },
+      },
+    })
+  }
+
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL
   if (!baseUrl) {
     throw new Error("Proměnná prostředí NEXT_PUBLIC_APP_URL není nastavena.")
   }
-  const signUrl = `${baseUrl}/odchody/${offboardingId}/vystupni-list`
+
+  const signUrl = `${baseUrl}/odchody-public/${checklist.publicToken}`
 
   try {
     await sendSignatureInviteEmail({

@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useEffect, useMemo, useState } from "react"
-import { useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { format, parseISO } from "date-fns"
 import { cs } from "date-fns/locale"
 import {
@@ -21,6 +21,7 @@ import {
   User,
   XCircle,
 } from "lucide-react"
+import { useSession } from "next-auth/react"
 
 import { type Position } from "@/types/position"
 
@@ -251,6 +252,8 @@ function getLatestYearAndMonth(
 interface DepartureTableRowProps {
   departure: Departure
   variant: "planned" | "actual"
+  canManage: boolean
+  canOpenExitChecklist: boolean
   onEdit: () => void
   onConfirm?: () => void
   onRevert?: () => void
@@ -262,6 +265,8 @@ interface DepartureTableRowProps {
 const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
   departure,
   variant,
+  canManage,
+  canOpenExitChecklist,
   onEdit,
   onConfirm,
   onDelete,
@@ -372,68 +377,74 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
             }
           />
 
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onOpenExitChecklist}
-            title="Výstupní list"
-          >
-            <FileText className="size-4" />
-          </Button>
-
-          <SendEmailButton
-            id={departure.id}
-            kind="offboarding"
-            email={departure.userEmail ?? undefined}
-            onDone={onReload}
-            onEditRequest={onEdit}
-          />
-
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onEdit}
-            title="Upravit záznam"
-          >
-            <Edit className="size-4" />
-            <span className="ml-1 hidden sm:inline">Upravit</span>
-          </Button>
-
-          {variant === "planned" && onConfirm ? (
-            <Button
-              size="sm"
-              variant="default"
-              onClick={onConfirm}
-              title="Potvrdit skutečný odchod"
-              className="bg-orange-500 text-white hover:bg-orange-600"
-            >
-              <Check className="size-4" />
-              <span className="ml-1 hidden sm:inline">Odešel</span>
-            </Button>
-          ) : variant === "actual" && onRevert ? (
+          {canOpenExitChecklist && (
             <Button
               size="sm"
               variant="outline"
-              onClick={onRevert}
-              title="Vrátit zpět do plánovaných"
-              className="text-orange-600 hover:bg-orange-50 hover:text-orange-700 dark:hover:bg-orange-950"
+              onClick={onOpenExitChecklist}
+              title="Výstupní list"
             >
-              <RotateCcw className="size-4" />
-              <span className="ml-1 hidden whitespace-nowrap sm:inline">
-                Vrátit zpět do plánovaných
-              </span>
+              <FileText className="size-4" />
             </Button>
-          ) : null}
+          )}
 
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onDelete}
-            title="Smazat záznam"
-            className="text-red-600 hover:bg-red-50 hover:text-red-700"
-          >
-            <Trash2 className="size-4" />
-          </Button>
+          {canManage && (
+            <>
+              <SendEmailButton
+                id={departure.id}
+                kind="offboarding"
+                email={departure.userEmail ?? undefined}
+                onDone={onReload}
+                onEditRequest={onEdit}
+              />
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onEdit}
+                title="Upravit záznam"
+              >
+                <Edit className="size-4" />
+                <span className="ml-1 hidden sm:inline">Upravit</span>
+              </Button>
+
+              {variant === "planned" && onConfirm ? (
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={onConfirm}
+                  title="Potvrdit skutečný odchod"
+                  className="bg-orange-500 text-white hover:bg-orange-600"
+                >
+                  <Check className="size-4" />
+                  <span className="ml-1 hidden sm:inline">Odešel</span>
+                </Button>
+              ) : variant === "actual" && onRevert ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={onRevert}
+                  title="Vrátit zpět do plánovaných"
+                  className="text-orange-600 hover:bg-orange-50 hover:text-orange-700 dark:hover:bg-orange-950"
+                >
+                  <RotateCcw className="size-4" />
+                  <span className="ml-1 hidden whitespace-nowrap sm:inline">
+                    Vrátit zpět
+                  </span>
+                </Button>
+              ) : null}
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onDelete}
+                title="Smazat záznam"
+                className="text-red-600 hover:bg-red-50 hover:text-red-700"
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            </>
+          )}
         </div>
       </TableCell>
     </TableRow>
@@ -442,6 +453,8 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
 
 export default function OffboardingPage() {
   const sp = useSearchParams()
+  const router = useRouter()
+  const { data: session, status } = useSession()
 
   const [planned, setPlanned] = useState<Departure[]>([])
   const [actual, setActual] = useState<Departure[]>([])
@@ -501,6 +514,12 @@ export default function OffboardingPage() {
 
   const currentMonth = format(new Date(), "yyyy-MM")
 
+  const role = session?.user?.role ?? "USER"
+  const canManageOffboarding =
+    role === "ADMIN" || role === "HR" || role === "IT"
+  const canReadOffboarding =
+    role === "ADMIN" || role === "HR" || role === "IT" || role === "READONLY"
+
   const showSuccess = React.useCallback((title: string, message: string) => {
     setSuccessModal({ open: true, title, message })
   }, [])
@@ -518,6 +537,11 @@ export default function OffboardingPage() {
   )
 
   const reload = React.useCallback(async () => {
+    if (!canReadOffboarding) {
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
     try {
       const [posRes, offRes] = await Promise.all([
@@ -545,11 +569,23 @@ export default function OffboardingPage() {
     } finally {
       setLoading(false)
     }
-  }, [showError])
+  }, [canReadOffboarding, showError])
 
   useEffect(() => {
+    if (status === "loading") return
+
+    if (role === "USER") {
+      router.replace("/no-access")
+      return
+    }
+
+    if (!canReadOffboarding) {
+      router.replace("/no-access")
+      return
+    }
+
     void reload()
-  }, [reload])
+  }, [status, role, canReadOffboarding, reload, router])
 
   useEffect(() => {
     const { year, month } = getLatestYearAndMonth(planned, "plannedEnd")
@@ -564,10 +600,10 @@ export default function OffboardingPage() {
   }, [actual])
 
   useEffect(() => {
-    if (!qpMode) return
+    if (!qpMode || !canManageOffboarding) return
     if (qpMode === "create-actual") setOpenNewActual(true)
     else setOpenNewPlanned(true)
-  }, [qpMode])
+  }, [qpMode, canManageOffboarding])
 
   useEffect(() => {
     const handler = () => {
@@ -627,13 +663,15 @@ export default function OffboardingPage() {
   }
 
   function openActualDialogFromPlanned(row: Departure) {
+    if (!canManageOffboarding) return
     setActiveRow(row)
     setActualEndInput(row.plannedEnd.slice(0, 10))
     setOpenActual(true)
   }
 
   async function confirmDepartureWithInput() {
-    if (!activeRow || !actualEndInput) return
+    if (!activeRow || !actualEndInput || !canManageOffboarding) return
+
     try {
       const actualDate = new Date(actualEndInput)
       const noticePeriodEnd = new Date(actualDate)
@@ -648,6 +686,7 @@ export default function OffboardingPage() {
           status: "COMPLETED",
         }),
       })
+
       if (!res.ok) {
         const j = await res.json().catch(() => null)
         showError(
@@ -678,7 +717,7 @@ export default function OffboardingPage() {
 
   async function handleRevert() {
     const departure = revertDialog.departure
-    if (!departure) return
+    if (!departure || !canManageOffboarding) return
 
     setRevertDialog((prev) => ({ ...prev, loading: true }))
 
@@ -709,6 +748,8 @@ export default function OffboardingPage() {
   }
 
   async function openEditDialog(row: Departure, context: "planned" | "actual") {
+    if (!canManageOffboarding) return
+
     setEditContext(context)
     setEditId(row.id)
     setEditLoading(true)
@@ -742,6 +783,8 @@ export default function OffboardingPage() {
   }
 
   async function handleDelete(departure: Departure) {
+    if (!canManageOffboarding) return
+
     setDeleteDialog({
       open: true,
       departure,
@@ -751,7 +794,7 @@ export default function OffboardingPage() {
 
   async function confirmDelete() {
     const departure = deleteDialog.departure
-    if (!departure) return
+    if (!departure || !canManageOffboarding) return
 
     setDeleteDialog((prev) => ({ ...prev, loading: true }))
 
@@ -780,16 +823,28 @@ export default function OffboardingPage() {
     }
   }
 
-  return (
-    <div
-      className="
+  if (status === "loading") {
+    return (
+      <div
+        className="
         mx-auto
         flex w-full max-w-[1400px] flex-col
         gap-4 px-3 pb-8
         sm:px-4
         lg:px-8
       "
-    >
+      >
+        <p className="text-sm text-muted-foreground">Načítám…</p>
+      </div>
+    )
+  }
+
+  if (role === "USER" || !canReadOffboarding) {
+    return null
+  }
+
+  return (
+    <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-3 pb-8 sm:px-4 lg:px-8">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">
           Odchody zaměstnanců
@@ -813,43 +868,49 @@ export default function OffboardingPage() {
 
         <TabsContent value="planned" className="mt-4 space-y-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <Dialog open={openNewPlanned} onOpenChange={setOpenNewPlanned}>
-              <DialogTrigger asChild>
-                <Button className="w-full justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] sm:w-auto">
-                  Přidat plánovaný odchod
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
-                <DialogTitle className="px-6 pt-6">
-                  Nový plánovaný odchod
-                </DialogTitle>
-                <div className="p-6">
-                  <OffboardingFormUnified
-                    mode="create-planned"
-                    prefillDate={qpDate}
-                    excludePersonalNumbers={allPersonalNumbers}
-                    onSuccess={async () => {
-                      setOpenNewPlanned(false)
-                      showSuccess(
-                        "Záznam vytvořen",
-                        "Plánovaný odchod byl úspěšně přidán."
-                      )
-                      await reload()
-                    }}
-                  />
-                </div>
-              </DialogContent>
-            </Dialog>
+            {canManageOffboarding ? (
+              <Dialog open={openNewPlanned} onOpenChange={setOpenNewPlanned}>
+                <DialogTrigger asChild>
+                  <Button className="w-full justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] sm:w-auto">
+                    Přidat plánovaný odchod
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
+                  <DialogTitle className="px-6 pt-6">
+                    Nový plánovaný odchod
+                  </DialogTitle>
+                  <div className="p-6">
+                    <OffboardingFormUnified
+                      mode="create-planned"
+                      prefillDate={qpDate}
+                      excludePersonalNumbers={allPersonalNumbers}
+                      onSuccess={async () => {
+                        setOpenNewPlanned(false)
+                        showSuccess(
+                          "Záznam vytvořen",
+                          "Plánovaný odchod byl úspěšně přidán."
+                        )
+                        await reload()
+                      }}
+                    />
+                  </div>
+                </DialogContent>
+              </Dialog>
+            ) : (
+              <div />
+            )}
 
-            <div className="w-full sm:w-auto [&_button]:w-full sm:[&_button]:w-auto">
-              <DeletedRecordsDialog
-                kind="offboarding"
-                title="Smazané odchody"
-                triggerLabel="Smazané záznamy"
-                successEvent="offboarding:deleted"
-                onRestore={() => void reload()}
-              />
-            </div>
+            {canManageOffboarding && (
+              <div className="w-full sm:w-auto [&_button]:w-full sm:[&_button]:w-auto">
+                <DeletedRecordsDialog
+                  kind="offboarding"
+                  title="Smazané odchody"
+                  triggerLabel="Smazané záznamy"
+                  successEvent="offboarding:deleted"
+                  onRestore={() => void reload()}
+                />
+              </div>
+            )}
           </div>
 
           {loading ? (
@@ -867,7 +928,9 @@ export default function OffboardingPage() {
                   Žádné plánované odchody
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Přidejte první záznam pomocí tlačítka výše
+                  {canManageOffboarding
+                    ? "Přidejte první záznam pomocí tlačítka výše"
+                    : "Momentálně zde nejsou žádné záznamy"}
                 </p>
               </CardContent>
             </Card>
@@ -924,7 +987,9 @@ export default function OffboardingPage() {
                                     {format(
                                       new Date(month + "-01"),
                                       "LLLL yyyy",
-                                      { locale: cs }
+                                      {
+                                        locale: cs,
+                                      }
                                     )}
                                   </span>
                                   <Badge variant="outline" className="ml-auto">
@@ -935,14 +1000,9 @@ export default function OffboardingPage() {
                                 <CollapsibleContent className="mt-2">
                                   <Card className="w-full min-w-0 overflow-hidden">
                                     <CardContent className="min-w-0 p-0">
-                                      <div
-                                        className="w-full max-w-full overflow-x-auto overflow-y-hidden
-                                          [-webkit-overflow-scrolling:touch] [overscroll-behavior-x:contain]
-                                          [touch-action:pan-x]
-                                        "
-                                      >
+                                      <div className="w-full max-w-full overflow-x-auto overflow-y-hidden [-webkit-overflow-scrolling:touch] [overscroll-behavior-x:contain] [touch-action:pan-x]">
                                         <div className="inline-block min-w-full pr-6">
-                                          <Table className="w-max min-w-[1320px]">
+                                          <Table className="w-max min-w-[1440px]">
                                             <TableHeader>
                                               <TableRow>
                                                 <TableHead className="w-[240px]">
@@ -963,7 +1023,6 @@ export default function OffboardingPage() {
                                                 <TableHead className="w-[180px]">
                                                   Kontakt
                                                 </TableHead>
-
                                                 <TableHead className="w-[420px] whitespace-nowrap text-right">
                                                   Akce
                                                 </TableHead>
@@ -975,6 +1034,12 @@ export default function OffboardingPage() {
                                                   key={e.id}
                                                   departure={e}
                                                   variant="planned"
+                                                  canManage={
+                                                    canManageOffboarding
+                                                  }
+                                                  canOpenExitChecklist={
+                                                    canReadOffboarding
+                                                  }
                                                   onEdit={() =>
                                                     void openEditDialog(
                                                       e,
@@ -1012,52 +1077,62 @@ export default function OffboardingPage() {
             </div>
           )}
 
-          <div className="mt-2 flex justify-end">
-            <MonthlyReportLauncher
-              initialType="odchody"
-              kind="planned"
-              defaultMonth={currentMonth}
-            />
-          </div>
+          {canManageOffboarding && (
+            <div className="mt-2 flex justify-end">
+              <MonthlyReportLauncher
+                initialType="odchody"
+                kind="planned"
+                defaultMonth={currentMonth}
+              />
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="actual" className="mt-4 space-y-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <Dialog open={openNewActual} onOpenChange={setOpenNewActual}>
-              <DialogTrigger asChild>
-                <Button className="w-full justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] sm:w-auto">
-                  Přidat skutečný odchod
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
-                <DialogTitle className="px-6 pt-6">Skutečný odchod</DialogTitle>
-                <div className="p-6">
-                  <OffboardingFormUnified
-                    mode="create-actual"
-                    prefillDate={qpDate}
-                    excludePersonalNumbers={allPersonalNumbers}
-                    onSuccess={async () => {
-                      setOpenNewActual(false)
-                      showSuccess(
-                        "Záznam vytvořen",
-                        "Skutečný odchod byl úspěšně přidán."
-                      )
-                      await reload()
-                    }}
-                  />
-                </div>
-              </DialogContent>
-            </Dialog>
+            {canManageOffboarding ? (
+              <Dialog open={openNewActual} onOpenChange={setOpenNewActual}>
+                <DialogTrigger asChild>
+                  <Button className="w-full justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] sm:w-auto">
+                    Přidat skutečný odchod
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
+                  <DialogTitle className="px-6 pt-6">
+                    Skutečný odchod
+                  </DialogTitle>
+                  <div className="p-6">
+                    <OffboardingFormUnified
+                      mode="create-actual"
+                      prefillDate={qpDate}
+                      excludePersonalNumbers={allPersonalNumbers}
+                      onSuccess={async () => {
+                        setOpenNewActual(false)
+                        showSuccess(
+                          "Záznam vytvořen",
+                          "Skutečný odchod byl úspěšně přidán."
+                        )
+                        await reload()
+                      }}
+                    />
+                  </div>
+                </DialogContent>
+              </Dialog>
+            ) : (
+              <div />
+            )}
 
-            <div className="w-full sm:w-auto [&_button]:w-full sm:[&_button]:w-auto">
-              <DeletedRecordsDialog
-                kind="offboarding"
-                title="Smazané odchody"
-                triggerLabel="Smazané záznamy"
-                successEvent="offboarding:deleted"
-                onRestore={() => void reload()}
-              />
-            </div>
+            {canManageOffboarding && (
+              <div className="w-full sm:w-auto [&_button]:w-full sm:[&_button]:w-auto">
+                <DeletedRecordsDialog
+                  kind="offboarding"
+                  title="Smazané odchody"
+                  triggerLabel="Smazané záznamy"
+                  successEvent="offboarding:deleted"
+                  onRestore={() => void reload()}
+                />
+              </div>
+            )}
           </div>
 
           {loading ? (
@@ -1075,7 +1150,9 @@ export default function OffboardingPage() {
                   Žádné skutečné odchody
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Přidejte první záznam pomocí tlačítka výše
+                  {canManageOffboarding
+                    ? "Přidejte první záznam pomocí tlačítka výše"
+                    : "Momentálně zde nejsou žádné záznamy"}
                 </p>
               </CardContent>
             </Card>
@@ -1132,7 +1209,9 @@ export default function OffboardingPage() {
                                     {format(
                                       new Date(month + "-01"),
                                       "LLLL yyyy",
-                                      { locale: cs }
+                                      {
+                                        locale: cs,
+                                      }
                                     )}
                                   </span>
                                   <Badge variant="outline" className="ml-auto">
@@ -1143,23 +1222,18 @@ export default function OffboardingPage() {
                                 <CollapsibleContent className="mt-2">
                                   <Card className="w-full min-w-0 overflow-hidden">
                                     <CardContent className="min-w-0 p-0">
-                                      <div
-                                        className="w-full max-w-full overflow-x-auto overflow-y-hidden
-                                          [-webkit-overflow-scrolling:touch] [overscroll-behavior-x:contain]
-                                          [touch-action:pan-x]
-                                        "
-                                      >
+                                      <div className="w-full max-w-full overflow-x-auto overflow-y-hidden [-webkit-overflow-scrolling:touch] [overscroll-behavior-x:contain] [touch-action:pan-x]">
                                         <div className="inline-block min-w-full pr-6">
-                                          <Table className="w-max min-w-[1320px]">
+                                          <Table className="w-max min-w-[1440px]">
                                             <TableHeader>
                                               <TableRow>
-                                                <TableHead className="w-[200px]">
+                                                <TableHead className="w-[240px]">
                                                   Zaměstnanec
                                                 </TableHead>
-                                                <TableHead className="w-[180px]">
+                                                <TableHead className="w-[240px]">
                                                   Pozice
                                                 </TableHead>
-                                                <TableHead className="w-[150px]">
+                                                <TableHead className="w-[240px]">
                                                   Odbor / Oddělení
                                                 </TableHead>
                                                 <TableHead className="w-[140px]">
@@ -1171,7 +1245,6 @@ export default function OffboardingPage() {
                                                 <TableHead className="w-[180px]">
                                                   Kontakt
                                                 </TableHead>
-
                                                 <TableHead className="w-[420px] whitespace-nowrap text-right">
                                                   Akce
                                                 </TableHead>
@@ -1183,6 +1256,12 @@ export default function OffboardingPage() {
                                                   key={e.id}
                                                   departure={e}
                                                   variant="actual"
+                                                  canManage={
+                                                    canManageOffboarding
+                                                  }
+                                                  canOpenExitChecklist={
+                                                    canReadOffboarding
+                                                  }
                                                   onEdit={() =>
                                                     void openEditDialog(
                                                       e,
@@ -1222,13 +1301,15 @@ export default function OffboardingPage() {
             </div>
           )}
 
-          <div className="mt-2 flex justify-end">
-            <MonthlyReportLauncher
-              initialType="odchody"
-              kind="actual"
-              defaultMonth={currentMonth}
-            />
-          </div>
+          {canManageOffboarding && (
+            <div className="mt-2 flex justify-end">
+              <MonthlyReportLauncher
+                initialType="odchody"
+                kind="actual"
+                defaultMonth={currentMonth}
+              />
+            </div>
+          )}
         </TabsContent>
       </Tabs>
 

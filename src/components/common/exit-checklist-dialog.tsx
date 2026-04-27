@@ -10,7 +10,6 @@ import {
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
-  AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
@@ -92,7 +91,10 @@ export function ExitChecklistDialog({ offboardingId, open }: Props) {
   function handleDialogOpenChange(next: boolean) {
     if (!next && dirty) {
       setShowUnsavedAlert(true)
-    } else if (!next) {
+      return
+    }
+
+    if (!next) {
       emitClose()
     }
   }
@@ -100,6 +102,7 @@ export function ExitChecklistDialog({ offboardingId, open }: Props) {
   function handleSaved(newData: ExitChecklistData) {
     setData(newData)
     setDirty(false)
+
     if (closeAfterSave) {
       setCloseAfterSave(false)
       emitClose()
@@ -110,29 +113,29 @@ export function ExitChecklistDialog({ offboardingId, open }: Props) {
     <>
       <Dialog open={open} onOpenChange={handleDialogOpenChange}>
         <DialogContent
-          className="flex max-h-[95svh] w-full max-w-5xl flex-col gap-0 p-0"
+          className="flex max-h-[95svh] w-full max-w-6xl flex-col overflow-hidden p-0"
           style={{ overscrollBehavior: "contain" }}
         >
-          <div className="shrink-0 border-b p-4 sm:px-6">
-            <DialogTitle className="text-base font-semibold">
+          <div className="shrink-0 border-b bg-background px-5 py-4 sm:px-6">
+            <DialogTitle className="text-lg font-semibold">
               Výstupní list
             </DialogTitle>
           </div>
 
           <div
-            className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:px-6"
+            className="min-h-0 flex-1 overflow-y-auto p-5 sm:px-6"
             data-lenis-prevent=""
             onWheelCapture={(e) => e.stopPropagation()}
           >
             {loading && (
-              <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+              <div className="flex items-center gap-3 rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground">
                 <div className="size-4 animate-spin rounded-full border-b-2 border-current" />
-                Načítám data výstupního listu…
+                <span>Načítám data výstupního listu…</span>
               </div>
             )}
 
             {error && !loading && (
-              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">
                 <p className="font-medium">Chyba při načítání</p>
                 <p className="mt-1">{error}</p>
               </div>
@@ -152,35 +155,46 @@ export function ExitChecklistDialog({ offboardingId, open }: Props) {
       </Dialog>
 
       <AlertDialog open={showUnsavedAlert} onOpenChange={setShowUnsavedAlert}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Neuložené změny</AlertDialogTitle>
-            <AlertDialogDescription>
-              Ve výstupním listu jsou neuložené změny. Co s nimi?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Zůstat ve formuláři</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                setShowUnsavedAlert(false)
-                setDirty(false)
-                emitClose()
-              }}
-            >
-              Odejít bez uložení
-            </AlertDialogAction>
-            <AlertDialogAction
-              className="bg-[#00847C] text-white hover:bg-[#0B6D73]"
-              onClick={() => {
-                setShowUnsavedAlert(false)
-                setCloseAfterSave(true)
-                setSaveTrigger((prev) => prev + 1)
-              }}
-            >
-              Uložit změny a zavřít
-            </AlertDialogAction>
-          </AlertDialogFooter>
+        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-2xl overflow-hidden p-0">
+          <div className="px-8 py-7">
+            <AlertDialogHeader className="space-y-3 text-left">
+              <AlertDialogTitle className="text-2xl font-semibold">
+                Neuložené změny
+              </AlertDialogTitle>
+              <AlertDialogDescription className="max-w-2xl text-base leading-8 text-muted-foreground">
+                Ve výstupním listu jsou neuložené změny. Vyberte, co chcete
+                udělat.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+              <AlertDialogCancel className="h-12 min-w-[190px] px-6 text-base font-medium">
+                Zůstat ve formuláři
+              </AlertDialogCancel>
+
+              <AlertDialogAction
+                className="h-12 min-w-[190px] bg-black px-6 text-base font-medium text-white hover:bg-neutral-800"
+                onClick={() => {
+                  setShowUnsavedAlert(false)
+                  setDirty(false)
+                  emitClose()
+                }}
+              >
+                Odejít bez uložení
+              </AlertDialogAction>
+
+              <AlertDialogAction
+                className="h-12 min-w-[190px] bg-[#00847C] px-6 text-base font-medium text-white hover:bg-[#0B6D73]"
+                onClick={() => {
+                  setShowUnsavedAlert(false)
+                  setCloseAfterSave(true)
+                  setSaveTrigger((prev) => prev + 1)
+                }}
+              >
+                Uložit a zavřít
+              </AlertDialogAction>
+            </div>
+          </div>
         </AlertDialogContent>
       </AlertDialog>
     </>

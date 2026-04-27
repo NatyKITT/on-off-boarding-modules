@@ -528,7 +528,7 @@ export async function sendSignatureInviteEmail({
   const bgLight = "#E5F5F2"
 
   const greeting = toName ? `Dobrý den, ${toName},` : "Dobrý den,"
-  const subject = `Žádost o podpis výstupního listu – ${employeeName}`
+  const subject = `Pozvánka k podpisu výstupního listu – ${employeeName}`
 
   const html = `
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
@@ -542,103 +542,127 @@ export async function sendSignatureInviteEmail({
         table { border-collapse: collapse; }
         .intro-text {
           font-family: 'Civil Premium', 'Segoe UI', Arial, sans-serif;
-          font-size: 14px; line-height: 1.6; color: #082B2A;
+          font-size: 14px;
+          line-height: 1.6;
+          color: #082B2A;
         }
         .card-border { border: 1px solid #d9ece7; }
         @media only screen and (min-width: 600px) {
-          .card-shadow { box-shadow: 0 8px 24px rgba(0,0,0,0.12) !important; border-radius: 12px !important; }
+          .card-shadow {
+            box-shadow: 0 8px 24px rgba(0,0,0,0.12) !important;
+            border-radius: 12px !important;
+          }
           .rounded-top { border-radius: 12px 12px 0 0 !important; }
           .rounded-bottom { border-radius: 0 0 12px 12px !important; }
         }
         @media only screen and (max-width: 600px) {
           .content-pad { padding: 18px 14px !important; }
         }
-        @media (prefers-color-scheme: dark) {
-          body { background-color: #111827 !important; }
-          .outer-bg { background-color: #111827 !important; }
-          .intro-text { color: #F9FAFB !important; }
-          .card-border { border-color: #4b5563 !important; }
-        }
       </style>
     </head>
     <body style="margin:0;padding:0;background-color:${bgLight};width:100% !important;">
-      <table class="outer-bg" border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
+      <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
         <tr>
           <td align="center" style="padding:30px 10px;">
-            <table class="card-shadow card-border" border="0" cellpadding="0" cellspacing="0" width="600"
-              style="max-width:600px;background-color:#ffffff;border-collapse:separate;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,0.12);">
-  
+            <table
+              class="card-shadow card-border"
+              border="0"
+              cellpadding="0"
+              cellspacing="0"
+              width="600"
+              style="max-width:600px;background-color:#ffffff;border-collapse:separate;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;"
+            >
               <tr>
-                <td class="rounded-top" bgcolor="${primary}"
-                  style="padding:25px 30px;background-color:${primary};border-radius:12px 12px 0 0;">
+                <td
+                  class="rounded-top"
+                  bgcolor="${primary}"
+                  style="padding:25px 30px;background-color:${primary};border-radius:12px 12px 0 0;"
+                >
                   <table border="0" cellpadding="0" cellspacing="0" width="100%">
                     <tr>
                       <td style="color:#ffffff;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;">
-                        <div style="font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:0.9;">Výstupní list</div>
-                        <div style="font-size:22px;font-weight:bold;line-height:1.2;">Žádost o podpis</div>
+                        <div style="font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:0.9;">
+                          Výstupní list
+                        </div>
+                        <div style="font-size:22px;font-weight:bold;line-height:1.2;">
+                          Pozvánka k podpisu
+                        </div>
                       </td>
                     </tr>
                   </table>
                 </td>
               </tr>
-  
+
               <tr>
-                <td class="content-pad"
-                  style="padding:26px 30px;background-color:#ffffff;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;">
-  
-                  <p class="intro-text" style="margin:0 0 16px 0;font-size:14px;line-height:1.6;color:#082B2A;">
+                <td
+                  class="content-pad"
+                  style="padding:26px 30px;background-color:#ffffff;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;"
+                >
+                  <p class="intro-text" style="margin:0 0 16px 0;">
                     ${greeting}
                   </p>
-  
-                  <p class="intro-text" style="margin:0 0 16px 0;font-size:14px;line-height:1.6;color:#374151;">
-                    <strong>${sentByName}</strong> z HR oddělení ÚMČ Praha 6 vás žádá
-                    o elektronický podpis výstupního listu zaměstnance:
+
+                  <p class="intro-text" style="margin:0 0 16px 0;color:#374151;">
+                    <strong>${sentByName}</strong> vám zaslal(a) pozvánku k elektronickému podpisu
+                    výstupního listu zaměstnance <strong>${employeeName}</strong>.
                   </p>
-  
+
                   <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:24px;">
                     <tr>
-                      <td bgcolor="${bgLight}"
-                        style="padding:14px 18px;background-color:${bgLight};border:1px solid #d9ece7;border-radius:8px;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;font-size:16px;font-weight:bold;color:#082B2A;">
+                      <td
+                        bgcolor="${bgLight}"
+                        style="padding:14px 18px;background-color:${bgLight};border:1px solid #d9ece7;border-radius:8px;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;font-size:16px;font-weight:bold;color:#082B2A;"
+                      >
                         ${employeeName}
                       </td>
                     </tr>
                   </table>
-  
-                  <p class="intro-text" style="margin:0 0 24px 0;font-size:14px;line-height:1.6;color:#374151;">
-                    Přihlaste se svým firemním účtem a potvrďte příslušné položky
-                    svým elektronickým podpisem.
+
+                  <p class="intro-text" style="margin:0 0 16px 0;color:#374151;">
+                    Přihlaste se svým firemním účtem Google
+                    (<strong>@praha6.cz</strong>).
                   </p>
-  
+
+                  <p class="intro-text" style="margin:0 0 24px 0;color:#374151;">
+                    Po přihlášení budete přesměrován(a) na konkrétní výstupní list,
+                    kde můžete doplnit potvrzení a elektronický podpis.
+                  </p>
+
                   <table border="0" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
                     <tr>
                       <td bgcolor="${primary}" style="border-radius:6px;background-color:${primary};">
-                        <a href="${signUrl}"
-                          style="display:inline-block;padding:12px 28px;color:#ffffff;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;font-size:15px;font-weight:bold;text-decoration:none;border-radius:6px;">
+                        <a
+                          href="${signUrl}"
+                          style="display:inline-block;padding:12px 28px;color:#ffffff;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;font-size:15px;font-weight:bold;text-decoration:none;border-radius:6px;"
+                        >
                           Otevřít výstupní list
                         </a>
                       </td>
                     </tr>
                   </table>
-  
+
                   <p style="margin:0 0 4px 0;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;font-size:12px;color:#6b7280;">
                     Pokud tlačítko nefunguje, zkopírujte tento odkaz do prohlížeče:
                   </p>
                   <p style="margin:0;word-break:break-all;">
-                    <a href="${signUrl}" style="font-family:monospace;font-size:12px;color:${primary};">${signUrl}</a>
+                    <a href="${signUrl}" style="font-family:monospace;font-size:12px;color:${primary};">
+                      ${signUrl}
+                    </a>
                   </p>
-  
                 </td>
               </tr>
-  
+
               <tr>
-                <td class="rounded-bottom" bgcolor="${bgLight}"
-                  style="padding:18px 30px;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;font-size:12px;color:#4b5563;line-height:1.5;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;">
+                <td
+                  class="rounded-bottom"
+                  bgcolor="${bgLight}"
+                  style="padding:18px 30px;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;font-size:12px;color:#4b5563;line-height:1.5;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;"
+                >
                   Tento e-mail byl automaticky vygenerován systémem
-                  <strong>On-Boarding Modul ÚMČ Praha&nbsp;6</strong>.<br/>
-                  Prosíme neodpovídejte na tuto zprávu. V případě dotazů kontaktujte personální oddělení.
+                  <strong>On-Off-Boarding Modul ÚMČ Praha&nbsp;6</strong>.<br/>
+                  Prosíme, neodpovídejte na tuto zprávu. V případě dotazů kontaktujte personální oddělení.
                 </td>
               </tr>
-  
             </table>
           </td>
         </tr>
@@ -646,10 +670,22 @@ export async function sendSignatureInviteEmail({
     </body>
   </html>`
 
+  const text = [
+    greeting,
+    "",
+    `${sentByName} vám zaslal(a) pozvánku k elektronickému podpisu výstupního listu zaměstnance ${employeeName}.`,
+    "",
+    "Přihlaste se svým firemním účtem Google (@praha6.cz).",
+    "Po přihlášení budete přesměrován(a) na konkrétní výstupní list k podpisu.",
+    "",
+    `Odkaz: ${signUrl}`,
+  ].join("\n")
+
   await sendMail({
     to: [to],
     subject,
     html,
+    text,
   })
 }
 

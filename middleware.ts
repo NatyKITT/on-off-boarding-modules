@@ -24,6 +24,10 @@ function isKitt6(email?: string | null) {
   return getDomain(email) === "kitt6.cz"
 }
 
+function isPraha6OrKitt6(email?: string | null) {
+  return isPraha6(email) || isKitt6(email)
+}
+
 function jsonError(status: number, message: string) {
   return new NextResponse(JSON.stringify({ message }), {
     status,
@@ -33,13 +37,6 @@ function jsonError(status: number, message: string) {
 
 function isMutatingMethod(method: string) {
   return ["POST", "PUT", "PATCH", "DELETE"].includes(method.toUpperCase())
-}
-
-function isVystupniList(path: string) {
-  return (
-    /^\/odchody\/\d+\/vystupni-list(\/.*)?$/.test(path) ||
-    /^\/api\/odchody\/\d+\/exit-checklist(\/.*)?$/.test(path)
-  )
 }
 
 export default auth((req) => {
@@ -58,12 +55,33 @@ export default auth((req) => {
     "/api/dokumenty/public",
   ]
 
+  const isPublicExitPage = path.startsWith("/odchody-public/")
+  const isPublicExitApi = path.startsWith("/api/odchody/public/")
+  const isInternalExitChecklistApi =
+    /^\/api\/odchody\/\d+\/exit-checklist(\/.*)?$/.test(path)
+  const isInternalExitChecklistPage =
+    /^\/odchody\/\d+\/vystupni-list(\/.*)?$/.test(path)
+
   if (publicPaths.some((p) => path.startsWith(p))) {
     return NextResponse.next()
   }
 
   if (!session?.user) {
+    if (isPublicExitPage) {
+      const signInUrl = new URL("/signin", req.url)
+      signInUrl.searchParams.set(
+        "callbackUrl",
+        `${req.nextUrl.pathname}${req.nextUrl.search}`
+      )
+      return NextResponse.redirect(signInUrl)
+    }
+
+    if (isPublicExitApi) {
+      return jsonError(401, "Nejste přihlášen(a).")
+    }
+
     if (isApi) return jsonError(401, "Nejste přihlášen(a).")
+
     const signInUrl = new URL("/signin", req.url)
     signInUrl.searchParams.set(
       "callbackUrl",
@@ -72,36 +90,47 @@ export default auth((req) => {
     return NextResponse.redirect(signInUrl)
   }
 
-  const email = session.user.email ?? null
   const role = (session.user.role ?? "USER") as Role
   const canAccessApp = Boolean(session.user.canAccessApp)
-
-  const isPublicExit =
-    path.startsWith("/public/exit") || path.startsWith("/api/public/exit")
-
-  if (isPublicExit) {
-    if (!isPraha6(email) && !isKitt6(email)) {
-      return isApi
-        ? jsonError(403, "Nemáte oprávnění k podpisové části.")
-        : NextResponse.redirect(new URL("/prehled", req.url))
-    }
-    return NextResponse.next()
-  }
+  const email = session.user.email ?? null
 
   if (path === "/") {
     return NextResponse.redirect(new URL("/prehled", req.url))
   }
 
-  if (isVystupniList(path)) {
-    if (!isPraha6(email) && !isKitt6(email)) {
+  if (isPublicExitPage || isPublicExitApi) {
+    if (!isPraha6OrKitt6(email)) {
       return isApi
-        ? jsonError(403, "Přístup pouze pro zaměstnance ÚMČ Praha 6.")
+        ? jsonError(403, "Přístup pouze pro účty Praha 6 nebo KITT6.")
         : NextResponse.redirect(new URL("/no-access", req.url))
     }
+
     return NextResponse.next()
   }
 
-  if (role === "USER" || !canAccessApp) {
+  if (role === "USER") {
+    if (isInternalExitChecklistPage || isInternalExitChecklistApi) {
+      return NextResponse.next()
+    }
+
+    return isApi
+      ? jsonError(403, "Nemáte přístup do aplikace.")
+      : NextResponse.redirect(new URL("/no-access", req.url))
+  }
+
+  if (role === "READONLY" && isApi && isMutatingMethod(method)) {
+    const allowedReadonlyMutations =
+      isInternalExitChecklistApi || isPublicExitApi
+
+    if (!allowedReadonlyMutations) {
+      return jsonError(
+        403,
+        "Máte pouze režim pro čtení. Pro úpravy kontaktujte administrátora."
+      )
+    }
+  }
+
+  if (!canAccessApp && role !== "READONLY") {
     return isApi
       ? jsonError(403, "Nemáte přístup do aplikace.")
       : NextResponse.redirect(new URL("/no-access", req.url))
@@ -113,17 +142,6 @@ export default auth((req) => {
         ? jsonError(403, "Přístup pouze pro administrátory.")
         : NextResponse.redirect(new URL("/prehled", req.url))
     }
-    return NextResponse.next()
-  }
-
-  if (role === "READONLY" && isApi && isMutatingMethod(method)) {
-    if (path.startsWith("/api/public/exit")) {
-      return NextResponse.next()
-    }
-    return jsonError(
-      403,
-      "Máte pouze režim pro čtení. Pro úpravy kontaktujte administrátora."
-    )
   }
 
   return NextResponse.next()

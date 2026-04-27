@@ -37,7 +37,6 @@ export const updateUserNameSchema = z.object({
     .max(32, "Jméno je příliš dlouhé"),
 })
 
-// Typy
 export type AppRole = z.infer<typeof roleSchema>
 export type GetUserByEmailInput = z.infer<typeof getUserByEmailSchema>
 export type GetUserByIdInput = z.infer<typeof getUserByIdSchema>

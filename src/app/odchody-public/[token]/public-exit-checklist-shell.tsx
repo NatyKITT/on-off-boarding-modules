@@ -1,22 +1,18 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import Link from "next/link"
-import { ArrowLeft, Loader2, XCircle } from "lucide-react"
+import { Loader2, XCircle } from "lucide-react"
 
 import type { ExitChecklistData } from "@/types/exit-checklist"
 
 import { ExitChecklistForm } from "@/components/forms/exit-checklist-form"
 
 type Props = {
-  offboardingId: number
+  token: string
   employeeName: string
 }
 
-export function ExitChecklistPageClient({
-  offboardingId,
-  employeeName,
-}: Props) {
+export function PublicExitChecklistShell({ token, employeeName }: Props) {
   const [data, setData] = useState<ExitChecklistData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -24,23 +20,26 @@ export function ExitChecklistPageClient({
   useEffect(() => {
     void (async () => {
       try {
-        const res = await fetch(
-          `/api/odchody/${offboardingId}/exit-checklist`,
-          { cache: "no-store" }
-        )
+        const res = await fetch(`/api/odchody/public/${token}`, {
+          cache: "no-store",
+          credentials: "include",
+        })
+
+        const json = await res.json().catch(() => null)
+
         if (!res.ok) {
-          const json = await res.json().catch(() => ({}))
           throw new Error(
-            (json as { error?: string }).error ??
+            json?.message ??
+              json?.error ??
               "Nepodařilo se načíst výstupní list."
           )
         }
-        const json = (await res.json()) as {
-          status?: string
-          data?: ExitChecklistData
+
+        if (!json?.data) {
+          throw new Error("Chybí data výstupního listu.")
         }
-        if (!json.data) throw new Error("Chybí data výstupního listu.")
-        setData(json.data)
+
+        setData(json.data as ExitChecklistData)
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Nepodařilo se načíst data."
@@ -49,22 +48,14 @@ export function ExitChecklistPageClient({
         setLoading(false)
       }
     })()
-  }, [offboardingId])
+  }, [token])
 
   return (
     <div className="min-h-screen bg-neutral-50 px-4 py-6">
       <div className="mx-auto max-w-4xl space-y-4">
-        <div className="flex items-center gap-3">
-          <Link
-            href={`/odchody`}
-            className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-          >
-            <ArrowLeft className="size-4" />
-            Zpět na odchody
-          </Link>
-          <span className="text-sm text-muted-foreground">
-            Výstupní list – {employeeName}
-          </span>
+        <div className="space-y-1">
+          <h1 className="text-2xl font-bold">Výstupní list</h1>
+          <p className="text-sm text-muted-foreground">{employeeName}</p>
         </div>
 
         {loading && (
@@ -83,8 +74,9 @@ export function ExitChecklistPageClient({
 
         {data && !loading && (
           <ExitChecklistForm
-            offboardingId={offboardingId}
-            mode="internal"
+            offboardingId={data.offboardingId}
+            mode="public"
+            publicToken={token}
             initialData={data}
             onSaved={setData}
           />

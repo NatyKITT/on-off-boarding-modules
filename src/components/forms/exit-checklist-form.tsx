@@ -46,7 +46,9 @@ import {
 import { SendInviteDialog } from "@/components/forms/send-invite-dialog"
 
 type Props = {
-  offboardingId: number
+  offboardingId?: number
+  publicToken?: string
+  mode?: "internal" | "public"
   initialData: ExitChecklistData
   onDirtyChange?: (dirty: boolean) => void
   onSaved?: (data: ExitChecklistData) => void
@@ -67,6 +69,15 @@ const emptySignature = (): ExitChecklistSignatureValue => ({
   signedByEmail: null,
   signedAt: null,
 })
+
+function getTodayIsoDate() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function getDefaultIssuedDate(value?: string | null) {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : getTodayIsoDate()
+}
 
 function mergeItemsWithConfig(
   dataItems: ExitChecklistItem[]
@@ -230,6 +241,8 @@ function HeaderSignatureBlock({
 
 export function ExitChecklistForm({
   offboardingId,
+  publicToken,
+  mode = "internal",
   initialData,
   onDirtyChange,
   onSaved,
@@ -277,9 +290,7 @@ export function ExitChecklistForm({
     employee: initialData.signatures?.employee ?? emptySignature(),
     manager: initialData.signatures?.manager ?? emptySignature(),
     issuer: initialData.signatures?.issuer ?? emptySignature(),
-    issuedDate:
-      initialData.signatures?.issuedDate ??
-      new Date().toISOString().slice(0, 10),
+    issuedDate: getDefaultIssuedDate(initialData.signatures?.issuedDate),
   })
 
   const [positions, setPositions] = useState<Position[]>([])
@@ -294,10 +305,15 @@ export function ExitChecklistForm({
   )
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
 
-  const isLocked = Boolean(lockedAt)
+  const isLocked = mode === "internal" ? Boolean(lockedAt) : false
 
   const role = session?.user.role ?? "USER"
   const isAdmin = role === "ADMIN" || role === "HR" || role === "IT"
+
+  const isInternalMode = mode === "internal"
+  const canInvite = isInternalMode && isAdmin && Boolean(offboardingId)
+  const canLock = isInternalMode && isAdmin
+  const canGeneratePdf = isInternalMode && Boolean(offboardingId)
 
   const header = useMemo(
     () => ({
@@ -361,9 +377,7 @@ export function ExitChecklistForm({
       employee: initialData.signatures?.employee ?? emptySignature(),
       manager: initialData.signatures?.manager ?? emptySignature(),
       issuer: initialData.signatures?.issuer ?? emptySignature(),
-      issuedDate:
-        initialData.signatures?.issuedDate ??
-        new Date().toISOString().slice(0, 10),
+      issuedDate: getDefaultIssuedDate(initialData.signatures?.issuedDate),
     })
 
     setDirty(false)
@@ -597,11 +611,16 @@ export function ExitChecklistForm({
     try {
       setSaving(true)
 
-      const res = await fetch(`/api/odchody/${offboardingId}/exit-checklist`, {
+      const saveUrl = isInternalMode
+        ? `/api/odchody/${offboardingId}/exit-checklist`
+        : `/api/odchody/public/${publicToken}`
+
+      const res = await fetch(saveUrl, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
-          lock: lockAfterSave,
+          lock: isInternalMode ? lockAfterSave : false,
           items: items.map((i) => ({
             key: i.key,
             resolved: i.resolved,
@@ -629,7 +648,11 @@ export function ExitChecklistForm({
       })
 
       if (!res.ok) {
-        console.error("Nepodařilo se uložit výstupní list.")
+        const json = await res.json().catch(() => null)
+        console.error(
+          "Nepodařilo se uložit výstupní list.",
+          json?.message ?? json?.error ?? res.statusText
+        )
         return
       }
 
@@ -648,9 +671,7 @@ export function ExitChecklistForm({
           employee: json.data.signatures?.employee ?? emptySignature(),
           manager: json.data.signatures?.manager ?? emptySignature(),
           issuer: json.data.signatures?.issuer ?? emptySignature(),
-          issuedDate:
-            json.data.signatures?.issuedDate ??
-            new Date().toISOString().slice(0, 10),
+          issuedDate: getDefaultIssuedDate(json.data.signatures?.issuedDate),
         })
 
         setDirty(false)
@@ -666,6 +687,7 @@ export function ExitChecklistForm({
   }
 
   async function handleGeneratePdfWithSave() {
+    if (!offboardingId) return
     await handleSave(false)
     window.open(
       `/api/odchody/${offboardingId}/vystupni-list`,
@@ -682,7 +704,9 @@ export function ExitChecklistForm({
       Uzamčeno k úpravám
     </Badge>
   ) : (
-    <Badge variant="secondary">Rozpracováno</Badge>
+    <Badge variant="secondary">
+      {isInternalMode ? "Rozpracováno" : "Podpisový režim"}
+    </Badge>
   )
 
   return (
@@ -1392,31 +1416,33 @@ export function ExitChecklistForm({
         <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-2 text-xs text-muted-foreground">
             <p>
-              Po uzamčení formuláře již nepůjde běžným uživatelům měnit. Ruční
-              podpis zaměstnance a vedoucího odboru se doplní až na vytištěném
-              PDF.
+              {isInternalMode
+                ? "Po uzamčení formuláře již nepůjde běžným uživatelům měnit. Ruční podpis zaměstnance a vedoucího odboru se doplní až na vytištěném PDF."
+                : "Výstupní list můžete doplnit, podepsat a uložit pod svým přihlášeným účtem."}
             </p>
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-2">
-            {isAdmin && (
+            {canInvite && (
               <SendInviteDialog
-                offboardingId={offboardingId}
+                offboardingId={offboardingId!}
                 employeeName={header.employeeName ?? ""}
               />
             )}
 
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => void handleGeneratePdfWithSave()}
-              className="gap-1"
-              disabled={saving}
-            >
-              <Printer className="size-4" />
-              {pdfButtonLabel}
-            </Button>
+            {canGeneratePdf && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void handleGeneratePdfWithSave()}
+                className="gap-1"
+                disabled={saving}
+              >
+                <Printer className="size-4" />
+                {pdfButtonLabel}
+              </Button>
+            )}
 
             {!isLocked && (
               <>
@@ -1430,7 +1456,7 @@ export function ExitChecklistForm({
                   Uložit
                 </Button>
 
-                {isAdmin && (
+                {canLock && (
                   <Button
                     type="button"
                     size="sm"

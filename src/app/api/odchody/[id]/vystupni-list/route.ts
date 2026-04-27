@@ -20,7 +20,7 @@ async function getChecklistById(
   id: number,
   cookie: string | null
 ): Promise<ExitChecklistData> {
-  const base = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3001"
+  const base = process.env.AUTH_URL || process.env.NEXT_PUBLIC_APP_URL
   const res = await fetch(`${base}/api/odchody/${id}/exit-checklist`, {
     cache: "no-store",
     headers: cookie ? { cookie } : undefined,
