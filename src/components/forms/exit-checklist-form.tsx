@@ -79,6 +79,20 @@ function getDefaultIssuedDate(value?: string | null) {
   return trimmed ? trimmed : getTodayIsoDate()
 }
 
+function createTempAssetId() {
+  try {
+    if (
+      typeof globalThis !== "undefined" &&
+      globalThis.crypto &&
+      typeof globalThis.crypto.randomUUID === "function"
+    ) {
+      return globalThis.crypto.randomUUID()
+    }
+  } catch {}
+
+  return `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
 function mergeItemsWithConfig(
   dataItems: ExitChecklistItem[]
 ): ExitChecklistItem[] {
@@ -305,12 +319,12 @@ export function ExitChecklistForm({
   )
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
 
-  const isLocked = mode === "internal" ? Boolean(lockedAt) : false
+  const isInternalMode = mode === "internal"
+  const isLocked = isInternalMode ? Boolean(lockedAt) : false
 
   const role = session?.user.role ?? "USER"
   const isAdmin = role === "ADMIN" || role === "HR" || role === "IT"
 
-  const isInternalMode = mode === "internal"
   const canInvite = isInternalMode && isAdmin && Boolean(offboardingId)
   const canLock = isInternalMode && isAdmin
   const canGeneratePdf = isInternalMode && Boolean(offboardingId)
@@ -575,7 +589,7 @@ export function ExitChecklistForm({
     setAssets((prev) => [
       ...prev,
       {
-        id: crypto.randomUUID(),
+        id: createTempAssetId(),
         subject: "",
         inventoryNumber: "",
       },
@@ -885,7 +899,7 @@ export function ExitChecklistForm({
                           type="button"
                           size="sm"
                           variant="outline"
-                          className="h-7 gap-1 text-xs"
+                          className="gap-1"
                           disabled={isSigningDisabled}
                           onClick={() =>
                             !isSigningDisabled && signRow(item.key)
@@ -900,7 +914,7 @@ export function ExitChecklistForm({
                           type="button"
                           size="sm"
                           variant="ghost"
-                          className="h-7 gap-1 text-xs text-muted-foreground"
+                          className="gap-1 text-xs text-muted-foreground"
                           onClick={() => revokeSignature(item.key)}
                         >
                           <Undo2 className="size-3" />

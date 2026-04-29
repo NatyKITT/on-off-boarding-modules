@@ -59,8 +59,6 @@ export default auth((req) => {
   const isPublicExitApi = path.startsWith("/api/odchody/public/")
   const isInternalExitChecklistApi =
     /^\/api\/odchody\/\d+\/exit-checklist(\/.*)?$/.test(path)
-  const isInternalExitChecklistPage =
-    /^\/odchody\/\d+\/vystupni-list(\/.*)?$/.test(path)
 
   if (publicPaths.some((p) => path.startsWith(p))) {
     return NextResponse.next()
@@ -80,7 +78,9 @@ export default auth((req) => {
       return jsonError(401, "Nejste přihlášen(a).")
     }
 
-    if (isApi) return jsonError(401, "Nejste přihlášen(a).")
+    if (isApi) {
+      return jsonError(401, "Nejste přihlášen(a).")
+    }
 
     const signInUrl = new URL("/signin", req.url)
     signInUrl.searchParams.set(
@@ -100,7 +100,7 @@ export default auth((req) => {
 
   if (isPublicExitPage || isPublicExitApi) {
     if (!isPraha6OrKitt6(email)) {
-      return isApi
+      return isPublicExitApi
         ? jsonError(403, "Přístup pouze pro účty Praha 6 nebo KITT6.")
         : NextResponse.redirect(new URL("/no-access", req.url))
     }
@@ -109,10 +109,6 @@ export default auth((req) => {
   }
 
   if (role === "USER") {
-    if (isInternalExitChecklistPage || isInternalExitChecklistApi) {
-      return NextResponse.next()
-    }
-
     return isApi
       ? jsonError(403, "Nemáte přístup do aplikace.")
       : NextResponse.redirect(new URL("/no-access", req.url))

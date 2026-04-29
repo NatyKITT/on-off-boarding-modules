@@ -21,6 +21,11 @@ async function getChecklistById(
   cookie: string | null
 ): Promise<ExitChecklistData> {
   const base = process.env.AUTH_URL || process.env.NEXT_PUBLIC_APP_URL
+
+  if (!base) {
+    throw new Error("Chybí AUTH_URL nebo NEXT_PUBLIC_APP_URL.")
+  }
+
   const res = await fetch(`${base}/api/odchody/${id}/exit-checklist`, {
     cache: "no-store",
     headers: cookie ? { cookie } : undefined,

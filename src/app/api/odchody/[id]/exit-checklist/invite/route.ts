@@ -1,5 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { auth } from "@/auth"
+import { ChecklistResolution, Prisma } from "@prisma/client"
+
+import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
 
 import { prisma } from "@/lib/db"
 import { sendSignatureInviteEmail } from "@/lib/email"
@@ -86,6 +89,15 @@ export async function POST(
           employmentEndDate: (
             offboarding.actualEnd ?? offboarding.plannedEnd
           ).toISOString(),
+        } as Prisma.InputJsonObject,
+        items: {
+          create: EXIT_CHECKLIST_ROWS.map((row, index) => ({
+            key: row.key,
+            department: row.organization,
+            label: row.obligation,
+            order: index,
+            resolution: ChecklistResolution.NOT_APPLICABLE,
+          })),
         },
       },
     })

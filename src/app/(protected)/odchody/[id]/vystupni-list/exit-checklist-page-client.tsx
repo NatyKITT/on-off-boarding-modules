@@ -22,33 +22,54 @@ export function ExitChecklistPageClient({
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    let cancelled = false
+
     void (async () => {
       try {
+        setLoading(true)
+        setError(null)
+
         const res = await fetch(
           `/api/odchody/${offboardingId}/exit-checklist`,
-          { cache: "no-store" }
+          {
+            cache: "no-store",
+            credentials: "include",
+          }
         )
+
+        const json = await res.json().catch(() => null)
+
         if (!res.ok) {
-          const json = await res.json().catch(() => ({}))
           throw new Error(
-            (json as { error?: string }).error ??
+            json?.message ??
+              json?.error ??
               "Nepodařilo se načíst výstupní list."
           )
         }
-        const json = (await res.json()) as {
-          status?: string
-          data?: ExitChecklistData
+
+        if (!json?.data) {
+          throw new Error("Chybí data výstupního listu.")
         }
-        if (!json.data) throw new Error("Chybí data výstupního listu.")
-        setData(json.data)
+
+        if (!cancelled) {
+          setData(json.data as ExitChecklistData)
+        }
       } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Nepodařilo se načíst data."
-        )
+        if (!cancelled) {
+          setError(
+            err instanceof Error ? err.message : "Nepodařilo se načíst data."
+          )
+        }
       } finally {
-        setLoading(false)
+        if (!cancelled) {
+          setLoading(false)
+        }
       }
     })()
+
+    return () => {
+      cancelled = true
+    }
   }, [offboardingId])
 
   return (
@@ -56,12 +77,13 @@ export function ExitChecklistPageClient({
       <div className="mx-auto max-w-4xl space-y-4">
         <div className="flex items-center gap-3">
           <Link
-            href={`/odchody`}
+            href="/odchody"
             className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
           >
             <ArrowLeft className="size-4" />
             Zpět na odchody
           </Link>
+
           <span className="text-sm text-muted-foreground">
             Výstupní list – {employeeName}
           </span>

@@ -18,8 +18,13 @@ export function PublicExitChecklistShell({ token, employeeName }: Props) {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    let cancelled = false
+
     void (async () => {
       try {
+        setLoading(true)
+        setError(null)
+
         const res = await fetch(`/api/odchody/public/${token}`, {
           cache: "no-store",
           credentials: "include",
@@ -39,15 +44,25 @@ export function PublicExitChecklistShell({ token, employeeName }: Props) {
           throw new Error("Chybí data výstupního listu.")
         }
 
-        setData(json.data as ExitChecklistData)
+        if (!cancelled) {
+          setData(json.data as ExitChecklistData)
+        }
       } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Nepodařilo se načíst data."
-        )
+        if (!cancelled) {
+          setError(
+            err instanceof Error ? err.message : "Nepodařilo se načíst data."
+          )
+        }
       } finally {
-        setLoading(false)
+        if (!cancelled) {
+          setLoading(false)
+        }
       }
     })()
+
+    return () => {
+      cancelled = true
+    }
   }, [token])
 
   return (
@@ -74,7 +89,6 @@ export function PublicExitChecklistShell({ token, employeeName }: Props) {
 
         {data && !loading && (
           <ExitChecklistForm
-            offboardingId={data.offboardingId}
             mode="public"
             publicToken={token}
             initialData={data}

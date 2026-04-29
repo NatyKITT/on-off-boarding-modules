@@ -41,8 +41,9 @@ export default async function PublicExitChecklistPage({ params }: Props) {
   }
 
   const role = session.user.role ?? "USER"
+  const isInternalRole = ["ADMIN", "HR", "IT", "READONLY"].includes(role)
 
-  if (["ADMIN", "HR", "IT", "READONLY"].includes(role)) {
+  if (isInternalRole) {
     redirect(`/odchody/${checklist.offboardingId}/vystupni-list`)
   }
 

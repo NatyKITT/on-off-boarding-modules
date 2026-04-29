@@ -327,10 +327,46 @@ async function getOrCreateChecklist(offboardingId: number): Promise<{
   }
 }
 
+async function requireExitChecklistRead() {
+  const session = await getSession()
+  const user = session?.user
+
+  if (!user) {
+    return {
+      error: NextResponse.json(
+        { status: "error", message: "Nejste přihlášen(a)." },
+        { status: 401 }
+      ),
+    }
+  }
+
+  const role = user.role ?? "USER"
+  const canRead =
+    hasPerm(role, "EXIT_CHECKLIST_READ") ||
+    hasPerm(role, "EXIT_CHECKLIST_SIGN") ||
+    hasPerm(role, "EXIT_CHECKLIST_ADMIN")
+
+  if (!canRead) {
+    return {
+      error: NextResponse.json(
+        { status: "error", message: "Nemáte oprávnění číst výstupní list." },
+        { status: 403 }
+      ),
+    }
+  }
+
+  return { user }
+}
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const authResult = await requireExitChecklistRead()
+  if ("error" in authResult) {
+    return authResult.error
+  }
+
   const offboardingId = Number(params.id)
   if (Number.isNaN(offboardingId)) {
     return NextResponse.json(
@@ -382,8 +418,16 @@ export async function PUT(
 
   const session = await getSession()
   const user = session?.user
-  const userId = user?.id ?? null
-  const userRole = user?.role ?? "USER"
+
+  if (!user) {
+    return NextResponse.json(
+      { status: "error", message: "Nejste přihlášen(a)." },
+      { status: 401 }
+    )
+  }
+
+  const userId = user.id ?? null
+  const userRole = user.role ?? "USER"
   const canAdmin = hasPerm(userRole, "EXIT_CHECKLIST_ADMIN")
   const canSign = hasPerm(userRole, "EXIT_CHECKLIST_SIGN")
 

@@ -74,12 +74,29 @@ const toStr = (v: unknown) => {
   return String(v)
 }
 
+function canReadOffboarding(role?: string | null) {
+  return ["ADMIN", "HR", "IT", "READONLY"].includes(role ?? "")
+}
+
+function canWriteOffboarding(role?: string | null) {
+  return ["ADMIN", "HR", "IT"].includes(role ?? "")
+}
+
 export async function GET(_: NextRequest, { params }: RouteParams) {
   const session = await auth()
+
   if (!session?.user) {
     return NextResponse.json(
       { status: "error", message: "Nejste přihlášeni." },
       { status: 401 }
+    )
+  }
+
+  const role = session.user.role ?? "USER"
+  if (!canReadOffboarding(role)) {
+    return NextResponse.json(
+      { status: "error", message: "Nemáte oprávnění číst záznam odchodu." },
+      { status: 403 }
     )
   }
 
@@ -127,10 +144,22 @@ export async function GET(_: NextRequest, { params }: RouteParams) {
 
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   const session = await auth()
+
   if (!session?.user) {
     return NextResponse.json(
       { status: "error", message: "Nejste přihlášeni." },
       { status: 401 }
+    )
+  }
+
+  const role = session.user.role ?? "USER"
+  if (!canWriteOffboarding(role)) {
+    return NextResponse.json(
+      {
+        status: "error",
+        message: "Nemáte oprávnění upravovat záznam odchodu.",
+      },
+      { status: 403 }
     )
   }
 
@@ -284,11 +313,13 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       const msg = err.issues
         .map((i) => `${i.path.join(".")}: ${i.message}`)
         .join("; ")
+
       return NextResponse.json(
         { status: "error", message: `Formulář obsahuje chyby: ${msg}` },
         { status: 400 }
       )
     }
+
     console.error("PATCH /odchody/[id] error:", err)
     return NextResponse.json(
       { status: "error", message: "Chyba při aktualizaci záznamu." },
@@ -299,10 +330,19 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
 export async function DELETE(_: NextRequest, { params }: RouteParams) {
   const session = await auth()
+
   if (!session?.user) {
     return NextResponse.json(
       { status: "error", message: "Musíte být přihlášeni." },
       { status: 401 }
+    )
+  }
+
+  const role = session.user.role ?? "USER"
+  if (!canWriteOffboarding(role)) {
+    return NextResponse.json(
+      { status: "error", message: "Nemáte oprávnění mazat záznam odchodu." },
+      { status: 403 }
     )
   }
 
@@ -331,6 +371,7 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
       { status: 404 }
     )
   }
+
   if (before.deletedAt) {
     return NextResponse.json(
       { status: "error", message: "Záznam už je smazán." },
@@ -393,7 +434,7 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
     data: {
       id: before.id,
       name: `${before.name} ${before.surname}`,
-      deletedAt: new Date().toISOString(),
+      deletedAt: now.toISOString(),
       deletedBy: userKey,
     },
   })

@@ -13,7 +13,9 @@ export default async function VystupniListPage({ params }: Props) {
   const session = await auth()
 
   if (!session?.user) {
-    redirect("/signin")
+    redirect(
+      `/signin?callbackUrl=${encodeURIComponent(`/odchody/${params.id}/vystupni-list`)}`
+    )
   }
 
   const offboardingId = Number(params.id)

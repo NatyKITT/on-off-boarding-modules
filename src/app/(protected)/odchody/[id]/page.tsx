@@ -1,6 +1,7 @@
-import { notFound } from "next/navigation"
+import { notFound, redirect } from "next/navigation"
+import { auth } from "@/auth"
 
-import { absoluteUrl } from "@/lib/utils"
+import { prisma } from "@/lib/db"
 
 import { OffboardingDetailPageClient } from "./offboarding-detail-page-client"
 
@@ -34,25 +35,60 @@ interface PageProps {
 }
 
 export default async function OffboardingDetailPage({ params }: PageProps) {
-  const id = Number(params.id)
-  if (Number.isNaN(id)) notFound()
+  const session = await auth()
 
-  const res = await fetch(absoluteUrl(`/api/odchody/${params.id}`), {
-    cache: "no-store",
+  if (!session?.user) {
+    redirect(
+      `/signin?callbackUrl=${encodeURIComponent(`/odchody/${params.id}`)}`
+    )
+  }
+
+  const id = Number(params.id)
+  if (Number.isNaN(id)) {
+    notFound()
+  }
+
+  const record = await prisma.employeeOffboarding.findUnique({
+    where: {
+      id,
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+      status: true,
+      plannedEnd: true,
+      actualEnd: true,
+      noticeEnd: true,
+      noticeMonths: true,
+      hasCustomDates: true,
+
+      titleBefore: true,
+      name: true,
+      surname: true,
+      titleAfter: true,
+
+      positionNum: true,
+      positionName: true,
+      department: true,
+      unitName: true,
+
+      userName: true,
+      userEmail: true,
+      personalNumber: true,
+      notes: true,
+    },
   })
 
-  if (!res.ok) {
+  if (!record) {
     notFound()
   }
 
-  const json = (await res.json()) as {
-    status?: string
-    data?: OffboardingDetail
+  const data: OffboardingDetail = {
+    ...record,
+    plannedEnd: record.plannedEnd.toISOString(),
+    actualEnd: record.actualEnd?.toISOString() ?? null,
+    noticeEnd: record.noticeEnd?.toISOString() ?? null,
   }
 
-  if (!json.data) {
-    notFound()
-  }
-
-  return <OffboardingDetailPageClient data={json.data} />
+  return <OffboardingDetailPageClient data={data} />
 }

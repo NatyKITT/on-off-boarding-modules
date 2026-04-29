@@ -63,7 +63,8 @@ function normalizeSignatureValue(
   }
 
   const canTouch =
-    canAdmin || (existing.signedByEmail && existing.signedByEmail === currentUserEmail)
+    canAdmin ||
+    (existing.signedByEmail && existing.signedByEmail === currentUserEmail)
 
   if (!canTouch) {
     return existing
@@ -149,8 +150,14 @@ export async function PUT(
     )
   }
 
-  const items = (Array.isArray(body.items) ? body.items : []) as ExitChecklistItem[]
-  const assets = (Array.isArray(body.assets) ? body.assets : []) as ExitAssetItem[]
+  const items = (
+    Array.isArray(body.items) ? body.items : []
+  ) as ExitChecklistItem[]
+
+  const assets = (
+    Array.isArray(body.assets) ? body.assets : []
+  ) as ExitAssetItem[]
+
   const handover = sanitizeHandoverForJson(body.handover)
   const incomingSignatures = (body.signatures ?? {}) as ExitChecklistSignatures
 
@@ -167,27 +174,51 @@ export async function PUT(
   const currentSignatures: ExitChecklistSignatures = {
     employee: {
       signedByName:
-        sanitizeText((currentSignaturesRaw.employee as Record<string, unknown>)?.signedByName) || null,
+        sanitizeText(
+          (currentSignaturesRaw.employee as Record<string, unknown>)
+            ?.signedByName
+        ) || null,
       signedByEmail:
-        sanitizeText((currentSignaturesRaw.employee as Record<string, unknown>)?.signedByEmail) || null,
+        sanitizeText(
+          (currentSignaturesRaw.employee as Record<string, unknown>)
+            ?.signedByEmail
+        ) || null,
       signedAt:
-        sanitizeText((currentSignaturesRaw.employee as Record<string, unknown>)?.signedAt) || null,
+        sanitizeText(
+          (currentSignaturesRaw.employee as Record<string, unknown>)?.signedAt
+        ) || null,
     },
     manager: {
       signedByName:
-        sanitizeText((currentSignaturesRaw.manager as Record<string, unknown>)?.signedByName) || null,
+        sanitizeText(
+          (currentSignaturesRaw.manager as Record<string, unknown>)
+            ?.signedByName
+        ) || null,
       signedByEmail:
-        sanitizeText((currentSignaturesRaw.manager as Record<string, unknown>)?.signedByEmail) || null,
+        sanitizeText(
+          (currentSignaturesRaw.manager as Record<string, unknown>)
+            ?.signedByEmail
+        ) || null,
       signedAt:
-        sanitizeText((currentSignaturesRaw.manager as Record<string, unknown>)?.signedAt) || null,
+        sanitizeText(
+          (currentSignaturesRaw.manager as Record<string, unknown>)?.signedAt
+        ) || null,
     },
     issuer: {
       signedByName:
-        sanitizeText((currentSignaturesRaw.issuer as Record<string, unknown>)?.signedByName) || null,
+        sanitizeText(
+          (currentSignaturesRaw.issuer as Record<string, unknown>)
+            ?.signedByName
+        ) || null,
       signedByEmail:
-        sanitizeText((currentSignaturesRaw.issuer as Record<string, unknown>)?.signedByEmail) || null,
+        sanitizeText(
+          (currentSignaturesRaw.issuer as Record<string, unknown>)
+            ?.signedByEmail
+        ) || null,
       signedAt:
-        sanitizeText((currentSignaturesRaw.issuer as Record<string, unknown>)?.signedAt) || null,
+        sanitizeText(
+          (currentSignaturesRaw.issuer as Record<string, unknown>)?.signedAt
+        ) || null,
     },
     issuedDate: sanitizeIsoDate(currentSignaturesRaw.issuedDate),
   }
@@ -222,43 +253,40 @@ export async function PUT(
 
       const resolution = toResolution(incoming?.resolved ?? null)
 
-      const safeSignedByName =
-        canOverwriteSignature(
-          {
-            signedByEmail: existing?.signedByEmail ?? null,
-            signedAt: existing?.signedAt ?? null,
-          },
-          user.email,
-          canAdmin
-        )
-          ? sanitizeText(incoming?.signedByName) || null
-          : existing?.signedByName ?? null
+      const safeSignedByName = canOverwriteSignature(
+        {
+          signedByEmail: existing?.signedByEmail ?? null,
+          signedAt: existing?.signedAt ?? null,
+        },
+        user.email,
+        canAdmin
+      )
+        ? sanitizeText(incoming?.signedByName) || null
+        : existing?.signedByName ?? null
 
-      const safeSignedByEmail =
-        canOverwriteSignature(
-          {
-            signedByEmail: existing?.signedByEmail ?? null,
-            signedAt: existing?.signedAt ?? null,
-          },
-          user.email,
-          canAdmin
-        )
-          ? sanitizeText(incoming?.signedByEmail) || null
-          : existing?.signedByEmail ?? null
+      const safeSignedByEmail = canOverwriteSignature(
+        {
+          signedByEmail: existing?.signedByEmail ?? null,
+          signedAt: existing?.signedAt ?? null,
+        },
+        user.email,
+        canAdmin
+      )
+        ? sanitizeText(incoming?.signedByEmail) || null
+        : existing?.signedByEmail ?? null
 
-      const safeSignedAt =
-        canOverwriteSignature(
-          {
-            signedByEmail: existing?.signedByEmail ?? null,
-            signedAt: existing?.signedAt ?? null,
-          },
-          user.email,
-          canAdmin
-        )
-          ? incoming?.signedAt
-            ? new Date(incoming.signedAt)
-            : null
-          : existing?.signedAt ?? null
+      const safeSignedAt = canOverwriteSignature(
+        {
+          signedByEmail: existing?.signedByEmail ?? null,
+          signedAt: existing?.signedAt ?? null,
+        },
+        user.email,
+        canAdmin
+      )
+        ? incoming?.signedAt
+          ? new Date(incoming.signedAt)
+          : null
+        : existing?.signedAt ?? null
 
       await prisma.exitChecklistItem.upsert({
         where: {
@@ -290,9 +318,12 @@ export async function PUT(
       })
     }
 
-    await prisma.exitChecklistAsset.deleteMany({
+    const existingAssets = await prisma.exitChecklistAsset.findMany({
       where: { checklistId: checklist.id },
     })
+
+    const existingById = new Map(existingAssets.map((a) => [a.id, a]))
+    const seenExistingIds = new Set<number>()
 
     for (const asset of assets) {
       const subject = sanitizeText(asset.subject)
@@ -300,13 +331,40 @@ export async function PUT(
 
       if (!subject && !inventoryNumber) continue
 
-      await prisma.exitChecklistAsset.create({
-        data: {
-          checklistId: checklist.id,
-          subject,
-          inventoryNumber,
-          createdById: user.id ?? null,
-        },
+      const numericId = Number(asset.id)
+
+      if (!Number.isNaN(numericId)) {
+        const existing = existingById.get(numericId)
+        if (!existing) continue
+
+        seenExistingIds.add(numericId)
+
+        await prisma.exitChecklistAsset.update({
+          where: { id: numericId },
+          data: {
+            subject,
+            inventoryNumber,
+          },
+        })
+      } else {
+        await prisma.exitChecklistAsset.create({
+          data: {
+            checklistId: checklist.id,
+            subject,
+            inventoryNumber,
+            createdById: user.id ?? null,
+          },
+        })
+      }
+    }
+
+    const deletableIds = existingAssets
+      .filter((a) => !seenExistingIds.has(a.id))
+      .map((a) => a.id)
+
+    if (deletableIds.length > 0) {
+      await prisma.exitChecklistAsset.deleteMany({
+        where: { id: { in: deletableIds } },
       })
     }
 
