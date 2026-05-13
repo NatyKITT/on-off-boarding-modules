@@ -1613,7 +1613,11 @@ export default function OffboardingPage() {
       </Dialog>
 
       {openExitChecklistId != null && (
-        <ExitChecklistDialog offboardingId={openExitChecklistId} open={true} />
+        <ExitChecklistDialog
+          key={openExitChecklistId}
+          offboardingId={openExitChecklistId}
+          open={true}
+        />
       )}
 
       <SuccessModal

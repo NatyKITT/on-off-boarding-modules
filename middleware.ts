@@ -16,16 +16,9 @@ function getDomain(email?: string | null) {
   return (email ?? "").split("@")[1]?.toLowerCase() ?? ""
 }
 
-function isPraha6(email?: string | null) {
-  return getDomain(email) === "praha6.cz"
-}
-
-function isKitt6(email?: string | null) {
-  return getDomain(email) === "kitt6.cz"
-}
-
 function isPraha6OrKitt6(email?: string | null) {
-  return isPraha6(email) || isKitt6(email)
+  const d = getDomain(email)
+  return d === "praha6.cz" || d === "kitt6.cz"
 }
 
 function jsonError(status: number, message: string) {
@@ -55,33 +48,12 @@ export default auth((req) => {
     "/api/dokumenty/public",
   ]
 
-  const isPublicExitPage = path.startsWith("/odchody-public/")
-  const isPublicExitApi = path.startsWith("/api/odchody/public/")
-  const isInternalExitChecklistApi =
-    /^\/api\/odchody\/\d+\/exit-checklist(\/.*)?$/.test(path)
-
   if (publicPaths.some((p) => path.startsWith(p))) {
     return NextResponse.next()
   }
 
   if (!session?.user) {
-    if (isPublicExitPage) {
-      const signInUrl = new URL("/signin", req.url)
-      signInUrl.searchParams.set(
-        "callbackUrl",
-        `${req.nextUrl.pathname}${req.nextUrl.search}`
-      )
-      return NextResponse.redirect(signInUrl)
-    }
-
-    if (isPublicExitApi) {
-      return jsonError(401, "Nejste přihlášen(a).")
-    }
-
-    if (isApi) {
-      return jsonError(401, "Nejste přihlášen(a).")
-    }
-
+    if (isApi) return jsonError(401, "Nejste přihlášen(a).")
     const signInUrl = new URL("/signin", req.url)
     signInUrl.searchParams.set(
       "callbackUrl",
@@ -90,19 +62,40 @@ export default auth((req) => {
     return NextResponse.redirect(signInUrl)
   }
 
+  const email = session.user.email ?? null
   const role = (session.user.role ?? "USER") as Role
   const canAccessApp = Boolean(session.user.canAccessApp)
-  const email = session.user.email ?? null
 
   if (path === "/") {
     return NextResponse.redirect(new URL("/prehled", req.url))
   }
 
+  const isPublicExitPage = path.startsWith("/odchody-public/")
+  const isPublicExitApi = path.startsWith("/api/odchody/public/")
+
   if (isPublicExitPage || isPublicExitApi) {
     if (!isPraha6OrKitt6(email)) {
-      return isPublicExitApi
-        ? jsonError(403, "Přístup pouze pro účty Praha 6 nebo KITT6.")
+      return isApi
+        ? jsonError(403, "Přístup pouze pro zaměstnance ÚMČ Praha 6.")
         : NextResponse.redirect(new URL("/no-access", req.url))
+    }
+    return NextResponse.next()
+  }
+
+  const isInternalExitPage = /^\/odchody\/\d+\/vystupni-list(\/.*)?$/.test(path)
+  const isInternalExitApi = /^\/api\/odchody\/\d+\/exit-checklist(\/.*)?$/.test(
+    path
+  )
+
+  if (isInternalExitPage || isInternalExitApi) {
+    if (!isPraha6OrKitt6(email)) {
+      return isApi
+        ? jsonError(403, "Přístup pouze pro zaměstnance ÚMČ Praha 6.")
+        : NextResponse.redirect(new URL("/no-access", req.url))
+    }
+
+    if (role === "USER" && /\/invite/.test(path)) {
+      return jsonError(403, "Nemáte oprávnění odesílat pozvánky k podpisu.")
     }
 
     return NextResponse.next()
@@ -112,18 +105,6 @@ export default auth((req) => {
     return isApi
       ? jsonError(403, "Nemáte přístup do aplikace.")
       : NextResponse.redirect(new URL("/no-access", req.url))
-  }
-
-  if (role === "READONLY" && isApi && isMutatingMethod(method)) {
-    const allowedReadonlyMutations =
-      isInternalExitChecklistApi || isPublicExitApi
-
-    if (!allowedReadonlyMutations) {
-      return jsonError(
-        403,
-        "Máte pouze režim pro čtení. Pro úpravy kontaktujte administrátora."
-      )
-    }
   }
 
   if (!canAccessApp && role !== "READONLY") {
@@ -138,6 +119,17 @@ export default auth((req) => {
         ? jsonError(403, "Přístup pouze pro administrátory.")
         : NextResponse.redirect(new URL("/prehled", req.url))
     }
+    return NextResponse.next()
+  }
+
+  if (role === "READONLY" && isApi && isMutatingMethod(method)) {
+    if (isInternalExitApi || isPublicExitApi) {
+      return NextResponse.next()
+    }
+    return jsonError(
+      403,
+      "Máte pouze režim pro čtení. Pro úpravy kontaktujte administrátora."
+    )
   }
 
   return NextResponse.next()

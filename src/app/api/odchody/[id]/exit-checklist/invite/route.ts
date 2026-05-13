@@ -14,7 +14,6 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   const session = await auth()
-
   if (!session?.user) {
     return NextResponse.json({ error: "Nejste přihlášen." }, { status: 401 })
   }
@@ -33,8 +32,15 @@ export async function POST(
   }
 
   const body = await req.json().catch(() => null)
-  const inviteeEmail = body?.inviteeEmail?.trim() ?? ""
-  const inviteeName = body?.inviteeName?.trim() ?? ""
+  if (!body) {
+    return NextResponse.json(
+      { error: "Chybí tělo požadavku." },
+      { status: 400 }
+    )
+  }
+
+  const inviteeEmail: string = body?.inviteeEmail?.trim() ?? ""
+  const inviteeName: string = body?.inviteeName?.trim() ?? ""
 
   if (!inviteeEmail) {
     return NextResponse.json(
@@ -53,9 +59,7 @@ export async function POST(
 
   const offboarding = await prisma.employeeOffboarding.findUnique({
     where: { id: offboardingId },
-    include: {
-      exitChecklist: true,
-    },
+    include: { exitChecklist: true },
   })
 
   if (!offboarding) {
@@ -105,7 +109,10 @@ export async function POST(
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL
   if (!baseUrl) {
-    throw new Error("Proměnná prostředí NEXT_PUBLIC_APP_URL není nastavena.")
+    return NextResponse.json(
+      { error: "Není nastavena proměnná NEXT_PUBLIC_APP_URL." },
+      { status: 500 }
+    )
   }
 
   const signUrl = `${baseUrl}/odchody-public/${checklist.publicToken}`
@@ -118,8 +125,7 @@ export async function POST(
       sentByName: session.user.name ?? session.user.email ?? "HR oddělení",
       signUrl,
     })
-  } catch (err) {
-    console.error("[exit-checklist/invite] E-mail se nepodařilo odeslat:", err)
+  } catch {
     return NextResponse.json(
       {
         error:

@@ -59,8 +59,8 @@ export function sanitizeText(value: unknown): string {
 
 export function sanitizeResponsibleParty(
   value: unknown
-): "KITT6" | "OSSL_KT" | null {
-  if (value === "KITT6" || value === "OSSL_KT") return value
+): "KITT6" | "OSS_KT" | null {
+  if (value === "KITT6" || value === "OSS_KT") return value
   return null
 }
 
@@ -220,6 +220,7 @@ export function mapToExitChecklistData(
   off: EmployeeOffboarding,
   checklist: {
     id: number
+    publicToken: string
     lockedAt: Date | null
     items: ExitChecklistItemModel[]
     assets: ExitChecklistAssetModel[]
@@ -266,11 +267,17 @@ export function mapToExitChecklistData(
   return {
     id: checklist.id,
     offboardingId: off.id,
+    publicToken: checklist.publicToken,
+    conflictOfInterest: Boolean(headerData.conflictOfInterest),
+    positionNum: off.positionNum ?? null,
     employeeName: header.employeeName,
     personalNumber: header.personalNumber,
     department: header.department,
     unitName: header.unitName,
     employmentEndDate: header.employmentEndDate,
+    employeeEmail: off.userEmail ?? null,
+    managerEmail: sanitizeText(headerData.managerEmail) || null,
+    managerName: sanitizeText(headerData.managerName) || null,
     lockedAt: checklist.lockedAt
       ? new Date(checklist.lockedAt).toISOString()
       : null,

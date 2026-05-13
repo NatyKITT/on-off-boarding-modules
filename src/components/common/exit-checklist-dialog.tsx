@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { CheckCircle } from "lucide-react"
 
 import type { ExitChecklistData } from "@/types/exit-checklist"
 
@@ -26,6 +27,7 @@ export function ExitChecklistDialog({ offboardingId, open }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
+  const [saved, setSaved] = useState(false)
 
   const [showUnsavedAlert, setShowUnsavedAlert] = useState(false)
   const [saveTrigger, setSaveTrigger] = useState(0)
@@ -42,11 +44,13 @@ export function ExitChecklistDialog({ offboardingId, open }: Props) {
       setData(null)
       setDirty(false)
       setError(null)
+      setSaved(false)
       return
     }
 
     setLoading(true)
     setError(null)
+    setSaved(false)
 
     void (async () => {
       try {
@@ -102,10 +106,12 @@ export function ExitChecklistDialog({ offboardingId, open }: Props) {
   function handleSaved(newData: ExitChecklistData) {
     setData(newData)
     setDirty(false)
+    setSaved(true)
+    setTimeout(() => setSaved(false), 4000)
 
     if (closeAfterSave) {
       setCloseAfterSave(false)
-      emitClose()
+      setTimeout(() => emitClose(), 1000)
     }
   }
 
@@ -141,11 +147,28 @@ export function ExitChecklistDialog({ offboardingId, open }: Props) {
               </div>
             )}
 
+            {saved && !dirty && (
+              <div className="mb-4 flex items-start gap-3 rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+                <CheckCircle className="mt-0.5 size-5 shrink-0 text-green-600" />
+                <div>
+                  <p className="font-medium">
+                    Výstupní list byl úspěšně uložen.
+                  </p>
+                  <p className="mt-0.5 text-green-700">
+                    Všechny změny byly zaznamenány.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {data && !loading && (
               <ExitChecklistForm
                 offboardingId={offboardingId}
                 initialData={data}
-                onDirtyChange={setDirty}
+                onDirtyChange={(d) => {
+                  setDirty(d)
+                  if (d) setSaved(false)
+                }}
                 onSaved={handleSaved}
                 externalSaveTrigger={saveTrigger}
               />

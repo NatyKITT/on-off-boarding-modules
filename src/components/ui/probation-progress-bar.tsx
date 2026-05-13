@@ -12,16 +12,12 @@ import {
 } from "@/components/ui/tooltip"
 
 interface ProbationProgressBarProps {
-  /** Datum skutečného nebo plánovaného nástupu */
   startDate: string
-  /** Datum konce zkušební doby */
   probationEndDate: string
-  /** Typ - planned nebo actual */
   variant?: "planned" | "actual"
-  /** Label pro tooltip */
   label?: string
-  /** Velikost progress baru */
   size?: "sm" | "md" | "lg"
+  frozenAt?: string | null
 }
 
 export function ProbationProgressBar({
@@ -30,14 +26,16 @@ export function ProbationProgressBar({
   variant = "actual",
   label,
   size = "sm",
+  frozenAt,
 }: ProbationProgressBarProps) {
+  const isFrozen = Boolean(frozenAt)
+
   const progress = useMemo(() => {
     const start = new Date(startDate)
     const end = new Date(probationEndDate)
-    const today = new Date()
+    const today = frozenAt ? new Date(frozenAt) : new Date()
 
     const rawRemaining = Math.ceil(differenceInDays(end, today))
-
     const totalDays = Math.ceil(differenceInDays(end, start))
 
     if (variant === "planned" && !isPast(start)) {
@@ -59,11 +57,15 @@ export function ProbationProgressBar({
     const isCompleted = rawRemaining <= 0 || percentage >= 100
     const daysRemaining = Math.max(rawRemaining, 0)
 
-    let status: "in-progress" | "ending-soon" | "completed"
+    let status: "in-progress" | "ending-soon" | "completed" | "frozen"
     let statusText: string
     let displayText: string
 
-    if (isCompleted) {
+    if (isFrozen && !isCompleted) {
+      status = "frozen"
+      statusText = `Zastaveno k ${format(new Date(frozenAt!), "d.M.yyyy", { locale: cs })} — zbývalo ${daysRemaining} ${daysRemaining === 1 ? "den" : daysRemaining < 5 ? "dny" : "dní"}`
+      displayText = `${daysRemaining}d`
+    } else if (isCompleted) {
       status = "completed"
       statusText = "Zkušební doba skončila"
       displayText = "ukončeno"
@@ -85,7 +87,7 @@ export function ProbationProgressBar({
       statusText,
       displayText,
     }
-  }, [startDate, probationEndDate, variant])
+  }, [startDate, probationEndDate, variant, frozenAt, isFrozen])
 
   const sizeClasses = {
     sm: "h-6 w-24",
@@ -93,25 +95,31 @@ export function ProbationProgressBar({
     lg: "h-10 w-40",
   } as const
 
-  const trackBg =
-    variant === "planned" ? "rgba(59,130,246,0.15)" : "rgba(16,185,129,0.15)"
+  const trackBg = isFrozen
+    ? "rgba(156,163,175,0.2)"
+    : variant === "planned"
+      ? "rgba(59,130,246,0.15)"
+      : "rgba(16,185,129,0.15)"
 
-  const fillGradient =
-    variant === "planned"
+  const fillGradient = isFrozen
+    ? "linear-gradient(90deg, rgba(156,163,175,0.7) 0%, rgba(107,114,128,0.8) 100%)"
+    : variant === "planned"
       ? "linear-gradient(90deg, rgba(59,130,246,0.75) 0%, rgba(37,99,235,0.9) 100%)"
       : "linear-gradient(90deg, rgba(16,185,129,0.75) 0%, rgba(5,150,105,0.9) 100%)"
 
-  const completedGradient =
-    variant === "planned"
+  const completedGradient = isFrozen
+    ? "linear-gradient(90deg, #9ca3af 0%, #6b7280 100%)"
+    : variant === "planned"
       ? "linear-gradient(90deg, #3b82f6 0%, #1d4ed8 100%)"
       : "linear-gradient(90deg, #10b981 0%, #059669 100%)"
 
   const urgentOpacity = useMemo(() => {
+    if (isFrozen) return 0.75
     if (progress.status === "completed") return 1
     if (progress.daysRemaining <= 3) return 1
     if (progress.daysRemaining <= 7) return 0.9
     return 0.8
-  }, [progress.status, progress.daysRemaining])
+  }, [progress.status, progress.daysRemaining, isFrozen])
 
   const widthPct =
     progress.status === "completed" ? 100 : Math.min(progress.percentage, 100)
@@ -126,7 +134,23 @@ export function ProbationProgressBar({
   const tooltipContent = (
     <div className="text-center">
       <p className="font-medium">{label || "Zkušební doba"}</p>
-      {progress.status === "completed" ? (
+      {isFrozen && progress.status !== "completed" ? (
+        <>
+          <p className="text-sm text-muted-foreground">Zastaveno — odchod</p>
+          <p className="text-sm">
+            k {format(new Date(frozenAt!), "d.M.yyyy", { locale: cs })}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            zbývalo {progress.daysRemaining}{" "}
+            {progress.daysRemaining === 1
+              ? "den"
+              : progress.daysRemaining < 5
+                ? "dny"
+                : "dní"}{" "}
+            do {format(new Date(probationEndDate), "d.M.yyyy", { locale: cs })}
+          </p>
+        </>
+      ) : progress.status === "completed" ? (
         <p className="text-sm">
           Termín uplynul{" "}
           {format(new Date(probationEndDate), "d.M.yyyy", { locale: cs })}
@@ -179,7 +203,13 @@ export function ProbationProgressBar({
               />
 
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                <span className="select-none text-xs font-semibold tabular-nums text-black/70 dark:text-white/80">
+                <span
+                  className={`select-none text-xs font-semibold tabular-nums ${
+                    isFrozen
+                      ? "text-gray-500 dark:text-gray-400"
+                      : "text-black/70 dark:text-white/80"
+                  }`}
+                >
                   {progress.displayText}
                 </span>
               </div>

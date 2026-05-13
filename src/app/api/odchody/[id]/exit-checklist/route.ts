@@ -53,8 +53,8 @@ function sanitizeText(value: unknown): string {
   return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : ""
 }
 
-function sanitizeResponsibleParty(value: unknown): "KITT6" | "OSSL_KT" | null {
-  if (value === "KITT6" || value === "OSSL_KT") return value
+function sanitizeResponsibleParty(value: unknown): "KITT6" | "OSS_KT" | null {
+  if (value === "KITT6" || value === "OSS_KT") return value
   return null
 }
 
@@ -182,9 +182,7 @@ function sanitizeHandoverForResponse(
   }
 }
 
-function sanitizeSignaturesForJson(
-  value: unknown
-): Prisma.InputJsonObject {
+function sanitizeSignaturesForJson(value: unknown): Prisma.InputJsonObject {
   const raw =
     value && typeof value === "object" ? (value as Record<string, unknown>) : {}
 
@@ -256,11 +254,16 @@ function mapToExitChecklistData(
   return {
     id: checklist.id,
     offboardingId: off.id,
+    publicToken: checklist.publicToken,
+    conflictOfInterest: Boolean(headerData.conflictOfInterest),
     employeeName: header.employeeName,
     personalNumber: header.personalNumber,
     department: header.department,
     unitName: header.unitName,
     employmentEndDate: header.employmentEndDate,
+    employeeEmail: off.userEmail ?? null,
+    managerEmail: sanitizeText(headerData.managerEmail) || null,
+    managerName: sanitizeText(headerData.managerName) || null,
     lockedAt: checklist.lockedAt
       ? new Date(checklist.lockedAt).toISOString()
       : null,
@@ -484,6 +487,9 @@ export async function PUT(
       department: header.department,
       unitName: header.unitName,
       employmentEndDate: header.employmentEndDate,
+      managerEmail: sanitizeText(body.managerEmail) || null,
+      managerName: sanitizeText(body.managerName) || null,
+      conflictOfInterest: Boolean(body.conflictOfInterest),
       handover,
       signatures,
     }
@@ -558,10 +564,7 @@ export async function PUT(
 
         await prisma.exitChecklistAsset.update({
           where: { id: numericId },
-          data: {
-            subject,
-            inventoryNumber,
-          },
+          data: { subject, inventoryNumber },
         })
       } else {
         await prisma.exitChecklistAsset.create({

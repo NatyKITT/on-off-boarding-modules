@@ -62,8 +62,8 @@ function isInternalRole(role: Role | null | undefined): boolean {
 
 function getEnvRoleForEmail(email: string): Role | null {
   const lower = email.toLowerCase()
-  if (isKitt6(lower)) return "ADMIN"
   if (SUPER_ADMIN_EMAILS.has(lower)) return "ADMIN"
+  if (isKitt6(lower)) return "ADMIN"
   if (HR_EMAILS.has(lower)) return "HR"
   if (IT_EMAILS.has(lower)) return "IT"
   if (READONLY_EMAILS.has(lower)) return "READONLY"

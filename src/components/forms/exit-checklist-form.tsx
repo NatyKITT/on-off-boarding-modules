@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { format } from "date-fns"
-import { Check, ChevronDown, Lock, Printer, Undo2 } from "lucide-react"
+import { Check, ChevronDown, Lock, Printer, Undo2, X } from "lucide-react"
 import { useSession } from "next-auth/react"
 
 import type {
@@ -43,6 +43,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { SendAllDialog } from "@/components/forms/send-all-dialog"
 import { SendInviteDialog } from "@/components/forms/send-invite-dialog"
 
 type Props = {
@@ -55,7 +56,19 @@ type Props = {
   externalSaveTrigger?: number
 }
 
-const SIGNING_DISABLED_KEYS: string[] = ["lawInfo"]
+type EmployeePersonItem = {
+  id: string
+  personalNumber: string
+  name: string
+  surname: string
+  email: string
+  titleBefore?: string | null
+  titleAfter?: string | null
+  positionNum?: string
+  positionName?: string
+  department?: string
+  unitName?: string
+}
 
 type SearchablePosition = Position & {
   _key: string
@@ -89,7 +102,6 @@ function createTempAssetId() {
       return globalThis.crypto.randomUUID()
     }
   } catch {}
-
   return `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 
@@ -97,7 +109,6 @@ function mergeItemsWithConfig(
   dataItems: ExitChecklistItem[]
 ): ExitChecklistItem[] {
   const existingByKey = new Map(dataItems.map((i) => [i.key, i]))
-
   return EXIT_CHECKLIST_ROWS.map((row) => {
     const found = existingByKey.get(row.key)
     return {
@@ -134,9 +145,7 @@ function normalizePositions(payload: unknown): Position[] {
         typeof v.num === "string" || typeof v.num === "number"
           ? String(v.num)
           : ""
-
       if (!num) return null
-
       return {
         id:
           typeof v.id === "string" || typeof v.id === "number"
@@ -156,7 +165,6 @@ function normalizePositions(payload: unknown): Position[] {
       byNum.set(p.num, p)
       continue
     }
-
     const existing = byNum.get(p.num)!
     const existingScore =
       (existing.name ? 1 : 0) +
@@ -164,13 +172,35 @@ function normalizePositions(payload: unknown): Position[] {
       (existing.unit_name ? 1 : 0)
     const nextScore =
       (p.name ? 1 : 0) + (p.dept_name ? 1 : 0) + (p.unit_name ? 1 : 0)
-
-    if (nextScore > existingScore) {
-      byNum.set(p.num, p)
-    }
+    if (nextScore > existingScore) byNum.set(p.num, p)
   }
 
   return Array.from(byNum.values())
+}
+
+function buildEmployeeFullName(person: Partial<EmployeePersonItem>) {
+  return [person.titleBefore, person.name, person.surname, person.titleAfter]
+    .filter(Boolean)
+    .join(" ")
+    .trim()
+}
+
+function renderOrganization(text: string, managerName?: string | null) {
+  const lines = text.split("\n").filter(Boolean)
+  if (lines.length === 0) return null
+  return (
+    <div className="leading-snug">
+      <div className="font-semibold">{lines[0]}</div>
+      {lines[0] === "Vedoucí odboru" && managerName && (
+        <div className="text-xs text-muted-foreground">{managerName}</div>
+      )}
+      {lines.slice(1).map((line, i) => (
+        <div key={i} className="text-xs text-muted-foreground">
+          {line}
+        </div>
+      ))}
+    </div>
+  )
 }
 
 type HeaderSignatureBlockProps = {
@@ -195,14 +225,11 @@ function HeaderSignatureBlock({
   onRevoke,
 }: HeaderSignatureBlockProps) {
   const isSigned = Boolean(value.signedAt)
-
   const currentUserIsSigner =
     Boolean(value.signedByEmail) && value.signedByEmail === currentUserEmail
-
   const canRevoke = !isLocked && isSigned && (isAdmin || currentUserIsSigner)
   const canSign =
     !isLocked && !isSigned && Boolean(currentUserName || currentUserEmail)
-
   const signedAtDate = value.signedAt
     ? format(new Date(value.signedAt), "d.M.yyyy HH:mm")
     : ""
@@ -210,7 +237,6 @@ function HeaderSignatureBlock({
   return (
     <div className="space-y-2 rounded-md border p-3">
       <Label className="text-sm font-medium">{label}</Label>
-
       {isSigned ? (
         <div className="rounded-md bg-muted/50 px-3 py-2 text-sm">
           <div>{value.signedByName ?? "Podepsáno"}</div>
@@ -221,7 +247,6 @@ function HeaderSignatureBlock({
           Nepodepsáno
         </div>
       )}
-
       <div className="flex flex-wrap gap-2">
         {canSign && (
           <Button
@@ -235,7 +260,6 @@ function HeaderSignatureBlock({
             Podepsat elektronicky
           </Button>
         )}
-
         {canRevoke && (
           <Button
             type="button"
@@ -273,7 +297,9 @@ export function ExitChecklistForm({
   const [assets, setAssets] = useState<ExitAssetItem[]>(
     initialData.assets ?? []
   )
-
+  const [conflictOfInterest, setConflictOfInterest] = useState(
+    initialData.conflictOfInterest ?? false
+  )
   const [includeHandoverAgenda, setIncludeHandoverAgenda] = useState(
     initialData.handover?.includeHandoverAgenda ?? false
   )
@@ -297,7 +323,7 @@ export function ExitChecklistForm({
     initialData.handover?.option3Reason ?? ""
   )
   const [responsibleParty, setResponsibleParty] = useState<
-    "KITT6" | "OSSL_KT" | null
+    "KITT6" | "OSS_KT" | null
   >(initialData.handover?.responsibleParty ?? null)
 
   const [signatures, setSignatures] = useState<ExitChecklistSignatures>({
@@ -307,16 +333,26 @@ export function ExitChecklistForm({
     issuedDate: getDefaultIssuedDate(initialData.signatures?.issuedDate),
   })
 
+  const [managerName, setManagerName] = useState<string>(
+    initialData.managerName ?? ""
+  )
+  const [managerEmail, setManagerEmail] = useState<string>(
+    initialData.managerEmail ?? ""
+  )
+  const [managerSearchOpen, setManagerSearchOpen] = useState(false)
+  const [managerEmployees, setManagerEmployees] = useState<
+    EmployeePersonItem[]
+  >([])
+  const [managerSearchLoading, setManagerSearchLoading] = useState(false)
+  const [managerQuery, setManagerQuery] = useState("")
+
   const [positions, setPositions] = useState<Position[]>([])
   const [loadingPositions, setLoadingPositions] = useState(false)
   const [positionPickerOpen, setPositionPickerOpen] = useState(false)
   const [positionQuery, setPositionQuery] = useState("")
-
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [lastSaveTrigger, setLastSaveTrigger] = useState<number | undefined>(
-    undefined
-  )
+  const [lastSaveTrigger, setLastSaveTrigger] = useState<number | undefined>(0)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
 
   const isInternalMode = mode === "internal"
@@ -329,6 +365,9 @@ export function ExitChecklistForm({
   const canLock = isInternalMode && isAdmin
   const canGeneratePdf = isInternalMode && Boolean(offboardingId)
 
+  const signingDisabledKeys = conflictOfInterest ? [] : ["lawInfo"]
+  const lawInfoGreyed = !conflictOfInterest
+
   const header = useMemo(
     () => ({
       employeeName: initialData.employeeName,
@@ -336,6 +375,7 @@ export function ExitChecklistForm({
       department: initialData.department,
       unitName: initialData.unitName,
       employmentEndDate: initialData.employmentEndDate,
+      employeeEmail: initialData.employeeEmail ?? null,
     }),
     [initialData]
   )
@@ -367,13 +407,25 @@ export function ExitChecklistForm({
     return positionsForSearch.filter((p) => p._hay.includes(q))
   }, [positionsForSearch, positionQuery])
 
+  const filteredManagerEmployees = useMemo(() => {
+    const q = managerQuery.trim().toLowerCase()
+    if (!q) return managerEmployees.slice(0, 50)
+    return managerEmployees
+      .filter((e) => {
+        const name = `${e.name} ${e.surname}`.toLowerCase()
+        const email = (e.email ?? "").toLowerCase()
+        const pn = (e.personalNumber ?? "").toLowerCase()
+        return name.includes(q) || email.includes(q) || pn.includes(q)
+      })
+      .slice(0, 50)
+  }, [managerEmployees, managerQuery])
+
   useEffect(() => {
     const merged = mergeItemsWithConfig(initialData.items ?? [])
-
     setLockedAt(initialData.lockedAt ?? null)
     setItems(merged)
     setAssets(initialData.assets ?? [])
-
+    setConflictOfInterest(initialData.conflictOfInterest ?? false)
     setIncludeHandoverAgenda(
       initialData.handover?.includeHandoverAgenda ?? false
     )
@@ -386,15 +438,16 @@ export function ExitChecklistForm({
     setHandoverOption3(initialData.handover?.option3 ?? false)
     setHandoverOption3Reason(initialData.handover?.option3Reason ?? "")
     setResponsibleParty(initialData.handover?.responsibleParty ?? null)
-
     setSignatures({
       employee: initialData.signatures?.employee ?? emptySignature(),
       manager: initialData.signatures?.manager ?? emptySignature(),
       issuer: initialData.signatures?.issuer ?? emptySignature(),
       issuedDate: getDefaultIssuedDate(initialData.signatures?.issuedDate),
     })
-
+    setManagerName(initialData.managerName ?? "")
+    setManagerEmail(initialData.managerEmail ?? "")
     setDirty(false)
+    setStatusMessage(null)
   }, [initialData])
 
   useEffect(() => {
@@ -414,45 +467,33 @@ export function ExitChecklistForm({
   }, [externalSaveTrigger])
 
   useEffect(() => {
-    if (!includeHandoverAgenda || !handoverOption2 || positions.length > 0) {
+    if (!includeHandoverAgenda || !handoverOption2 || positions.length > 0)
       return
-    }
-
     let cancelled = false
-
     ;(async () => {
       try {
         setLoadingPositions(true)
         const res = await fetch("/api/systemizace", { cache: "no-store" })
         const json = await res.json().catch(() => null)
         const normalized = normalizePositions(json)
-
-        if (!cancelled) {
-          setPositions(normalized)
-        }
+        if (!cancelled) setPositions(normalized)
       } catch (err) {
         console.error("Nepodařilo se načíst systemizaci:", err)
       } finally {
-        if (!cancelled) {
-          setLoadingPositions(false)
-        }
+        if (!cancelled) setLoadingPositions(false)
       }
     })()
-
     return () => {
       cancelled = true
     }
   }, [includeHandoverAgenda, handoverOption2, positions.length])
 
   function markDirty() {
-    if (!dirty) {
-      setDirty(true)
-    }
+    if (!dirty) setDirty(true)
   }
 
   function signHeaderSignature(key: HeaderSignatureKey) {
     if (isLocked || (!currentUserName && !currentUserEmail)) return
-
     setSignatures((prev) => ({
       ...prev,
       [key]: {
@@ -461,7 +502,6 @@ export function ExitChecklistForm({
         signedAt: new Date().toISOString(),
       },
     }))
-
     markDirty()
     setStatusMessage("Elektronický podpis byl doplněn. Nezapomeňte uložit.")
     setTimeout(() => setStatusMessage(null), 3000)
@@ -469,23 +509,13 @@ export function ExitChecklistForm({
 
   function revokeHeaderSignature(key: HeaderSignatureKey) {
     if (isLocked) return
-
     const current = signatures[key]
-    const isSigned = Boolean(current.signedAt)
-    if (!isSigned) return
-
+    if (!Boolean(current.signedAt)) return
     const isSignedByCurrentUser =
       Boolean(current.signedByEmail) &&
       current.signedByEmail === currentUserEmail
-
-    const canRevoke = isAdmin || isSignedByCurrentUser
-    if (!canRevoke) return
-
-    setSignatures((prev) => ({
-      ...prev,
-      [key]: emptySignature(),
-    }))
-
+    if (!isAdmin && !isSignedByCurrentUser) return
+    setSignatures((prev) => ({ ...prev, [key]: emptySignature() }))
     markDirty()
     setStatusMessage("Podpis byl zrušen.")
     setTimeout(() => setStatusMessage(null), 3000)
@@ -496,41 +526,28 @@ export function ExitChecklistForm({
     value: ExitResolvedValue
   ) {
     if (isLocked) return
-    if (SIGNING_DISABLED_KEYS.includes(key)) return
-
+    if (signingDisabledKeys.includes(key)) return
     const current = items.find((i) => i.key === key)
     if (!current) return
-
     if (
       !isAdmin &&
       current.signedByEmail &&
       current.signedByEmail !== currentUserEmail
-    ) {
+    )
       return
-    }
-
     markDirty()
     setItems((prev) =>
       prev.map((item) =>
-        item.key === key
-          ? {
-              ...item,
-              resolved: value,
-            }
-          : item
+        item.key === key ? { ...item, resolved: value } : item
       )
     )
   }
 
   function signRow(key: ExitChecklistItem["key"]) {
     if (isLocked || !currentUserEmail) return
-
+    if (signingDisabledKeys.includes(key)) return
     const current = items.find((i) => i.key === key)
-    if (!current) return
-
-    const isAlreadySigned = Boolean(current.signedAt)
-    if (isAlreadySigned) return
-
+    if (!current || Boolean(current.signedAt)) return
     markDirty()
     setItems((prev) =>
       prev.map((item) =>
@@ -551,20 +568,12 @@ export function ExitChecklistForm({
 
   function revokeSignature(key: ExitChecklistItem["key"]) {
     if (isLocked) return
-
     const current = items.find((i) => i.key === key)
-    if (!current) return
-
-    const isSigned = Boolean(current.signedAt)
-    if (!isSigned) return
-
+    if (!current || !Boolean(current.signedAt)) return
     const isSignedByCurrentUser =
       Boolean(current.signedByEmail) &&
       current.signedByEmail === currentUserEmail
-
-    const canRevoke = isAdmin || isSignedByCurrentUser
-    if (!canRevoke) return
-
+    if (!isAdmin && !isSignedByCurrentUser) return
     markDirty()
     setItems((prev) =>
       prev.map((item) =>
@@ -588,11 +597,7 @@ export function ExitChecklistForm({
     markDirty()
     setAssets((prev) => [
       ...prev,
-      {
-        id: createTempAssetId(),
-        subject: "",
-        inventoryNumber: "",
-      },
+      { id: createTempAssetId(), subject: "", inventoryNumber: "" },
     ])
   }
 
@@ -604,14 +609,7 @@ export function ExitChecklistForm({
     if (isLocked) return
     markDirty()
     setAssets((prev) =>
-      prev.map((a) =>
-        a.id === id
-          ? {
-              ...a,
-              [field]: value,
-            }
-          : a
-      )
+      prev.map((a) => (a.id === id ? { ...a, [field]: value } : a))
     )
   }
 
@@ -624,7 +622,6 @@ export function ExitChecklistForm({
   async function handleSave(lockAfterSave: boolean) {
     try {
       setSaving(true)
-
       const saveUrl = isInternalMode
         ? `/api/odchody/${offboardingId}/exit-checklist`
         : `/api/odchody/public/${publicToken}`
@@ -635,6 +632,9 @@ export function ExitChecklistForm({
         credentials: "include",
         body: JSON.stringify({
           lock: isInternalMode ? lockAfterSave : false,
+          conflictOfInterest,
+          managerEmail: managerEmail || null,
+          managerName: managerName || null,
           items: items.map((i) => ({
             key: i.key,
             resolved: i.resolved,
@@ -680,17 +680,16 @@ export function ExitChecklistForm({
         setItems(merged)
         setAssets(json.data.assets ?? [])
         setLockedAt(json.data.lockedAt ?? null)
-
+        setConflictOfInterest(json.data.conflictOfInterest ?? false)
         setSignatures({
           employee: json.data.signatures?.employee ?? emptySignature(),
           manager: json.data.signatures?.manager ?? emptySignature(),
           issuer: json.data.signatures?.issuer ?? emptySignature(),
           issuedDate: getDefaultIssuedDate(json.data.signatures?.issuedDate),
         })
-
+        setManagerName(json.data.managerName ?? "")
+        setManagerEmail(json.data.managerEmail ?? "")
         setDirty(false)
-        setStatusMessage("Výstupní list byl úspěšně uložen.")
-        setTimeout(() => setStatusMessage(null), 3000)
         onSaved?.(json.data)
       }
     } catch (err) {
@@ -764,6 +763,35 @@ export function ExitChecklistForm({
             </div>
           </div>
 
+          {isInternalMode && !isLocked && (
+            <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
+              <Checkbox
+                id="conflictOfInterest"
+                checked={conflictOfInterest}
+                onCheckedChange={(checked) => {
+                  setConflictOfInterest(Boolean(checked))
+                  markDirty()
+                }}
+              />
+              <Label
+                htmlFor="conflictOfInterest"
+                className="cursor-pointer text-sm"
+              >
+                Obsahuje střet zájmů{" "}
+                <span className="text-xs font-normal text-muted-foreground">
+                  (aktivuje řádek Právního odboru k podpisu a zahrne ho do
+                  hromadného odesílání k podpisu)
+                </span>
+              </Label>
+            </div>
+          )}
+
+          {isInternalMode && isLocked && conflictOfInterest && (
+            <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              Střet zájmů: zahrnut řádek Právního odboru
+            </div>
+          )}
+
           <div className="grid gap-4 border-t pt-4 md:grid-cols-2">
             <HeaderSignatureBlock
               label="Podpis zaměstnance"
@@ -776,46 +804,177 @@ export function ExitChecklistForm({
               onRevoke={() => revokeHeaderSignature("employee")}
             />
 
-            <HeaderSignatureBlock
-              label="Podpis vedoucího odboru"
-              value={signatures.manager}
-              isLocked={isLocked}
-              isAdmin={isAdmin}
-              currentUserName={currentUserName}
-              currentUserEmail={currentUserEmail}
-              onSign={() => signHeaderSignature("manager")}
-              onRevoke={() => revokeHeaderSignature("manager")}
-            />
-          </div>
+            <div className="space-y-2 rounded-md border p-3">
+              <Label className="text-sm font-medium">
+                Podpis vedoucího odboru
+              </Label>
 
-          <div className="grid gap-4 border-t pt-4 md:grid-cols-[1fr,220px] md:items-start">
-            <HeaderSignatureBlock
-              label="pí Ing. Krýzová Martina, podpis"
-              value={signatures.issuer}
-              isLocked={isLocked}
-              isAdmin={isAdmin}
-              currentUserName={currentUserName}
-              currentUserEmail={currentUserEmail}
-              onSign={() => signHeaderSignature("issuer")}
-              onRevoke={() => revokeHeaderSignature("issuer")}
-            />
+              {isInternalMode && !isLocked && (
+                <div className="space-y-2">
+                  <Label className="text-xs text-muted-foreground">
+                    Vybrat vedoucího z eOSu
+                  </Label>
+                  <Popover
+                    open={managerSearchOpen}
+                    onOpenChange={(o) => {
+                      setManagerSearchOpen(o)
+                      if (o && managerEmployees.length === 0) {
+                        setManagerSearchLoading(true)
+                        fetch("/api/zamestnanci/hledat?q=1&limit=500", {
+                          cache: "no-store",
+                        })
+                          .then((r) => r.json())
+                          .then((json) => {
+                            setManagerEmployees(
+                              Array.isArray(json?.data) ? json.data : []
+                            )
+                          })
+                          .catch(() => {})
+                          .finally(() => setManagerSearchLoading(false))
+                      }
+                    }}
+                  >
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="w-full justify-between text-xs"
+                      >
+                        <span className="truncate">
+                          {managerName || "Vyhledat vedoucího v eOSu…"}
+                        </span>
+                        <ChevronDown className="ml-2 size-3 opacity-60" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[380px] p-0" align="start">
+                      <Command shouldFilter={false}>
+                        <CommandInput
+                          placeholder="Jméno, osobní číslo nebo e-mail…"
+                          value={managerQuery}
+                          onValueChange={setManagerQuery}
+                        />
+                        <CommandEmpty>
+                          {managerSearchLoading
+                            ? "Načítám…"
+                            : "Nikdo nenalezen"}
+                        </CommandEmpty>
+                        <CommandList className="max-h-72 overflow-y-auto">
+                          <CommandGroup>
+                            {filteredManagerEmployees.map((e) => (
+                              <CommandItem
+                                key={e.id}
+                                value={e.id}
+                                onSelect={() => {
+                                  const fullName = buildEmployeeFullName(e)
+                                  setManagerName(fullName)
+                                  setManagerEmail(e.email ?? "")
+                                  markDirty()
+                                  setManagerSearchOpen(false)
+                                  setManagerQuery("")
+                                }}
+                                className="flex items-start gap-2 py-2"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-sm font-medium">
+                                    {buildEmployeeFullName(e)}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">
+                                    {e.email}
+                                    {e.department ? ` · ${e.department}` : ""}
+                                  </div>
+                                </div>
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
 
-            <div className="space-y-2">
-              <Label htmlFor="issuedDate">Datum vystavení</Label>
-              <Input
-                id="issuedDate"
-                type="date"
-                value={signatures.issuedDate ?? ""}
-                onChange={(e) => {
-                  setSignatures((prev) => ({
-                    ...prev,
-                    issuedDate: e.target.value,
-                  }))
-                  markDirty()
-                }}
-                disabled={isLocked}
-                className="w-full"
-              />
+                  {managerName && (
+                    <div className="flex items-start justify-between gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs">
+                      <div>
+                        <div className="font-medium">{managerName}</div>
+                        {managerEmail && (
+                          <div className="text-muted-foreground">
+                            {managerEmail}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setManagerName("")
+                          setManagerEmail("")
+                          markDirty()
+                        }}
+                        className="shrink-0 text-muted-foreground hover:text-foreground"
+                        title="Odebrat vedoucího"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {(isLocked || !isInternalMode) && managerName && (
+                <div className="rounded-md bg-muted/50 px-3 py-2 text-xs">
+                  <div className="font-medium">{managerName}</div>
+                  {managerEmail && (
+                    <div className="text-muted-foreground">{managerEmail}</div>
+                  )}
+                </div>
+              )}
+
+              {signatures.manager.signedAt ? (
+                <div className="rounded-md bg-muted/50 px-3 py-2 text-sm">
+                  <div>{signatures.manager.signedByName ?? "Podepsáno"}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {format(
+                      new Date(signatures.manager.signedAt),
+                      "d.M.yyyy HH:mm"
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
+                  Nepodepsáno
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-2">
+                {!isLocked &&
+                  !signatures.manager.signedAt &&
+                  Boolean(currentUserName || currentUserEmail) && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="gap-1"
+                      onClick={() => signHeaderSignature("manager")}
+                    >
+                      <Check className="size-4" />
+                      Podepsat elektronicky
+                    </Button>
+                  )}
+                {!isLocked &&
+                  signatures.manager.signedAt &&
+                  (isAdmin ||
+                    signatures.manager.signedByEmail === currentUserEmail) && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="gap-1 text-xs text-muted-foreground"
+                      onClick={() => revokeHeaderSignature("manager")}
+                    >
+                      <Undo2 className="size-4" />
+                      Zrušit podpis
+                    </Button>
+                  )}
+              </div>
             </div>
           </div>
         </CardContent>
@@ -845,39 +1004,38 @@ export function ExitChecklistForm({
                 item.signedByEmail &&
                 currentUserEmail &&
                 item.signedByEmail === currentUserEmail
-              const isSigningDisabled = SIGNING_DISABLED_KEYS.includes(item.key)
-              const showSignButton = !isLocked && !isSigned
+              const isSigningDisabled = signingDisabledKeys.includes(item.key)
+              const isLawInfoGreyed = item.key === "lawInfo" && lawInfoGreyed
+              const showSignButton =
+                !isLocked && !isSigned && !isSigningDisabled
               const showRevokeButton =
                 !isLocked && isSigned && (isAdmin || currentUserIsSigner)
 
               return (
-                <div key={item.key} className="space-y-2 px-4 py-3">
-                  <div className="text-xs font-medium text-muted-foreground">
-                    {item.organization}
+                <div
+                  key={item.key}
+                  className={`space-y-2 px-4 py-3 ${isLawInfoGreyed ? "opacity-50" : ""}`}
+                >
+                  <div className="text-xs">
+                    {renderOrganization(
+                      item.organization,
+                      item.key === "handoverProtocol" ? managerName : null
+                    )}
                   </div>
                   <div className="text-sm">{item.obligation}</div>
-
                   <div className="flex items-center justify-between gap-2 pt-1">
                     {!isLocked && !isSigningDisabled ? (
                       <div className="inline-flex items-center gap-1 rounded-md bg-muted px-1 py-0.5 text-xs">
                         <button
                           type="button"
-                          className={`rounded px-2 py-0.5 ${
-                            item.resolved === "YES"
-                              ? "bg-green-600 text-white"
-                              : "hover:bg-green-100 dark:hover:bg-green-900/40"
-                          }`}
+                          className={`rounded px-2 py-0.5 ${item.resolved === "YES" ? "bg-green-600 text-white" : "hover:bg-green-100 dark:hover:bg-green-900/40"}`}
                           onClick={() => updateResolved(item.key, "YES")}
                         >
                           Ano
                         </button>
                         <button
                           type="button"
-                          className={`rounded px-2 py-0.5 ${
-                            item.resolved === "NO"
-                              ? "bg-red-600 text-white"
-                              : "hover:bg-red-100 dark:hover:bg-red-900/40"
-                          }`}
+                          className={`rounded px-2 py-0.5 ${item.resolved === "NO" ? "bg-red-600 text-white" : "hover:bg-red-100 dark:hover:bg-red-900/40"}`}
                           onClick={() => updateResolved(item.key, "NO")}
                         >
                           Ne
@@ -885,14 +1043,15 @@ export function ExitChecklistForm({
                       </div>
                     ) : (
                       <span className="text-sm font-medium">
-                        {item.resolved === "YES"
-                          ? "✓ Ano"
-                          : item.resolved === "NO"
-                            ? "✗ Ne"
-                            : "–"}
+                        {isLawInfoGreyed
+                          ? "–"
+                          : item.resolved === "YES"
+                            ? "✓ Ano"
+                            : item.resolved === "NO"
+                              ? "✗ Ne"
+                              : "–"}
                       </span>
                     )}
-
                     <div className="flex gap-2">
                       {showSignButton && (
                         <Button
@@ -900,10 +1059,7 @@ export function ExitChecklistForm({
                           size="sm"
                           variant="outline"
                           className="gap-1"
-                          disabled={isSigningDisabled}
-                          onClick={() =>
-                            !isSigningDisabled && signRow(item.key)
-                          }
+                          onClick={() => signRow(item.key)}
                         >
                           <Check className="size-3" />
                           Podepsat
@@ -923,8 +1079,7 @@ export function ExitChecklistForm({
                       )}
                     </div>
                   </div>
-
-                  {isSigned && (
+                  {isSigned && !isLawInfoGreyed && (
                     <div className="text-xs text-muted-foreground">
                       {item.signedByName} · {signedAtDate}
                     </div>
@@ -959,17 +1114,26 @@ export function ExitChecklistForm({
                     item.signedByEmail &&
                     currentUserEmail &&
                     item.signedByEmail === currentUserEmail
-                  const isSigningDisabled = SIGNING_DISABLED_KEYS.includes(
+                  const isSigningDisabled = signingDisabledKeys.includes(
                     item.key
                   )
-                  const showSignButton = !isLocked && !isSigned
+                  const isLawInfoGreyed =
+                    item.key === "lawInfo" && lawInfoGreyed
+                  const showSignButton =
+                    !isLocked && !isSigned && !isSigningDisabled
                   const showRevokeButton =
                     !isLocked && isSigned && (isAdmin || currentUserIsSigner)
 
                   return (
-                    <TableRow key={item.key}>
+                    <TableRow
+                      key={item.key}
+                      className={isLawInfoGreyed ? "opacity-50" : ""}
+                    >
                       <TableCell className="align-top text-sm">
-                        {item.organization}
+                        {renderOrganization(
+                          item.organization,
+                          item.key === "handoverProtocol" ? managerName : null
+                        )}
                       </TableCell>
                       <TableCell className="align-top text-sm">
                         {item.obligation}
@@ -979,22 +1143,14 @@ export function ExitChecklistForm({
                           <div className="inline-flex items-center gap-1 rounded-md bg-muted px-1 py-0.5 text-xs">
                             <button
                               type="button"
-                              className={`rounded px-2 py-0.5 ${
-                                item.resolved === "YES"
-                                  ? "bg-green-600 text-white"
-                                  : "hover:bg-green-100 dark:hover:bg-green-900/40"
-                              }`}
+                              className={`rounded px-2 py-0.5 ${item.resolved === "YES" ? "bg-green-600 text-white" : "hover:bg-green-100 dark:hover:bg-green-900/40"}`}
                               onClick={() => updateResolved(item.key, "YES")}
                             >
                               Ano
                             </button>
                             <button
                               type="button"
-                              className={`rounded px-2 py-0.5 ${
-                                item.resolved === "NO"
-                                  ? "bg-red-600 text-white"
-                                  : "hover:bg-red-100 dark:hover:bg-red-900/40"
-                              }`}
+                              className={`rounded px-2 py-0.5 ${item.resolved === "NO" ? "bg-red-600 text-white" : "hover:bg-red-100 dark:hover:bg-red-900/40"}`}
                               onClick={() => updateResolved(item.key, "NO")}
                             >
                               Ne
@@ -1002,16 +1158,18 @@ export function ExitChecklistForm({
                           </div>
                         ) : (
                           <span className="text-sm font-medium">
-                            {item.resolved === "YES"
-                              ? "Ano"
-                              : item.resolved === "NO"
-                                ? "Ne"
-                                : "–"}
+                            {isLawInfoGreyed
+                              ? "–"
+                              : item.resolved === "YES"
+                                ? "Ano"
+                                : item.resolved === "NO"
+                                  ? "Ne"
+                                  : "–"}
                           </span>
                         )}
                       </TableCell>
                       <TableCell className="align-top text-sm">
-                        {isSigned ? (
+                        {isSigned && !isLawInfoGreyed ? (
                           <div className="flex flex-col">
                             <span>{item.signedByName}</span>
                             <span className="text-xs text-muted-foreground">
@@ -1020,7 +1178,7 @@ export function ExitChecklistForm({
                           </div>
                         ) : (
                           <span className="text-xs text-muted-foreground">
-                            Nepodepsáno
+                            {isLawInfoGreyed ? "—" : "Nepodepsáno"}
                           </span>
                         )}
                       </TableCell>
@@ -1032,15 +1190,7 @@ export function ExitChecklistForm({
                               size="sm"
                               variant="outline"
                               className="gap-1"
-                              disabled={isSigningDisabled}
-                              title={
-                                isSigningDisabled
-                                  ? "Tato položka zatím není dostupná k podpisu."
-                                  : undefined
-                              }
-                              onClick={() =>
-                                !isSigningDisabled && signRow(item.key)
-                              }
+                              onClick={() => signRow(item.key)}
                             >
                               <Check className="size-4" />
                               Podepsat
@@ -1072,15 +1222,13 @@ export function ExitChecklistForm({
       <Card>
         <CardHeader>
           <CardTitle className="text-base">
-            Zapůjčený movitý majetek (mobilní telefon, fotopřístroje…)
+            Výpis z osobní karty zaměstnance o zapůjčení movitého majetku
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-xs text-muted-foreground">
-            Odpovídá části „Výpis z osobní karty zaměstnance… / předmět –
-            inventární číslo“ v papírovém formuláři.
+            (mobilní telefon, fotopřístroje) evidovaného Odborem služeb k datu:
           </p>
-
           <Table>
             <TableHeader>
               <TableRow>
@@ -1159,6 +1307,36 @@ export function ExitChecklistForm({
               Přidat položku
             </Button>
           )}
+
+          <div className="grid gap-4 border-t pt-4 md:grid-cols-[1fr,220px] md:items-start">
+            <HeaderSignatureBlock
+              label="Ing. Krýzová Martina, podpis"
+              value={signatures.issuer}
+              isLocked={isLocked}
+              isAdmin={isAdmin}
+              currentUserName={currentUserName}
+              currentUserEmail={currentUserEmail}
+              onSign={() => signHeaderSignature("issuer")}
+              onRevoke={() => revokeHeaderSignature("issuer")}
+            />
+            <div className="space-y-2">
+              <Label htmlFor="issuedDate">Datum vystavení</Label>
+              <Input
+                id="issuedDate"
+                type="date"
+                value={signatures.issuedDate ?? ""}
+                onChange={(e) => {
+                  setSignatures((prev) => ({
+                    ...prev,
+                    issuedDate: e.target.value,
+                  }))
+                  markDirty()
+                }}
+                disabled={isLocked}
+                className="w-full"
+              />
+            </div>
+          </div>
         </CardContent>
       </Card>
 
@@ -1166,7 +1344,6 @@ export function ExitChecklistForm({
         <CardHeader>
           <CardTitle className="flex items-center justify-between text-base">
             <span>Předávaná agenda</span>
-
             {!isLocked && (
               <div className="flex items-center gap-2">
                 <Checkbox
@@ -1175,7 +1352,6 @@ export function ExitChecklistForm({
                   onCheckedChange={(checked) => {
                     const next = Boolean(checked)
                     setIncludeHandoverAgenda(next)
-
                     if (!next) {
                       setHandoverOption1(false)
                       setHandoverOption2(false)
@@ -1185,7 +1361,6 @@ export function ExitChecklistForm({
                       setHandoverOption3Reason("")
                       setResponsibleParty(null)
                     }
-
                     markDirty()
                   }}
                 />
@@ -1197,7 +1372,6 @@ export function ExitChecklistForm({
                 </Label>
               </div>
             )}
-
             {isLocked && includeHandoverAgenda && (
               <Badge variant="secondary">Zahrnuto</Badge>
             )}
@@ -1210,7 +1384,6 @@ export function ExitChecklistForm({
               Elektronické dokumenty v e-spisu - elektronické přihlášení
               dokumentů (zakroužkujte realizovanou možnost)
             </p>
-
             <div className="space-y-4">
               <div className="flex items-start gap-3">
                 <Checkbox
@@ -1239,14 +1412,12 @@ export function ExitChecklistForm({
                     onCheckedChange={(checked) => {
                       const next = Boolean(checked)
                       setHandoverOption2(next)
-
                       if (!next) {
                         setHandoverOption2Target("")
                         setHandoverOption2TargetPositionNum("")
                         setPositionPickerOpen(false)
                         setPositionQuery("")
                       }
-
                       markDirty()
                     }}
                     disabled={isLocked}
@@ -1279,7 +1450,6 @@ export function ExitChecklistForm({
                           <ChevronDown className="ml-2 size-4 opacity-60" />
                         </Button>
                       </PopoverTrigger>
-
                       <PopoverContent className="w-[420px] p-0" align="start">
                         <Command shouldFilter={false}>
                           <CommandInput
@@ -1339,12 +1509,10 @@ export function ExitChecklistForm({
                     onCheckedChange={(checked) => {
                       const next = Boolean(checked)
                       setHandoverOption3(next)
-
                       if (!next) {
                         setHandoverOption3Reason("")
                         setResponsibleParty(null)
                       }
-
                       markDirty()
                     }}
                     disabled={isLocked}
@@ -1368,12 +1536,10 @@ export function ExitChecklistForm({
                       placeholder="např. do doby nástupu nového zaměstnance"
                       disabled={isLocked}
                     />
-
                     <div className="space-y-2">
                       <p className="text-sm font-medium">
                         Za dokumenty odpovídá:
                       </p>
-
                       <div className="flex flex-wrap gap-4">
                         <div className="flex items-center gap-2">
                           <input
@@ -1395,25 +1561,24 @@ export function ExitChecklistForm({
                             KITT6
                           </Label>
                         </div>
-
                         <div className="flex items-center gap-2">
                           <input
                             type="radio"
-                            id="resp-ossl"
+                            id="resp-oss"
                             name="responsibleParty"
-                            checked={responsibleParty === "OSSL_KT"}
+                            checked={responsibleParty === "OSS_KT"}
                             onChange={() => {
-                              setResponsibleParty("OSSL_KT")
+                              setResponsibleParty("OSS_KT")
                               markDirty()
                             }}
                             disabled={isLocked}
                             className="cursor-pointer disabled:cursor-default"
                           />
                           <Label
-                            htmlFor="resp-ossl"
+                            htmlFor="resp-oss"
                             className={`text-sm ${isLocked ? "cursor-default" : "cursor-pointer"}`}
                           >
-                            OSSL KT
+                            OSS KT
                           </Label>
                         </div>
                       </div>
@@ -1437,6 +1602,18 @@ export function ExitChecklistForm({
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-2">
+            {canInvite && initialData.publicToken && (
+              <SendAllDialog
+                offboardingId={offboardingId!}
+                employeeName={header.employeeName ?? ""}
+                employeeEmail={header.employeeEmail ?? null}
+                publicToken={initialData.publicToken}
+                conflictOfInterest={conflictOfInterest}
+                managerEmail={managerEmail || null}
+                managerName={managerName || null}
+              />
+            )}
+
             {canInvite && (
               <SendInviteDialog
                 offboardingId={offboardingId!}
@@ -1467,9 +1644,8 @@ export function ExitChecklistForm({
                   onClick={() => void handleSave(false)}
                   disabled={saving}
                 >
-                  Uložit
+                  {saving ? "Ukládám…" : "Uložit"}
                 </Button>
-
                 {canLock && (
                   <Button
                     type="button"

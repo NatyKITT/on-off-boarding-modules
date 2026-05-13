@@ -46,7 +46,7 @@ export interface HandoverAgendaData {
   option2TargetPositionNum?: string
   option3?: boolean
   option3Reason?: string
-  responsibleParty?: "KITT6" | "OSSL_KT" | null
+  responsibleParty?: "KITT6" | "OSS_KT" | null
 }
 
 export interface ExitChecklistSignatureValue {
@@ -60,17 +60,24 @@ export interface ExitChecklistSignatures {
   manager: ExitChecklistSignatureValue
   issuer: ExitChecklistSignatureValue
   issuedDate: string
+  managerEmail?: string | null
 }
 
 export interface ExitChecklistData {
   id?: number
   offboardingId: number
+  publicToken?: string | null
+  conflictOfInterest?: boolean
   employeeName: string
   personalNumber: string | null
   department: string
   unitName: string
+  positionNum?: string | null
   employmentEndDate: string
   lockedAt: string | null
+  employeeEmail?: string | null
+  managerEmail?: string | null
+  managerName?: string | null
   items: ExitChecklistItem[]
   assets: ExitAssetItem[]
   handover?: HandoverAgendaData
