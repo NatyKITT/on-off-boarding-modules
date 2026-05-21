@@ -3,20 +3,41 @@ import path from "path"
 
 import type { NextRequest } from "next/server"
 import fontkit from "@pdf-lib/fontkit"
-import { PDFDocument, type PDFFont, type PDFPage } from "pdf-lib"
+import { PDFDocument, rgb, type PDFFont, type PDFPage } from "pdf-lib"
 
 import type {
   ExitChecklistData,
+  ExitChecklistSignatureValue,
   HandoverAgendaData,
 } from "@/types/exit-checklist"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-const H = 841.92
-const cv = (y: number) => H - y
+const PAGE_HEIGHT = 841.92
+const PAGE_WIDTH = 595.28
 
-const nfc = (s?: string | null) => (s ?? "").normalize("NFC")
+const cv = (yFromTop: number) => PAGE_HEIGHT - yFromTop
+const nfc = (value?: string | null) => (value ?? "").normalize("NFC")
+
+const SECTION_LEFT = 58
+const SECTION_RIGHT = 520
+const SECTION_WIDTH = SECTION_RIGHT - SECTION_LEFT
+
+const ASSET_TABLE_LEFT = 58
+const ASSET_TABLE_RIGHT = 520
+const ASSET_TABLE_SPLIT = 332
+const ASSET_TABLE_HEADER_HEIGHT = 15
+const ASSET_TABLE_ROW_HEIGHT = 15
+const DRAW_ASSET_TABLE_HEADER_TEXT = true
+
+const PAGE1_SIGN_OFFSET = 7
+const PAGE2_SIGN_OFFSET = 26
+
+type FontSet = {
+  regular: PDFFont
+  bold: PDFFont
+}
 
 async function getChecklistById(
   id: number,
@@ -34,6 +55,17 @@ async function getChecklistById(
   return json.data as ExitChecklistData
 }
 
+async function readFirstExistingFile(
+  paths: string[]
+): Promise<Uint8Array | null> {
+  for (const filePath of paths) {
+    try {
+      return await fs.readFile(filePath)
+    } catch {}
+  }
+  return null
+}
+
 function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
   const { buffer, byteOffset, byteLength } = u8
   return buffer.slice(byteOffset, byteOffset + byteLength) as ArrayBuffer
@@ -46,14 +78,14 @@ function cleanText(value?: string | null): string {
 function formatCzDate(iso?: string | null): string {
   if (!iso) return ""
   const d = new Date(iso)
-  if (isNaN(d.getTime())) return ""
+  if (Number.isNaN(d.getTime())) return ""
   return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`
 }
 
 function formatCzDateTime(iso?: string | null): string {
   if (!iso) return ""
   const d = new Date(iso)
-  if (isNaN(d.getTime())) return ""
+  if (Number.isNaN(d.getTime())) return ""
   return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`
 }
 
@@ -76,14 +108,17 @@ function drawTextFitted(
   x: number,
   y: number,
   maxWidth: number,
-  baseSize: number
+  baseSize: number,
+  minSize = 5.2
 ) {
-  if (!text) return
+  const normalized = nfc(cleanText(text))
+  if (!normalized) return
   let size = baseSize
-  if (font.widthOfTextAtSize(nfc(text), size) > maxWidth) {
-    size = (maxWidth / font.widthOfTextAtSize(nfc(text), size)) * size
+  const width = font.widthOfTextAtSize(normalized, size)
+  if (width > maxWidth) {
+    size = Math.max(minSize, (maxWidth / width) * size)
   }
-  page.drawText(nfc(text), { x, y, size, font })
+  page.drawText(normalized, { x, y, size, font })
 }
 
 function drawCenteredText(
@@ -94,8 +129,9 @@ function drawCenteredText(
   y: number,
   size: number
 ) {
-  const w = font.widthOfTextAtSize(nfc(text), size)
-  page.drawText(nfc(text), { x: centerX - w / 2, y, size, font })
+  const normalized = nfc(text)
+  const width = font.widthOfTextAtSize(normalized, size)
+  page.drawText(normalized, { x: centerX - width / 2, y, size, font })
 }
 
 function wrapText(
@@ -113,10 +149,15 @@ function wrapText(
     const candidate = current ? `${current} ${word}` : word
     if (font.widthOfTextAtSize(candidate, fontSize) <= maxWidth) {
       current = candidate
-    } else {
-      if (current) lines.push(current)
-      current = word
+      continue
     }
+    if (current) {
+      lines.push(current)
+      current = word
+      continue
+    }
+    lines.push(word)
+    current = ""
   }
   if (current) lines.push(current)
   return lines
@@ -129,60 +170,348 @@ function drawParagraph(
   x: number,
   y: number,
   maxWidth: number,
-  fontSize = 10,
-  lineHeight = 13
+  fontSize = 9,
+  lineHeight = 11.5
 ): number {
-  for (const line of wrapText(text, font, fontSize, maxWidth)) {
+  const lines = wrapText(text, font, fontSize, maxWidth)
+  for (const line of lines) {
     drawText(page, font, line, x, y, fontSize)
     y -= lineHeight
   }
   return y
 }
 
-function drawSignatureBlock(
+function drawBoldText(
   page: PDFPage,
-  font: PDFFont,
-  signer: string,
+  fonts: FontSet,
+  text: string | null | undefined,
+  x: number,
+  y: number,
+  size: number
+) {
+  if (!text) return
+  drawText(page, fonts.bold, text, x, y, size)
+  drawText(page, fonts.bold, text, x + 0.35, y, size)
+}
+
+function drawBoldTextFitted(
+  page: PDFPage,
+  fonts: FontSet,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  baseSize: number,
+  minSize = 5.2
+) {
+  if (!cleanText(text)) return
+  drawTextFitted(page, fonts.bold, text, x, y, maxWidth, baseSize, minSize)
+  drawTextFitted(
+    page,
+    fonts.bold,
+    text,
+    x + 0.35,
+    y,
+    maxWidth,
+    baseSize,
+    minSize
+  )
+}
+
+function splitSignerForPdf(signer: string): {
+  name: string
+  isBehalf: boolean
+} {
+  const cleaned = cleanText(signer)
+  const isBehalf =
+    /v\s+zastoupení/i.test(cleaned) || /\bv\.?\s*z\.?\b/i.test(cleaned)
+  const name = cleaned
+    .replace(/\s*[—-]\s*v\s+zastoupení\s*$/i, "")
+    .replace(/\s*\(v\s+zastoupení\)\s*$/i, "")
+    .replace(/^\s*v\.?\s*z\.?\s*/i, "")
+    .trim()
+  return { name: name || cleaned, isBehalf }
+}
+
+function drawSignatureBlockBase(
+  page: PDFPage,
+  fonts: FontSet,
+  signer: string | null | undefined,
+  signedAt: string | null | undefined,
+  x: number,
+  y: number,
+  maxWidth: number,
+  options: {
+    nameSize: number
+    dateSize: number
+    noteSize: number
+    lineHeight: number
+  }
+) {
+  const rawName = cleanText(signer)
+  if (!rawName) return
+
+  const { name, isBehalf } = splitSignerForPdf(rawName)
+  const displayName = isBehalf ? `v.z. ${name}` : name
+  const nameLines = wrapText(
+    displayName,
+    fonts.regular,
+    options.nameSize,
+    maxWidth
+  )
+
+  let currentY = y
+  for (const line of nameLines) {
+    drawText(page, fonts.regular, line, x, currentY, options.nameSize)
+    currentY -= options.lineHeight
+  }
+
+  if (signedAt) {
+    drawText(
+      page,
+      fonts.regular,
+      formatCzDateTime(signedAt),
+      x,
+      currentY,
+      options.dateSize
+    )
+    currentY -= options.lineHeight - 1
+  }
+
+  const noteLines = wrapText(
+    "Elektronicky potvrzeno v aplikaci On-Off-Boarding ÚMČ Praha 6.",
+    fonts.regular,
+    options.noteSize,
+    maxWidth
+  )
+  for (const line of noteLines) {
+    drawText(page, fonts.regular, line, x, currentY, options.noteSize)
+    currentY -= options.noteSize + 1
+  }
+}
+
+function drawSignatureBlockHeader(
+  page: PDFPage,
+  fonts: FontSet,
+  signer: string | null | undefined,
   signedAt: string | null | undefined,
   x: number,
   y: number,
   maxWidth: number
 ) {
-  const name = cleanText(signer)
-  if (!name) return
+  drawSignatureBlockBase(page, fonts, signer, signedAt, x, y, maxWidth, {
+    nameSize: 9.0,
+    dateSize: 7.5,
+    noteSize: 5.2,
+    lineHeight: 8.5,
+  })
+}
 
-  const nameLines = wrapText(name, font, 9, maxWidth)
-  let curY = y
-  for (const line of nameLines) {
-    drawText(page, font, line, x, curY, 9)
-    curY -= 10
+function drawSignatureBlockPage1(
+  page: PDFPage,
+  fonts: FontSet,
+  signer: string | null | undefined,
+  signedAt: string | null | undefined,
+  x: number,
+  y: number,
+  maxWidth: number
+) {
+  drawSignatureBlockBase(page, fonts, signer, signedAt, x, y, maxWidth, {
+    nameSize: 8.5,
+    dateSize: 7.0,
+    noteSize: 4.8,
+    lineHeight: 8.0,
+  })
+}
+
+function drawSignatureBlockPage2(
+  page: PDFPage,
+  fonts: FontSet,
+  signer: string | null | undefined,
+  signedAt: string | null | undefined,
+  x: number,
+  y: number,
+  maxWidth: number
+) {
+  drawSignatureBlockBase(page, fonts, signer, signedAt, x, y, maxWidth, {
+    nameSize: 8.5,
+    dateSize: 7.0,
+    noteSize: 4.8,
+    lineHeight: 8.0,
+  })
+}
+
+function drawSignatureBlockSection(
+  page: PDFPage,
+  fonts: FontSet,
+  signer: string | null | undefined,
+  signedAt: string | null | undefined,
+  x: number,
+  y: number,
+  maxWidth: number
+) {
+  drawSignatureBlockBase(page, fonts, signer, signedAt, x, y, maxWidth, {
+    nameSize: 9.0,
+    dateSize: 7.5,
+    noteSize: 5.0,
+    lineHeight: 8.5,
+  })
+}
+
+function drawHorizontalLine(
+  page: PDFPage,
+  x1: number,
+  x2: number,
+  yFromTop: number,
+  thickness = 0.5
+) {
+  page.drawLine({
+    start: { x: x1, y: cv(yFromTop) },
+    end: { x: x2, y: cv(yFromTop) },
+    thickness,
+    color: rgb(0, 0, 0),
+  })
+}
+
+function drawVerticalLine(
+  page: PDFPage,
+  x: number,
+  yTopFromTop: number,
+  yBottomFromTop: number,
+  thickness = 0.5
+) {
+  page.drawLine({
+    start: { x, y: cv(yTopFromTop) },
+    end: { x, y: cv(yBottomFromTop) },
+    thickness,
+    color: rgb(0, 0, 0),
+  })
+}
+
+type AssetRow = {
+  id?: string | null
+  subject?: string | null
+  inventoryNumber?: string | null
+  createdById?: string | null
+}
+
+function normalizeAssetsForPdf(
+  assets: ExitChecklistData["assets"]
+): AssetRow[] {
+  const validAssets = assets.filter(
+    (asset) => cleanText(asset.subject) || cleanText(asset.inventoryNumber)
+  )
+  if (validAssets.length === 0) {
+    return [
+      {
+        id: "empty",
+        subject: "žádný evidovaný majetek",
+        inventoryNumber: "",
+        createdById: null,
+      },
+    ]
+  }
+  return validAssets
+}
+
+function drawAssetsTableOnly({
+  page,
+  fonts,
+  assets,
+  startTopY,
+}: {
+  page: PDFPage
+  fonts: FontSet
+  assets: ExitChecklistData["assets"]
+  startTopY: number
+}): number {
+  const rows = normalizeAssetsForPdf(assets)
+  const leftX = ASSET_TABLE_LEFT
+  const rightX = ASSET_TABLE_RIGHT
+  const splitX = ASSET_TABLE_SPLIT
+  const headerHeight = ASSET_TABLE_HEADER_HEIGHT
+  const rowHeight = ASSET_TABLE_ROW_HEIGHT
+  const tableBottomY = startTopY + headerHeight + rows.length * rowHeight
+
+  drawHorizontalLine(page, leftX, rightX, startTopY, 0.55)
+  drawHorizontalLine(page, leftX, rightX, startTopY + headerHeight, 0.55)
+  drawHorizontalLine(page, leftX, rightX, tableBottomY, 0.55)
+  drawVerticalLine(page, leftX, startTopY, tableBottomY, 0.55)
+  drawVerticalLine(page, splitX, startTopY, tableBottomY, 0.55)
+  drawVerticalLine(page, rightX, startTopY, tableBottomY, 0.55)
+
+  if (DRAW_ASSET_TABLE_HEADER_TEXT) {
+    drawBoldText(page, fonts, "Předmět", leftX + 7, cv(startTopY + 10.8), 9.0)
+    drawBoldText(
+      page,
+      fonts,
+      "Inventární číslo",
+      splitX + 7,
+      cv(startTopY + 10.8),
+      9.0
+    )
   }
 
-  if (signedAt) {
-    drawText(page, font, formatCzDateTime(signedAt), x, curY, 8)
-    curY -= 9
-    const noteLines = wrapText(
-      "Elektronicky potvrzeno v aplikaci On-Off-Boarding ÚMČ Praha 6.",
-      font,
-      5,
-      maxWidth
+  rows.forEach((row, index) => {
+    const rowTopY = startTopY + headerHeight + index * rowHeight
+    const rowBottomY = rowTopY + rowHeight
+    if (index > 0) drawHorizontalLine(page, leftX, rightX, rowTopY, 0.45)
+    drawTextFitted(
+      page,
+      fonts.regular,
+      cleanText(row.subject),
+      leftX + 7,
+      cv(rowTopY + 10.4),
+      splitX - leftX - 16,
+      8.3,
+      5.2
     )
-    for (const line of noteLines) {
-      drawText(page, font, line, x, curY, 5)
-      curY -= 6
-    }
-  } else {
-    const noteLines = wrapText(
-      "Elektronicky potvrzeno v aplikaci On-Off-Boarding ÚMČ Praha 6.",
-      font,
-      5,
-      maxWidth
+    drawTextFitted(
+      page,
+      fonts.regular,
+      cleanText(row.inventoryNumber),
+      splitX + 7,
+      cv(rowTopY + 10.4),
+      rightX - splitX - 16,
+      8.3,
+      5.2
     )
-    for (const line of noteLines) {
-      drawText(page, font, line, x, curY, 5)
-      curY -= 6
+    if (index === rows.length - 1) {
+      drawHorizontalLine(page, leftX, rightX, rowBottomY, 0.55)
     }
-  }
+  })
+
+  return tableBottomY
+}
+
+type HandoverRecipientLike = {
+  name?: string | null
+  email?: string | null
+  personalNumber?: string | null
+  department?: string | null
+}
+
+function getHandoverRecipients(
+  handover?: HandoverAgendaData
+): HandoverRecipientLike[] {
+  const withRecipients = handover as
+    | (HandoverAgendaData & { handoverRecipients?: HandoverRecipientLike[] })
+    | undefined
+  return Array.isArray(withRecipients?.handoverRecipients)
+    ? withRecipients.handoverRecipients
+    : []
+}
+
+function formatHandoverRecipientForPdf(
+  recipient: HandoverRecipientLike
+): string {
+  const name = cleanText(recipient.name)
+  const email = cleanText(recipient.email)
+  const personalNumber = cleanText(recipient.personalNumber)
+  const main = [personalNumber, name].filter(Boolean).join(" — ")
+  if (main && email) return `${main} (${email})`
+  if (main) return main
+  return email
 }
 
 function buildHandoverSummary(handover?: HandoverAgendaData): string[] {
@@ -191,19 +520,19 @@ function buildHandoverSummary(handover?: HandoverAgendaData): string[] {
 
   if (handover.option1) {
     lines.push(
-      "Elektronické dokumenty v e-spisu byly předány zaměstnancem do spisovny v e-spisu nebo předány na jiné funkční místo."
+      "Předáno zaměstnancem do spisovny v e-spise nebo předáno na jiné funkční místo."
     )
   }
 
   if (handover.option2) {
-    const target = cleanText(handover.option2Target)
-    const num = cleanText(handover.option2TargetPositionNum)
-    if (target && num && !target.includes(num)) {
-      lines.push(
-        `OI-KITT6 předá dokumenty na jiné funkční místo: ${num} — ${target}.`
-      )
-    } else if (target) {
-      lines.push(`OI-KITT6 předá dokumenty na jiné funkční místo: ${target}.`)
+    const recipients = getHandoverRecipients(handover)
+      .map(formatHandoverRecipientForPdf)
+      .filter(Boolean)
+    if (recipients.length > 0) {
+      lines.push("OI-KITT6 předá dokumenty na jiné funkční místo:")
+      recipients.forEach((r, i) => {
+        lines.push(`  ${i + 1}. ${r}`)
+      })
     } else {
       lines.push("OI-KITT6 předá dokumenty na jiné funkční místo.")
     }
@@ -211,20 +540,159 @@ function buildHandoverSummary(handover?: HandoverAgendaData): string[] {
 
   if (handover.option3) {
     const reason = cleanText(handover.option3Reason)
-    const resp =
+    const responsibleParty =
       handover.responsibleParty === "KITT6"
         ? "KITT6"
         : handover.responsibleParty === "OSS_KT"
           ? "OSS KT"
           : ""
-    let s = "Agenda zatím zůstává na neobsazeném funkčním místě"
-    if (reason) s += ` z důvodu: ${reason}`
-    s += "."
-    if (resp) s += ` Za dokumenty odpovídá ${resp}.`
-    lines.push(s)
+    let line = "Agenda zatím zůstává na neobsazeném funkčním místě"
+    if (reason) line += ` z důvodu: ${reason}`
+    line += "."
+    if (responsibleParty) line += ` Za dokumenty odpovídá ${responsibleParty}.`
+    lines.push(line)
   }
 
   return lines
+}
+
+function createBlankPage(pdf: PDFDocument) {
+  return pdf.addPage([PAGE_WIDTH, PAGE_HEIGHT])
+}
+
+function drawHandoverSection({
+  pdf,
+  page,
+  fonts,
+  handover,
+  managerName,
+  handoverManagerSignature,
+  startY,
+}: {
+  pdf: PDFDocument
+  page: PDFPage
+  fonts: FontSet
+  handover?: HandoverAgendaData
+  managerName?: string | null
+  handoverManagerSignature?: ExitChecklistSignatureValue | null
+  startY: number
+}) {
+  let activePage = page
+  let y = cv(startY)
+
+  const ensureSpace = (neededHeight: number) => {
+    if (y - neededHeight < 45) {
+      activePage = createBlankPage(pdf)
+      y = cv(60)
+    }
+  }
+
+  ensureSpace(95)
+
+  drawBoldText(activePage, fonts, "C.", SECTION_LEFT, y, 10.6)
+  drawBoldText(
+    activePage,
+    fonts,
+    "Předávaná agenda",
+    SECTION_LEFT + 21,
+    y,
+    10.6
+  )
+
+  y -= 18
+
+  y = drawParagraph(
+    activePage,
+    fonts.regular,
+    "Elektronické dokumenty v e-spisu – elektronické předání dokumentů proběhne/proběhlo následujícím způsobem:",
+    SECTION_LEFT,
+    y,
+    SECTION_WIDTH - 8,
+    9,
+    11.1
+  )
+
+  y -= 6
+
+  const handoverLines = buildHandoverSummary(handover)
+
+  if (handoverLines.length > 0) {
+    for (const line of handoverLines) {
+      ensureSpace(28)
+      const isNumberedItem = /^\s+\d+\./.test(line)
+      const indent = isNumberedItem ? SECTION_LEFT + 12 : SECTION_LEFT
+      const maxW = isNumberedItem ? SECTION_WIDTH - 20 : SECTION_WIDTH - 8
+      y = drawParagraph(
+        activePage,
+        fonts.regular,
+        line.trim(),
+        indent,
+        y,
+        maxW,
+        8.9,
+        10.8
+      )
+      y -= isNumberedItem ? 1 : 2
+    }
+    y -= 10
+  } else {
+    drawText(
+      activePage,
+      fonts.regular,
+      "Není evidována žádná agenda k předání.",
+      SECTION_LEFT,
+      y,
+      8.9
+    )
+    y -= 14
+  }
+
+  if (y - 70 < 45) {
+    activePage = createBlankPage(pdf)
+    y = cv(60)
+  }
+
+  y -= 8
+
+  const labelX = SECTION_LEFT
+  const roleX = 230
+  const signatureX = 375
+
+  drawText(
+    activePage,
+    fonts.regular,
+    "Způsob předání agendy potvrzuje:",
+    labelX,
+    y,
+    9
+  )
+
+  drawText(activePage, fonts.regular, "Vedoucí odboru", roleX, y, 9)
+
+  if (managerName) {
+    drawTextFitted(
+      activePage,
+      fonts.regular,
+      cleanText(managerName),
+      roleX,
+      y - 16,
+      145,
+      9.0,
+      6
+    )
+  }
+
+  if (handoverManagerSignature?.signedByName) {
+    drawSignatureBlockSection(
+      activePage,
+      fonts,
+      handoverManagerSignature.signedByName,
+      handoverManagerSignature.signedAt,
+      signatureX,
+      y,
+      130
+    )
+  }
 }
 
 export async function GET(
@@ -244,23 +712,32 @@ export async function GET(
       "docs",
       "vystupni-list.pdf"
     )
-    const fontPath = path.join(
-      process.cwd(),
-      "public",
-      "assets",
-      "fonts",
-      "NotoSans-Regular.ttf"
-    )
+    const fontDir = path.join(process.cwd(), "public", "assets", "fonts")
+    const regularFontPath = path.join(fontDir, "NotoSans-Regular.ttf")
+    const boldFontPaths = [
+      path.join(fontDir, "NotoSans-Bold.ttf"),
+      path.join(fontDir, "NotoSans_Bold.ttf"),
+      path.join(fontDir, "NotoSans-SemiBold.ttf"),
+      path.join(fontDir, "NotoSans_Condensed-Bold.ttf"),
+    ]
 
-    const [tplBytes, fontBytes, checklist] = await Promise.all([
-      fs.readFile(tplPath),
-      fs.readFile(fontPath),
-      getChecklistById(id, cookie),
-    ])
+    const [tplBytes, regularFontBytes, boldFontBytes, checklist] =
+      await Promise.all([
+        fs.readFile(tplPath),
+        fs.readFile(regularFontPath),
+        readFirstExistingFile(boldFontPaths),
+        getChecklistById(id, cookie),
+      ])
 
     const pdf = await PDFDocument.load(tplBytes)
     pdf.registerFontkit(fontkit)
-    const czFont = await pdf.embedFont(fontBytes, { subset: false })
+
+    const regularFont = await pdf.embedFont(regularFontBytes, { subset: false })
+    const boldFont = boldFontBytes
+      ? await pdf.embedFont(boldFontBytes, { subset: false })
+      : regularFont
+
+    const fonts: FontSet = { regular: regularFont, bold: boldFont }
 
     const page1 = pdf.getPage(0)
     const page2 = pdf.getPage(1)
@@ -277,102 +754,118 @@ export async function GET(
       signatures,
       conflictOfInterest,
       managerName,
+      handoverManagerSignature,
     } = checklist
 
-    const VAL_X = 300
-    const VAL_MAX = 250
+    const headerValueX = 300
+    const headerValueMax = 240
 
+    drawBoldTextFitted(
+      page1,
+      fonts,
+      cleanText(employeeName),
+      headerValueX,
+      cv(164),
+      headerValueMax,
+      9.6
+    )
     drawTextFitted(
       page1,
-      czFont,
-      nfc(employeeName ?? ""),
-      VAL_X,
-      cv(143),
-      VAL_MAX,
-      10
+      fonts.regular,
+      cleanText(personalNumber),
+      headerValueX,
+      cv(185),
+      headerValueMax,
+      9.6
     )
-
     drawTextFitted(
       page1,
-      czFont,
-      nfc(personalNumber ?? ""),
-      VAL_X,
-      cv(165),
-      VAL_MAX,
-      10
+      fonts.regular,
+      cleanText(department),
+      headerValueX,
+      cv(206),
+      headerValueMax,
+      9.6
     )
-
     drawTextFitted(
       page1,
-      czFont,
-      nfc(department ?? ""),
-      VAL_X,
-      cv(186),
-      VAL_MAX,
-      10
+      fonts.regular,
+      cleanText(unitName),
+      headerValueX,
+      cv(227),
+      headerValueMax,
+      9.6
     )
-
-    drawTextFitted(
+    drawText(
       page1,
-      czFont,
-      nfc(unitName ?? ""),
-      VAL_X,
-      cv(207),
-      VAL_MAX,
-      10
+      fonts.regular,
+      formatCzDate(employmentEndDate),
+      headerValueX,
+      cv(248),
+      9.6
     )
-
-    drawText(page1, czFont, formatCzDate(employmentEndDate), VAL_X, cv(228), 10)
 
     if (signatures?.employee?.signedByName) {
-      drawSignatureBlock(
+      drawSignatureBlockHeader(
         page1,
-        czFont,
+        fonts,
         signatures.employee.signedByName,
         signatures.employee.signedAt,
-        63,
-        cv(256),
-        220
+        52,
+        cv(276),
+        190
       )
     }
 
     if (signatures?.manager?.signedByName) {
-      drawSignatureBlock(
+      drawSignatureBlockHeader(
         page1,
-        czFont,
+        fonts,
         signatures.manager.signedByName,
         signatures.manager.signedAt,
-        300,
-        cv(256),
-        245
+        290,
+        cv(276),
+        200
       )
     }
 
     if (managerName) {
-      drawTextFitted(page1, czFont, nfc(managerName), 63, cv(398), 155, 8)
+      drawTextFitted(
+        page1,
+        fonts.regular,
+        cleanText(managerName),
+        52,
+        cv(417),
+        158,
+        8.7,
+        6
+      )
     }
 
-    const RES_CENTER_X = 398
-    const SIGN_X = 430
-    const SIGN_MAX_W = 121
+    const resolutionCenterXPage1 = 386
+    const resolutionCenterXPage2 = 386
+    const signatureXPage1 = 418
+    const signatureXPage2 = 418
+    const signatureMaxWidthPage1 = 120
+    const signatureMaxWidthPage2 = 120
 
     const rowYMap: Record<string, { page: number; y: number }> = {
-      handoverProtocol: { page: 1, y: 387 },
-      sneoChip: { page: 1, y: 434 },
-      sneoRemote: { page: 1, y: 477 },
-      electronicTicket: { page: 1, y: 520 },
-      carChip: { page: 1, y: 563 },
-      cashAdvance: { page: 1, y: 607 },
-      serviceTools: { page: 1, y: 654 },
-      serviceId: { page: 1, y: 706 },
-      centralRegistry: { page: 2, y: 63 },
-      classifiedDocs: { page: 2, y: 124 },
-      fineBlocks: { page: 2, y: 183 },
-      socialFundLoan: { page: 2, y: 256 },
-      phoneCosts: { page: 2, y: 318 },
-      itEquipment: { page: 2, y: 361 },
-      espis: { page: 2, y: 404 },
-      lawInfo: { page: 2, y: 448 },
+      handoverProtocol: { page: 1, y: 392 },
+      sneoChip: { page: 1, y: 439 },
+      sneoRemote: { page: 1, y: 482 },
+      electronicTicket: { page: 1, y: 525 },
+      carChip: { page: 1, y: 568 },
+      cashAdvance: { page: 1, y: 612 },
+      serviceTools: { page: 1, y: 659 },
+      serviceId: { page: 1, y: 711 },
+      centralRegistry: { page: 2, y: 68 },
+      classifiedDocs: { page: 2, y: 129 },
+      fineBlocks: { page: 2, y: 188 },
+      socialFundLoan: { page: 2, y: 261 },
+      phoneCosts: { page: 2, y: 323 },
+      itEquipment: { page: 2, y: 366 },
+      espis: { page: 2, y: 409 },
+      lawInfo: { page: 2, y: 453 },
     }
 
     for (const item of items) {
@@ -380,94 +873,138 @@ export async function GET(
       if (!rowInfo) continue
 
       const page = rowInfo.page === 1 ? page1 : page2
-      const libY = cv(rowInfo.y + 3)
+      const isSecondPage = rowInfo.page === 2
+      const resolutionCenterX = isSecondPage
+        ? resolutionCenterXPage2
+        : resolutionCenterXPage1
+      const signatureX = isSecondPage ? signatureXPage2 : signatureXPage1
+      const signatureMaxWidth = isSecondPage
+        ? signatureMaxWidthPage2
+        : signatureMaxWidthPage1
+
+      const yFromTop =
+        rowInfo.y + (isSecondPage ? PAGE2_SIGN_OFFSET : PAGE1_SIGN_OFFSET)
+      const signatureY = cv(yFromTop)
+      const resolutionY = signatureY - 2
 
       if (item.key === "lawInfo" && !conflictOfInterest) {
-        drawCenteredText(page, czFont, "———", RES_CENTER_X, libY, 9)
-        drawText(page, czFont, "———", SIGN_X, libY, 9)
+        drawCenteredText(
+          page,
+          fonts.regular,
+          "———",
+          resolutionCenterX,
+          resolutionY,
+          8.8
+        )
+        drawText(page, fonts.regular, "———", signatureX, resolutionY, 8.8)
         continue
       }
 
       if (item.resolved === "YES") {
-        drawCenteredText(page, czFont, "Ano", RES_CENTER_X, libY, 10)
+        drawCenteredText(
+          page,
+          fonts.regular,
+          "Ano",
+          resolutionCenterX,
+          resolutionY,
+          9.3
+        )
       } else if (item.resolved === "NO") {
-        drawCenteredText(page, czFont, "Ne", RES_CENTER_X, libY, 10)
+        drawCenteredText(
+          page,
+          fonts.regular,
+          "Ne",
+          resolutionCenterX,
+          resolutionY,
+          9.3
+        )
       }
 
       if (item.signedAt && item.signedByName) {
-        drawSignatureBlock(
-          page,
-          czFont,
-          item.signedByName,
-          item.signedAt,
-          SIGN_X,
-          libY + 6,
-          SIGN_MAX_W
-        )
-      } else if (item.key === "lawInfo" && !item.signedAt) {
-        drawText(page, czFont, "———", SIGN_X, libY, 9)
+        if (isSecondPage) {
+          drawSignatureBlockPage2(
+            page,
+            fonts,
+            item.signedByName,
+            item.signedAt,
+            signatureX,
+            signatureY,
+            signatureMaxWidth
+          )
+        } else {
+          drawSignatureBlockPage1(
+            page,
+            fonts,
+            item.signedByName,
+            item.signedAt,
+            signatureX,
+            signatureY,
+            signatureMaxWidth
+          )
+        }
+      } else if (item.key === "lawInfo" && !conflictOfInterest) {
+        drawText(page, fonts.regular, "———", signatureX, resolutionY, 8.8)
       }
     }
 
-    assets.slice(0, 8).forEach((asset, idx) => {
-      const pdfY = 558 + idx * 14
-      if (asset.subject) {
-        drawTextFitted(
-          page2,
-          czFont,
-          nfc(asset.subject),
-          62,
-          cv(pdfY + 8),
-          285,
-          9
-        )
-      }
-      if (asset.inventoryNumber) {
-        drawText(
-          page2,
-          czFont,
-          nfc(asset.inventoryNumber),
-          358,
-          cv(pdfY + 8),
-          9
-        )
-      }
+    const bTableStartTopY = 566
+    const assetsTableBottomY = drawAssetsTableOnly({
+      page: page2,
+      fonts,
+      assets,
+      startTopY: bTableStartTopY,
     })
 
-    if (signatures?.issuedDate) {
-      drawText(
-        page2,
-        czFont,
-        formatCzDate(signatures.issuedDate),
-        165,
-        cv(673),
-        10
-      )
-    }
+    const issuerTopY = assetsTableBottomY + 26
+
+    drawText(
+      page2,
+      fonts.regular,
+      "Za Odbor služeb potvrzuje správnost Výpisu:",
+      SECTION_LEFT,
+      cv(issuerTopY),
+      9
+    )
 
     if (signatures?.issuer?.signedByName) {
-      drawSignatureBlock(
+      drawSignatureBlockSection(
         page2,
-        czFont,
+        fonts,
         signatures.issuer.signedByName,
         signatures.issuer.signedAt,
-        420,
-        cv(671),
-        130
+        278,
+        cv(issuerTopY + 2),
+        165
       )
     }
 
-    const handoverLines = buildHandoverSummary(handover)
-    if (handoverLines.length > 0) {
-      let y = cv(738)
-      for (const line of handoverLines) {
-        y = drawParagraph(page2, czFont, line, 65, y, 489, 9, 12)
-        y -= 4
-      }
+    const handoverStartY = issuerTopY + 34
+
+    if (handoverStartY > 750) {
+      const extraPage = createBlankPage(pdf)
+      drawHandoverSection({
+        pdf,
+        page: extraPage,
+        fonts,
+        handover,
+        managerName,
+        handoverManagerSignature,
+        startY: 60,
+      })
+    } else {
+      drawHandoverSection({
+        pdf,
+        page: page2,
+        fonts,
+        handover,
+        managerName,
+        handoverManagerSignature,
+        startY: handoverStartY,
+      })
     }
 
-    const u8 = await pdf.save()
-    return new Response(toArrayBuffer(u8), {
+    const pdfBytes = await pdf.save()
+    return new Response(toArrayBuffer(pdfBytes), {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
@@ -475,8 +1012,8 @@ export async function GET(
         "Cache-Control": "no-store",
       },
     })
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error"
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error"
     console.error("[vystupni-list] ERROR:", message)
     return new Response(JSON.stringify({ error: message }), {
       status: 500,

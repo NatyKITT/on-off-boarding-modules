@@ -13,6 +13,7 @@ import type {
   ExitChecklistSignatures,
   ExitChecklistSignatureValue,
   HandoverAgendaData,
+  HandoverRecipient,
 } from "@/types/exit-checklist"
 import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
 
@@ -74,11 +75,30 @@ export function sanitizeIsoDate(value: unknown): string {
   return d.toISOString().slice(0, 10)
 }
 
+function getRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {}
+  return value as Record<string, unknown>
+}
+
+function sanitizeNullableText(value: unknown): string | null {
+  return sanitizeText(value) || null
+}
+
+function sanitizeNullableNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value
+
+  if (typeof value === "string") {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+
+  return null
+}
+
 export function sanitizeSignatureValueForJson(
   value: unknown
 ): Prisma.InputJsonObject {
-  const raw =
-    value && typeof value === "object" ? (value as Record<string, unknown>) : {}
+  const raw = getRecord(value)
 
   return {
     signedByName: sanitizeText(raw.signedByName),
@@ -90,8 +110,7 @@ export function sanitizeSignatureValueForJson(
 export function sanitizeSignatureValueForResponse(
   value: unknown
 ): ExitChecklistSignatureValue {
-  const raw =
-    value && typeof value === "object" ? (value as Record<string, unknown>) : {}
+  const raw = getRecord(value)
 
   return {
     signedByName: sanitizeText(raw.signedByName) || null,
@@ -100,13 +119,85 @@ export function sanitizeSignatureValueForResponse(
   }
 }
 
+function sanitizeHandoverRecipientsForResponse(
+  raw: Record<string, unknown>
+): HandoverRecipient[] {
+  if (!Array.isArray(raw.handoverRecipients)) return []
+
+  return raw.handoverRecipients
+    .map((recipient, index) => {
+      const rec = getRecord(recipient)
+
+      const id =
+        sanitizeText(rec.id) ||
+        sanitizeText(rec.email) ||
+        `recipient-${index + 1}`
+
+      return {
+        id,
+        name: sanitizeText(rec.name),
+        email: sanitizeText(rec.email).toLowerCase(),
+        personalNumber: sanitizeNullableText(rec.personalNumber),
+        department: sanitizeNullableText(rec.department),
+      }
+    })
+    .filter((recipient) => Boolean(recipient.name) && Boolean(recipient.email))
+}
+
+function sanitizeHandoverRecipientsForJson(
+  raw: Record<string, unknown>
+): Prisma.InputJsonArray {
+  const recipients = sanitizeHandoverRecipientsForResponse(raw)
+
+  return recipients.map(
+    (recipient): Prisma.InputJsonObject => ({
+      id: recipient.id,
+      name: recipient.name,
+      email: recipient.email,
+      personalNumber: recipient.personalNumber,
+      department: recipient.department,
+    })
+  )
+}
+
+function getHandoverSendMetadataForJson(
+  raw: Record<string, unknown>
+): Pick<
+  HandoverAgendaData,
+  | "handoverRecipientsSentAt"
+  | "handoverRecipientsSentByName"
+  | "handoverRecipientsSentByEmail"
+  | "handoverRecipientsSentHash"
+  | "handoverRecipientsSentCount"
+> {
+  return {
+    handoverRecipientsSentAt: sanitizeNullableText(
+      raw.handoverRecipientsSentAt
+    ),
+    handoverRecipientsSentByName: sanitizeNullableText(
+      raw.handoverRecipientsSentByName
+    ),
+    handoverRecipientsSentByEmail: sanitizeNullableText(
+      raw.handoverRecipientsSentByEmail
+    ),
+    handoverRecipientsSentHash: sanitizeNullableText(
+      raw.handoverRecipientsSentHash
+    ),
+    handoverRecipientsSentCount: sanitizeNullableNumber(
+      raw.handoverRecipientsSentCount
+    ),
+  }
+}
+
 export function sanitizeHandoverForJson(
   value: unknown
 ): Prisma.InputJsonObject | null {
-  if (!value || typeof value !== "object") return null
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
 
   const raw = value as Record<string, unknown>
   const includeHandoverAgenda = Boolean(raw.includeHandoverAgenda)
+
+  const metadata = getHandoverSendMetadataForJson(raw)
 
   if (!includeHandoverAgenda) {
     return {
@@ -118,6 +209,8 @@ export function sanitizeHandoverForJson(
       option3: false,
       option3Reason: "",
       responsibleParty: null,
+      handoverRecipients: [],
+      ...metadata,
     }
   }
 
@@ -135,6 +228,8 @@ export function sanitizeHandoverForJson(
     ? sanitizeResponsibleParty(raw.responsibleParty)
     : null
 
+  const handoverRecipients = sanitizeHandoverRecipientsForJson(raw)
+
   return {
     includeHandoverAgenda: true,
     option1,
@@ -144,16 +239,22 @@ export function sanitizeHandoverForJson(
     option3,
     option3Reason,
     responsibleParty,
+    handoverRecipients,
+    ...metadata,
   }
 }
 
 export function sanitizeHandoverForResponse(
   value: unknown
 ): HandoverAgendaData | undefined {
-  if (!value || typeof value !== "object") return undefined
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined
+  }
 
   const raw = value as Record<string, unknown>
   const includeHandoverAgenda = Boolean(raw.includeHandoverAgenda)
+
+  const metadata = getHandoverSendMetadataForJson(raw)
 
   if (!includeHandoverAgenda) {
     return {
@@ -165,12 +266,16 @@ export function sanitizeHandoverForResponse(
       option3: false,
       option3Reason: "",
       responsibleParty: null,
+      handoverRecipients: [],
+      ...metadata,
     }
   }
 
   const option1 = Boolean(raw.option1)
   const option2 = Boolean(raw.option2)
   const option3 = Boolean(raw.option3)
+
+  const handoverRecipients = sanitizeHandoverRecipientsForResponse(raw)
 
   return {
     includeHandoverAgenda: true,
@@ -185,14 +290,61 @@ export function sanitizeHandoverForResponse(
     responsibleParty: option3
       ? sanitizeResponsibleParty(raw.responsibleParty)
       : null,
+    handoverRecipients,
+    ...metadata,
+  }
+}
+
+export function preserveHandoverSendMetadata(
+  nextHandover: Prisma.InputJsonObject | null,
+  previousHandover: unknown
+): Prisma.InputJsonObject | null {
+  if (!nextHandover) return nextHandover
+
+  const previousRaw = getRecord(previousHandover)
+  const previousMetadata = getHandoverSendMetadataForJson(previousRaw)
+
+  return {
+    ...nextHandover,
+    handoverRecipientsSentAt:
+      previousMetadata.handoverRecipientsSentAt ??
+      (nextHandover.handoverRecipientsSentAt as string | null | undefined) ??
+      null,
+    handoverRecipientsSentByName:
+      previousMetadata.handoverRecipientsSentByName ??
+      (nextHandover.handoverRecipientsSentByName as
+        | string
+        | null
+        | undefined) ??
+      null,
+    handoverRecipientsSentByEmail:
+      previousMetadata.handoverRecipientsSentByEmail ??
+      (nextHandover.handoverRecipientsSentByEmail as
+        | string
+        | null
+        | undefined) ??
+      null,
+    handoverRecipientsSentHash:
+      previousMetadata.handoverRecipientsSentHash ??
+      (nextHandover.handoverRecipientsSentHash as
+        | string
+        | null
+        | undefined) ??
+      null,
+    handoverRecipientsSentCount:
+      previousMetadata.handoverRecipientsSentCount ??
+      (nextHandover.handoverRecipientsSentCount as
+        | number
+        | null
+        | undefined) ??
+      null,
   }
 }
 
 export function sanitizeSignaturesForJson(
   value: unknown
 ): Prisma.InputJsonObject {
-  const raw =
-    value && typeof value === "object" ? (value as Record<string, unknown>) : {}
+  const raw = getRecord(value)
 
   return {
     employee: sanitizeSignatureValueForJson(raw.employee),
@@ -205,8 +357,7 @@ export function sanitizeSignaturesForJson(
 export function sanitizeSignaturesForResponse(
   value: unknown
 ): ExitChecklistSignatures {
-  const raw =
-    value && typeof value === "object" ? (value as Record<string, unknown>) : {}
+  const raw = getRecord(value)
 
   return {
     employee: sanitizeSignatureValueForResponse(raw.employee),
@@ -248,18 +399,15 @@ export function mapToExitChecklistData(
   })
 
   const assets: ExitAssetItem[] = checklist.assets.map(
-    (a: ExitChecklistAssetModel) => ({
-      id: String(a.id),
-      subject: a.subject,
-      inventoryNumber: a.inventoryNumber ?? "",
-      createdById: a.createdById ?? null,
+    (asset: ExitChecklistAssetModel) => ({
+      id: String(asset.id),
+      subject: asset.subject,
+      inventoryNumber: asset.inventoryNumber ?? "",
+      createdById: asset.createdById ?? null,
     })
   )
 
-  const headerData =
-    checklist.header && typeof checklist.header === "object"
-      ? (checklist.header as Record<string, unknown>)
-      : {}
+  const headerData = getRecord(checklist.header)
 
   const handover = sanitizeHandoverForResponse(headerData.handover)
   const signatures = sanitizeSignaturesForResponse(headerData.signatures)
@@ -278,6 +426,9 @@ export function mapToExitChecklistData(
     employeeEmail: off.userEmail ?? null,
     managerEmail: sanitizeText(headerData.managerEmail) || null,
     managerName: sanitizeText(headerData.managerName) || null,
+    handoverManagerSignature:
+      sanitizeSignatureValueForResponse(headerData.handoverManagerSignature) ??
+      null,
     lockedAt: checklist.lockedAt
       ? new Date(checklist.lockedAt).toISOString()
       : null,

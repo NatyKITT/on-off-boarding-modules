@@ -38,15 +38,33 @@ export interface ExitAssetItem {
   createdById?: string | null
 }
 
+export interface HandoverRecipient {
+  id: string
+  name: string
+  email: string
+  personalNumber?: string | null
+  department?: string | null
+}
+
 export interface HandoverAgendaData {
   includeHandoverAgenda?: boolean
+
   option1?: boolean
+
   option2?: boolean
   option2Target?: string
   option2TargetPositionNum?: string
+
   option3?: boolean
   option3Reason?: string
   responsibleParty?: "KITT6" | "OSS_KT" | null
+
+  handoverRecipients?: HandoverRecipient[]
+  handoverRecipientsSentAt?: string | null
+  handoverRecipientsSentByName?: string | null
+  handoverRecipientsSentByEmail?: string | null
+  handoverRecipientsSentHash?: string | null
+  handoverRecipientsSentCount?: number | null
 }
 
 export interface ExitChecklistSignatureValue {
@@ -78,6 +96,7 @@ export interface ExitChecklistData {
   employeeEmail?: string | null
   managerEmail?: string | null
   managerName?: string | null
+  handoverManagerSignature?: ExitChecklistSignatureValue | null
   items: ExitChecklistItem[]
   assets: ExitAssetItem[]
   handover?: HandoverAgendaData

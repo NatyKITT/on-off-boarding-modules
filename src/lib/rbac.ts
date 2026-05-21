@@ -54,3 +54,17 @@ export function hasPerm(role: Role | null | undefined, perm: Permission) {
   if (!role) return false
   return ROLE_PERMS[role]?.includes(perm) ?? false
 }
+
+export function canAccessInternalApp(role: Role | null | undefined) {
+  return (
+    role === "ADMIN" || role === "HR" || role === "IT" || role === "READONLY"
+  )
+}
+
+export function canEditInternalApp(role: Role | null | undefined) {
+  return role === "ADMIN" || role === "HR" || role === "IT"
+}
+
+export function canAdminExitChecklist(role: Role | null | undefined) {
+  return role === "ADMIN" || role === "HR" || role === "IT"
+}

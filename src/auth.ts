@@ -6,52 +6,33 @@ import GoogleProvider from "next-auth/providers/google"
 import { env } from "@/env.mjs"
 
 import { prisma } from "@/lib/db"
-import { getUserById } from "@/lib/user"
 
 const isProd = process.env.NODE_ENV === "production"
 
 const DEV_ALLOWED_DOMAINS = ["kitt6.cz", "praha6.cz"] as const
-const PROD_ALLOWED_DOMAINS = ["praha6.cz"] as const
+const PROD_ALLOWED_DOMAINS = ["kitt6.cz", "praha6.cz"] as const
 
 const ALLOWED_DOMAINS: ReadonlySet<string> = new Set(
   isProd ? PROD_ALLOWED_DOMAINS : DEV_ALLOWED_DOMAINS
 )
 
-const SUPER_ADMIN_EMAILS: ReadonlySet<string> = new Set(
-  (process.env.SUPER_ADMIN_EMAILS ?? "")
-    .split(/[;,]/)
-    .map((v) => v.trim().toLowerCase())
-    .filter(Boolean)
-)
+function parseEmails(envValue: string | undefined): ReadonlySet<string> {
+  return new Set(
+    (envValue ?? "")
+      .split(/[;,]/)
+      .map((v) => v.trim().toLowerCase())
+      .filter(Boolean)
+  )
+}
 
-const HR_EMAILS: ReadonlySet<string> = new Set(
-  (process.env.HR_EMAILS ?? "")
-    .split(/[;,]/)
-    .map((v) => v.trim().toLowerCase())
-    .filter(Boolean)
-)
-
-const IT_EMAILS: ReadonlySet<string> = new Set(
-  (process.env.IT_EMAILS ?? "")
-    .split(/[;,]/)
-    .map((v) => v.trim().toLowerCase())
-    .filter(Boolean)
-)
-
-const READONLY_EMAILS: ReadonlySet<string> = new Set(
-  (process.env.READONLY_EMAILS ?? "")
-    .split(/[;,]/)
-    .map((v) => v.trim().toLowerCase())
-    .filter(Boolean)
-)
+const SUPER_ADMIN_EMAILS = parseEmails(process.env.SUPER_ADMIN_EMAILS)
+const HR_EMAILS = parseEmails(process.env.HR_EMAILS)
+const IT_EMAILS = parseEmails(process.env.IT_EMAILS)
+const READONLY_EMAILS = parseEmails(process.env.READONLY_EMAILS)
 
 function getDomain(email: string | null | undefined): string {
   if (!email) return ""
   return email.split("@")[1]?.toLowerCase() ?? ""
-}
-
-function isKitt6(email: string | null | undefined): boolean {
-  return getDomain(email) === "kitt6.cz"
 }
 
 function isInternalRole(role: Role | null | undefined): boolean {
@@ -62,12 +43,67 @@ function isInternalRole(role: Role | null | undefined): boolean {
 
 function getEnvRoleForEmail(email: string): Role | null {
   const lower = email.toLowerCase()
+
   if (SUPER_ADMIN_EMAILS.has(lower)) return "ADMIN"
-  if (isKitt6(lower)) return "ADMIN"
   if (HR_EMAILS.has(lower)) return "HR"
   if (IT_EMAILS.has(lower)) return "IT"
   if (READONLY_EMAILS.has(lower)) return "READONLY"
+
   return null
+}
+
+function getDefaultRoleForEmail(email: string): Role {
+  const domain = getDomain(email)
+
+  if (domain === "kitt6.cz") {
+    return "IT"
+  }
+
+  return "USER"
+}
+
+function getRoleForEmail(email: string): Role {
+  return getEnvRoleForEmail(email) ?? getDefaultRoleForEmail(email)
+}
+
+function canEmailSignIn(email: string | null | undefined): boolean {
+  const domain = getDomain(email)
+  return ALLOWED_DOMAINS.has(domain)
+}
+
+async function syncUserAccess(userId: string, email: string) {
+  const normalizedEmail = email.toLowerCase()
+  const nextRole = getRoleForEmail(normalizedEmail)
+  const nextCanAccessApp = isInternalRole(nextRole)
+
+  const dbUser = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      role: true,
+      canAccessApp: true,
+      name: true,
+      surname: true,
+    },
+  })
+
+  if (!dbUser) return null
+
+  if (dbUser.role !== nextRole || dbUser.canAccessApp !== nextCanAccessApp) {
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        role: nextRole,
+        canAccessApp: nextCanAccessApp,
+      },
+    })
+  }
+
+  return {
+    ...dbUser,
+    role: nextRole,
+    canAccessApp: nextCanAccessApp,
+  }
 }
 
 export const authConfig = {
@@ -95,64 +131,35 @@ export const authConfig = {
     }),
   ],
 
-  events: {
-    async signIn({ user }) {
-      try {
-        const email = user.email?.toLowerCase() ?? ""
-        if (!email) return
-
-        const envRole = getEnvRoleForEmail(email)
-
-        if (envRole !== null) {
-          await prisma.user.update({
-            where: { id: String(user.id) },
-            data: { role: envRole, canAccessApp: true },
-          })
-        } else {
-          const existingUser = await prisma.user.findUnique({
-            where: { id: String(user.id) },
-            select: { role: true },
-          })
-
-          if (!existingUser?.role) {
-            await prisma.user.update({
-              where: { id: String(user.id) },
-              data: { role: "USER", canAccessApp: false },
-            })
-          }
-        }
-      } catch (e) {
-        console.warn("signIn role sync (non-fatal):", e)
-      }
-    },
-  },
-
   callbacks: {
     authorized() {
       return true
     },
 
     async signIn({ profile }) {
-      const email = profile?.email ?? ""
-      const domain = getDomain(email)
-      return ALLOWED_DOMAINS.has(domain)
+      return canEmailSignIn(profile?.email)
     },
 
     async redirect({ url, baseUrl }) {
       if (url.startsWith("/")) return `${baseUrl}${url}`
+
       try {
         if (new URL(url).origin === new URL(baseUrl).origin) return url
       } catch {}
+
       return baseUrl
     },
 
-    async jwt({ token, user, profile, trigger }) {
+    async jwt({ token, user, profile }) {
       const email =
         (typeof token.email === "string" && token.email) ||
         (typeof user?.email === "string" && user.email) ||
         (typeof profile?.email === "string" && profile.email) ||
         null
-      if (email) token.email = email
+
+      if (email) {
+        token.email = email.toLowerCase()
+      }
 
       const userId =
         user && "id" in user
@@ -160,25 +167,21 @@ export const authConfig = {
           : token.sub
             ? String(token.sub)
             : null
-      if (userId) token.id = userId
+
+      if (userId) {
+        token.id = userId
+      }
 
       if (user?.name && !token.name) {
         token.name = user.name
       }
 
-      const needsDbLoad =
-        !!user ||
-        trigger === "update" ||
-        !token.role ||
-        typeof token.canAccessApp === "undefined"
+      if (userId && token.email) {
+        const dbUser = await syncUserAccess(userId, String(token.email))
 
-      if (needsDbLoad && userId) {
-        const dbUser = await getUserById(userId)
         if (dbUser) {
-          token.role = dbUser.role as Role
-          token.canAccessApp = isInternalRole(dbUser.role)
-            ? true
-            : (dbUser.canAccessApp ?? false)
+          token.role = dbUser.role
+          token.canAccessApp = dbUser.canAccessApp
 
           if (!token.name && (dbUser.name || dbUser.surname)) {
             token.name = [dbUser.name, dbUser.surname].filter(Boolean).join(" ")
@@ -186,16 +189,13 @@ export const authConfig = {
         }
       }
 
-      if (token.email) {
-        const envRole = getEnvRoleForEmail(token.email)
-        if (envRole !== null) {
-          token.role = envRole
-          token.canAccessApp = true
-        }
+      if (!token.role) {
+        token.role = "USER"
       }
 
-      if (!token.role) token.role = "USER"
-      if (typeof token.canAccessApp === "undefined") token.canAccessApp = false
+      if (typeof token.canAccessApp === "undefined") {
+        token.canAccessApp = false
+      }
 
       return token
     },
@@ -207,10 +207,12 @@ export const authConfig = {
           (token.email as string | null) ?? session.user.email
         session.user.role = token.role as Role
         session.user.canAccessApp = Boolean(token.canAccessApp)
+
         if (token.name) {
           session.user.name = token.name as string
         }
       }
+
       return session
     },
   },

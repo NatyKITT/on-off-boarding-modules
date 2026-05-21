@@ -18,6 +18,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { UserAvatar } from "@/components/shared/user-avatar"
 
+const SIGNOUT_SUCCESS_REDIRECT = "/signin?logout=success"
+
 const ROLE_CONFIG: Record<
   string,
   { label: string; variant: "secondary" | "outline" }
@@ -29,8 +31,10 @@ const ROLE_CONFIG: Record<
 
 function RoleBadge({ role }: { role?: string | null }) {
   if (!role) return null
+
   const config = ROLE_CONFIG[role]
   if (!config) return null
+
   return (
     <Badge variant={config.variant} className="w-fit text-xs">
       {role === "READONLY" && <Eye className="mr-1 size-3" />}
@@ -44,9 +48,18 @@ export function UserAccountNav() {
   const user = session?.user
 
   const [open, setOpen] = useState(false)
-  const closeDrawer = () => setOpen(false)
-
   const { isMobile } = useMediaQuery()
+
+  function closeDrawer() {
+    setOpen(false)
+  }
+
+  function handleSignOut() {
+    void signOut({
+      callbackUrl: SIGNOUT_SUCCESS_REDIRECT,
+      redirect: true,
+    })
+  }
 
   if (!user) {
     return <div className="size-8 animate-pulse rounded-full border bg-muted" />
@@ -76,11 +89,13 @@ export function UserAccountNav() {
             />
           </button>
         </Drawer.Trigger>
+
         <Drawer.Portal>
           <Drawer.Overlay
             className="fixed inset-0 z-40 h-full bg-background/80 backdrop-blur-sm"
             onClick={closeDrawer}
           />
+
           <Drawer.Content
             className="fixed inset-x-0 bottom-0 z-50 mt-24 overflow-hidden rounded-t-[10px] border bg-background px-3 text-sm"
             onOpenAutoFocus={(e) => e.preventDefault()}
@@ -106,6 +121,7 @@ export function UserAccountNav() {
                   </Link>
                 </li>
               )}
+
               <li className="rounded-lg text-foreground hover:bg-muted">
                 <Link
                   href="/prehled"
@@ -116,6 +132,7 @@ export function UserAccountNav() {
                   <p className="text-sm">Přehled</p>
                 </Link>
               </li>
+
               <li className="rounded-lg text-foreground hover:bg-muted">
                 <Link
                   href="/nastaveni"
@@ -126,17 +143,20 @@ export function UserAccountNav() {
                   <p className="text-sm">Nastavení</p>
                 </Link>
               </li>
-              <li
-                className="rounded-lg text-foreground hover:bg-muted"
-                onClick={(event) => {
-                  event.preventDefault()
-                  signOut({ callbackUrl: `${window.location.origin}/` })
-                }}
-              >
-                <div className="flex w-full items-center gap-3 px-2.5 py-2">
+
+              <li className="rounded-lg text-foreground hover:bg-muted">
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-3 px-2.5 py-2 text-left"
+                  onClick={(event) => {
+                    event.preventDefault()
+                    closeDrawer()
+                    handleSignOut()
+                  }}
+                >
                   <LogOut className="size-4" />
                   <p className="text-sm">Odhlásit se</p>
-                </div>
+                </button>
               </li>
             </ul>
           </Drawer.Content>
@@ -166,6 +186,7 @@ export function UserAccountNav() {
         <div className="flex items-center justify-start gap-2 p-2">
           {userInfo}
         </div>
+
         <DropdownMenuSeparator />
 
         {user.role === "ADMIN" && (
@@ -195,9 +216,9 @@ export function UserAccountNav() {
 
         <DropdownMenuItem
           className="cursor-pointer"
-          onSelect={(e) => {
-            e.preventDefault()
-            signOut({ callbackUrl: `${window.location.origin}/` })
+          onSelect={(event) => {
+            event.preventDefault()
+            handleSignOut()
           }}
         >
           <div className="flex items-center space-x-2.5">

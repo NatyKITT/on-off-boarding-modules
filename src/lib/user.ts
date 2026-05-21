@@ -8,9 +8,10 @@ export const getUserByEmail = async (email: string) => {
         id: true,
         email: true,
         name: true,
+        surname: true,
         role: true,
         emailVerified: true,
-        canAccessApp: false,
+        canAccessApp: true,
         createdAt: true,
       },
     })
@@ -21,7 +22,9 @@ export const getUserByEmail = async (email: string) => {
 
 export const getUserById = async (id: string) => {
   try {
-    return await prisma.user.findUnique({ where: { id } })
+    return await prisma.user.findUnique({
+      where: { id },
+    })
   } catch {
     return null
   }

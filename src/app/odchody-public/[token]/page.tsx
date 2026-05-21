@@ -17,7 +17,9 @@ export default async function PublicExitChecklistPage({ params }: Props) {
 
   if (!session?.user) {
     redirect(
-      `/signin?callbackUrl=${encodeURIComponent(`/odchody-public/${params.token}`)}`
+      `/signin?callbackUrl=${encodeURIComponent(
+        `/odchody-public/${params.token}`
+      )}`
     )
   }
 
@@ -38,13 +40,6 @@ export default async function PublicExitChecklistPage({ params }: Props) {
         </div>
       </div>
     )
-  }
-
-  const role = session.user.role ?? "USER"
-  const isInternalRole = ["ADMIN", "HR", "IT", "READONLY"].includes(role)
-
-  if (isInternalRole) {
-    redirect(`/odchody/${checklist.offboardingId}/vystupni-list`)
   }
 
   const employeeName = [

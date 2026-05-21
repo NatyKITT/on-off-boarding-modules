@@ -4,8 +4,7 @@ export const EXIT_CHECKLIST_ROWS: ExitChecklistRowDefinition[] = [
   {
     key: "handoverProtocol",
     organization: "Vedoucí odboru",
-    obligation:
-      "předávací protokol (v písemné formě dle vzoru NÁVODY ÚMČP6, KT-E-spis-Předávací protokol)",
+    obligation: "předávací protokol (v písemné formě)",
   },
   {
     key: "sneoChip",
@@ -83,13 +82,14 @@ export const EXIT_CHECKLIST_ROWS: ExitChecklistRowDefinition[] = [
     key: "itEquipment",
     organization:
       "Ředitel KITT6\nVladimír Šuvarina\nKITT6, Dr. Zikmunda Wintra 768/20",
-    obligation: "výpočetní technika, mobilní telefon, fotopřístroje (viz níže)",
+    obligation:
+      "výpočetní technika, mobilní telefon, fotopřístroje (viz B. Výpis z osobní karty)",
   },
   {
     key: "espis",
     organization:
       "Ředitel KITT6\nVladimír Šuvarina\nKITT6, Dr. Zikmunda Wintra 768/20",
-    obligation: "e-spis – kontrola předání dokumentů (viz předávací protokol)",
+    obligation: "e-spis – kontrola předání dokumentů (viz C. Předávaná agenda)",
   },
   {
     key: "lawInfo",

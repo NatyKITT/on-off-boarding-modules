@@ -3,8 +3,6 @@
 import * as React from "react"
 import { signOut } from "next-auth/react"
 
-import { DEFAULT_SIGNOUT_REDIRECT } from "@/config/defaults"
-
 import { cn } from "@/lib/utils"
 
 import { Button, type ButtonProps } from "@/components/ui/button"
@@ -12,11 +10,22 @@ import { Icons } from "@/components/shared/icons"
 
 type SignOutButtonProps = Omit<ButtonProps, "onClick">
 
+const SIGNOUT_SUCCESS_REDIRECT = "/signin?logout=success"
+
 export const SignOutButton = React.forwardRef<
   HTMLButtonElement,
   SignOutButtonProps
 >(({ className, children, ...props }, ref) => {
-  const [pending, start] = React.useTransition()
+  const [pending, startTransition] = React.useTransition()
+
+  function handleSignOut() {
+    startTransition(() => {
+      void signOut({
+        callbackUrl: SIGNOUT_SUCCESS_REDIRECT,
+        redirect: true,
+      })
+    })
+  }
 
   return (
     <Button
@@ -27,14 +36,7 @@ export const SignOutButton = React.forwardRef<
         className
       )}
       disabled={pending}
-      onClick={() =>
-        start(() =>
-          signOut({
-            callbackUrl: DEFAULT_SIGNOUT_REDIRECT,
-            redirect: true,
-          })
-        )
-      }
+      onClick={handleSignOut}
       {...props}
     >
       {pending ? (
@@ -45,6 +47,7 @@ export const SignOutButton = React.forwardRef<
       ) : (
         <Icons.logout className="mr-2 size-4" aria-hidden="true" />
       )}
+
       {children ?? (pending ? "Odhlašuji…" : "Odhlásit se")}
     </Button>
   )

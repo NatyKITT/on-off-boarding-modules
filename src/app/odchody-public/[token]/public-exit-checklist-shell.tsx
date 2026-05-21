@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { CheckCircle, Loader2, XCircle } from "lucide-react"
 
 import type { ExitChecklistData } from "@/types/exit-checklist"
@@ -13,10 +14,15 @@ type Props = {
 }
 
 export function PublicExitChecklistShell({ token, employeeName }: Props) {
+  const searchParams = useSearchParams()
+
+  const loginSuccess = searchParams.get("login") === "success"
+
   const [data, setData] = useState<ExitChecklistData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
+  const [showLoginSuccess, setShowLoginSuccess] = useState(loginSuccess)
 
   useEffect(() => {
     let cancelled = false
@@ -45,7 +51,9 @@ export function PublicExitChecklistShell({ token, employeeName }: Props) {
           throw new Error("Chybí data výstupního listu.")
         }
 
-        if (!cancelled) setData(json.data as ExitChecklistData)
+        if (!cancelled) {
+          setData(json.data as ExitChecklistData)
+        }
       } catch (err) {
         if (!cancelled) {
           setError(
@@ -53,7 +61,9 @@ export function PublicExitChecklistShell({ token, employeeName }: Props) {
           )
         }
       } finally {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) {
+          setLoading(false)
+        }
       }
     })()
 
@@ -62,6 +72,16 @@ export function PublicExitChecklistShell({ token, employeeName }: Props) {
     }
   }, [token])
 
+  useEffect(() => {
+    if (!showLoginSuccess) return
+
+    const timeout = window.setTimeout(() => {
+      setShowLoginSuccess(false)
+    }, 5000)
+
+    return () => window.clearTimeout(timeout)
+  }, [showLoginSuccess])
+
   return (
     <div className="min-h-screen bg-neutral-50 px-4 py-6">
       <div className="mx-auto max-w-4xl space-y-4">
@@ -69,6 +89,18 @@ export function PublicExitChecklistShell({ token, employeeName }: Props) {
           <h1 className="text-2xl font-bold">Výstupní list</h1>
           <p className="text-sm text-muted-foreground">{employeeName}</p>
         </div>
+
+        {showLoginSuccess && !loading && !error && (
+          <div className="flex items-start gap-3 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+            <CheckCircle className="mt-0.5 size-5 shrink-0 text-emerald-600" />
+            <div>
+              <p className="font-medium">Přihlášení proběhlo úspěšně.</p>
+              <p className="mt-0.5 text-emerald-700">
+                Byli jste přesměrováni zpět na výstupní list.
+              </p>
+            </div>
+          </div>
+        )}
 
         {saved && (
           <div className="flex items-start gap-3 rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">

@@ -1,3 +1,6 @@
+
+
+
 import "@/styles/globals.css"
 import "@/styles/mdx.css"
 
@@ -10,7 +13,12 @@ import { siteConfig } from "@/config/site"
 
 import { cn } from "@/lib/utils"
 
+import { AuthStatusFeedback } from "@/components/auth/auth-status-feedback"
 import { ClientLayout } from "@/components/layout/client-layout"
+
+
+
+
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -43,21 +51,25 @@ export const metadata: Metadata = {
 }
 
 export default function RootLayout({
-  children,
-}: {
+                                     children,
+                                   }: {
   children: React.ReactNode
 }) {
   return (
     <html lang="cs" suppressHydrationWarning>
-      <body
-        className={cn(
-          "overflow-x-hidden overflow-y-scroll bg-background font-sans text-foreground",
-          fontSans.variable,
-          fontHeading.variable
-        )}
-      >
-        <ClientLayout>{children}</ClientLayout>
-      </body>
+    <body
+      className={cn(
+        "overflow-x-hidden overflow-y-scroll bg-background font-sans text-foreground",
+        fontSans.variable,
+        fontHeading.variable
+      )}
+    >
+    <React.Suspense fallback={null}>
+      <AuthStatusFeedback />
+    </React.Suspense>
+
+    <ClientLayout>{children}</ClientLayout>
+    </body>
     </html>
   )
 }

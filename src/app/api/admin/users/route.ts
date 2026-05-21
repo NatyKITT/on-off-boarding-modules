@@ -13,17 +13,19 @@ function parseEnvEmails(envValue: string | undefined): string[] {
     .filter(Boolean)
 }
 
-function getEnvRole(email: string): string | null {
+function getEnvRole(email: string): "ADMIN" | "HR" | "IT" | "READONLY" | null {
   const lower = email.toLowerCase()
-  const domain = lower.split("@")[1] ?? ""
 
-  if (domain === "kitt6.cz") return "ADMIN"
-  if (parseEnvEmails(process.env.SUPER_ADMIN_EMAILS).includes(lower))
+  if (parseEnvEmails(process.env.SUPER_ADMIN_EMAILS).includes(lower)) {
     return "ADMIN"
+  }
+
   if (parseEnvEmails(process.env.HR_EMAILS).includes(lower)) return "HR"
   if (parseEnvEmails(process.env.IT_EMAILS).includes(lower)) return "IT"
-  if (parseEnvEmails(process.env.READONLY_EMAILS).includes(lower))
+
+  if (parseEnvEmails(process.env.READONLY_EMAILS).includes(lower)) {
     return "READONLY"
+  }
 
   return null
 }
@@ -55,6 +57,7 @@ export async function GET() {
     return NextResponse.json({ users })
   } catch (error) {
     console.error("Error fetching users:", error)
+
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
@@ -87,12 +90,23 @@ export async function POST(req: NextRequest) {
     }
 
     const envRole = getEnvRole(normalizedEmail)
+
     if (envRole !== null) {
       return NextResponse.json(
         {
           error: `Tento email má roli definovanou v ENV (${envRole}). Přidá se automaticky při prvním přihlášení.`,
         },
         { status: 409 }
+      )
+    }
+
+    if (role && role !== "USER") {
+      return NextResponse.json(
+        {
+          error:
+            "Zvýšené role nastavujte přes ENV. Uživatel mimo ENV bude vytvořen pouze jako USER.",
+        },
+        { status: 400 }
       )
     }
 
@@ -107,14 +121,11 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const allowedRoles = ["USER", "READONLY", "HR", "IT", "ADMIN"]
-    const assignedRole = allowedRoles.includes(role ?? "") ? role! : "USER"
-
     const newUser = await prisma.user.create({
       data: {
         email: normalizedEmail,
-        role: assignedRole as "USER" | "READONLY" | "HR" | "IT" | "ADMIN",
-        canAccessApp: assignedRole !== "USER",
+        role: "USER",
+        canAccessApp: false,
       },
       select: {
         id: true,
@@ -130,6 +141,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ user: newUser }, { status: 201 })
   } catch (error) {
     console.error("Error creating user:", error)
+
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

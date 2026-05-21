@@ -5,20 +5,26 @@ import { ChecklistResolution, Prisma } from "@prisma/client"
 import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
 
 import { prisma } from "@/lib/db"
-import { sendSignatureInviteEmail } from "@/lib/email"
+import { sendBehalfSignatureEmail, sendSignatureInviteEmail } from "@/lib/email"
 
 export const dynamic = "force-dynamic"
+
+function cleanText(value: unknown): string {
+  return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : ""
+}
 
 export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const session = await auth()
+
   if (!session?.user) {
     return NextResponse.json({ error: "Nejste přihlášen." }, { status: 401 })
   }
 
   const role = session.user.role ?? "USER"
+
   if (!["ADMIN", "HR", "IT"].includes(role)) {
     return NextResponse.json(
       { error: "Nemáte oprávnění odesílat pozvánky k podpisu." },
@@ -27,20 +33,26 @@ export async function POST(
   }
 
   const offboardingId = Number(params.id)
+
   if (Number.isNaN(offboardingId)) {
     return NextResponse.json({ error: "Neplatné ID záznamu." }, { status: 400 })
   }
 
   const body = await req.json().catch(() => null)
-  if (!body) {
+
+  if (!body || typeof body !== "object") {
     return NextResponse.json(
       { error: "Chybí tělo požadavku." },
       { status: 400 }
     )
   }
 
-  const inviteeEmail: string = body?.inviteeEmail?.trim() ?? ""
-  const inviteeName: string = body?.inviteeName?.trim() ?? ""
+  const inviteeEmail = cleanText(body.inviteeEmail)
+  const isBehalf = body.isBehalf === true
+  const behalfOf = cleanText(body.behalfOf)
+  const behalfOfName = cleanText(body.behalfOfName)
+  const behalfOfRole = cleanText(body.behalfOfRole)
+  const behalfOfDisplayLabel = cleanText(body.behalfOfDisplayLabel)
 
   if (!inviteeEmail) {
     return NextResponse.json(
@@ -50,6 +62,7 @@ export async function POST(
   }
 
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
   if (!emailRegex.test(inviteeEmail)) {
     return NextResponse.json(
       { error: "Zadaná e-mailová adresa není platná." },
@@ -57,9 +70,29 @@ export async function POST(
     )
   }
 
+  if (isBehalf && !behalfOf && !behalfOfName && !behalfOfDisplayLabel) {
+    return NextResponse.json(
+      { error: "Vyberte, za koho bude příjemce podepisovat." },
+      { status: 400 }
+    )
+  }
+
   const offboarding = await prisma.employeeOffboarding.findUnique({
     where: { id: offboardingId },
-    include: { exitChecklist: true },
+    select: {
+      id: true,
+      name: true,
+      surname: true,
+      titleBefore: true,
+      titleAfter: true,
+      personalNumber: true,
+      positionName: true,
+      department: true,
+      unitName: true,
+      actualEnd: true,
+      plannedEnd: true,
+      exitChecklist: true,
+    },
   })
 
   if (!offboarding) {
@@ -79,6 +112,12 @@ export async function POST(
     .join(" ")
     .trim()
 
+  const endDate = offboarding.actualEnd ?? offboarding.plannedEnd
+
+  const employmentEndDate = endDate
+    ? new Date(endDate).toLocaleDateString("cs-CZ")
+    : "—"
+
   let checklist = offboarding.exitChecklist
 
   if (!checklist) {
@@ -90,9 +129,7 @@ export async function POST(
           personalNumber: offboarding.personalNumber ?? null,
           department: offboarding.department,
           unitName: offboarding.unitName,
-          employmentEndDate: (
-            offboarding.actualEnd ?? offboarding.plannedEnd
-          ).toISOString(),
+          employmentEndDate: endDate?.toISOString() ?? new Date().toISOString(),
         } as Prisma.InputJsonObject,
         items: {
           create: EXIT_CHECKLIST_ROWS.map((row, index) => ({
@@ -108,6 +145,7 @@ export async function POST(
   }
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL
+
   if (!baseUrl) {
     return NextResponse.json(
       { error: "Není nastavena proměnná NEXT_PUBLIC_APP_URL." },
@@ -116,20 +154,36 @@ export async function POST(
   }
 
   const signUrl = `${baseUrl}/odchody-public/${checklist.publicToken}`
+  const sentByName = session.user.name ?? session.user.email ?? "HR oddělení"
 
   try {
-    await sendSignatureInviteEmail({
-      to: inviteeEmail,
-      toName: inviteeName || undefined,
-      employeeName,
-      sentByName: session.user.name ?? session.user.email ?? "HR oddělení",
-      signUrl,
-    })
-  } catch {
+    if (isBehalf) {
+      await sendBehalfSignatureEmail({
+        to: inviteeEmail,
+        behalfOfName: behalfOfName || behalfOf || "zodpovědnou osobu",
+        behalfOfRole,
+        behalfOfDisplayLabel: behalfOfDisplayLabel || behalfOf || undefined,
+
+        employeeName,
+        employeePosition: offboarding.positionName ?? "",
+        employeeDepartment: offboarding.department ?? "",
+        employmentEndDate,
+        signUrl,
+      })
+    } else {
+      await sendSignatureInviteEmail({
+        to: inviteeEmail,
+        employeeName,
+        sentByName,
+        signUrl,
+      })
+    }
+  } catch (err) {
+    console.error("[exit-checklist/invite] E-mail se nepodařilo odeslat:", err)
+
     return NextResponse.json(
       {
-        error:
-          "E-mail se nepodařilo odeslat. Zkopírujte odkaz ručně a zašlete jej příjemci.",
+        error: "E-mail se nepodařilo odeslat. Zkopírujte odkaz ručně.",
         signUrl,
       },
       { status: 207 }

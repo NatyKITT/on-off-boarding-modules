@@ -1,8 +1,21 @@
 "use client"
 
+import * as React from "react"
 import { useEffect, useMemo, useState } from "react"
 import { format } from "date-fns"
-import { Check, ChevronDown, Lock, Printer, Undo2, X } from "lucide-react"
+import {
+  Check,
+  CheckCircle,
+  ChevronDown,
+  Loader2,
+  Lock,
+  Printer,
+  RefreshCcw,
+  Send,
+  Undo2,
+  X,
+  XCircle,
+} from "lucide-react"
 import { useSession } from "next-auth/react"
 
 import type {
@@ -12,10 +25,19 @@ import type {
   ExitChecklistSignatures,
   ExitChecklistSignatureValue,
   ExitResolvedValue,
+  HandoverRecipient,
 } from "@/types/exit-checklist"
-import type { Position } from "@/types/position"
 import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
 
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -28,6 +50,13 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -43,8 +72,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { SendAllDialog } from "@/components/forms/send-all-dialog"
-import { SendInviteDialog } from "@/components/forms/send-invite-dialog"
+import { SendAllDialog } from "@/components/common/send-all-dialog"
+import { SendInviteBehalfDialog } from "@/components/common/send-invite-behalf-dialog"
+import { SendInviteDialog } from "@/components/common/send-invite-dialog"
 
 type Props = {
   offboardingId?: number
@@ -70,12 +100,14 @@ type EmployeePersonItem = {
   unitName?: string
 }
 
-type SearchablePosition = Position & {
-  _key: string
-  _hay: string
-}
-
 type HeaderSignatureKey = "employee" | "manager" | "issuer"
+
+type FeedbackDialogState = {
+  open: boolean
+  type: "success" | "error"
+  title: string
+  message: string
+}
 
 const emptySignature = (): ExitChecklistSignatureValue => ({
   signedByName: null,
@@ -92,16 +124,13 @@ function getDefaultIssuedDate(value?: string | null) {
   return trimmed ? trimmed : getTodayIsoDate()
 }
 
-function createTempAssetId() {
+function createTempId() {
   try {
-    if (
-      typeof globalThis !== "undefined" &&
-      globalThis.crypto &&
-      typeof globalThis.crypto.randomUUID === "function"
-    ) {
+    if (typeof globalThis !== "undefined" && globalThis.crypto?.randomUUID) {
       return globalThis.crypto.randomUUID()
     }
   } catch {}
+
   return `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 
@@ -109,8 +138,10 @@ function mergeItemsWithConfig(
   dataItems: ExitChecklistItem[]
 ): ExitChecklistItem[] {
   const existingByKey = new Map(dataItems.map((i) => [i.key, i]))
+
   return EXIT_CHECKLIST_ROWS.map((row) => {
     const found = existingByKey.get(row.key)
+
     return {
       ...row,
       resolved: found?.resolved ?? null,
@@ -121,61 +152,15 @@ function mergeItemsWithConfig(
   })
 }
 
-function stripAccents(s: string) {
+function normalizeStr(s: string) {
   return s
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
 }
 
-function normalizePositions(payload: unknown): Position[] {
-  const arr = Array.isArray((payload as { data?: unknown })?.data)
-    ? ((payload as { data: unknown[] }).data ?? [])
-    : Array.isArray(payload)
-      ? payload
-      : []
-
-  const raw = arr.filter(
-    (v): v is Record<string, unknown> => v != null && typeof v === "object"
-  )
-
-  const mapped: Position[] = raw
-    .map((v) => {
-      const num =
-        typeof v.num === "string" || typeof v.num === "number"
-          ? String(v.num)
-          : ""
-      if (!num) return null
-      return {
-        id:
-          typeof v.id === "string" || typeof v.id === "number"
-            ? String(v.id)
-            : num,
-        num,
-        name: typeof v.name === "string" ? v.name : "",
-        dept_name: typeof v.dept_name === "string" ? v.dept_name : "",
-        unit_name: typeof v.unit_name === "string" ? v.unit_name : "",
-      }
-    })
-    .filter((v): v is Position => Boolean(v))
-
-  const byNum = new Map<string, Position>()
-  for (const p of mapped) {
-    if (!byNum.has(p.num)) {
-      byNum.set(p.num, p)
-      continue
-    }
-    const existing = byNum.get(p.num)!
-    const existingScore =
-      (existing.name ? 1 : 0) +
-      (existing.dept_name ? 1 : 0) +
-      (existing.unit_name ? 1 : 0)
-    const nextScore =
-      (p.name ? 1 : 0) + (p.dept_name ? 1 : 0) + (p.unit_name ? 1 : 0)
-    if (nextScore > existingScore) byNum.set(p.num, p)
-  }
-
-  return Array.from(byNum.values())
+function normalizeEmail(value?: string | null) {
+  return value?.trim().toLowerCase() ?? ""
 }
 
 function buildEmployeeFullName(person: Partial<EmployeePersonItem>) {
@@ -187,7 +172,9 @@ function buildEmployeeFullName(person: Partial<EmployeePersonItem>) {
 
 function renderOrganization(text: string, managerName?: string | null) {
   const lines = text.split("\n").filter(Boolean)
+
   if (lines.length === 0) return null
+
   return (
     <div className="leading-snug">
       <div className="font-semibold">{lines[0]}</div>
@@ -203,6 +190,204 @@ function renderOrganization(text: string, managerName?: string | null) {
   )
 }
 
+function PersonLookupCombobox({
+  valueName,
+  valueEmail,
+  placeholder,
+  disabled,
+  onSelect,
+}: {
+  valueName?: string
+  valueEmail?: string
+  placeholder?: string
+  disabled?: boolean
+  onSelect: (employee: EmployeePersonItem) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState("")
+  const [allEmployees, setAllEmployees] = useState<EmployeePersonItem[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open || allEmployees.length > 0) return
+
+    const controller = new AbortController()
+
+    ;(async () => {
+      setLoading(true)
+      setError(null)
+
+      try {
+        const url = new URL("/api/zamestnanci/hledat", window.location.origin)
+        url.searchParams.set("q", "1")
+        url.searchParams.set("limit", "500")
+
+        const res = await fetch(url.toString(), {
+          cache: "no-store",
+          signal: controller.signal,
+          headers: { Accept: "application/json" },
+        })
+
+        if (!res.ok) {
+          throw new Error(
+            res.status === 502 ? "EOS není dostupná" : `Chyba (${res.status})`
+          )
+        }
+
+        const json = await res.json().catch(() => null)
+        setAllEmployees(Array.isArray(json?.data) ? json.data : [])
+      } catch (e) {
+        if ((e as Error).name !== "AbortError") {
+          setError((e as Error).message || "Chyba vyhledávání")
+        }
+      } finally {
+        setLoading(false)
+      }
+    })()
+
+    return () => controller.abort()
+  }, [open, allEmployees.length])
+
+  useEffect(() => {
+    if (!open) setQuery("")
+  }, [open])
+
+  const filtered = useMemo(() => {
+    const q = normalizeStr(query.trim())
+
+    if (!q) return allEmployees
+
+    return allEmployees.filter((e) => {
+      const num = normalizeStr(e.personalNumber ?? "")
+      const nm = normalizeStr(
+        `${e.titleBefore ?? ""} ${e.name ?? ""} ${e.surname ?? ""} ${e.titleAfter ?? ""}`
+      )
+      const org = normalizeStr(
+        `${e.positionName ?? ""} ${e.department ?? ""} ${e.unitName ?? ""}`
+      )
+      const email = normalizeStr(e.email ?? "")
+
+      return (
+        num.includes(q) ||
+        nm.includes(q) ||
+        org.includes(q) ||
+        email.includes(q)
+      )
+    })
+  }, [allEmployees, query])
+
+  const selectedLabel =
+    valueName || valueEmail
+      ? [valueName, valueEmail].filter(Boolean).join(" · ")
+      : ""
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="w-full justify-between text-xs"
+          disabled={disabled}
+        >
+          <span className="truncate">
+            {selectedLabel || (placeholder ?? "Vyhledat v eOSu…")}
+          </span>
+          <ChevronDown className="ml-2 size-3 opacity-60" />
+        </Button>
+      </PopoverTrigger>
+
+      <PopoverContent className="w-[420px] p-0" align="start">
+        <Command shouldFilter={false}>
+          <div className="relative">
+            <CommandInput
+              placeholder="Osobní číslo, jméno nebo e-mail…"
+              value={query}
+              onValueChange={setQuery}
+              autoFocus
+            />
+            {query && (
+              <button
+                type="button"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setQuery("")}
+              >
+                <X className="size-4" />
+              </button>
+            )}
+          </div>
+
+          <CommandEmpty>
+            {loading ? (
+              <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
+                <div className="mr-2 size-4 animate-spin rounded-full border-b-2 border-current" />
+                Načítám…
+              </div>
+            ) : error ? (
+              <div className="py-6 text-center text-sm text-destructive">
+                {error}
+              </div>
+            ) : (
+              <div className="py-6 text-center text-sm text-muted-foreground">
+                Nic nenalezeno.
+              </div>
+            )}
+          </CommandEmpty>
+
+          <CommandList className="max-h-80 overflow-y-auto overscroll-contain">
+            <CommandGroup>
+              {filtered.map((e) => (
+                <CommandItem
+                  key={e.id}
+                  value={e.personalNumber || e.id}
+                  onPointerDown={(ev) => {
+                    ev.preventDefault()
+                    onSelect(e)
+                    setOpen(false)
+                    setQuery("")
+                  }}
+                  onSelect={() => {}}
+                  className="flex cursor-pointer items-start gap-3 py-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      {e.personalNumber && (
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {e.personalNumber}
+                        </span>
+                      )}
+                      <span className="truncate text-sm font-medium">
+                        {buildEmployeeFullName(e)}
+                      </span>
+                    </div>
+
+                    <div className="mt-0.5 space-y-0.5 text-xs text-muted-foreground">
+                      {e.positionName && (
+                        <div className="truncate">{e.positionName}</div>
+                      )}
+                      {(e.department || e.unitName) && (
+                        <div className="truncate">
+                          {[e.department, e.unitName]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </div>
+                      )}
+                      {e.email && <div className="truncate">{e.email}</div>}
+                    </div>
+                  </div>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 type HeaderSignatureBlockProps = {
   label: string
   value: ExitChecklistSignatureValue
@@ -211,6 +396,7 @@ type HeaderSignatureBlockProps = {
   currentUserName: string
   currentUserEmail: string
   onSign: () => void
+  onSignBehalf?: () => void
   onRevoke: () => void
 }
 
@@ -222,59 +408,224 @@ function HeaderSignatureBlock({
   currentUserName,
   currentUserEmail,
   onSign,
+  onSignBehalf,
   onRevoke,
 }: HeaderSignatureBlockProps) {
   const isSigned = Boolean(value.signedAt)
   const currentUserIsSigner =
-    Boolean(value.signedByEmail) && value.signedByEmail === currentUserEmail
+    normalizeEmail(value.signedByEmail) === normalizeEmail(currentUserEmail)
+
   const canRevoke = !isLocked && isSigned && (isAdmin || currentUserIsSigner)
   const canSign =
     !isLocked && !isSigned && Boolean(currentUserName || currentUserEmail)
+
   const signedAtDate = value.signedAt
     ? format(new Date(value.signedAt), "d.M.yyyy HH:mm")
     : ""
 
   return (
-    <div className="space-y-2 rounded-md border p-3">
-      <Label className="text-sm font-medium">{label}</Label>
-      {isSigned ? (
-        <div className="rounded-md bg-muted/50 px-3 py-2 text-sm">
-          <div>{value.signedByName ?? "Podepsáno"}</div>
-          <div className="text-xs text-muted-foreground">{signedAtDate}</div>
-        </div>
-      ) : (
-        <div className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
-          Nepodepsáno
-        </div>
-      )}
-      <div className="flex flex-wrap gap-2">
-        {canSign && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="gap-1"
-            onClick={onSign}
-          >
-            <Check className="size-4" />
-            Podepsat elektronicky
-          </Button>
+    <div
+      className="flex flex-col rounded-md border p-3"
+      style={{ minHeight: "130px" }}
+    >
+      <Label className="mb-2 text-sm font-medium">{label}</Label>
+
+      <div style={{ minHeight: "52px" }} className="flex-1">
+        {isSigned ? (
+          <div className="rounded-md bg-muted/50 px-3 py-2 text-sm">
+            <div className="font-medium">
+              {value.signedByName ?? "Podepsáno"}
+            </div>
+            <div className="text-xs text-muted-foreground">{signedAtDate}</div>
+          </div>
+        ) : (
+          <div className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
+            Nepodepsáno
+          </div>
         )}
-        {canRevoke && (
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="gap-1 text-xs text-muted-foreground"
-            onClick={onRevoke}
-          >
-            <Undo2 className="size-4" />
-            Zrušit podpis
-          </Button>
+      </div>
+
+      <div
+        className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-[168px_168px]"
+        style={{ minHeight: "70px" }}
+      >
+        {canSign ? (
+          <>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs"
+              onClick={onSign}
+            >
+              <Check className="size-3 shrink-0" />
+              <span className="text-left">Podepsat</span>
+            </Button>
+
+            {onSignBehalf ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs text-muted-foreground"
+                onClick={onSignBehalf}
+              >
+                <Check className="size-3 shrink-0" />
+                <span className="text-left">Podepsat v zastoupení</span>
+              </Button>
+            ) : (
+              <div className="hidden h-8 sm:block" aria-hidden="true" />
+            )}
+          </>
+        ) : canRevoke ? (
+          <>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs text-muted-foreground"
+              onClick={onRevoke}
+            >
+              <Undo2 className="size-3 shrink-0" />
+              <span className="text-left">Zrušit podpis</span>
+            </Button>
+            <div className="hidden h-8 sm:block" aria-hidden="true" />
+          </>
+        ) : (
+          <>
+            <div className="hidden h-8 sm:block" aria-hidden="true" />
+            <div className="hidden h-8 sm:block" aria-hidden="true" />
+          </>
         )}
       </div>
     </div>
   )
+}
+
+function TableSignatureCell({
+  isSigned,
+  isMuted,
+  signedByName,
+  signedAt,
+}: {
+  isSigned: boolean
+  isMuted: boolean
+  signedByName?: string | null
+  signedAt: string
+}) {
+  return (
+    <div className="flex h-[68px] min-w-0 flex-col justify-center overflow-hidden">
+      {isSigned && !isMuted ? (
+        <>
+          <span
+            className="min-w-0 break-words text-sm font-medium leading-tight"
+            style={{
+              display: "-webkit-box",
+              WebkitBoxOrient: "vertical",
+              WebkitLineClamp: 2,
+              overflow: "hidden",
+            }}
+            title={signedByName ?? undefined}
+          >
+            {signedByName}
+          </span>
+          <span className="mt-1 truncate text-xs text-muted-foreground">
+            {signedAt}
+          </span>
+        </>
+      ) : (
+        <span className="text-xs text-muted-foreground">
+          {isMuted ? "—" : "Nepodepsáno"}
+        </span>
+      )}
+    </div>
+  )
+}
+
+function TableActionCell({
+  showSignButton,
+  showRevokeButton,
+  onSign,
+  onSignBehalf,
+  onRevoke,
+}: {
+  showSignButton: boolean
+  showRevokeButton: boolean
+  onSign: () => void
+  onSignBehalf: () => void
+  onRevoke: () => void
+}) {
+  return (
+    <div className="grid h-[68px] w-full grid-rows-2 gap-1">
+      {showSignButton ? (
+        <>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 w-full justify-start gap-1 px-2 text-xs"
+            onClick={onSign}
+          >
+            <Check className="size-3 shrink-0" />
+            <span className="min-w-0 truncate text-left">Podepsat</span>
+          </Button>
+
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 w-full justify-start gap-1 px-2 text-xs text-muted-foreground"
+            onClick={onSignBehalf}
+          >
+            <Check className="size-3 shrink-0" />
+            <span className="min-w-0 truncate text-left">
+              Podepsat v zastoupení
+            </span>
+          </Button>
+        </>
+      ) : showRevokeButton ? (
+        <>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-8 w-full justify-start gap-1 px-2 text-xs text-muted-foreground"
+            onClick={onRevoke}
+          >
+            <Undo2 className="size-3 shrink-0" />
+            <span className="min-w-0 truncate text-left">Zrušit podpis</span>
+          </Button>
+          <div className="h-8 w-full" aria-hidden="true" />
+        </>
+      ) : (
+        <>
+          <div className="h-8 w-full" aria-hidden="true" />
+          <div className="h-8 w-full" aria-hidden="true" />
+        </>
+      )}
+    </div>
+  )
+}
+
+function buildHandoverRecipientSendKey(recipients: HandoverRecipient[]) {
+  return recipients
+    .filter((recipient) => {
+      const email = normalizeEmail(recipient.email)
+      return (
+        Boolean(recipient.name?.trim()) &&
+        /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+      )
+    })
+    .map((recipient) => ({
+      email: normalizeEmail(recipient.email),
+      name: recipient.name?.trim() ?? "",
+      personalNumber: recipient.personalNumber?.trim() ?? "",
+    }))
+    .sort((a, b) => a.email.localeCompare(b.email))
+    .map((recipient) =>
+      [recipient.email, recipient.name, recipient.personalNumber].join("|")
+    )
+    .join(";;")
 }
 
 export function ExitChecklistForm({
@@ -300,6 +651,7 @@ export function ExitChecklistForm({
   const [conflictOfInterest, setConflictOfInterest] = useState(
     initialData.conflictOfInterest ?? false
   )
+
   const [includeHandoverAgenda, setIncludeHandoverAgenda] = useState(
     initialData.handover?.includeHandoverAgenda ?? false
   )
@@ -325,6 +677,28 @@ export function ExitChecklistForm({
   const [responsibleParty, setResponsibleParty] = useState<
     "KITT6" | "OSS_KT" | null
   >(initialData.handover?.responsibleParty ?? null)
+  const [handoverRecipients, setHandoverRecipients] = useState<
+    HandoverRecipient[]
+  >(initialData.handover?.handoverRecipients ?? [])
+
+  const [handoverRecipientsSentAt, setHandoverRecipientsSentAt] = useState<
+    string | null
+  >(initialData.handover?.handoverRecipientsSentAt ?? null)
+  const [handoverRecipientsSentByName, setHandoverRecipientsSentByName] =
+    useState<string | null>(
+      initialData.handover?.handoverRecipientsSentByName ?? null
+    )
+  const [handoverRecipientsSentByEmail, setHandoverRecipientsSentByEmail] =
+    useState<string | null>(
+      initialData.handover?.handoverRecipientsSentByEmail ?? null
+    )
+  const [handoverRecipientsSentHash, setHandoverRecipientsSentHash] = useState<
+    string | null
+  >(initialData.handover?.handoverRecipientsSentHash ?? null)
+  const [handoverRecipientsSentCount, setHandoverRecipientsSentCount] =
+    useState<number | null>(
+      initialData.handover?.handoverRecipientsSentCount ?? null
+    )
 
   const [signatures, setSignatures] = useState<ExitChecklistSignatures>({
     employee: initialData.signatures?.employee ?? emptySignature(),
@@ -332,6 +706,10 @@ export function ExitChecklistForm({
     issuer: initialData.signatures?.issuer ?? emptySignature(),
     issuedDate: getDefaultIssuedDate(initialData.signatures?.issuedDate),
   })
+  const [handoverManagerSignature, setHandoverManagerSignature] =
+    useState<ExitChecklistSignatureValue>(
+      initialData.handoverManagerSignature ?? emptySignature()
+    )
 
   const [managerName, setManagerName] = useState<string>(
     initialData.managerName ?? ""
@@ -339,32 +717,38 @@ export function ExitChecklistForm({
   const [managerEmail, setManagerEmail] = useState<string>(
     initialData.managerEmail ?? ""
   )
-  const [managerSearchOpen, setManagerSearchOpen] = useState(false)
-  const [managerEmployees, setManagerEmployees] = useState<
-    EmployeePersonItem[]
-  >([])
-  const [managerSearchLoading, setManagerSearchLoading] = useState(false)
-  const [managerQuery, setManagerQuery] = useState("")
+  const [managerLoading, setManagerLoading] = useState(false)
+  const [managerLoadError, setManagerLoadError] = useState<string | null>(null)
 
-  const [positions, setPositions] = useState<Position[]>([])
-  const [loadingPositions, setLoadingPositions] = useState(false)
-  const [positionPickerOpen, setPositionPickerOpen] = useState(false)
-  const [positionQuery, setPositionQuery] = useState("")
+  const [newRecipientName, setNewRecipientName] = useState("")
+  const [newRecipientEmail, setNewRecipientEmail] = useState("")
+  const [newRecipientError, setNewRecipientError] = useState<string | null>(
+    null
+  )
+
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [sendingHandoverInfo, setSendingHandoverInfo] = useState(false)
   const [lastSaveTrigger, setLastSaveTrigger] = useState<number | undefined>(0)
-  const [statusMessage, setStatusMessage] = useState<string | null>(null)
+  const [feedbackDialog, setFeedbackDialog] = useState<FeedbackDialogState>({
+    open: false,
+    type: "success",
+    title: "",
+    message: "",
+  })
+  const [handoverSendDialogOpen, setHandoverSendDialogOpen] = useState(false)
+  const [handoverSendDialogMode, setHandoverSendDialogMode] = useState<
+    "first-send" | "resend"
+  >("first-send")
 
   const isInternalMode = mode === "internal"
-  const isLocked = isInternalMode ? Boolean(lockedAt) : false
-
+  const isLocked = Boolean(lockedAt)
+  const resolvedOffboardingId = offboardingId ?? initialData.offboardingId
   const role = session?.user.role ?? "USER"
   const isAdmin = role === "ADMIN" || role === "HR" || role === "IT"
-
-  const canInvite = isInternalMode && isAdmin && Boolean(offboardingId)
+  const canInvite = isInternalMode && isAdmin && Boolean(resolvedOffboardingId)
   const canLock = isInternalMode && isAdmin
-  const canGeneratePdf = isInternalMode && Boolean(offboardingId)
-
+  const canGeneratePdf = isInternalMode && Boolean(resolvedOffboardingId)
   const signingDisabledKeys = conflictOfInterest ? [] : ["lawInfo"]
   const lawInfoGreyed = !conflictOfInterest
 
@@ -390,40 +774,39 @@ export function ExitChecklistForm({
 
   const currentUserName = session?.user?.name ?? ""
   const currentUserEmail = session?.user?.email ?? ""
+  const currentUserEmailNormalized = normalizeEmail(currentUserEmail)
 
-  const positionsForSearch: SearchablePosition[] = useMemo(
+  const validHandoverRecipients = useMemo(
     () =>
-      positions.map((p) => ({
-        ...p,
-        _key: `${p.num} ${p.name}`,
-        _hay: stripAccents(`${p.num} ${p.name} ${p.dept_name} ${p.unit_name}`),
-      })),
-    [positions]
+      handoverRecipients.filter((recipient) => {
+        const email = normalizeEmail(recipient.email)
+        return (
+          Boolean(recipient.name?.trim()) &&
+          Boolean(email) &&
+          /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+        )
+      }),
+    [handoverRecipients]
   )
 
-  const filteredPositions = useMemo(() => {
-    const q = stripAccents(positionQuery.trim())
-    if (!q) return positionsForSearch
-    return positionsForSearch.filter((p) => p._hay.includes(q))
-  }, [positionsForSearch, positionQuery])
+  const handoverRecipientsSendKey = useMemo(
+    () => buildHandoverRecipientSendKey(validHandoverRecipients),
+    [validHandoverRecipients]
+  )
 
-  const filteredManagerEmployees = useMemo(() => {
-    const q = managerQuery.trim().toLowerCase()
-    if (!q) return managerEmployees.slice(0, 50)
-    return managerEmployees
-      .filter((e) => {
-        const name = `${e.name} ${e.surname}`.toLowerCase()
-        const email = (e.email ?? "").toLowerCase()
-        const pn = (e.personalNumber ?? "").toLowerCase()
-        return name.includes(q) || email.includes(q) || pn.includes(q)
-      })
-      .slice(0, 50)
-  }, [managerEmployees, managerQuery])
+  const handoverRecipientsWereSent = Boolean(handoverRecipientsSentAt)
+
+  const canSendHandoverInfo =
+    Boolean(resolvedOffboardingId) &&
+    Boolean(currentUserEmail) &&
+    !isLocked &&
+    includeHandoverAgenda &&
+    handoverOption2 &&
+    validHandoverRecipients.length > 0
 
   useEffect(() => {
-    const merged = mergeItemsWithConfig(initialData.items ?? [])
     setLockedAt(initialData.lockedAt ?? null)
-    setItems(merged)
+    setItems(mergeItemsWithConfig(initialData.items ?? []))
     setAssets(initialData.assets ?? [])
     setConflictOfInterest(initialData.conflictOfInterest ?? false)
     setIncludeHandoverAgenda(
@@ -438,16 +821,34 @@ export function ExitChecklistForm({
     setHandoverOption3(initialData.handover?.option3 ?? false)
     setHandoverOption3Reason(initialData.handover?.option3Reason ?? "")
     setResponsibleParty(initialData.handover?.responsibleParty ?? null)
+    setHandoverRecipients(initialData.handover?.handoverRecipients ?? [])
+    setHandoverRecipientsSentAt(
+      initialData.handover?.handoverRecipientsSentAt ?? null
+    )
+    setHandoverRecipientsSentByName(
+      initialData.handover?.handoverRecipientsSentByName ?? null
+    )
+    setHandoverRecipientsSentByEmail(
+      initialData.handover?.handoverRecipientsSentByEmail ?? null
+    )
+    setHandoverRecipientsSentHash(
+      initialData.handover?.handoverRecipientsSentHash ?? null
+    )
+    setHandoverRecipientsSentCount(
+      initialData.handover?.handoverRecipientsSentCount ?? null
+    )
     setSignatures({
       employee: initialData.signatures?.employee ?? emptySignature(),
       manager: initialData.signatures?.manager ?? emptySignature(),
       issuer: initialData.signatures?.issuer ?? emptySignature(),
       issuedDate: getDefaultIssuedDate(initialData.signatures?.issuedDate),
     })
+    setHandoverManagerSignature(
+      initialData.handoverManagerSignature ?? emptySignature()
+    )
     setManagerName(initialData.managerName ?? "")
     setManagerEmail(initialData.managerEmail ?? "")
     setDirty(false)
-    setStatusMessage(null)
   }, [initialData])
 
   useEffect(() => {
@@ -459,146 +860,311 @@ export function ExitChecklistForm({
       externalSaveTrigger !== undefined &&
       externalSaveTrigger !== lastSaveTrigger
     ) {
-      void handleSave(false).then(() => {
-        setLastSaveTrigger(externalSaveTrigger)
-      })
+      void handleSave(false).then(() => setLastSaveTrigger(externalSaveTrigger))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalSaveTrigger])
 
-  useEffect(() => {
-    if (!includeHandoverAgenda || !handoverOption2 || positions.length > 0)
-      return
-    let cancelled = false
-    ;(async () => {
-      try {
-        setLoadingPositions(true)
-        const res = await fetch("/api/systemizace", { cache: "no-store" })
-        const json = await res.json().catch(() => null)
-        const normalized = normalizePositions(json)
-        if (!cancelled) setPositions(normalized)
-      } catch (err) {
-        console.error("Nepodařilo se načíst systemizaci:", err)
-      } finally {
-        if (!cancelled) setLoadingPositions(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [includeHandoverAgenda, handoverOption2, positions.length])
-
   function markDirty() {
-    if (!dirty) setDirty(true)
+    setDirty(true)
+  }
+
+  function showFeedback(
+    type: FeedbackDialogState["type"],
+    title: string,
+    message: string
+  ) {
+    setFeedbackDialog({
+      open: true,
+      type,
+      title,
+      message,
+    })
+  }
+
+  async function reloadManagerFromPosition() {
+    const positionNum = initialData.positionNum
+
+    if (!positionNum) return
+
+    setManagerLoading(true)
+    setManagerLoadError(null)
+
+    try {
+      const res = await fetch(
+        `/api/systemizace/superior?positionNum=${encodeURIComponent(positionNum)}`,
+        { cache: "no-store" }
+      )
+
+      if (!res.ok) {
+        setManagerLoadError("Vedoucí nebyl nalezen.")
+        return
+      }
+
+      const json = await res.json().catch(() => null)
+      const sup = json?.supervisor
+
+      if (!sup) {
+        setManagerLoadError("Vedoucí nebyl nalezen.")
+        return
+      }
+
+      const fullName = [sup.titleBefore, sup.name, sup.surname, sup.titleAfter]
+        .filter(Boolean)
+        .join(" ")
+        .trim()
+
+      if (!fullName) {
+        setManagerLoadError("Vedoucí nebyl nalezen.")
+        return
+      }
+
+      setManagerName(fullName)
+      setManagerEmail(sup.email ?? "")
+      setManagerLoadError(null)
+      markDirty()
+    } catch {
+      setManagerLoadError("Nepodařilo se načíst vedoucího.")
+    } finally {
+      setManagerLoading(false)
+    }
   }
 
   function signHeaderSignature(key: HeaderSignatureKey) {
     if (isLocked || (!currentUserName && !currentUserEmail)) return
-    setSignatures((prev) => ({
-      ...prev,
-      [key]: {
-        signedByName: currentUserName || currentUserEmail,
-        signedByEmail: currentUserEmail || null,
-        signedAt: new Date().toISOString(),
-      },
-    }))
+
+    const now = new Date().toISOString()
+
+    setSignatures((prev) => {
+      if (prev[key]?.signedAt) return prev
+
+      return {
+        ...prev,
+        [key]: {
+          signedByName: currentUserName || currentUserEmail,
+          signedByEmail: currentUserEmail || null,
+          signedAt: now,
+        },
+      }
+    })
+
     markDirty()
-    setStatusMessage("Elektronický podpis byl doplněn. Nezapomeňte uložit.")
-    setTimeout(() => setStatusMessage(null), 3000)
+  }
+
+  function signHeaderSignatureBehalf(key: HeaderSignatureKey) {
+    if (isLocked || (!currentUserName && !currentUserEmail)) return
+
+    const now = new Date().toISOString()
+
+    setSignatures((prev) => {
+      if (prev[key]?.signedAt) return prev
+
+      return {
+        ...prev,
+        [key]: {
+          signedByName: `${currentUserName || currentUserEmail} — v zastoupení`,
+          signedByEmail: currentUserEmail || null,
+          signedAt: now,
+        },
+      }
+    })
+
+    markDirty()
   }
 
   function revokeHeaderSignature(key: HeaderSignatureKey) {
     if (isLocked) return
-    const current = signatures[key]
-    if (!Boolean(current.signedAt)) return
-    const isSignedByCurrentUser =
-      Boolean(current.signedByEmail) &&
-      current.signedByEmail === currentUserEmail
-    if (!isAdmin && !isSignedByCurrentUser) return
-    setSignatures((prev) => ({ ...prev, [key]: emptySignature() }))
+
+    setSignatures((prev) => {
+      const current = prev[key]
+
+      if (!current?.signedAt) return prev
+
+      const signerEmail = normalizeEmail(current.signedByEmail)
+
+      if (!isAdmin && signerEmail !== currentUserEmailNormalized) return prev
+
+      return {
+        ...prev,
+        [key]: emptySignature(),
+      }
+    })
+
     markDirty()
-    setStatusMessage("Podpis byl zrušen.")
-    setTimeout(() => setStatusMessage(null), 3000)
   }
 
   function updateResolved(
     key: ExitChecklistItem["key"],
     value: ExitResolvedValue
   ) {
-    if (isLocked) return
-    if (signingDisabledKeys.includes(key)) return
-    const current = items.find((i) => i.key === key)
-    if (!current) return
-    if (
-      !isAdmin &&
-      current.signedByEmail &&
-      current.signedByEmail !== currentUserEmail
-    )
-      return
-    markDirty()
+    if (isLocked || signingDisabledKeys.includes(key)) return
+
+    let changed = false
+
     setItems((prev) =>
-      prev.map((item) =>
-        item.key === key ? { ...item, resolved: value } : item
-      )
+      prev.map((item) => {
+        if (item.key !== key) return item
+
+        const signerEmail = normalizeEmail(item.signedByEmail)
+
+        if (
+          !isAdmin &&
+          signerEmail &&
+          signerEmail !== currentUserEmailNormalized
+        ) {
+          return item
+        }
+
+        if (item.resolved === value) return item
+
+        changed = true
+
+        return {
+          ...item,
+          resolved: value,
+        }
+      })
     )
+
+    if (changed) markDirty()
   }
 
   function signRow(key: ExitChecklistItem["key"]) {
-    if (isLocked || !currentUserEmail) return
-    if (signingDisabledKeys.includes(key)) return
-    const current = items.find((i) => i.key === key)
-    if (!current || Boolean(current.signedAt)) return
-    markDirty()
+    if (isLocked || !currentUserEmail || signingDisabledKeys.includes(key)) {
+      return
+    }
+
+    const now = new Date().toISOString()
+    let changed = false
+
     setItems((prev) =>
-      prev.map((item) =>
-        item.key === key
-          ? {
-              ...item,
-              resolved: "YES",
-              signedByName: currentUserName || currentUserEmail,
-              signedByEmail: currentUserEmail,
-              signedAt: new Date().toISOString(),
-            }
-          : item
-      )
+      prev.map((item) => {
+        if (item.key !== key) return item
+        if (item.signedAt) return item
+
+        changed = true
+
+        return {
+          ...item,
+          resolved: "YES",
+          signedByName: currentUserName || currentUserEmail,
+          signedByEmail: currentUserEmail,
+          signedAt: now,
+        }
+      })
     )
-    setStatusMessage("Podpis byl přidán. Nezapomeňte uložit.")
-    setTimeout(() => setStatusMessage(null), 3000)
+
+    if (changed) markDirty()
+  }
+
+  function signRowOnBehalf(key: ExitChecklistItem["key"]) {
+    if (isLocked || !currentUserEmail || signingDisabledKeys.includes(key)) {
+      return
+    }
+
+    const now = new Date().toISOString()
+    let changed = false
+
+    setItems((prev) =>
+      prev.map((item) => {
+        if (item.key !== key) return item
+        if (item.signedAt) return item
+
+        changed = true
+
+        return {
+          ...item,
+          resolved: "YES",
+          signedByName: `${currentUserName || currentUserEmail} — v zastoupení`,
+          signedByEmail: currentUserEmail,
+          signedAt: now,
+        }
+      })
+    )
+
+    if (changed) markDirty()
   }
 
   function revokeSignature(key: ExitChecklistItem["key"]) {
     if (isLocked) return
-    const current = items.find((i) => i.key === key)
-    if (!current || !Boolean(current.signedAt)) return
-    const isSignedByCurrentUser =
-      Boolean(current.signedByEmail) &&
-      current.signedByEmail === currentUserEmail
-    if (!isAdmin && !isSignedByCurrentUser) return
-    markDirty()
+
+    let changed = false
+
     setItems((prev) =>
-      prev.map((item) =>
-        item.key === key
-          ? {
-              ...item,
-              resolved: null,
-              signedByName: null,
-              signedByEmail: null,
-              signedAt: null,
-            }
-          : item
-      )
+      prev.map((item) => {
+        if (item.key !== key) return item
+        if (!item.signedAt) return item
+
+        const signerEmail = normalizeEmail(item.signedByEmail)
+
+        if (!isAdmin && signerEmail !== currentUserEmailNormalized) {
+          return item
+        }
+
+        changed = true
+
+        return {
+          ...item,
+          resolved: null,
+          signedByName: null,
+          signedByEmail: null,
+          signedAt: null,
+        }
+      })
     )
-    setStatusMessage("Podpis byl zrušen.")
-    setTimeout(() => setStatusMessage(null), 3000)
+
+    if (changed) markDirty()
+  }
+
+  function signHandoverManagerSignature(behalf = false) {
+    if (isLocked || (!currentUserName && !currentUserEmail)) return
+
+    const now = new Date().toISOString()
+
+    setHandoverManagerSignature((prev) => {
+      if (prev.signedAt) return prev
+
+      return {
+        signedByName: behalf
+          ? `${currentUserName || currentUserEmail} — v zastoupení`
+          : currentUserName || currentUserEmail,
+        signedByEmail: currentUserEmail || null,
+        signedAt: now,
+      }
+    })
+
+    markDirty()
+  }
+
+  function revokeHandoverManagerSignature() {
+    if (isLocked) return
+
+    setHandoverManagerSignature((prev) => {
+      if (!prev.signedAt) return prev
+
+      const signerEmail = normalizeEmail(prev.signedByEmail)
+
+      if (!isAdmin && signerEmail !== currentUserEmailNormalized) return prev
+
+      return emptySignature()
+    })
+
+    markDirty()
   }
 
   function addAssetRow() {
     if (isLocked) return
-    markDirty()
+
     setAssets((prev) => [
       ...prev,
-      { id: createTempAssetId(), subject: "", inventoryNumber: "" },
+      {
+        id: createTempId(),
+        subject: "",
+        inventoryNumber: "",
+      },
     ])
+
+    markDirty()
   }
 
   function updateAsset(
@@ -607,23 +1173,210 @@ export function ExitChecklistForm({
     value: string
   ) {
     if (isLocked) return
-    markDirty()
+
     setAssets((prev) =>
       prev.map((a) => (a.id === id ? { ...a, [field]: value } : a))
     )
+
+    markDirty()
   }
 
   function removeAsset(id: string) {
     if (isLocked) return
-    markDirty()
+
     setAssets((prev) => prev.filter((a) => a.id !== id))
+    markDirty()
+  }
+
+  function addRecipientManually() {
+    setNewRecipientError(null)
+
+    const name = newRecipientName.trim()
+    const email = newRecipientEmail.trim().toLowerCase()
+
+    if (!name) {
+      setNewRecipientError("Jméno je povinné.")
+      return
+    }
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setNewRecipientError("Zadejte platný e-mail.")
+      return
+    }
+
+    if (
+      handoverRecipients.some(
+        (recipient) => normalizeEmail(recipient.email) === email
+      )
+    ) {
+      setNewRecipientError("Tento příjemce je již v seznamu.")
+      return
+    }
+
+    setHandoverRecipients((prev) => [
+      ...prev,
+      {
+        id: createTempId(),
+        name,
+        email,
+      },
+    ])
+
+    setNewRecipientName("")
+    setNewRecipientEmail("")
+    markDirty()
+  }
+
+  function openHandoverSendDialog() {
+    if (!resolvedOffboardingId || !currentUserEmail) {
+      showFeedback(
+        "error",
+        "Odeslání není dostupné",
+        "Informace může odeslat pouze přihlášený uživatel s oprávněním k výstupnímu listu."
+      )
+      return
+    }
+
+    if (isLocked) {
+      showFeedback(
+        "error",
+        "Výstupní list je uzamčený",
+        "Po uzamčení už nelze odesílat informace příjemcům předávané agendy."
+      )
+      return
+    }
+
+    if (!includeHandoverAgenda || !handoverOption2) {
+      showFeedback(
+        "error",
+        "Předávaná agenda není připravena",
+        "Nejdříve zaškrtněte možnost „OI-KITT6 předá na jiné funkční místo“."
+      )
+      return
+    }
+
+    if (validHandoverRecipients.length === 0) {
+      showFeedback(
+        "error",
+        "Chybí příjemci",
+        "Přidejte alespoň jednoho příjemce s platným e-mailem."
+      )
+      return
+    }
+
+    setHandoverSendDialogMode(
+      handoverRecipientsWereSent ? "resend" : "first-send"
+    )
+    setHandoverSendDialogOpen(true)
+  }
+
+  async function handleSendHandoverRecipientInfo(force = false) {
+    if (!resolvedOffboardingId || !currentUserEmail) {
+      showFeedback(
+        "error",
+        "Odeslání není dostupné",
+        "Informace může odeslat pouze přihlášený uživatel s oprávněním k výstupnímu listu."
+      )
+      return
+    }
+
+    try {
+      setSendingHandoverInfo(true)
+
+      const res = await fetch(
+        `/api/odchody/${resolvedOffboardingId}/exit-checklist/handover-recipients/send`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            force,
+            handover: {
+              includeHandoverAgenda,
+              option1: handoverOption1,
+              option2: handoverOption2,
+              option2Target: handoverOption2Target,
+              option2TargetPositionNum: handoverOption2TargetPositionNum,
+              option3: handoverOption3,
+              option3Reason: handoverOption3Reason,
+              responsibleParty,
+            },
+            recipients: validHandoverRecipients.map((recipient) => ({
+              id: recipient.id,
+              name: recipient.name,
+              email: recipient.email,
+              personalNumber: recipient.personalNumber ?? null,
+              department: recipient.department ?? null,
+            })),
+          }),
+        }
+      )
+
+      const json = await res.json().catch(() => null)
+
+      if (res.status === 409 && json?.code === "ALREADY_SENT") {
+        setHandoverSendDialogMode("resend")
+        setHandoverSendDialogOpen(true)
+        return
+      }
+
+      if (!res.ok) {
+        throw new Error(
+          json?.message ??
+            json?.error ??
+            "Nepodařilo se odeslat informace příjemcům."
+        )
+      }
+
+      const sentAt =
+        json?.sentAt ?? json?.data?.sentAt ?? new Date().toISOString()
+      const sentByName =
+        json?.sentByName ??
+        json?.data?.sentByName ??
+        currentUserName ??
+        currentUserEmail
+      const sentByEmail =
+        json?.sentByEmail ?? json?.data?.sentByEmail ?? currentUserEmail
+      const sentHash =
+        json?.sentHash ?? json?.data?.sentHash ?? handoverRecipientsSendKey
+      const sentCount =
+        typeof json?.sentCount === "number"
+          ? json.sentCount
+          : typeof json?.data?.sentCount === "number"
+            ? json.data.sentCount
+            : (handoverRecipientsSentCount ?? 0) + 1
+
+      setHandoverRecipientsSentAt(sentAt)
+      setHandoverRecipientsSentByName(sentByName)
+      setHandoverRecipientsSentByEmail(sentByEmail)
+      setHandoverRecipientsSentHash(sentHash)
+      setHandoverRecipientsSentCount(sentCount)
+      setHandoverSendDialogOpen(false)
+
+      showFeedback(
+        "success",
+        force ? "Informace byly odeslány znovu" : "Informace byly odeslány",
+        `Informace o předávané agendě byly odeslány pro ${validHandoverRecipients.length} příjemce/příjemců.`
+      )
+    } catch (err) {
+      showFeedback(
+        "error",
+        "Chyba při odesílání",
+        err instanceof Error
+          ? err.message
+          : "Došlo k neočekávané chybě při odesílání."
+      )
+    } finally {
+      setSendingHandoverInfo(false)
+    }
   }
 
   async function handleSave(lockAfterSave: boolean) {
     try {
       setSaving(true)
+
       const saveUrl = isInternalMode
-        ? `/api/odchody/${offboardingId}/exit-checklist`
+        ? `/api/odchody/${resolvedOffboardingId}/exit-checklist`
         : `/api/odchody/public/${publicToken}`
 
       const res = await fetch(saveUrl, {
@@ -635,6 +1388,7 @@ export function ExitChecklistForm({
           conflictOfInterest,
           managerEmail: managerEmail || null,
           managerName: managerName || null,
+          handoverManagerSignature,
           items: items.map((i) => ({
             key: i.key,
             resolved: i.resolved,
@@ -656,54 +1410,118 @@ export function ExitChecklistForm({
             option3: handoverOption3,
             option3Reason: handoverOption3Reason,
             responsibleParty,
+            handoverRecipients,
+            handoverRecipientsSentAt,
+            handoverRecipientsSentByName,
+            handoverRecipientsSentByEmail,
+            handoverRecipientsSentHash,
+            handoverRecipientsSentCount,
           },
           signatures,
         }),
       })
 
+      const json = await res.json().catch(() => null)
+
       if (!res.ok) {
-        const json = await res.json().catch(() => null)
-        console.error(
-          "Nepodařilo se uložit výstupní list.",
-          json?.message ?? json?.error ?? res.statusText
+        showFeedback(
+          "error",
+          "Nepodařilo se uložit výstupní list",
+          json?.message ?? json?.error ?? "Zkuste akci zopakovat."
         )
         return
       }
 
-      const json = (await res.json()) as {
+      const payload = json as {
         status?: string
         data?: ExitChecklistData
       }
 
-      if (json.data) {
-        const merged = mergeItemsWithConfig(json.data.items ?? [])
-        setItems(merged)
-        setAssets(json.data.assets ?? [])
-        setLockedAt(json.data.lockedAt ?? null)
-        setConflictOfInterest(json.data.conflictOfInterest ?? false)
+      if (payload.data) {
+        setItems(mergeItemsWithConfig(payload.data.items ?? []))
+        setAssets(payload.data.assets ?? [])
+        setLockedAt(payload.data.lockedAt ?? null)
+        setConflictOfInterest(payload.data.conflictOfInterest ?? false)
         setSignatures({
-          employee: json.data.signatures?.employee ?? emptySignature(),
-          manager: json.data.signatures?.manager ?? emptySignature(),
-          issuer: json.data.signatures?.issuer ?? emptySignature(),
-          issuedDate: getDefaultIssuedDate(json.data.signatures?.issuedDate),
+          employee: payload.data.signatures?.employee ?? emptySignature(),
+          manager: payload.data.signatures?.manager ?? emptySignature(),
+          issuer: payload.data.signatures?.issuer ?? emptySignature(),
+          issuedDate: getDefaultIssuedDate(payload.data.signatures?.issuedDate),
         })
-        setManagerName(json.data.managerName ?? "")
-        setManagerEmail(json.data.managerEmail ?? "")
+        setHandoverManagerSignature(
+          payload.data.handoverManagerSignature ?? emptySignature()
+        )
+        setIncludeHandoverAgenda(
+          payload.data.handover?.includeHandoverAgenda ?? false
+        )
+        setHandoverOption1(payload.data.handover?.option1 ?? false)
+        setHandoverOption2(payload.data.handover?.option2 ?? false)
+        setHandoverOption2Target(payload.data.handover?.option2Target ?? "")
+        setHandoverOption2TargetPositionNum(
+          payload.data.handover?.option2TargetPositionNum ?? ""
+        )
+        setHandoverOption3(payload.data.handover?.option3 ?? false)
+        setHandoverOption3Reason(payload.data.handover?.option3Reason ?? "")
+        setResponsibleParty(payload.data.handover?.responsibleParty ?? null)
+        setHandoverRecipients(payload.data.handover?.handoverRecipients ?? [])
+        setHandoverRecipientsSentAt(
+          payload.data.handover?.handoverRecipientsSentAt ??
+            handoverRecipientsSentAt
+        )
+        setHandoverRecipientsSentByName(
+          payload.data.handover?.handoverRecipientsSentByName ??
+            handoverRecipientsSentByName
+        )
+        setHandoverRecipientsSentByEmail(
+          payload.data.handover?.handoverRecipientsSentByEmail ??
+            handoverRecipientsSentByEmail
+        )
+        setHandoverRecipientsSentHash(
+          payload.data.handover?.handoverRecipientsSentHash ??
+            handoverRecipientsSentHash
+        )
+        setHandoverRecipientsSentCount(
+          payload.data.handover?.handoverRecipientsSentCount ??
+            handoverRecipientsSentCount
+        )
+        setManagerName(payload.data.managerName ?? "")
+        setManagerEmail(payload.data.managerEmail ?? "")
         setDirty(false)
-        onSaved?.(json.data)
+
+        showFeedback(
+          "success",
+          lockAfterSave
+            ? "Výstupní list byl uzamčen"
+            : "Výstupní list byl uložen",
+          lockAfterSave
+            ? "Formulář je uložený a uzamčený k dalším úpravám."
+            : "Všechny změny a podpisy byly úspěšně zaznamenány."
+        )
+
+        onSaved?.(payload.data)
       }
     } catch (err) {
-      console.error("Chyba při ukládání výstupního listu:", err)
+      console.error("Chyba při ukládání:", err)
+
+      showFeedback(
+        "error",
+        "Chyba při ukládání",
+        err instanceof Error
+          ? err.message
+          : "Došlo k neočekávané chybě při ukládání."
+      )
     } finally {
       setSaving(false)
     }
   }
 
   async function handleGeneratePdfWithSave() {
-    if (!offboardingId) return
+    if (!resolvedOffboardingId) return
+
     await handleSave(false)
+
     window.open(
-      `/api/odchody/${offboardingId}/vystupni-list`,
+      `/api/odchody/${resolvedOffboardingId}/vystupni-list`,
       "_blank",
       "noopener,noreferrer"
     )
@@ -713,8 +1531,7 @@ export function ExitChecklistForm({
 
   const isLockedBadge = isLocked ? (
     <Badge variant="outline" className="flex items-center gap-1">
-      <Lock className="size-3" />
-      Uzamčeno k úpravám
+      <Lock className="size-3" /> Uzamčeno k úpravám
     </Badge>
   ) : (
     <Badge variant="secondary">
@@ -724,6 +1541,47 @@ export function ExitChecklistForm({
 
   return (
     <div className="space-y-6">
+      <Dialog
+        open={feedbackDialog.open}
+        onOpenChange={(open) =>
+          setFeedbackDialog((prev) => ({
+            ...prev,
+            open,
+          }))
+        }
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-muted">
+              {feedbackDialog.type === "success" ? (
+                <CheckCircle className="size-7 text-green-600" />
+              ) : (
+                <XCircle className="size-7 text-red-600" />
+              )}
+            </div>
+            <DialogTitle className="text-center">
+              {feedbackDialog.title}
+            </DialogTitle>
+            <DialogDescription className="text-center">
+              {feedbackDialog.message}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-center pt-2">
+            <Button
+              type="button"
+              onClick={() =>
+                setFeedbackDialog((prev) => ({
+                  ...prev,
+                  open: false,
+                }))
+              }
+            >
+              OK
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center justify-between gap-2">
@@ -757,7 +1615,7 @@ export function ExitChecklistForm({
             </div>
             <div>
               <span className="font-medium text-muted-foreground">
-                Datum skončení pracovního poměru:
+                Datum skončení:
               </span>{" "}
               {formattedDate || "–"}
             </div>
@@ -779,8 +1637,7 @@ export function ExitChecklistForm({
               >
                 Obsahuje střet zájmů{" "}
                 <span className="text-xs font-normal text-muted-foreground">
-                  (aktivuje řádek Právního odboru k podpisu a zahrne ho do
-                  hromadného odesílání k podpisu)
+                  (aktivuje řádek Právního odboru k podpisu)
                 </span>
               </Label>
             </div>
@@ -792,7 +1649,7 @@ export function ExitChecklistForm({
             </div>
           )}
 
-          <div className="grid gap-4 border-t pt-4 md:grid-cols-2">
+          <div className="grid items-stretch gap-4 border-t pt-4 md:grid-cols-2">
             <HeaderSignatureBlock
               label="Podpis zaměstnance"
               value={signatures.employee}
@@ -801,96 +1658,59 @@ export function ExitChecklistForm({
               currentUserName={currentUserName}
               currentUserEmail={currentUserEmail}
               onSign={() => signHeaderSignature("employee")}
+              onSignBehalf={() => signHeaderSignatureBehalf("employee")}
               onRevoke={() => revokeHeaderSignature("employee")}
             />
 
-            <div className="space-y-2 rounded-md border p-3">
-              <Label className="text-sm font-medium">
+            <div
+              className="flex flex-col rounded-md border p-3"
+              style={{ minHeight: "130px" }}
+            >
+              <Label className="mb-2 text-sm font-medium">
                 Podpis vedoucího odboru
               </Label>
 
               {isInternalMode && !isLocked && (
-                <div className="space-y-2">
-                  <Label className="text-xs text-muted-foreground">
-                    Vybrat vedoucího z eOSu
-                  </Label>
-                  <Popover
-                    open={managerSearchOpen}
-                    onOpenChange={(o) => {
-                      setManagerSearchOpen(o)
-                      if (o && managerEmployees.length === 0) {
-                        setManagerSearchLoading(true)
-                        fetch("/api/zamestnanci/hledat?q=1&limit=500", {
-                          cache: "no-store",
-                        })
-                          .then((r) => r.json())
-                          .then((json) => {
-                            setManagerEmployees(
-                              Array.isArray(json?.data) ? json.data : []
-                            )
-                          })
-                          .catch(() => {})
-                          .finally(() => setManagerSearchLoading(false))
-                      }
-                    }}
-                  >
-                    <PopoverTrigger asChild>
+                <div className="mb-2 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-xs text-muted-foreground">
+                      Vybrat vedoucího z eOSu
+                    </Label>
+
+                    {initialData.positionNum && (
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
-                        className="w-full justify-between text-xs"
+                        className="h-7 gap-1 text-xs"
+                        onClick={() => void reloadManagerFromPosition()}
+                        disabled={managerLoading}
                       >
-                        <span className="truncate">
-                          {managerName || "Vyhledat vedoucího v eOSu…"}
-                        </span>
-                        <ChevronDown className="ml-2 size-3 opacity-60" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[380px] p-0" align="start">
-                      <Command shouldFilter={false}>
-                        <CommandInput
-                          placeholder="Jméno, osobní číslo nebo e-mail…"
-                          value={managerQuery}
-                          onValueChange={setManagerQuery}
+                        <RefreshCcw
+                          className={`size-3 ${
+                            managerLoading ? "animate-spin" : ""
+                          }`}
                         />
-                        <CommandEmpty>
-                          {managerSearchLoading
-                            ? "Načítám…"
-                            : "Nikdo nenalezen"}
-                        </CommandEmpty>
-                        <CommandList className="max-h-72 overflow-y-auto">
-                          <CommandGroup>
-                            {filteredManagerEmployees.map((e) => (
-                              <CommandItem
-                                key={e.id}
-                                value={e.id}
-                                onSelect={() => {
-                                  const fullName = buildEmployeeFullName(e)
-                                  setManagerName(fullName)
-                                  setManagerEmail(e.email ?? "")
-                                  markDirty()
-                                  setManagerSearchOpen(false)
-                                  setManagerQuery("")
-                                }}
-                                className="flex items-start gap-2 py-2"
-                              >
-                                <div className="min-w-0 flex-1">
-                                  <div className="text-sm font-medium">
-                                    {buildEmployeeFullName(e)}
-                                  </div>
-                                  <div className="text-xs text-muted-foreground">
-                                    {e.email}
-                                    {e.department ? ` · ${e.department}` : ""}
-                                  </div>
-                                </div>
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
+                        {managerLoading ? "Načítám…" : "Načíst dle pozice"}
+                      </Button>
+                    )}
+                  </div>
+
+                  {managerLoadError && (
+                    <p className="text-xs text-amber-600">{managerLoadError}</p>
+                  )}
+
+                  <PersonLookupCombobox
+                    valueName={managerName || undefined}
+                    valueEmail={managerEmail || undefined}
+                    placeholder="Vyhledejte vedoucího v eOSu…"
+                    onSelect={(employee) => {
+                      setManagerName(buildEmployeeFullName(employee))
+                      setManagerEmail(employee.email ?? "")
+                      setManagerLoadError(null)
+                      markDirty()
+                    }}
+                  />
 
                   {managerName && (
                     <div className="flex items-start justify-between gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs">
@@ -910,7 +1730,6 @@ export function ExitChecklistForm({
                           markDirty()
                         }}
                         className="shrink-0 text-muted-foreground hover:text-foreground"
-                        title="Odebrat vedoucího"
                       >
                         <X className="size-3" />
                       </button>
@@ -920,7 +1739,7 @@ export function ExitChecklistForm({
               )}
 
               {(isLocked || !isInternalMode) && managerName && (
-                <div className="rounded-md bg-muted/50 px-3 py-2 text-xs">
+                <div className="mb-2 rounded-md bg-muted/50 px-3 py-2 text-xs">
                   <div className="font-medium">{managerName}</div>
                   {managerEmail && (
                     <div className="text-muted-foreground">{managerEmail}</div>
@@ -928,50 +1747,69 @@ export function ExitChecklistForm({
                 </div>
               )}
 
-              {signatures.manager.signedAt ? (
-                <div className="rounded-md bg-muted/50 px-3 py-2 text-sm">
-                  <div>{signatures.manager.signedByName ?? "Podepsáno"}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {format(
-                      new Date(signatures.manager.signedAt),
-                      "d.M.yyyy HH:mm"
-                    )}
+              <div style={{ minHeight: "52px" }} className="flex-1">
+                {signatures.manager.signedAt ? (
+                  <div className="rounded-md bg-muted/50 px-3 py-2 text-sm">
+                    <div className="font-medium">
+                      {signatures.manager.signedByName ?? "Podepsáno"}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {format(
+                        new Date(signatures.manager.signedAt),
+                        "d.M.yyyy HH:mm"
+                      )}
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <div className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
-                  Nepodepsáno
-                </div>
-              )}
+                ) : (
+                  <div className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
+                    Nepodepsáno
+                  </div>
+                )}
+              </div>
 
-              <div className="flex flex-wrap gap-2">
+              <div
+                className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-[168px_168px]"
+                style={{ minHeight: "70px" }}
+              >
                 {!isLocked &&
                   !signatures.manager.signedAt &&
                   Boolean(currentUserName || currentUserEmail) && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="gap-1"
-                      onClick={() => signHeaderSignature("manager")}
-                    >
-                      <Check className="size-4" />
-                      Podepsat elektronicky
-                    </Button>
+                    <>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs"
+                        onClick={() => signHeaderSignature("manager")}
+                      >
+                        <Check className="size-3" /> Podepsat
+                      </Button>
+
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs text-muted-foreground"
+                        onClick={() => signHeaderSignatureBehalf("manager")}
+                      >
+                        <Check className="size-3" /> Podepsat v zastoupení
+                      </Button>
+                    </>
                   )}
+
                 {!isLocked &&
                   signatures.manager.signedAt &&
                   (isAdmin ||
-                    signatures.manager.signedByEmail === currentUserEmail) && (
+                    normalizeEmail(signatures.manager.signedByEmail) ===
+                      currentUserEmailNormalized) && (
                     <Button
                       type="button"
                       size="sm"
                       variant="ghost"
-                      className="gap-1 text-xs text-muted-foreground"
+                      className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs text-muted-foreground"
                       onClick={() => revokeHeaderSignature("manager")}
                     >
-                      <Undo2 className="size-4" />
-                      Zrušit podpis
+                      <Undo2 className="size-3" /> Zrušit podpis
                     </Button>
                   )}
               </div>
@@ -980,30 +1818,23 @@ export function ExitChecklistForm({
         </CardContent>
       </Card>
 
-      {statusMessage && (
-        <div className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800">
-          <Check className="size-4 shrink-0" />
-          {statusMessage}
-        </div>
-      )}
-
       <Card>
         <CardHeader>
           <CardTitle className="text-base">
-            Vyrovnání závazků zaměstnance k zaměstnavateli
+            A. Vyrovnání závazků zaměstnance k zaměstnavateli
           </CardTitle>
         </CardHeader>
+
         <CardContent className="p-0 sm:p-6">
-          <div className="divide-y sm:hidden">
+          <div className="divide-y lg:hidden">
             {items.map((item) => {
               const isSigned = Boolean(item.signedAt)
               const signedAtDate = item.signedAt
                 ? format(new Date(item.signedAt), "d.M.yyyy HH:mm")
                 : ""
               const currentUserIsSigner =
-                item.signedByEmail &&
-                currentUserEmail &&
-                item.signedByEmail === currentUserEmail
+                normalizeEmail(item.signedByEmail) ===
+                currentUserEmailNormalized
               const isSigningDisabled = signingDisabledKeys.includes(item.key)
               const isLawInfoGreyed = item.key === "lawInfo" && lawInfoGreyed
               const showSignButton =
@@ -1014,7 +1845,9 @@ export function ExitChecklistForm({
               return (
                 <div
                   key={item.key}
-                  className={`space-y-2 px-4 py-3 ${isLawInfoGreyed ? "opacity-50" : ""}`}
+                  className={`space-y-2 px-4 py-3 ${
+                    isLawInfoGreyed ? "opacity-50" : ""
+                  }`}
                 >
                   <div className="text-xs">
                     {renderOrganization(
@@ -1022,20 +1855,30 @@ export function ExitChecklistForm({
                       item.key === "handoverProtocol" ? managerName : null
                     )}
                   </div>
+
                   <div className="text-sm">{item.obligation}</div>
-                  <div className="flex items-center justify-between gap-2 pt-1">
+
+                  <div className="flex flex-col gap-2 pt-1 min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between">
                     {!isLocked && !isSigningDisabled ? (
-                      <div className="inline-flex items-center gap-1 rounded-md bg-muted px-1 py-0.5 text-xs">
+                      <div className="inline-flex w-fit items-center gap-1 rounded-md bg-muted px-1 py-0.5 text-xs">
                         <button
                           type="button"
-                          className={`rounded px-2 py-0.5 ${item.resolved === "YES" ? "bg-green-600 text-white" : "hover:bg-green-100 dark:hover:bg-green-900/40"}`}
+                          className={`rounded px-2 py-0.5 ${
+                            item.resolved === "YES"
+                              ? "bg-green-600 text-white"
+                              : "hover:bg-green-100"
+                          }`}
                           onClick={() => updateResolved(item.key, "YES")}
                         >
                           Ano
                         </button>
                         <button
                           type="button"
-                          className={`rounded px-2 py-0.5 ${item.resolved === "NO" ? "bg-red-600 text-white" : "hover:bg-red-100 dark:hover:bg-red-900/40"}`}
+                          className={`rounded px-2 py-0.5 ${
+                            item.resolved === "NO"
+                              ? "bg-red-600 text-white"
+                              : "hover:bg-red-100"
+                          }`}
                           onClick={() => updateResolved(item.key, "NO")}
                         >
                           Ne
@@ -1052,33 +1895,47 @@ export function ExitChecklistForm({
                               : "–"}
                       </span>
                     )}
-                    <div className="flex gap-2">
+
+                    <div className="flex shrink-0 flex-wrap items-center gap-1">
                       {showSignButton && (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="gap-1"
-                          onClick={() => signRow(item.key)}
-                        >
-                          <Check className="size-3" />
-                          Podepsat
-                        </Button>
+                        <>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-7 gap-1 whitespace-nowrap px-2 text-xs"
+                            onClick={() => signRow(item.key)}
+                          >
+                            <Check className="size-3" /> Podepsat
+                          </Button>
+
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-7 gap-1 whitespace-nowrap px-2 text-xs text-muted-foreground"
+                            onClick={() => signRowOnBehalf(item.key)}
+                          >
+                            <Check className="size-3" /> Podepsat
+                            v&nbsp;zastoupení
+                          </Button>
+                        </>
                       )}
+
                       {showRevokeButton && (
                         <Button
                           type="button"
                           size="sm"
                           variant="ghost"
-                          className="gap-1 text-xs text-muted-foreground"
+                          className="h-7 gap-1 whitespace-nowrap px-2 text-xs text-muted-foreground"
                           onClick={() => revokeSignature(item.key)}
                         >
-                          <Undo2 className="size-3" />
-                          Zrušit
+                          <Undo2 className="size-3" /> Zrušit
                         </Button>
                       )}
                     </div>
                   </div>
+
                   {isSigned && !isLawInfoGreyed && (
                     <div className="text-xs text-muted-foreground">
                       {item.signedByName} · {signedAtDate}
@@ -1089,21 +1946,20 @@ export function ExitChecklistForm({
             })}
           </div>
 
-          <div className="hidden overflow-x-auto sm:block">
-            <Table>
+          <div className="hidden lg:block">
+            <Table className="w-full table-fixed">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[220px]">
-                    Odbor / organizace
+                  <TableHead className="w-1/5">Odbor / organizace</TableHead>
+                  <TableHead className="w-[24%]">Závazek</TableHead>
+                  <TableHead className="w-[8%] text-center">Vyrovnán</TableHead>
+                  <TableHead className="w-[30%] pl-10">
+                    Datum a podpis
                   </TableHead>
-                  <TableHead>Závazek</TableHead>
-                  <TableHead className="w-[110px] text-center">
-                    Vyrovnán
-                  </TableHead>
-                  <TableHead className="w-[180px]">Datum a podpis</TableHead>
-                  <TableHead className="w-[170px] text-right">Akce</TableHead>
+                  <TableHead className="w-[22%] pl-3 text-left">Akce</TableHead>
                 </TableRow>
               </TableHeader>
+
               <TableBody>
                 {items.map((item) => {
                   const isSigned = Boolean(item.signedAt)
@@ -1111,9 +1967,8 @@ export function ExitChecklistForm({
                     ? format(new Date(item.signedAt), "d.M.yyyy HH:mm")
                     : ""
                   const currentUserIsSigner =
-                    item.signedByEmail &&
-                    currentUserEmail &&
-                    item.signedByEmail === currentUserEmail
+                    normalizeEmail(item.signedByEmail) ===
+                    currentUserEmailNormalized
                   const isSigningDisabled = signingDisabledKeys.includes(
                     item.key
                   )
@@ -1128,29 +1983,38 @@ export function ExitChecklistForm({
                     <TableRow
                       key={item.key}
                       className={isLawInfoGreyed ? "opacity-50" : ""}
+                      style={{ height: "92px" }}
                     >
-                      <TableCell className="align-top text-sm">
+                      <TableCell className="w-[18%] align-middle text-sm">
                         {renderOrganization(
                           item.organization,
                           item.key === "handoverProtocol" ? managerName : null
                         )}
                       </TableCell>
-                      <TableCell className="align-top text-sm">
+                      <TableCell className="w-[22%] whitespace-normal break-words align-middle text-sm leading-snug">
                         {item.obligation}
                       </TableCell>
-                      <TableCell className="text-center align-top">
+                      <TableCell className="text-center align-middle">
                         {!isLocked && !isSigningDisabled ? (
                           <div className="inline-flex items-center gap-1 rounded-md bg-muted px-1 py-0.5 text-xs">
                             <button
                               type="button"
-                              className={`rounded px-2 py-0.5 ${item.resolved === "YES" ? "bg-green-600 text-white" : "hover:bg-green-100 dark:hover:bg-green-900/40"}`}
+                              className={`rounded px-2 py-0.5 ${
+                                item.resolved === "YES"
+                                  ? "bg-green-600 text-white"
+                                  : "hover:bg-green-100"
+                              }`}
                               onClick={() => updateResolved(item.key, "YES")}
                             >
                               Ano
                             </button>
                             <button
                               type="button"
-                              className={`rounded px-2 py-0.5 ${item.resolved === "NO" ? "bg-red-600 text-white" : "hover:bg-red-100 dark:hover:bg-red-900/40"}`}
+                              className={`rounded px-2 py-0.5 ${
+                                item.resolved === "NO"
+                                  ? "bg-red-600 text-white"
+                                  : "hover:bg-red-100"
+                              }`}
                               onClick={() => updateResolved(item.key, "NO")}
                             >
                               Ne
@@ -1168,47 +2032,22 @@ export function ExitChecklistForm({
                           </span>
                         )}
                       </TableCell>
-                      <TableCell className="align-top text-sm">
-                        {isSigned && !isLawInfoGreyed ? (
-                          <div className="flex flex-col">
-                            <span>{item.signedByName}</span>
-                            <span className="text-xs text-muted-foreground">
-                              {signedAtDate}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">
-                            {isLawInfoGreyed ? "—" : "Nepodepsáno"}
-                          </span>
-                        )}
+                      <TableCell className="w-[30%] pl-10 align-middle">
+                        <TableSignatureCell
+                          isSigned={isSigned}
+                          isMuted={isLawInfoGreyed}
+                          signedByName={item.signedByName}
+                          signedAt={signedAtDate}
+                        />
                       </TableCell>
-                      <TableCell className="align-top">
-                        <div className="flex justify-end gap-2">
-                          {showSignButton && (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="gap-1"
-                              onClick={() => signRow(item.key)}
-                            >
-                              <Check className="size-4" />
-                              Podepsat
-                            </Button>
-                          )}
-                          {showRevokeButton && (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              className="gap-1 text-xs text-muted-foreground"
-                              onClick={() => revokeSignature(item.key)}
-                            >
-                              <Undo2 className="size-4" />
-                              Zrušit podpis
-                            </Button>
-                          )}
-                        </div>
+                      <TableCell className="w-[22%] pl-3 align-middle">
+                        <TableActionCell
+                          showSignButton={showSignButton}
+                          showRevokeButton={showRevokeButton}
+                          onSign={() => signRow(item.key)}
+                          onSignBehalf={() => signRowOnBehalf(item.key)}
+                          onRevoke={() => revokeSignature(item.key)}
+                        />
                       </TableCell>
                     </TableRow>
                   )
@@ -1222,34 +2061,48 @@ export function ExitChecklistForm({
       <Card>
         <CardHeader>
           <CardTitle className="text-base">
-            Výpis z osobní karty zaměstnance o zapůjčení movitého majetku
+            B. Výpis z osobní karty zaměstnance o zapůjčení movitého majetku
           </CardTitle>
         </CardHeader>
+
         <CardContent className="space-y-4">
           <p className="text-xs text-muted-foreground">
-            (mobilní telefon, fotopřístroje) evidovaného Odborem služeb k datu:
+            (mobilní telefon, fotopřístroje) evidovaného Odborem služeb k datu
+            vystavení:
           </p>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Předmět</TableHead>
-                <TableHead className="w-[200px]">Inventární číslo</TableHead>
-                <TableHead className="w-[60px]" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {assets.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={3}>
-                    <p className="text-sm text-muted-foreground">
-                      Zatím žádné položky. Přidejte je tlačítkem níže.
-                    </p>
-                  </TableCell>
-                </TableRow>
-              )}
-              {assets.map((asset) => (
-                <TableRow key={asset.id}>
-                  <TableCell>
+
+          <div className="space-y-3 sm:hidden">
+            {assets.length === 0 && (
+              <p className="rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground">
+                Zatím žádné položky. Přidejte je tlačítkem níže.
+              </p>
+            )}
+
+            {assets.map((asset, index) => (
+              <div key={asset.id} className="rounded-md border p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    Položka {index + 1}
+                  </p>
+                  {!isLocked && (
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="size-7 shrink-0"
+                      onClick={() => removeAsset(asset.id)}
+                      aria-label="Odebrat položku"
+                    >
+                      ×
+                    </Button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">
+                      Předmět
+                    </Label>
                     {!isLocked ? (
                       <Input
                         value={asset.subject}
@@ -1259,10 +2112,16 @@ export function ExitChecklistForm({
                         placeholder="např. mobilní telefon"
                       />
                     ) : (
-                      <span>{asset.subject}</span>
+                      <p className="rounded-md bg-muted/50 px-3 py-2 text-sm">
+                        {asset.subject || "—"}
+                      </p>
                     )}
-                  </TableCell>
-                  <TableCell>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">
+                      Inventární číslo
+                    </Label>
                     {!isLocked ? (
                       <Input
                         value={asset.inventoryNumber}
@@ -1276,26 +2135,87 @@ export function ExitChecklistForm({
                         placeholder="např. 123456"
                       />
                     ) : (
-                      <span>{asset.inventoryNumber}</span>
+                      <p className="rounded-md bg-muted/50 px-3 py-2 text-sm">
+                        {asset.inventoryNumber || "—"}
+                      </p>
                     )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {!isLocked && (
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => removeAsset(asset.id)}
-                        aria-label="Odebrat položku"
-                      >
-                        ×
-                      </Button>
-                    )}
-                  </TableCell>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden sm:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Předmět</TableHead>
+                  <TableHead className="w-[200px]">Inventární číslo</TableHead>
+                  <TableHead className="w-[60px]" />
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+
+              <TableBody>
+                {assets.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={3}>
+                      <p className="text-sm text-muted-foreground">
+                        Zatím žádné položky. Přidejte je tlačítkem níže.
+                      </p>
+                    </TableCell>
+                  </TableRow>
+                )}
+
+                {assets.map((asset) => (
+                  <TableRow key={asset.id}>
+                    <TableCell>
+                      {!isLocked ? (
+                        <Input
+                          value={asset.subject}
+                          onChange={(e) =>
+                            updateAsset(asset.id, "subject", e.target.value)
+                          }
+                          placeholder="např. mobilní telefon"
+                        />
+                      ) : (
+                        <span>{asset.subject}</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {!isLocked ? (
+                        <Input
+                          value={asset.inventoryNumber}
+                          onChange={(e) =>
+                            updateAsset(
+                              asset.id,
+                              "inventoryNumber",
+                              e.target.value
+                            )
+                          }
+                          placeholder="např. 123456"
+                        />
+                      ) : (
+                        <span>{asset.inventoryNumber}</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {!isLocked && (
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => removeAsset(asset.id)}
+                          aria-label="Odebrat"
+                        >
+                          ×
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
 
           {!isLocked && (
             <Button
@@ -1308,34 +2228,18 @@ export function ExitChecklistForm({
             </Button>
           )}
 
-          <div className="grid gap-4 border-t pt-4 md:grid-cols-[1fr,220px] md:items-start">
+          <div className="border-t pt-4">
             <HeaderSignatureBlock
-              label="Ing. Krýzová Martina, podpis"
+              label="Za Odbor služeb potvrzuje správnost Výpisu"
               value={signatures.issuer}
               isLocked={isLocked}
               isAdmin={isAdmin}
               currentUserName={currentUserName}
               currentUserEmail={currentUserEmail}
               onSign={() => signHeaderSignature("issuer")}
+              onSignBehalf={() => signHeaderSignatureBehalf("issuer")}
               onRevoke={() => revokeHeaderSignature("issuer")}
             />
-            <div className="space-y-2">
-              <Label htmlFor="issuedDate">Datum vystavení</Label>
-              <Input
-                id="issuedDate"
-                type="date"
-                value={signatures.issuedDate ?? ""}
-                onChange={(e) => {
-                  setSignatures((prev) => ({
-                    ...prev,
-                    issuedDate: e.target.value,
-                  }))
-                  markDirty()
-                }}
-                disabled={isLocked}
-                className="w-full"
-              />
-            </div>
           </div>
         </CardContent>
       </Card>
@@ -1343,7 +2247,8 @@ export function ExitChecklistForm({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center justify-between text-base">
-            <span>Předávaná agenda</span>
+            <span>C. Předávaná agenda</span>
+
             {!isLocked && (
               <div className="flex items-center gap-2">
                 <Checkbox
@@ -1352,6 +2257,7 @@ export function ExitChecklistForm({
                   onCheckedChange={(checked) => {
                     const next = Boolean(checked)
                     setIncludeHandoverAgenda(next)
+
                     if (!next) {
                       setHandoverOption1(false)
                       setHandoverOption2(false)
@@ -1360,7 +2266,9 @@ export function ExitChecklistForm({
                       setHandoverOption3(false)
                       setHandoverOption3Reason("")
                       setResponsibleParty(null)
+                      setHandoverRecipients([])
                     }
+
                     markDirty()
                   }}
                 />
@@ -1372,6 +2280,7 @@ export function ExitChecklistForm({
                 </Label>
               </div>
             )}
+
             {isLocked && includeHandoverAgenda && (
               <Badge variant="secondary">Zahrnuto</Badge>
             )}
@@ -1381,9 +2290,10 @@ export function ExitChecklistForm({
         {includeHandoverAgenda && (
           <CardContent className="space-y-4">
             <p className="text-sm font-medium">
-              Elektronické dokumenty v e-spisu - elektronické přihlášení
-              dokumentů (zakroužkujte realizovanou možnost)
+              Elektronické dokumenty v e-spisu — elektronické předání dokumentů
+              proběhne/proběhlo následujícím způsobem:
             </p>
+
             <div className="space-y-4">
               <div className="flex items-start gap-3">
                 <Checkbox
@@ -1397,7 +2307,9 @@ export function ExitChecklistForm({
                 />
                 <Label
                   htmlFor="handover1"
-                  className={`text-sm ${isLocked ? "cursor-default" : "cursor-pointer"}`}
+                  className={`text-sm ${
+                    isLocked ? "cursor-default" : "cursor-pointer"
+                  }`}
                 >
                   Předáno zaměstnancem do spisovny v e-spise nebo předáno na
                   jiné funkční místo
@@ -1412,91 +2324,270 @@ export function ExitChecklistForm({
                     onCheckedChange={(checked) => {
                       const next = Boolean(checked)
                       setHandoverOption2(next)
+
                       if (!next) {
                         setHandoverOption2Target("")
                         setHandoverOption2TargetPositionNum("")
-                        setPositionPickerOpen(false)
-                        setPositionQuery("")
+                        setHandoverRecipients([])
                       }
+
                       markDirty()
                     }}
                     disabled={isLocked}
                   />
                   <Label
                     htmlFor="handover2"
-                    className={`text-sm ${isLocked ? "cursor-default" : "cursor-pointer"}`}
+                    className={`text-sm ${
+                      isLocked ? "cursor-default" : "cursor-pointer"
+                    }`}
                   >
                     OI-KITT6 předá na jiné funkční místo
                   </Label>
                 </div>
 
                 {handoverOption2 && (
-                  <div className="ml-7 space-y-2">
-                    <Popover
-                      open={positionPickerOpen}
-                      onOpenChange={setPositionPickerOpen}
-                    >
-                      <PopoverTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="w-full justify-between"
-                          disabled={isLocked || loadingPositions}
-                        >
-                          <span className="truncate">
-                            {handoverOption2Target ||
-                              "Vyberte funkční místo ze systemizace"}
-                          </span>
-                          <ChevronDown className="ml-2 size-4 opacity-60" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-[420px] p-0" align="start">
-                        <Command shouldFilter={false}>
-                          <CommandInput
-                            placeholder="Hledat číslo nebo název pozice..."
-                            value={positionQuery}
-                            onValueChange={setPositionQuery}
-                          />
-                          <CommandEmpty>
-                            {loadingPositions
-                              ? "Načítám pozice..."
-                              : "Žádná pozice nenalezena"}
-                          </CommandEmpty>
-                          <CommandList className="max-h-80 overflow-y-auto">
-                            <CommandGroup>
-                              {filteredPositions.map((p) => (
-                                <CommandItem
-                                  key={p.id ?? p.num}
-                                  value={`${p.num} ${p.name}`}
-                                  onSelect={() => {
-                                    setHandoverOption2Target(
-                                      `${p.num} — ${p.name}`
-                                    )
-                                    setHandoverOption2TargetPositionNum(p.num)
-                                    setPositionPickerOpen(false)
-                                    setPositionQuery("")
-                                    markDirty()
-                                  }}
-                                  className="flex items-start gap-3 py-3"
-                                >
-                                  <span className="min-w-[80px] rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
-                                    {p.num}
+                  <div className="ml-7 space-y-3 rounded-md border p-3">
+                    <div>
+                      <Label className="text-sm font-medium">
+                        Příjemci předávané agendy
+                      </Label>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        Uložení výstupního listu e-maily neposílá. Informace
+                        odešlete ručně tlačítkem níže.
+                      </p>
+                    </div>
+
+                    {!isLocked && (
+                      <>
+                        <PersonLookupCombobox
+                          placeholder="Vyhledat příjemce v eOSu…"
+                          onSelect={(employee) => {
+                            const id = employee.id
+                            const email = normalizeEmail(employee.email)
+
+                            if (
+                              handoverRecipients.some(
+                                (recipient) =>
+                                  recipient.id === id ||
+                                  normalizeEmail(recipient.email) === email
+                              )
+                            ) {
+                              return
+                            }
+
+                            setHandoverRecipients((prev) => [
+                              ...prev,
+                              {
+                                id,
+                                name: buildEmployeeFullName(employee),
+                                email: employee.email ?? "",
+                                personalNumber: employee.personalNumber,
+                                department: employee.department,
+                              },
+                            ])
+
+                            markDirty()
+                          }}
+                        />
+
+                        <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+                          <Label className="text-xs font-medium">
+                            Přidat ručně
+                          </Label>
+
+                          <div className="flex flex-col gap-2 sm:flex-row">
+                            <Input
+                              placeholder="Jméno a příjmení *"
+                              value={newRecipientName}
+                              onChange={(e) => {
+                                setNewRecipientName(e.target.value)
+                                setNewRecipientError(null)
+                              }}
+                              className="h-8 text-sm"
+                            />
+                            <Input
+                              placeholder="email@praha6.cz *"
+                              value={newRecipientEmail}
+                              onChange={(e) => {
+                                setNewRecipientEmail(e.target.value)
+                                setNewRecipientError(null)
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault()
+                                  addRecipientManually()
+                                }
+                              }}
+                              className="h-8 text-sm"
+                            />
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-8 shrink-0"
+                              onClick={addRecipientManually}
+                            >
+                              Přidat
+                            </Button>
+                          </div>
+
+                          {newRecipientError && (
+                            <p className="text-xs text-red-600">
+                              {newRecipientError}
+                            </p>
+                          )}
+                        </div>
+                      </>
+                    )}
+
+                    {handoverRecipients.length > 0 ? (
+                      <div className="space-y-1">
+                        {handoverRecipients.map((recipient) => (
+                          <div
+                            key={recipient.id}
+                            className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-2 text-xs"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">
+                                  {recipient.name}
+                                </span>
+                                {recipient.personalNumber && (
+                                  <span className="font-mono text-muted-foreground">
+                                    {recipient.personalNumber}
                                   </span>
-                                  <div className="flex-1">
-                                    <div className="text-sm font-medium">
-                                      {p.name}
-                                    </div>
-                                    <div className="text-xs text-muted-foreground">
-                                      {p.dept_name} • {p.unit_name}
-                                    </div>
-                                  </div>
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverContent>
-                    </Popover>
+                                )}
+                              </div>
+
+                              <div className="flex gap-3 text-muted-foreground">
+                                {recipient.department && (
+                                  <span>{recipient.department}</span>
+                                )}
+                                {recipient.email && (
+                                  <span>{recipient.email}</span>
+                                )}
+                              </div>
+                            </div>
+
+                            {!isLocked && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setHandoverRecipients((prev) =>
+                                    prev.filter((x) => x.id !== recipient.id)
+                                  )
+                                  markDirty()
+                                }}
+                                className="ml-2 shrink-0 text-muted-foreground hover:text-foreground"
+                              >
+                                <X className="size-3" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Zatím žádní příjemci.
+                      </p>
+                    )}
+
+                    {Boolean(currentUserEmail) &&
+                      Boolean(resolvedOffboardingId) && (
+                        <div className="rounded-md border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="space-y-0.5">
+                              <p className="font-medium">
+                                Informace se neodesílají automaticky při
+                                uložení.
+                              </p>
+                              <p>
+                                Příjemce předávané agendy informujte co
+                                nejdříve.
+                              </p>
+                            </div>
+
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="
+                                h-auto
+                                min-h-9
+                                w-full
+                                max-w-full
+                                justify-center
+                                gap-2
+                                whitespace-normal
+                                rounded-md
+                                bg-[#00847C]
+                                px-3
+                                py-2
+                                text-center
+                                text-sm
+                                font-medium
+                                leading-snug
+                                text-white
+                                hover:bg-[#0B6D73]
+                                disabled:bg-[#00847C]/50
+                                disabled:text-white/80
+                                sm:w-auto
+                                sm:whitespace-nowrap
+                              "
+                              onClick={openHandoverSendDialog}
+                              disabled={
+                                sendingHandoverInfo || !canSendHandoverInfo
+                              }
+                            >
+                              {sendingHandoverInfo ? (
+                                <>
+                                  <Loader2 className="size-4 shrink-0 animate-spin" />
+                                  <span className="min-w-0">Odesílám…</span>
+                                </>
+                              ) : handoverRecipientsWereSent ? (
+                                <>
+                                  <Send className="size-4 shrink-0" />
+                                  <span className="min-w-0">Odeslat znovu</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Send className="size-4 shrink-0" />
+                                  <span className="min-w-0">
+                                    Odeslat informace příjemcům
+                                  </span>
+                                </>
+                              )}
+                            </Button>
+                          </div>
+
+                          {handoverRecipientsSentAt && (
+                            <p className="mt-2 text-[11px] text-blue-700">
+                              Zasláno{" "}
+                              {format(
+                                new Date(handoverRecipientsSentAt),
+                                "d.M.yyyy HH:mm"
+                              )}{" "}
+                              uživatelem{" "}
+                              <span className="font-medium">
+                                {handoverRecipientsSentByName ??
+                                  handoverRecipientsSentByEmail ??
+                                  "neznámý uživatel"}
+                              </span>
+                              {handoverRecipientsSentCount &&
+                              handoverRecipientsSentCount > 1
+                                ? ` · odesláno ${handoverRecipientsSentCount}×`
+                                : ""}
+                            </p>
+                          )}
+
+                          {!canSendHandoverInfo &&
+                            validHandoverRecipients.length === 0 && (
+                              <p className="mt-2 text-[11px] text-blue-700">
+                                Tlačítko se aktivuje po přidání alespoň jednoho
+                                příjemce s platným e-mailem.
+                              </p>
+                            )}
+                        </div>
+                      )}
                   </div>
                 )}
               </div>
@@ -1509,17 +2600,21 @@ export function ExitChecklistForm({
                     onCheckedChange={(checked) => {
                       const next = Boolean(checked)
                       setHandoverOption3(next)
+
                       if (!next) {
                         setHandoverOption3Reason("")
                         setResponsibleParty(null)
                       }
+
                       markDirty()
                     }}
                     disabled={isLocked}
                   />
                   <Label
                     htmlFor="handover3"
-                    className={`text-sm ${isLocked ? "cursor-default" : "cursor-pointer"}`}
+                    className={`text-sm ${
+                      isLocked ? "cursor-default" : "cursor-pointer"
+                    }`}
                   >
                     Zůstává zatím na neobsazeném funkčním místě z důvodu:
                   </Label>
@@ -1536,53 +2631,123 @@ export function ExitChecklistForm({
                       placeholder="např. do doby nástupu nového zaměstnance"
                       disabled={isLocked}
                     />
+
                     <div className="space-y-2">
                       <p className="text-sm font-medium">
                         Za dokumenty odpovídá:
                       </p>
+
                       <div className="flex flex-wrap gap-4">
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="radio"
-                            id="resp-kitt6"
-                            name="responsibleParty"
-                            checked={responsibleParty === "KITT6"}
-                            onChange={() => {
-                              setResponsibleParty("KITT6")
-                              markDirty()
-                            }}
-                            disabled={isLocked}
-                            className="cursor-pointer disabled:cursor-default"
-                          />
-                          <Label
-                            htmlFor="resp-kitt6"
-                            className={`text-sm ${isLocked ? "cursor-default" : "cursor-pointer"}`}
-                          >
-                            KITT6
-                          </Label>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="radio"
-                            id="resp-oss"
-                            name="responsibleParty"
-                            checked={responsibleParty === "OSS_KT"}
-                            onChange={() => {
-                              setResponsibleParty("OSS_KT")
-                              markDirty()
-                            }}
-                            disabled={isLocked}
-                            className="cursor-pointer disabled:cursor-default"
-                          />
-                          <Label
-                            htmlFor="resp-oss"
-                            className={`text-sm ${isLocked ? "cursor-default" : "cursor-pointer"}`}
-                          >
-                            OSS KT
-                          </Label>
-                        </div>
+                        {(["KITT6", "OSS_KT"] as const).map((val) => (
+                          <div key={val} className="flex items-center gap-2">
+                            <input
+                              type="radio"
+                              id={`resp-${val}`}
+                              name="responsibleParty"
+                              checked={responsibleParty === val}
+                              onChange={() => {
+                                setResponsibleParty(val)
+                                markDirty()
+                              }}
+                              disabled={isLocked}
+                              className="cursor-pointer disabled:cursor-default"
+                            />
+                            <Label
+                              htmlFor={`resp-${val}`}
+                              className={`text-sm ${
+                                isLocked ? "cursor-default" : "cursor-pointer"
+                              }`}
+                            >
+                              {val === "OSS_KT" ? "OSS KT" : val}
+                            </Label>
+                          </div>
+                        ))}
                       </div>
                     </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="border-t pt-4">
+              <div
+                className="flex flex-col rounded-md border p-3"
+                style={{ minHeight: "110px" }}
+              >
+                <Label className="mb-2 text-sm font-medium">
+                  Způsob předání agendy potvrzuje — Vedoucí odboru
+                  {managerName && (
+                    <span className="ml-2 text-xs font-normal text-muted-foreground">
+                      ({managerName})
+                    </span>
+                  )}
+                </Label>
+
+                <div style={{ minHeight: "52px" }} className="flex-1">
+                  {handoverManagerSignature.signedAt ? (
+                    <div className="rounded-md bg-muted/50 px-3 py-2 text-sm">
+                      <div className="font-medium">
+                        {handoverManagerSignature.signedByName ?? "Podepsáno"}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {format(
+                          new Date(handoverManagerSignature.signedAt),
+                          "d.M.yyyy HH:mm"
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
+                      Nepodepsáno
+                    </div>
+                  )}
+                </div>
+
+                {!isLocked && (
+                  <div
+                    className="mt-2 flex flex-wrap items-center gap-1.5"
+                    style={{ minHeight: "32px" }}
+                  >
+                    {!handoverManagerSignature.signedAt &&
+                      Boolean(currentUserName || currentUserEmail) && (
+                        <>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs"
+                            onClick={() => signHandoverManagerSignature(false)}
+                          >
+                            <Check className="size-3" /> Podepsat
+                          </Button>
+
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs text-muted-foreground"
+                            onClick={() => signHandoverManagerSignature(true)}
+                          >
+                            <Check className="size-3" /> Podepsat v zastoupení
+                          </Button>
+                        </>
+                      )}
+
+                    {handoverManagerSignature.signedAt &&
+                      (isAdmin ||
+                        normalizeEmail(
+                          handoverManagerSignature.signedByEmail
+                        ) === currentUserEmailNormalized) && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs text-muted-foreground"
+                          onClick={revokeHandoverManagerSignature}
+                        >
+                          <Undo2 className="size-3" /> Zrušit podpis
+                        </Button>
+                      )}
                   </div>
                 )}
               </div>
@@ -1593,18 +2758,16 @@ export function ExitChecklistForm({
 
       <Card>
         <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="space-y-2 text-xs text-muted-foreground">
-            <p>
-              {isInternalMode
-                ? "Po uzamčení formuláře již nepůjde běžným uživatelům měnit. Ruční podpis zaměstnance a vedoucího odboru se doplní až na vytištěném PDF."
-                : "Výstupní list můžete doplnit, podepsat a uložit pod svým přihlášeným účtem."}
-            </p>
+          <div className="text-xs text-muted-foreground">
+            {isInternalMode
+              ? "Po uzamčení formuláře již nepůjde běžným uživatelům měnit."
+              : "Výstupní list můžete doplnit, podepsat a uložit pod svým přihlášeným účtem."}
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-2">
             {canInvite && initialData.publicToken && (
               <SendAllDialog
-                offboardingId={offboardingId!}
+                offboardingId={resolvedOffboardingId}
                 employeeName={header.employeeName ?? ""}
                 employeeEmail={header.employeeEmail ?? null}
                 publicToken={initialData.publicToken}
@@ -1615,10 +2778,17 @@ export function ExitChecklistForm({
             )}
 
             {canInvite && (
-              <SendInviteDialog
-                offboardingId={offboardingId!}
-                employeeName={header.employeeName ?? ""}
-              />
+              <>
+                <SendInviteDialog
+                  offboardingId={resolvedOffboardingId}
+                  employeeName={header.employeeName ?? ""}
+                />
+                <SendInviteBehalfDialog
+                  offboardingId={resolvedOffboardingId}
+                  employeeName={header.employeeName ?? ""}
+                  managerName={managerName || null}
+                />
+              </>
             )}
 
             {canGeneratePdf && (
@@ -1630,8 +2800,7 @@ export function ExitChecklistForm({
                 className="gap-1"
                 disabled={saving}
               >
-                <Printer className="size-4" />
-                {pdfButtonLabel}
+                <Printer className="size-4" /> {pdfButtonLabel}
               </Button>
             )}
 
@@ -1646,6 +2815,7 @@ export function ExitChecklistForm({
                 >
                   {saving ? "Ukládám…" : "Uložit"}
                 </Button>
+
                 {canLock && (
                   <Button
                     type="button"
@@ -1662,6 +2832,121 @@ export function ExitChecklistForm({
           </div>
         </CardContent>
       </Card>
+
+      <AlertDialog
+        open={handoverSendDialogOpen}
+        onOpenChange={(open) => {
+          if (!sendingHandoverInfo) {
+            setHandoverSendDialogOpen(open)
+          }
+        }}
+      >
+        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-lg overflow-hidden p-0">
+          <div className="p-6 sm:px-8 sm:py-7">
+            <AlertDialogHeader className="space-y-3 text-left">
+              <AlertDialogTitle className="text-xl font-semibold">
+                {handoverSendDialogMode === "resend"
+                  ? "Odeslat informace znovu?"
+                  : "Odeslat informace příjemcům?"}
+              </AlertDialogTitle>
+
+              <AlertDialogDescription asChild>
+                <div className="space-y-4 text-sm leading-6 text-muted-foreground">
+                  {handoverSendDialogMode === "resend" ? (
+                    <p>
+                      Informace pro příjemce předávané agendy už byly odeslány.
+                      Pokud je odešlete znovu, příjemci dostanou nový e-mail.
+                    </p>
+                  ) : (
+                    <p>
+                      Příjemcům předávané agendy bude odeslán e-mail s
+                      informací, že mají převzít agendu uvedeného zaměstnance,
+                      který ukončuje pracovní poměr. Tato akce se uloží hned,
+                      nezávisle na uložení celého formuláře.
+                    </p>
+                  )}
+
+                  {handoverRecipientsSentAt && (
+                    <div className="rounded-md border bg-muted/40 p-3 text-xs">
+                      <p className="font-medium text-foreground">
+                        Poslední odeslání
+                      </p>
+                      <p className="mt-1">
+                        {format(
+                          new Date(handoverRecipientsSentAt),
+                          "d.M.yyyy HH:mm"
+                        )}
+                        {" · "}
+                        {handoverRecipientsSentByName ??
+                          handoverRecipientsSentByEmail ??
+                          "neznámý uživatel"}
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="rounded-md border bg-background p-3 text-xs">
+                    <p className="mb-2 font-medium text-foreground">
+                      Příjemci e-mailu
+                    </p>
+                    <ul className="max-h-48 space-y-2 overflow-y-auto pr-1">
+                      {validHandoverRecipients.map((recipient) => (
+                        <li key={recipient.id} className="flex flex-col">
+                          <span className="font-medium text-foreground">
+                            {recipient.name}
+                          </span>
+                          <span>{recipient.email}</span>
+                          {recipient.department && (
+                            <span className="text-muted-foreground/80">
+                              {recipient.department}
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+
+            <AlertDialogFooter className="mt-6 gap-2 sm:gap-2">
+              <AlertDialogCancel
+                disabled={sendingHandoverInfo}
+                className="h-10 min-w-[120px]"
+              >
+                Zrušit
+              </AlertDialogCancel>
+
+              <Button
+                type="button"
+                className="h-10 min-w-[150px] bg-[#00847C] text-white hover:bg-[#0B6D73]"
+                onClick={() =>
+                  void handleSendHandoverRecipientInfo(
+                    handoverSendDialogMode === "resend"
+                  )
+                }
+                disabled={sendingHandoverInfo}
+              >
+                {sendingHandoverInfo ? (
+                  <>
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                    Odesílám…
+                  </>
+                ) : handoverSendDialogMode === "resend" ? (
+                  <>
+                    <Send className="mr-2 size-4" />
+                    Odeslat znovu
+                  </>
+                ) : (
+                  <>
+                    <Send className="mr-2 size-4" />
+                    Odeslat
+                  </>
+                )}
+              </Button>
+            </AlertDialogFooter>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

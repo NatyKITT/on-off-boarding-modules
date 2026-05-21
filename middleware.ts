@@ -3,6 +3,8 @@ import { auth } from "@/auth"
 import type { Role } from "@prisma/client"
 import type { Session } from "next-auth"
 
+import { canAccessInternalApp } from "@/lib/rbac"
+
 type SessionUser = {
   id: string
   role?: Role
@@ -17,8 +19,8 @@ function getDomain(email?: string | null) {
 }
 
 function isPraha6OrKitt6(email?: string | null) {
-  const d = getDomain(email)
-  return d === "praha6.cz" || d === "kitt6.cz"
+  const domain = getDomain(email)
+  return domain === "praha6.cz" || domain === "kitt6.cz"
 }
 
 function jsonError(status: number, message: string) {
@@ -32,6 +34,15 @@ function isMutatingMethod(method: string) {
   return ["POST", "PUT", "PATCH", "DELETE"].includes(method.toUpperCase())
 }
 
+function redirectWithCurrentSearch(
+  req: Parameters<Parameters<typeof auth>[0]>[0],
+  pathname: string
+) {
+  const url = new URL(pathname, req.url)
+  url.search = req.nextUrl.search
+  return NextResponse.redirect(url)
+}
+
 export default auth((req) => {
   const session = req.auth as SessionWithUser | null
   const path = req.nextUrl.pathname
@@ -40,12 +51,11 @@ export default auth((req) => {
 
   const publicPaths = [
     "/signin",
+    "/no-access",
     "/terms",
     "/privacy",
     "/api/auth",
     "/api/health",
-    "/dokumenty/",
-    "/api/dokumenty/public",
   ]
 
   if (publicPaths.some((p) => path.startsWith(p))) {
@@ -53,12 +63,16 @@ export default auth((req) => {
   }
 
   if (!session?.user) {
-    if (isApi) return jsonError(401, "Nejste přihlášen(a).")
+    if (isApi) {
+      return jsonError(401, "Nejste přihlášen(a).")
+    }
+
     const signInUrl = new URL("/signin", req.url)
     signInUrl.searchParams.set(
       "callbackUrl",
       `${req.nextUrl.pathname}${req.nextUrl.search}`
     )
+
     return NextResponse.redirect(signInUrl)
   }
 
@@ -67,7 +81,15 @@ export default auth((req) => {
   const canAccessApp = Boolean(session.user.canAccessApp)
 
   if (path === "/") {
-    return NextResponse.redirect(new URL("/prehled", req.url))
+    if (role === "ADMIN") {
+      return redirectWithCurrentSearch(req, "/admin")
+    }
+
+    if (canAccessInternalApp(role)) {
+      return redirectWithCurrentSearch(req, "/prehled")
+    }
+
+    return redirectWithCurrentSearch(req, "/no-access")
   }
 
   const isPublicExitPage = path.startsWith("/odchody-public/")
@@ -77,8 +99,9 @@ export default auth((req) => {
     if (!isPraha6OrKitt6(email)) {
       return isApi
         ? jsonError(403, "Přístup pouze pro zaměstnance ÚMČ Praha 6.")
-        : NextResponse.redirect(new URL("/no-access", req.url))
+        : redirectWithCurrentSearch(req, "/no-access")
     }
+
     return NextResponse.next()
   }
 
@@ -91,11 +114,13 @@ export default auth((req) => {
     if (!isPraha6OrKitt6(email)) {
       return isApi
         ? jsonError(403, "Přístup pouze pro zaměstnance ÚMČ Praha 6.")
-        : NextResponse.redirect(new URL("/no-access", req.url))
+        : redirectWithCurrentSearch(req, "/no-access")
     }
 
-    if (role === "USER" && /\/invite/.test(path)) {
-      return jsonError(403, "Nemáte oprávnění odesílat pozvánky k podpisu.")
+    if (!canAccessInternalApp(role)) {
+      return isApi
+        ? jsonError(403, "K internímu výstupnímu listu nemáte přístup.")
+        : redirectWithCurrentSearch(req, "/no-access")
     }
 
     return NextResponse.next()
@@ -104,28 +129,30 @@ export default auth((req) => {
   if (role === "USER") {
     return isApi
       ? jsonError(403, "Nemáte přístup do aplikace.")
-      : NextResponse.redirect(new URL("/no-access", req.url))
+      : redirectWithCurrentSearch(req, "/no-access")
   }
 
-  if (!canAccessApp && role !== "READONLY") {
+  if (!canAccessApp && !canAccessInternalApp(role)) {
     return isApi
       ? jsonError(403, "Nemáte přístup do aplikace.")
-      : NextResponse.redirect(new URL("/no-access", req.url))
+      : redirectWithCurrentSearch(req, "/no-access")
   }
 
   if (path.startsWith("/admin") || path.startsWith("/api/admin")) {
     if (role !== "ADMIN") {
       return isApi
         ? jsonError(403, "Přístup pouze pro administrátory.")
-        : NextResponse.redirect(new URL("/prehled", req.url))
+        : redirectWithCurrentSearch(req, "/prehled")
     }
+
     return NextResponse.next()
   }
 
   if (role === "READONLY" && isApi && isMutatingMethod(method)) {
-    if (isInternalExitApi || isPublicExitApi) {
+    if (isPublicExitApi || isInternalExitApi) {
       return NextResponse.next()
     }
+
     return jsonError(
       403,
       "Máte pouze režim pro čtení. Pro úpravy kontaktujte administrátora."

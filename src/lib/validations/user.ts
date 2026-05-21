@@ -6,7 +6,12 @@ export const roleSchema = z.nativeEnum(PrismaRole)
 export const userSchema = z.object({
   id: z.string(),
   email: z.string().email(),
-  name: z.string().min(1, "Jméno je povinné").max(32, "Jméno je příliš dlouhé"),
+  name: z.string().min(1, "Jméno je povinné").max(64, "Jméno je příliš dlouhé"),
+  surname: z
+    .string()
+    .max(64, "Příjmení je příliš dlouhé")
+    .optional()
+    .nullable(),
   role: roleSchema,
   canAccessApp: z.boolean().optional(),
   createdAt: z.date().optional(),
@@ -34,7 +39,7 @@ export const updateUserNameSchema = z.object({
     .string()
     .trim()
     .min(1, "Jméno je povinné")
-    .max(32, "Jméno je příliš dlouhé"),
+    .max(64, "Jméno je příliš dlouhé"),
 })
 
 export type AppRole = z.infer<typeof roleSchema>
