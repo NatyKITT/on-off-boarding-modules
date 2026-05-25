@@ -1,8 +1,6 @@
-import { redirect } from "next/navigation"
-
 import { sidebarLinks } from "@/config/dashboard"
 
-import { getCurrentUser } from "@/lib/session"
+import { requireInternalUser } from "@/lib/session"
 
 import { SearchCommand } from "@/components/dashboard/search-command"
 import {
@@ -22,15 +20,16 @@ interface ProtectedLayoutProps {
 }
 
 export default async function Dashboard({ children }: ProtectedLayoutProps) {
-  const user = await getCurrentUser()
-  if (!user) redirect("/signin")
+  const user = await requireInternalUser()
 
-  const filteredLinks = sidebarLinks.map((section) => ({
-    ...section,
-    items: section.items.filter(
-      ({ authorizeOnly }) => !authorizeOnly || authorizeOnly === user.role
-    ),
-  }))
+  const filteredLinks = sidebarLinks
+    .map((section) => ({
+      ...section,
+      items: section.items.filter(
+        ({ authorizeOnly }) => !authorizeOnly || authorizeOnly === user.role
+      ),
+    }))
+    .filter((section) => section.items.length > 0)
 
   return (
     <div className="relative flex min-h-screen w-full overflow-x-hidden">
@@ -40,9 +39,11 @@ export default async function Dashboard({ children }: ProtectedLayoutProps) {
         <header className="sticky top-0 z-50 flex h-14 bg-background px-4 lg:h-[60px] xl:px-8">
           <MaxWidthWrapper className="flex max-w-7xl items-center gap-x-3 px-0">
             <MobileSheetSidebar links={filteredLinks} />
+
             <div className="w-full min-w-0 flex-1">
               <SearchCommand links={filteredLinks} />
             </div>
+
             <ModeToggle />
             <UserAccountNav />
           </MaxWidthWrapper>

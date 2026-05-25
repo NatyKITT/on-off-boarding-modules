@@ -7,7 +7,7 @@ import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 import type { Role } from "@prisma/client"
 
-import { canAccessInternalApp } from "@/lib/rbac"
+import { canAccessInternalApp, canEditInternalApp } from "@/lib/rbac"
 
 
 
@@ -32,9 +32,9 @@ export async function requireUser() {
 
 export async function requireRole(roles: Role[] | Role) {
   const user = await requireUser()
-  const allowed = Array.isArray(roles) ? roles : [roles]
+  const allowedRoles = Array.isArray(roles) ? roles : [roles]
 
-  if (!user.role || !allowed.includes(user.role)) {
+  if (!user.role || !allowedRoles.includes(user.role)) {
     redirect("/no-access")
   }
 
@@ -45,6 +45,26 @@ export async function requireInternalUser() {
   const user = await requireUser()
 
   if (!canAccessInternalApp(user.role)) {
+    redirect("/no-access")
+  }
+
+  return user
+}
+
+export async function requireInternalEditor() {
+  const user = await requireUser()
+
+  if (!canEditInternalApp(user.role)) {
+    redirect("/no-access")
+  }
+
+  return user
+}
+
+export async function requireAdmin() {
+  const user = await requireUser()
+
+  if (user.role !== "ADMIN") {
     redirect("/no-access")
   }
 
