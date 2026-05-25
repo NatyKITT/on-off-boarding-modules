@@ -14,6 +14,12 @@ type SessionUser = {
 
 type SessionWithUser = Session & { user: SessionUser }
 
+type MiddlewareRequest = {
+  url: string
+  nextUrl: URL
+  method: string
+}
+
 function getDomain(email?: string | null) {
   return (email ?? "").split("@")[1]?.toLowerCase() ?? ""
 }
@@ -34,17 +40,27 @@ function isMutatingMethod(method: string) {
   return ["POST", "PUT", "PATCH", "DELETE"].includes(method.toUpperCase())
 }
 
-function redirectWithCurrentSearch(
-  req: Parameters<Parameters<typeof auth>[0]>[0],
-  pathname: string
-) {
+function redirectWithCurrentSearch(req: MiddlewareRequest, pathname: string) {
   const url = new URL(pathname, req.url)
   url.search = req.nextUrl.search
   return NextResponse.redirect(url)
 }
 
+function redirectToSignIn(req: MiddlewareRequest) {
+  const signInUrl = new URL("/signin", req.url)
+
+  signInUrl.searchParams.set(
+    "callbackUrl",
+    `${req.nextUrl.pathname}${req.nextUrl.search}`
+  )
+
+  return NextResponse.redirect(signInUrl)
+}
+
 export default auth((req) => {
+  const request = req as MiddlewareRequest
   const session = req.auth as SessionWithUser | null
+
   const path = req.nextUrl.pathname
   const method = req.method
   const isApi = path.startsWith("/api")
@@ -58,7 +74,7 @@ export default auth((req) => {
     "/api/health",
   ]
 
-  if (publicPaths.some((p) => path.startsWith(p))) {
+  if (publicPaths.some((p) => path === p || path.startsWith(`${p}/`))) {
     return NextResponse.next()
   }
 
@@ -67,30 +83,12 @@ export default auth((req) => {
       return jsonError(401, "Nejste přihlášen(a).")
     }
 
-    const signInUrl = new URL("/signin", req.url)
-    signInUrl.searchParams.set(
-      "callbackUrl",
-      `${req.nextUrl.pathname}${req.nextUrl.search}`
-    )
-
-    return NextResponse.redirect(signInUrl)
+    return redirectToSignIn(request)
   }
 
   const email = session.user.email ?? null
   const role = (session.user.role ?? "USER") as Role
   const canAccessApp = Boolean(session.user.canAccessApp)
-
-  if (path === "/") {
-    if (role === "ADMIN") {
-      return redirectWithCurrentSearch(req, "/admin")
-    }
-
-    if (canAccessInternalApp(role)) {
-      return redirectWithCurrentSearch(req, "/prehled")
-    }
-
-    return redirectWithCurrentSearch(req, "/no-access")
-  }
 
   const isPublicExitPage = path.startsWith("/odchody-public/")
   const isPublicExitApi = path.startsWith("/api/odchody/public/")
@@ -99,7 +97,7 @@ export default auth((req) => {
     if (!isPraha6OrKitt6(email)) {
       return isApi
         ? jsonError(403, "Přístup pouze pro zaměstnance ÚMČ Praha 6.")
-        : redirectWithCurrentSearch(req, "/no-access")
+        : redirectWithCurrentSearch(request, "/no-access")
     }
 
     return NextResponse.next()
@@ -114,13 +112,13 @@ export default auth((req) => {
     if (!isPraha6OrKitt6(email)) {
       return isApi
         ? jsonError(403, "Přístup pouze pro zaměstnance ÚMČ Praha 6.")
-        : redirectWithCurrentSearch(req, "/no-access")
+        : redirectWithCurrentSearch(request, "/no-access")
     }
 
     if (!canAccessInternalApp(role)) {
       return isApi
         ? jsonError(403, "K internímu výstupnímu listu nemáte přístup.")
-        : redirectWithCurrentSearch(req, "/no-access")
+        : redirectWithCurrentSearch(request, "/no-access")
     }
 
     return NextResponse.next()
@@ -129,20 +127,20 @@ export default auth((req) => {
   if (role === "USER") {
     return isApi
       ? jsonError(403, "Nemáte přístup do aplikace.")
-      : redirectWithCurrentSearch(req, "/no-access")
+      : redirectWithCurrentSearch(request, "/no-access")
   }
 
   if (!canAccessApp && !canAccessInternalApp(role)) {
     return isApi
       ? jsonError(403, "Nemáte přístup do aplikace.")
-      : redirectWithCurrentSearch(req, "/no-access")
+      : redirectWithCurrentSearch(request, "/no-access")
   }
 
   if (path.startsWith("/admin") || path.startsWith("/api/admin")) {
     if (role !== "ADMIN") {
       return isApi
         ? jsonError(403, "Přístup pouze pro administrátory.")
-        : redirectWithCurrentSearch(req, "/prehled")
+        : redirectWithCurrentSearch(request, "/prehled")
     }
 
     return NextResponse.next()

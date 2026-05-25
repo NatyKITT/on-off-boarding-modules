@@ -16,15 +16,22 @@ export const SignOutButton = React.forwardRef<
   HTMLButtonElement,
   SignOutButtonProps
 >(({ className, children, ...props }, ref) => {
-  const [pending, startTransition] = React.useTransition()
+  const [pending, setPending] = React.useState(false)
 
-  function handleSignOut() {
-    startTransition(() => {
-      void signOut({
+  async function handleSignOut() {
+    if (pending) return
+
+    try {
+      setPending(true)
+
+      await signOut({
         callbackUrl: SIGNOUT_SUCCESS_REDIRECT,
         redirect: true,
       })
-    })
+    } catch (error) {
+      console.error("[SignOutButton] Sign out failed:", error)
+      setPending(false)
+    }
   }
 
   return (
@@ -36,7 +43,7 @@ export const SignOutButton = React.forwardRef<
         className
       )}
       disabled={pending}
-      onClick={handleSignOut}
+      onClick={() => void handleSignOut()}
       {...props}
     >
       {pending ? (

@@ -84,7 +84,7 @@ function appendSearchParam(url: string, key: string, value: string): string {
 export function OAuthButtons({
   callbackUrl = DEFAULT_SIGNIN_REDIRECT,
 }: Props): JSX.Element {
-  const [pending, startTransition] = React.useTransition()
+  const [pending, setPending] = React.useState(false)
 
   const safeCallbackUrl = getSafeCallbackUrl(callbackUrl)
   const finalCallbackUrl = appendSearchParam(
@@ -93,13 +93,20 @@ export function OAuthButtons({
     "success"
   )
 
-  function handleOAuthSignIn() {
-    startTransition(() => {
-      void signIn("google", {
+  async function handleOAuthSignIn() {
+    if (pending) return
+
+    try {
+      setPending(true)
+
+      await signIn("google", {
         callbackUrl: finalCallbackUrl,
         redirect: true,
       })
-    })
+    } catch (error) {
+      console.error("[OAuthButtons] Google sign-in failed:", error)
+      setPending(false)
+    }
   }
 
   return (
@@ -107,7 +114,7 @@ export function OAuthButtons({
       <Button
         type="button"
         aria-label="Přihlásit se přes Google"
-        onClick={handleOAuthSignIn}
+        onClick={() => void handleOAuthSignIn()}
         disabled={pending}
         className="
           h-12

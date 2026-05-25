@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { format } from "date-fns"
 import {
   Check,
@@ -727,9 +727,12 @@ export function ExitChecklistForm({
   )
 
   const [dirty, setDirty] = useState(false)
+  const dirtyRef = useRef(false)
   const [saving, setSaving] = useState(false)
   const [sendingHandoverInfo, setSendingHandoverInfo] = useState(false)
-  const [lastSaveTrigger, setLastSaveTrigger] = useState<number | undefined>(0)
+  const [lastSaveTrigger, setLastSaveTrigger] = useState<number | undefined>(
+    externalSaveTrigger
+  )
   const [feedbackDialog, setFeedbackDialog] = useState<FeedbackDialogState>({
     open: false,
     type: "success",
@@ -804,6 +807,33 @@ export function ExitChecklistForm({
     handoverOption2 &&
     validHandoverRecipients.length > 0
 
+  const initialDataIdentity = useMemo(
+    () =>
+      [
+        initialData.id ?? "new",
+        initialData.offboardingId,
+        initialData.publicToken ?? "",
+      ].join(":"),
+    [initialData.id, initialData.offboardingId, initialData.publicToken]
+  )
+
+  const setFormDirty = useCallback(
+    (nextDirty: boolean) => {
+      dirtyRef.current = nextDirty
+      setDirty(nextDirty)
+      onDirtyChange?.(nextDirty)
+    },
+    [onDirtyChange]
+  )
+
+  function markDirty() {
+    setFormDirty(true)
+  }
+
+  function markClean() {
+    setFormDirty(false)
+  }
+
   useEffect(() => {
     setLockedAt(initialData.lockedAt ?? null)
     setItems(mergeItemsWithConfig(initialData.items ?? []))
@@ -848,26 +878,18 @@ export function ExitChecklistForm({
     )
     setManagerName(initialData.managerName ?? "")
     setManagerEmail(initialData.managerEmail ?? "")
-    setDirty(false)
-  }, [initialData])
+    markClean()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialDataIdentity])
 
   useEffect(() => {
-    onDirtyChange?.(dirty)
-  }, [dirty, onDirtyChange])
-
-  useEffect(() => {
-    if (
-      externalSaveTrigger !== undefined &&
-      externalSaveTrigger !== lastSaveTrigger
-    ) {
-      void handleSave(false).then(() => setLastSaveTrigger(externalSaveTrigger))
-    }
+    if (externalSaveTrigger === undefined) return
+    if (externalSaveTrigger === lastSaveTrigger) return
+    setLastSaveTrigger(externalSaveTrigger)
+    if (!dirtyRef.current) return
+    void handleSave(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalSaveTrigger])
-
-  function markDirty() {
-    setDirty(true)
-  }
 
   function showFeedback(
     type: FeedbackDialogState["type"],
@@ -1371,7 +1393,7 @@ export function ExitChecklistForm({
     }
   }
 
-  async function handleSave(lockAfterSave: boolean) {
+  async function handleSave(lockAfterSave: boolean): Promise<boolean> {
     try {
       setSaving(true)
 
@@ -1429,7 +1451,7 @@ export function ExitChecklistForm({
           "Nepodařilo se uložit výstupní list",
           json?.message ?? json?.error ?? "Zkuste akci zopakovat."
         )
-        return
+        return false
       }
 
       const payload = json as {
@@ -1486,7 +1508,7 @@ export function ExitChecklistForm({
         )
         setManagerName(payload.data.managerName ?? "")
         setManagerEmail(payload.data.managerEmail ?? "")
-        setDirty(false)
+        markClean()
 
         showFeedback(
           "success",
@@ -1499,7 +1521,10 @@ export function ExitChecklistForm({
         )
 
         onSaved?.(payload.data)
+        return true
       }
+
+      return false
     } catch (err) {
       console.error("Chyba při ukládání:", err)
 
@@ -1510,15 +1535,14 @@ export function ExitChecklistForm({
           ? err.message
           : "Došlo k neočekávané chybě při ukládání."
       )
+      return false
     } finally {
       setSaving(false)
     }
   }
 
-  async function handleGeneratePdfWithSave() {
+  function openPdf() {
     if (!resolvedOffboardingId) return
-
-    await handleSave(false)
 
     window.open(
       `/api/odchody/${resolvedOffboardingId}/vystupni-list`,
@@ -1527,7 +1551,17 @@ export function ExitChecklistForm({
     )
   }
 
-  const pdfButtonLabel = dirty ? "Uložit a vygenerovat PDF" : "Vygenerovat PDF"
+  async function requestGeneratePdf() {
+    if (dirtyRef.current) {
+      const saved = await handleSave(false)
+
+      if (!saved) return
+    }
+
+    openPdf()
+  }
+
+  const pdfButtonLabel = dirty ? "Vygenerovat PDF" : "Vygenerovat PDF"
 
   const isLockedBadge = isLocked ? (
     <Badge variant="outline" className="flex items-center gap-1">
@@ -2796,7 +2830,7 @@ export function ExitChecklistForm({
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => void handleGeneratePdfWithSave()}
+                onClick={requestGeneratePdf}
                 className="gap-1"
                 disabled={saving}
               >

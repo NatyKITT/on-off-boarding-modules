@@ -62,19 +62,35 @@ function getDefaultRoleForEmail(email: string): Role {
   return "USER"
 }
 
-function getRoleForEmail(email: string): Role {
-  return getEnvRoleForEmail(email) ?? getDefaultRoleForEmail(email)
-}
-
 function canEmailSignIn(email: string | null | undefined): boolean {
   const domain = getDomain(email)
   return ALLOWED_DOMAINS.has(domain)
 }
 
+function resolveRoleForUser(params: {
+  email: string
+  dbRole?: Role | null
+  dbCanAccessApp?: boolean | null
+}): Role {
+  const envRole = getEnvRoleForEmail(params.email)
+
+  if (envRole) {
+    return envRole
+  }
+
+  if (params.dbRole && isInternalRole(params.dbRole)) {
+    return params.dbRole
+  }
+
+  if (params.dbRole === "USER") {
+    return "USER"
+  }
+
+  return getDefaultRoleForEmail(params.email)
+}
+
 async function syncUserAccess(userId: string, email: string) {
   const normalizedEmail = email.toLowerCase()
-  const nextRole = getRoleForEmail(normalizedEmail)
-  const nextCanAccessApp = isInternalRole(nextRole)
 
   const dbUser = await prisma.user.findUnique({
     where: { id: userId },
@@ -84,10 +100,19 @@ async function syncUserAccess(userId: string, email: string) {
       canAccessApp: true,
       name: true,
       surname: true,
+      email: true,
     },
   })
 
   if (!dbUser) return null
+
+  const nextRole = resolveRoleForUser({
+    email: normalizedEmail,
+    dbRole: dbUser.role,
+    dbCanAccessApp: dbUser.canAccessApp,
+  })
+
+  const nextCanAccessApp = isInternalRole(nextRole)
 
   if (dbUser.role !== nextRole || dbUser.canAccessApp !== nextCanAccessApp) {
     await prisma.user.update({
@@ -131,6 +156,21 @@ export const authConfig = {
     }),
   ],
 
+  events: {
+    async signIn({ user }) {
+      try {
+        const userId = user.id ? String(user.id) : null
+        const email = user.email?.toLowerCase() ?? null
+
+        if (!userId || !email) return
+
+        await syncUserAccess(userId, email)
+      } catch (error) {
+        console.warn("[auth signIn syncUserAccess] Non-fatal error:", error)
+      }
+    },
+  },
+
   callbacks: {
     authorized() {
       return true
@@ -150,7 +190,7 @@ export const authConfig = {
       return baseUrl
     },
 
-    async jwt({ token, user, profile }) {
+    async jwt({ token, user, profile, trigger }) {
       const email =
         (typeof token.email === "string" && token.email) ||
         (typeof user?.email === "string" && user.email) ||
@@ -176,7 +216,13 @@ export const authConfig = {
         token.name = user.name
       }
 
-      if (userId && token.email) {
+      const shouldLoadFromDb =
+        Boolean(user) ||
+        trigger === "update" ||
+        !token.role ||
+        typeof token.canAccessApp === "undefined"
+
+      if (shouldLoadFromDb && userId && token.email) {
         const dbUser = await syncUserAccess(userId, String(token.email))
 
         if (dbUser) {
