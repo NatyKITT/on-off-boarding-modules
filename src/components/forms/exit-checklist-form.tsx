@@ -26,6 +26,7 @@ import type {
   ExitChecklistSignatureValue,
   ExitResolvedValue,
   HandoverRecipient,
+  HandoverSendHistoryEntry,
 } from "@/types/exit-checklist"
 import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
 
@@ -100,6 +101,14 @@ type EmployeePersonItem = {
   unitName?: string
 }
 
+type HandoverPositionItem = {
+  id?: string | number | null
+  num: string
+  name: string
+  dept_name?: string | null
+  unit_name?: string | null
+}
+
 type HeaderSignatureKey = "employee" | "manager" | "issuer"
 
 type FeedbackDialogState = {
@@ -168,6 +177,73 @@ function buildEmployeeFullName(person: Partial<EmployeePersonItem>) {
     .filter(Boolean)
     .join(" ")
     .trim()
+}
+
+function cleanPositionName(value?: string | null, positionNum?: string | null) {
+  const rawValue = (value ?? "").trim()
+  const rawPositionNum = (positionNum ?? "").trim()
+
+  if (!rawValue || !rawPositionNum) return rawValue
+
+  const escapedPositionNum = rawPositionNum.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&"
+  )
+
+  return rawValue
+    .replace(new RegExp(`^${escapedPositionNum}\\s*[—–-]\\s*`), "")
+    .replace(new RegExp(`^${escapedPositionNum}\\s+`), "")
+    .trim()
+}
+
+function formatHandoverPositionLabel(
+  positionNum?: string | null,
+  positionName?: string | null
+) {
+  const cleanName = cleanPositionName(positionName, positionNum)
+
+  return [positionNum?.trim(), cleanName].filter(Boolean).join(" — ")
+}
+
+type RawHandoverPositionItem = Record<string, unknown> & {
+  num: string | number
+}
+
+function isRawHandoverPositionItem(
+  item: unknown
+): item is RawHandoverPositionItem {
+  if (!item || typeof item !== "object") return false
+
+  const num = (item as { num?: unknown }).num
+
+  return typeof num === "string" || typeof num === "number"
+}
+
+function normalizeHandoverPositions(payload: unknown): HandoverPositionItem[] {
+  const arr = Array.isArray((payload as { data?: unknown })?.data)
+    ? (payload as { data: unknown[] }).data
+    : Array.isArray(payload)
+      ? payload
+      : []
+
+  return arr
+    .filter(isRawHandoverPositionItem)
+    .map((item) => {
+      const idValue = item.id
+      const num = String(item.num)
+
+      return {
+        id:
+          typeof idValue === "string" || typeof idValue === "number"
+            ? idValue
+            : num,
+        num,
+        name: typeof item.name === "string" ? item.name : "",
+        dept_name: typeof item.dept_name === "string" ? item.dept_name : null,
+        unit_name: typeof item.unit_name === "string" ? item.unit_name : null,
+      }
+    })
+    .filter((item) => item.num || item.name)
 }
 
 function renderOrganization(text: string, managerName?: string | null) {
@@ -620,12 +696,67 @@ function buildHandoverRecipientSendKey(recipients: HandoverRecipient[]) {
       email: normalizeEmail(recipient.email),
       name: recipient.name?.trim() ?? "",
       personalNumber: recipient.personalNumber?.trim() ?? "",
+      department: recipient.department?.trim() ?? "",
     }))
     .sort((a, b) => a.email.localeCompare(b.email))
     .map((recipient) =>
-      [recipient.email, recipient.name, recipient.personalNumber].join("|")
+      [
+        recipient.email,
+        recipient.name,
+        recipient.personalNumber,
+        recipient.department,
+      ].join("|")
     )
     .join(";;")
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return "—"
+
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) return value
+
+  return format(date, "d.M.yyyy HH:mm")
+}
+
+function mergeHandoverSendHistory(
+  currentHistory: HandoverSendHistoryEntry[],
+  sentRecipients: HandoverRecipient[],
+  sentAt: string,
+  sentByName: string | null,
+  sentByEmail: string | null
+): HandoverSendHistoryEntry[] {
+  const historyByEmail = new Map<string, HandoverSendHistoryEntry>()
+
+  currentHistory.forEach((entry) => {
+    const email = normalizeEmail(entry.email)
+    if (!email) return
+
+    historyByEmail.set(email, entry)
+  })
+
+  sentRecipients.forEach((recipient) => {
+    const email = normalizeEmail(recipient.email)
+    if (!email) return
+
+    const previous = historyByEmail.get(email)
+
+    historyByEmail.set(email, {
+      id: previous?.id ?? recipient.id ?? createTempId(),
+      name: recipient.name || previous?.name || email,
+      email,
+      personalNumber:
+        recipient.personalNumber ?? previous?.personalNumber ?? null,
+      department: recipient.department ?? previous?.department ?? null,
+      lastSentAt: sentAt,
+      lastSentByName: sentByName,
+      lastSentByEmail: sentByEmail,
+      sentCount: (previous?.sentCount ?? 0) + 1,
+    })
+  })
+
+  return Array.from(historyByEmail.values())
 }
 
 export function ExitChecklistForm({
@@ -662,7 +793,10 @@ export function ExitChecklistForm({
     initialData.handover?.option2 ?? false
   )
   const [handoverOption2Target, setHandoverOption2Target] = useState(
-    initialData.handover?.option2Target ?? ""
+    cleanPositionName(
+      initialData.handover?.option2Target,
+      initialData.handover?.option2TargetPositionNum
+    )
   )
   const [
     handoverOption2TargetPositionNum,
@@ -674,12 +808,16 @@ export function ExitChecklistForm({
   const [handoverOption3Reason, setHandoverOption3Reason] = useState(
     initialData.handover?.option3Reason ?? ""
   )
-  const [responsibleParty, setResponsibleParty] = useState<
-    "KITT6" | "OSS_KT" | null
-  >(initialData.handover?.responsibleParty ?? null)
+  const [, setResponsibleParty] = useState<"KITT6" | "OSS_KT" | null>(
+    initialData.handover?.responsibleParty ?? null
+  )
   const [handoverRecipients, setHandoverRecipients] = useState<
     HandoverRecipient[]
   >(initialData.handover?.handoverRecipients ?? [])
+
+  const [handoverSendHistory, setHandoverSendHistory] = useState<
+    HandoverSendHistoryEntry[]
+  >(initialData.handover?.handoverSendHistory ?? [])
 
   const [handoverRecipientsSentAt, setHandoverRecipientsSentAt] = useState<
     string | null
@@ -722,6 +860,9 @@ export function ExitChecklistForm({
 
   const [newRecipientName, setNewRecipientName] = useState("")
   const [newRecipientEmail, setNewRecipientEmail] = useState("")
+  const [newRecipientPersonalNumber, setNewRecipientPersonalNumber] =
+    useState("")
+  const [newRecipientDepartment, setNewRecipientDepartment] = useState("")
   const [newRecipientError, setNewRecipientError] = useState<string | null>(
     null
   )
@@ -743,15 +884,34 @@ export function ExitChecklistForm({
   const [handoverSendDialogMode, setHandoverSendDialogMode] = useState<
     "first-send" | "resend"
   >("first-send")
+  const [sendPdfDialogOpen, setSendPdfDialogOpen] = useState(false)
+  const [pdfRecipientName, setPdfRecipientName] = useState("")
+  const [pdfRecipientEmail, setPdfRecipientEmail] = useState("")
+  const [pdfMessage, setPdfMessage] = useState("")
+  const [sendingPdf, setSendingPdf] = useState(false)
+
+  const [positionPickerOpen, setPositionPickerOpen] = useState(false)
+  const [positionQuery, setPositionQuery] = useState("")
+  const [handoverPositions, setHandoverPositions] = useState<
+    HandoverPositionItem[]
+  >([])
+  const [loadingPositions, setLoadingPositions] = useState(false)
+  const [positionLoadError, setPositionLoadError] = useState<string | null>(
+    null
+  )
 
   const isInternalMode = mode === "internal"
   const isLocked = Boolean(lockedAt)
   const resolvedOffboardingId = offboardingId ?? initialData.offboardingId
   const role = session?.user.role ?? "USER"
   const isAdmin = role === "ADMIN" || role === "HR" || role === "IT"
-  const canInvite = isInternalMode && isAdmin && Boolean(resolvedOffboardingId)
+  const canInvite =
+    isInternalMode && isAdmin && Boolean(resolvedOffboardingId) && !isLocked
+
   const canLock = isInternalMode && isAdmin
+  const canUnlock = canLock && isLocked
   const canGeneratePdf = isInternalMode && Boolean(resolvedOffboardingId)
+  const canSendPdf = isInternalMode && isAdmin && Boolean(resolvedOffboardingId)
   const signingDisabledKeys = conflictOfInterest ? [] : ["lawInfo"]
   const lawInfoGreyed = !conflictOfInterest
 
@@ -799,13 +959,59 @@ export function ExitChecklistForm({
 
   const handoverRecipientsWereSent = Boolean(handoverRecipientsSentAt)
 
+  const displayedHandoverSendHistory = useMemo(() => {
+    return [...handoverSendHistory].sort((a, b) => {
+      const aTime = a.lastSentAt ? new Date(a.lastSentAt).getTime() : 0
+      const bTime = b.lastSentAt ? new Date(b.lastSentAt).getTime() : 0
+
+      return bTime - aTime
+    })
+  }, [handoverSendHistory])
+
   const canSendHandoverInfo =
     Boolean(resolvedOffboardingId) &&
     Boolean(currentUserEmail) &&
     !isLocked &&
     includeHandoverAgenda &&
-    handoverOption2 &&
+    handoverOption3 &&
     validHandoverRecipients.length > 0
+
+  const cleanHandoverOption2Target = useMemo(
+    () =>
+      cleanPositionName(
+        handoverOption2Target,
+        handoverOption2TargetPositionNum
+      ),
+    [handoverOption2Target, handoverOption2TargetPositionNum]
+  )
+
+  const selectedHandoverOption2PositionLabel = useMemo(
+    () =>
+      formatHandoverPositionLabel(
+        handoverOption2TargetPositionNum,
+        handoverOption2Target
+      ),
+    [handoverOption2Target, handoverOption2TargetPositionNum]
+  )
+
+  const filteredPositions = useMemo(() => {
+    const query = normalizeStr(positionQuery.trim())
+
+    if (!query) return handoverPositions
+
+    return handoverPositions.filter((position) => {
+      const searchable = normalizeStr(
+        [
+          position.num,
+          position.name,
+          position.dept_name ?? "",
+          position.unit_name ?? "",
+        ].join(" ")
+      )
+
+      return searchable.includes(query)
+    })
+  }, [handoverPositions, positionQuery])
 
   const initialDataIdentity = useMemo(
     () =>
@@ -844,7 +1050,12 @@ export function ExitChecklistForm({
     )
     setHandoverOption1(initialData.handover?.option1 ?? false)
     setHandoverOption2(initialData.handover?.option2 ?? false)
-    setHandoverOption2Target(initialData.handover?.option2Target ?? "")
+    setHandoverOption2Target(
+      cleanPositionName(
+        initialData.handover?.option2Target,
+        initialData.handover?.option2TargetPositionNum
+      )
+    )
     setHandoverOption2TargetPositionNum(
       initialData.handover?.option2TargetPositionNum ?? ""
     )
@@ -852,6 +1063,7 @@ export function ExitChecklistForm({
     setHandoverOption3Reason(initialData.handover?.option3Reason ?? "")
     setResponsibleParty(initialData.handover?.responsibleParty ?? null)
     setHandoverRecipients(initialData.handover?.handoverRecipients ?? [])
+    setHandoverSendHistory(initialData.handover?.handoverSendHistory ?? [])
     setHandoverRecipientsSentAt(
       initialData.handover?.handoverRecipientsSentAt ?? null
     )
@@ -890,6 +1102,44 @@ export function ExitChecklistForm({
     void handleSave(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalSaveTrigger])
+
+  useEffect(() => {
+    if (!positionPickerOpen || handoverPositions.length > 0) return
+
+    const controller = new AbortController()
+
+    ;(async () => {
+      setLoadingPositions(true)
+      setPositionLoadError(null)
+
+      try {
+        const res = await fetch("/api/systemizace", {
+          cache: "no-store",
+          signal: controller.signal,
+          headers: { Accept: "application/json" },
+        })
+
+        if (!res.ok) {
+          throw new Error(`Pozice se nepodařilo načíst (${res.status}).`)
+        }
+
+        const json = await res.json().catch(() => null)
+        setHandoverPositions(normalizeHandoverPositions(json))
+      } catch (err) {
+        if ((err as Error).name !== "AbortError") {
+          setPositionLoadError(
+            err instanceof Error
+              ? err.message
+              : "Nepodařilo se načíst pozice ze systemizace."
+          )
+        }
+      } finally {
+        setLoadingPositions(false)
+      }
+    })()
+
+    return () => controller.abort()
+  }, [positionPickerOpen, handoverPositions.length])
 
   function showFeedback(
     type: FeedbackDialogState["type"],
@@ -1215,6 +1465,8 @@ export function ExitChecklistForm({
 
     const name = newRecipientName.trim()
     const email = newRecipientEmail.trim().toLowerCase()
+    const personalNumber = newRecipientPersonalNumber.trim()
+    const department = newRecipientDepartment.trim()
 
     if (!name) {
       setNewRecipientError("Jméno je povinné.")
@@ -1241,11 +1493,15 @@ export function ExitChecklistForm({
         id: createTempId(),
         name,
         email,
+        personalNumber: personalNumber || null,
+        department: department || null,
       },
     ])
 
     setNewRecipientName("")
     setNewRecipientEmail("")
+    setNewRecipientPersonalNumber("")
+    setNewRecipientDepartment("")
     markDirty()
   }
 
@@ -1268,11 +1524,11 @@ export function ExitChecklistForm({
       return
     }
 
-    if (!includeHandoverAgenda || !handoverOption2) {
+    if (!includeHandoverAgenda || !handoverOption3) {
       showFeedback(
         "error",
         "Předávaná agenda není připravena",
-        "Nejdříve zaškrtněte možnost „OI-KITT6 předá na jiné funkční místo“."
+        "Nejdříve zaškrtněte možnost „Zůstává zatím na neobsazeném funkčním místě“ a doplňte osobu do pole „Za dokumenty odpovídá“."
       )
       return
     }
@@ -1317,11 +1573,11 @@ export function ExitChecklistForm({
               includeHandoverAgenda,
               option1: handoverOption1,
               option2: handoverOption2,
-              option2Target: handoverOption2Target,
+              option2Target: cleanHandoverOption2Target,
               option2TargetPositionNum: handoverOption2TargetPositionNum,
               option3: handoverOption3,
               option3Reason: handoverOption3Reason,
-              responsibleParty,
+              responsibleParty: null,
             },
             recipients: validHandoverRecipients.map((recipient) => ({
               id: recipient.id,
@@ -1368,6 +1624,56 @@ export function ExitChecklistForm({
             ? json.data.sentCount
             : (handoverRecipientsSentCount ?? 0) + 1
 
+      const updatedRecipientsFromApi =
+        json?.recipients ?? json?.data?.recipients ?? null
+
+      const updatedHistoryFromApi =
+        json?.handoverSendHistory ??
+        json?.data?.handoverSendHistory ??
+        json?.history ??
+        json?.data?.history ??
+        null
+
+      if (Array.isArray(updatedRecipientsFromApi)) {
+        setHandoverRecipients(updatedRecipientsFromApi)
+      } else {
+        const sentEmails = new Set(
+          validHandoverRecipients.map((recipient) =>
+            normalizeEmail(recipient.email)
+          )
+        )
+
+        setHandoverRecipients((prev) =>
+          prev.map((recipient) => {
+            if (!sentEmails.has(normalizeEmail(recipient.email))) {
+              return recipient
+            }
+
+            return {
+              ...recipient,
+              handoverInfoLastSentAt: sentAt,
+              handoverInfoLastSentByName: sentByName,
+              handoverInfoLastSentByEmail: sentByEmail,
+              handoverInfoSentCount: (recipient.handoverInfoSentCount ?? 0) + 1,
+            }
+          })
+        )
+      }
+
+      if (Array.isArray(updatedHistoryFromApi)) {
+        setHandoverSendHistory(updatedHistoryFromApi)
+      } else {
+        setHandoverSendHistory((prev) =>
+          mergeHandoverSendHistory(
+            prev,
+            validHandoverRecipients,
+            sentAt,
+            sentByName,
+            sentByEmail
+          )
+        )
+      }
+
       setHandoverRecipientsSentAt(sentAt)
       setHandoverRecipientsSentByName(sentByName)
       setHandoverRecipientsSentByEmail(sentByEmail)
@@ -1378,7 +1684,7 @@ export function ExitChecklistForm({
       showFeedback(
         "success",
         force ? "Informace byly odeslány znovu" : "Informace byly odeslány",
-        `Informace o předávané agendě byly odeslány pro ${validHandoverRecipients.length} příjemce/příjemců.`
+        `Informace o předávané agendě byly odeslány pro ${validHandoverRecipients.length} osobu/osob.`
       )
     } catch (err) {
       showFeedback(
@@ -1427,12 +1733,13 @@ export function ExitChecklistForm({
             includeHandoverAgenda,
             option1: handoverOption1,
             option2: handoverOption2,
-            option2Target: handoverOption2Target,
+            option2Target: cleanHandoverOption2Target,
             option2TargetPositionNum: handoverOption2TargetPositionNum,
             option3: handoverOption3,
             option3Reason: handoverOption3Reason,
-            responsibleParty,
+            responsibleParty: null,
             handoverRecipients,
+            handoverSendHistory,
             handoverRecipientsSentAt,
             handoverRecipientsSentByName,
             handoverRecipientsSentByEmail,
@@ -1478,7 +1785,12 @@ export function ExitChecklistForm({
         )
         setHandoverOption1(payload.data.handover?.option1 ?? false)
         setHandoverOption2(payload.data.handover?.option2 ?? false)
-        setHandoverOption2Target(payload.data.handover?.option2Target ?? "")
+        setHandoverOption2Target(
+          cleanPositionName(
+            payload.data.handover?.option2Target,
+            payload.data.handover?.option2TargetPositionNum
+          )
+        )
         setHandoverOption2TargetPositionNum(
           payload.data.handover?.option2TargetPositionNum ?? ""
         )
@@ -1486,6 +1798,9 @@ export function ExitChecklistForm({
         setHandoverOption3Reason(payload.data.handover?.option3Reason ?? "")
         setResponsibleParty(payload.data.handover?.responsibleParty ?? null)
         setHandoverRecipients(payload.data.handover?.handoverRecipients ?? [])
+        setHandoverSendHistory(
+          payload.data.handover?.handoverSendHistory ?? handoverSendHistory
+        )
         setHandoverRecipientsSentAt(
           payload.data.handover?.handoverRecipientsSentAt ??
             handoverRecipientsSentAt
@@ -1552,7 +1867,7 @@ export function ExitChecklistForm({
   }
 
   async function requestGeneratePdf() {
-    if (dirtyRef.current) {
+    if (dirtyRef.current && !isLocked) {
       const saved = await handleSave(false)
 
       if (!saved) return
@@ -1561,7 +1876,126 @@ export function ExitChecklistForm({
     openPdf()
   }
 
-  const pdfButtonLabel = dirty ? "Vygenerovat PDF" : "Vygenerovat PDF"
+  async function handleUnlock() {
+    if (!resolvedOffboardingId || !canUnlock) return
+
+    try {
+      setSaving(true)
+
+      const res = await fetch(
+        `/api/odchody/${resolvedOffboardingId}/exit-checklist`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ unlock: true }),
+        }
+      )
+
+      const json = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        throw new Error(
+          json?.message ??
+            json?.error ??
+            "Výstupní list se nepodařilo odemknout."
+        )
+      }
+
+      const payload = json as {
+        status?: string
+        data?: ExitChecklistData
+      }
+
+      if (payload.data) {
+        setLockedAt(payload.data.lockedAt ?? null)
+        onSaved?.(payload.data)
+      } else {
+        setLockedAt(null)
+      }
+
+      markClean()
+
+      showFeedback(
+        "success",
+        "Výstupní list byl odemknut",
+        "Formulář je znovu dostupný pro úpravy."
+      )
+    } catch (err) {
+      showFeedback(
+        "error",
+        "Nepodařilo se odemknout výstupní list",
+        err instanceof Error ? err.message : "Zkuste akci zopakovat."
+      )
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleSendPdf() {
+    if (!resolvedOffboardingId || !canSendPdf) return
+
+    const email = pdfRecipientEmail.trim().toLowerCase()
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      showFeedback("error", "Chybí e-mail", "Zadejte platný e-mail příjemce.")
+      return
+    }
+
+    try {
+      setSendingPdf(true)
+
+      if (dirtyRef.current && !isLocked) {
+        const saved = await handleSave(false)
+
+        if (!saved) return
+      }
+
+      const res = await fetch(
+        `/api/odchody/${resolvedOffboardingId}/exit-checklist/send-pdf`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            to: email,
+            recipientName: pdfRecipientName.trim() || null,
+            message: pdfMessage.trim() || null,
+          }),
+        }
+      )
+
+      const json = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        throw new Error(
+          json?.message ?? json?.error ?? "PDF se nepodařilo odeslat."
+        )
+      }
+
+      setSendPdfDialogOpen(false)
+      setPdfRecipientName("")
+      setPdfRecipientEmail("")
+      setPdfMessage("")
+
+      showFeedback(
+        "success",
+        "PDF bylo odesláno",
+        `Výstupní list byl odeslán jako příloha na adresu ${email}.`
+      )
+    } catch (err) {
+      showFeedback(
+        "error",
+        "PDF se nepodařilo odeslat",
+        err instanceof Error ? err.message : "Zkuste akci zopakovat."
+      )
+    } finally {
+      setSendingPdf(false)
+    }
+  }
+
+  const pdfButtonLabel =
+    dirty && !isLocked ? "Uložit a vygenerovat PDF" : "Vygenerovat PDF"
 
   const isLockedBadge = isLocked ? (
     <Badge variant="outline" className="flex items-center gap-1">
@@ -1874,7 +2308,11 @@ export function ExitChecklistForm({
               const showSignButton =
                 !isLocked && !isSigned && !isSigningDisabled
               const showRevokeButton =
-                !isLocked && isSigned && (isAdmin || currentUserIsSigner)
+                !isLocked &&
+                isSigned &&
+                !isSigningDisabled &&
+                !isLawInfoGreyed &&
+                (isAdmin || currentUserIsSigner)
 
               return (
                 <div
@@ -2011,7 +2449,11 @@ export function ExitChecklistForm({
                   const showSignButton =
                     !isLocked && !isSigned && !isSigningDisabled
                   const showRevokeButton =
-                    !isLocked && isSigned && (isAdmin || currentUserIsSigner)
+                    !isLocked &&
+                    isSigned &&
+                    !isSigningDisabled &&
+                    !isLawInfoGreyed &&
+                    (isAdmin || currentUserIsSigner)
 
                   return (
                     <TableRow
@@ -2362,7 +2804,6 @@ export function ExitChecklistForm({
                       if (!next) {
                         setHandoverOption2Target("")
                         setHandoverOption2TargetPositionNum("")
-                        setHandoverRecipients([])
                       }
 
                       markDirty()
@@ -2380,248 +2821,88 @@ export function ExitChecklistForm({
                 </div>
 
                 {handoverOption2 && (
-                  <div className="ml-7 space-y-3 rounded-md border p-3">
-                    <div>
-                      <Label className="text-sm font-medium">
-                        Příjemci předávané agendy
-                      </Label>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        Uložení výstupního listu e-maily neposílá. Informace
-                        odešlete ručně tlačítkem níže.
-                      </p>
-                    </div>
+                  <div className="ml-7 space-y-2">
+                    <Popover
+                      open={positionPickerOpen}
+                      onOpenChange={setPositionPickerOpen}
+                    >
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="w-full justify-between"
+                          disabled={isLocked || loadingPositions}
+                        >
+                          <span className="truncate">
+                            {selectedHandoverOption2PositionLabel ||
+                              "Vyberte funkční místo ze systemizace"}
+                          </span>
+                          <ChevronDown className="ml-2 size-4 opacity-60" />
+                        </Button>
+                      </PopoverTrigger>
 
-                    {!isLocked && (
-                      <>
-                        <PersonLookupCombobox
-                          placeholder="Vyhledat příjemce v eOSu…"
-                          onSelect={(employee) => {
-                            const id = employee.id
-                            const email = normalizeEmail(employee.email)
+                      <PopoverContent className="w-[420px] p-0" align="start">
+                        <Command shouldFilter={false}>
+                          <CommandInput
+                            placeholder="Hledat číslo nebo název pozice..."
+                            value={positionQuery}
+                            onValueChange={setPositionQuery}
+                          />
 
-                            if (
-                              handoverRecipients.some(
-                                (recipient) =>
-                                  recipient.id === id ||
-                                  normalizeEmail(recipient.email) === email
-                              )
-                            ) {
-                              return
-                            }
+                          <CommandEmpty>
+                            {loadingPositions
+                              ? "Načítám pozice..."
+                              : positionLoadError || "Žádná pozice nenalezena"}
+                          </CommandEmpty>
 
-                            setHandoverRecipients((prev) => [
-                              ...prev,
-                              {
-                                id,
-                                name: buildEmployeeFullName(employee),
-                                email: employee.email ?? "",
-                                personalNumber: employee.personalNumber,
-                                department: employee.department,
-                              },
-                            ])
-
-                            markDirty()
-                          }}
-                        />
-
-                        <div className="space-y-2 rounded-md border bg-muted/20 p-3">
-                          <Label className="text-xs font-medium">
-                            Přidat ručně
-                          </Label>
-
-                          <div className="flex flex-col gap-2 sm:flex-row">
-                            <Input
-                              placeholder="Jméno a příjmení *"
-                              value={newRecipientName}
-                              onChange={(e) => {
-                                setNewRecipientName(e.target.value)
-                                setNewRecipientError(null)
-                              }}
-                              className="h-8 text-sm"
-                            />
-                            <Input
-                              placeholder="email@praha6.cz *"
-                              value={newRecipientEmail}
-                              onChange={(e) => {
-                                setNewRecipientEmail(e.target.value)
-                                setNewRecipientError(null)
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  e.preventDefault()
-                                  addRecipientManually()
-                                }
-                              }}
-                              className="h-8 text-sm"
-                            />
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-8 shrink-0"
-                              onClick={addRecipientManually}
-                            >
-                              Přidat
-                            </Button>
-                          </div>
-
-                          {newRecipientError && (
-                            <p className="text-xs text-red-600">
-                              {newRecipientError}
-                            </p>
-                          )}
-                        </div>
-                      </>
-                    )}
-
-                    {handoverRecipients.length > 0 ? (
-                      <div className="space-y-1">
-                        {handoverRecipients.map((recipient) => (
-                          <div
-                            key={recipient.id}
-                            className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-2 text-xs"
-                          >
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium">
-                                  {recipient.name}
-                                </span>
-                                {recipient.personalNumber && (
-                                  <span className="font-mono text-muted-foreground">
-                                    {recipient.personalNumber}
+                          <CommandList className="max-h-80 overflow-y-auto">
+                            <CommandGroup>
+                              {filteredPositions.map((position) => (
+                                <CommandItem
+                                  key={position.id ?? position.num}
+                                  value={`${position.num} ${position.name}`}
+                                  onSelect={() => {
+                                    setHandoverOption2TargetPositionNum(
+                                      position.num
+                                    )
+                                    setHandoverOption2Target(position.name)
+                                    setPositionPickerOpen(false)
+                                    setPositionQuery("")
+                                    markDirty()
+                                  }}
+                                  className="flex items-start gap-3 py-3"
+                                >
+                                  <span className="min-w-[80px] rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
+                                    {position.num}
                                   </span>
-                                )}
-                              </div>
 
-                              <div className="flex gap-3 text-muted-foreground">
-                                {recipient.department && (
-                                  <span>{recipient.department}</span>
-                                )}
-                                {recipient.email && (
-                                  <span>{recipient.email}</span>
-                                )}
-                              </div>
-                            </div>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="truncate text-sm font-medium">
+                                      {position.name}
+                                    </div>
 
-                            {!isLocked && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setHandoverRecipients((prev) =>
-                                    prev.filter((x) => x.id !== recipient.id)
-                                  )
-                                  markDirty()
-                                }}
-                                className="ml-2 shrink-0 text-muted-foreground hover:text-foreground"
-                              >
-                                <X className="size-3" />
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
+                                    <div className="truncate text-xs text-muted-foreground">
+                                      {[position.dept_name, position.unit_name]
+                                        .filter(Boolean)
+                                        .join(" • ")}
+                                    </div>
+                                  </div>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+
+                    {selectedHandoverOption2PositionLabel && (
                       <p className="text-xs text-muted-foreground">
-                        Zatím žádní příjemci.
+                        Vybrané funkční místo:{" "}
+                        <span className="font-medium">
+                          {selectedHandoverOption2PositionLabel}
+                        </span>
                       </p>
                     )}
-
-                    {Boolean(currentUserEmail) &&
-                      Boolean(resolvedOffboardingId) && (
-                        <div className="rounded-md border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900">
-                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="space-y-0.5">
-                              <p className="font-medium">
-                                Informace se neodesílají automaticky při
-                                uložení.
-                              </p>
-                              <p>
-                                Příjemce předávané agendy informujte co
-                                nejdříve.
-                              </p>
-                            </div>
-
-                            <Button
-                              type="button"
-                              size="sm"
-                              className="
-                                h-auto
-                                min-h-9
-                                w-full
-                                max-w-full
-                                justify-center
-                                gap-2
-                                whitespace-normal
-                                rounded-md
-                                bg-[#00847C]
-                                px-3
-                                py-2
-                                text-center
-                                text-sm
-                                font-medium
-                                leading-snug
-                                text-white
-                                hover:bg-[#0B6D73]
-                                disabled:bg-[#00847C]/50
-                                disabled:text-white/80
-                                sm:w-auto
-                                sm:whitespace-nowrap
-                              "
-                              onClick={openHandoverSendDialog}
-                              disabled={
-                                sendingHandoverInfo || !canSendHandoverInfo
-                              }
-                            >
-                              {sendingHandoverInfo ? (
-                                <>
-                                  <Loader2 className="size-4 shrink-0 animate-spin" />
-                                  <span className="min-w-0">Odesílám…</span>
-                                </>
-                              ) : handoverRecipientsWereSent ? (
-                                <>
-                                  <Send className="size-4 shrink-0" />
-                                  <span className="min-w-0">Odeslat znovu</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Send className="size-4 shrink-0" />
-                                  <span className="min-w-0">
-                                    Odeslat informace příjemcům
-                                  </span>
-                                </>
-                              )}
-                            </Button>
-                          </div>
-
-                          {handoverRecipientsSentAt && (
-                            <p className="mt-2 text-[11px] text-blue-700">
-                              Zasláno{" "}
-                              {format(
-                                new Date(handoverRecipientsSentAt),
-                                "d.M.yyyy HH:mm"
-                              )}{" "}
-                              uživatelem{" "}
-                              <span className="font-medium">
-                                {handoverRecipientsSentByName ??
-                                  handoverRecipientsSentByEmail ??
-                                  "neznámý uživatel"}
-                              </span>
-                              {handoverRecipientsSentCount &&
-                              handoverRecipientsSentCount > 1
-                                ? ` · odesláno ${handoverRecipientsSentCount}×`
-                                : ""}
-                            </p>
-                          )}
-
-                          {!canSendHandoverInfo &&
-                            validHandoverRecipients.length === 0 && (
-                              <p className="mt-2 text-[11px] text-blue-700">
-                                Tlačítko se aktivuje po přidání alespoň jednoho
-                                příjemce s platným e-mailem.
-                              </p>
-                            )}
-                        </div>
-                      )}
                   </div>
                 )}
               </div>
@@ -2638,6 +2919,12 @@ export function ExitChecklistForm({
                       if (!next) {
                         setHandoverOption3Reason("")
                         setResponsibleParty(null)
+                        setHandoverRecipients([])
+                        setNewRecipientName("")
+                        setNewRecipientEmail("")
+                        setNewRecipientPersonalNumber("")
+                        setNewRecipientDepartment("")
+                        setNewRecipientError(null)
                       }
 
                       markDirty()
@@ -2666,37 +2953,331 @@ export function ExitChecklistForm({
                       disabled={isLocked}
                     />
 
-                    <div className="space-y-2">
-                      <p className="text-sm font-medium">
-                        Za dokumenty odpovídá:
-                      </p>
-
-                      <div className="flex flex-wrap gap-4">
-                        {(["KITT6", "OSS_KT"] as const).map((val) => (
-                          <div key={val} className="flex items-center gap-2">
-                            <input
-                              type="radio"
-                              id={`resp-${val}`}
-                              name="responsibleParty"
-                              checked={responsibleParty === val}
-                              onChange={() => {
-                                setResponsibleParty(val)
-                                markDirty()
-                              }}
-                              disabled={isLocked}
-                              className="cursor-pointer disabled:cursor-default"
-                            />
-                            <Label
-                              htmlFor={`resp-${val}`}
-                              className={`text-sm ${
-                                isLocked ? "cursor-default" : "cursor-pointer"
-                              }`}
-                            >
-                              {val === "OSS_KT" ? "OSS KT" : val}
-                            </Label>
-                          </div>
-                        ))}
+                    <div className="space-y-3 rounded-md border p-3">
+                      <div>
+                        <Label className="text-sm font-medium">
+                          Za dokumenty odpovídá
+                        </Label>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          Vyberte odpovědnou osobu z EOS nebo ji doplňte ručně.
+                          Pokud osoba není v EOS, vyplňte celé jméno a e-mail.
+                          Uložení výstupního listu e-maily neposílá; informaci
+                          odešlete ručně tlačítkem níže.
+                        </p>
                       </div>
+
+                      {!isLocked && (
+                        <>
+                          <PersonLookupCombobox
+                            placeholder="Vyhledat odpovědnou osobu v eOSu…"
+                            onSelect={(employee) => {
+                              const id = employee.id
+                              const email = normalizeEmail(employee.email)
+
+                              if (
+                                handoverRecipients.some(
+                                  (recipient) =>
+                                    recipient.id === id ||
+                                    normalizeEmail(recipient.email) === email
+                                )
+                              ) {
+                                return
+                              }
+
+                              setHandoverRecipients((prev) => [
+                                ...prev,
+                                {
+                                  id,
+                                  name: buildEmployeeFullName(employee),
+                                  email: employee.email ?? "",
+                                  personalNumber: employee.personalNumber,
+                                  department: employee.department,
+                                },
+                              ])
+
+                              markDirty()
+                            }}
+                          />
+
+                          <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+                            <Label className="text-xs font-medium">
+                              Přidat osobu ručně
+                            </Label>
+
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              <Input
+                                placeholder="Celé jméno a příjmení *"
+                                value={newRecipientName}
+                                onChange={(e) => {
+                                  setNewRecipientName(e.target.value)
+                                  setNewRecipientError(null)
+                                }}
+                                className="h-8 text-sm"
+                              />
+
+                              <Input
+                                placeholder="email@praha6.cz *"
+                                value={newRecipientEmail}
+                                onChange={(e) => {
+                                  setNewRecipientEmail(e.target.value)
+                                  setNewRecipientError(null)
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault()
+                                    addRecipientManually()
+                                  }
+                                }}
+                                className="h-8 text-sm"
+                              />
+
+                              <Input
+                                placeholder="Osobní číslo"
+                                value={newRecipientPersonalNumber}
+                                onChange={(e) => {
+                                  setNewRecipientPersonalNumber(e.target.value)
+                                  setNewRecipientError(null)
+                                }}
+                                className="h-8 text-sm"
+                              />
+
+                              <Input
+                                placeholder="Odbor / oddělení"
+                                value={newRecipientDepartment}
+                                onChange={(e) => {
+                                  setNewRecipientDepartment(e.target.value)
+                                  setNewRecipientError(null)
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault()
+                                    addRecipientManually()
+                                  }
+                                }}
+                                className="h-8 text-sm"
+                              />
+                            </div>
+
+                            <div className="flex justify-end">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-8 shrink-0"
+                                onClick={addRecipientManually}
+                              >
+                                Přidat
+                              </Button>
+                            </div>
+
+                            {newRecipientError && (
+                              <p className="text-xs text-red-600">
+                                {newRecipientError}
+                              </p>
+                            )}
+                          </div>
+                        </>
+                      )}
+
+                      {handoverRecipients.length > 0 ? (
+                        <div className="space-y-1">
+                          {handoverRecipients.map((recipient) => (
+                            <div
+                              key={recipient.id}
+                              className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-2 text-xs"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium">
+                                    {recipient.name}
+                                  </span>
+                                  {recipient.personalNumber && (
+                                    <span className="font-mono text-muted-foreground">
+                                      {recipient.personalNumber}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="flex gap-3 text-muted-foreground">
+                                  {recipient.department && (
+                                    <span>{recipient.department}</span>
+                                  )}
+                                  {recipient.email && (
+                                    <span>{recipient.email}</span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {!isLocked && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setHandoverRecipients((prev) =>
+                                      prev.filter((x) => x.id !== recipient.id)
+                                    )
+                                    markDirty()
+                                  }}
+                                  className="ml-2 shrink-0 text-muted-foreground hover:text-foreground"
+                                  aria-label="Odebrat příjemce"
+                                >
+                                  <X className="size-3" />
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          Zatím není uvedena žádná odpovědná osoba.
+                        </p>
+                      )}
+
+                      {Boolean(currentUserEmail) &&
+                        Boolean(resolvedOffboardingId) && (
+                          <div className="rounded-md border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                              <div className="space-y-0.5">
+                                <p className="font-medium">
+                                  Informace se neodesílají automaticky při
+                                  uložení.
+                                </p>
+                                <p>
+                                  Osobu uvedenou v poli „Za dokumenty odpovídá“
+                                  informujte co nejdříve.
+                                </p>
+                              </div>
+
+                              <Button
+                                type="button"
+                                size="sm"
+                                className="
+                                  h-auto
+                                  min-h-9
+                                  w-full
+                                  max-w-full
+                                  justify-center
+                                  gap-2
+                                  whitespace-normal
+                                  rounded-md
+                                  bg-[#00847C]
+                                  px-3
+                                  py-2
+                                  text-center
+                                  text-sm
+                                  font-medium
+                                  leading-snug
+                                  text-white
+                                  hover:bg-[#0B6D73]
+                                  disabled:bg-[#00847C]/50
+                                  disabled:text-white/80
+                                  sm:w-auto
+                                  sm:whitespace-nowrap
+                                "
+                                onClick={openHandoverSendDialog}
+                                disabled={
+                                  sendingHandoverInfo || !canSendHandoverInfo
+                                }
+                              >
+                                {sendingHandoverInfo ? (
+                                  <>
+                                    <Loader2 className="size-4 shrink-0 animate-spin" />
+                                    <span className="min-w-0">Odesílám…</span>
+                                  </>
+                                ) : handoverRecipientsWereSent ? (
+                                  <>
+                                    <Send className="size-4 shrink-0" />
+                                    <span className="min-w-0">
+                                      Odeslat znovu
+                                    </span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Send className="size-4 shrink-0" />
+                                    <span className="min-w-0">
+                                      Odeslat informace odpovědným osobám
+                                    </span>
+                                  </>
+                                )}
+                              </Button>
+                            </div>
+
+                            {displayedHandoverSendHistory.length > 0 ? (
+                              <div className="mt-3 rounded-md border border-blue-200 bg-white/70 p-3">
+                                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-blue-900">
+                                  Historie odeslání informací
+                                </p>
+
+                                <div className="space-y-2">
+                                  {displayedHandoverSendHistory.map((entry) => (
+                                    <div
+                                      key={`${entry.id}-${entry.email}`}
+                                      className="rounded-md bg-blue-50 px-3 py-2 text-[11px] text-blue-800"
+                                    >
+                                      <div className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                                        <div className="min-w-0">
+                                          <span className="font-medium">
+                                            {entry.name}
+                                          </span>
+                                          {entry.email && (
+                                            <span className="text-blue-700">
+                                              {" "}
+                                              · {entry.email}
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        <div className="shrink-0 text-blue-700">
+                                          odesláno {entry.sentCount || 1}×
+                                        </div>
+                                      </div>
+
+                                      <div className="mt-1 text-blue-700">
+                                        Naposledy{" "}
+                                        <span className="font-medium">
+                                          {formatDateTime(entry.lastSentAt)}
+                                        </span>
+                                        {entry.lastSentByName ||
+                                        entry.lastSentByEmail ? (
+                                          <>
+                                            {" "}
+                                            uživatelem{" "}
+                                            <span className="font-medium">
+                                              {entry.lastSentByName ??
+                                                entry.lastSentByEmail}
+                                            </span>
+                                          </>
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : handoverRecipientsSentAt ? (
+                              <p className="mt-2 text-[11px] text-blue-700">
+                                Zasláno{" "}
+                                {formatDateTime(handoverRecipientsSentAt)}{" "}
+                                uživatelem{" "}
+                                <span className="font-medium">
+                                  {handoverRecipientsSentByName ??
+                                    handoverRecipientsSentByEmail ??
+                                    "neznámý uživatel"}
+                                </span>
+                                {handoverRecipientsSentCount &&
+                                handoverRecipientsSentCount > 1
+                                  ? ` · odesláno ${handoverRecipientsSentCount}×`
+                                  : ""}
+                              </p>
+                            ) : null}
+
+                            {!canSendHandoverInfo &&
+                              validHandoverRecipients.length === 0 && (
+                                <p className="mt-2 text-[11px] text-blue-700">
+                                  Tlačítko se aktivuje po přidání alespoň jedné
+                                  odpovědné osoby s platným e-mailem.
+                                </p>
+                              )}
+                          </div>
+                        )}
                     </div>
                   </div>
                 )}
@@ -2739,8 +3320,8 @@ export function ExitChecklistForm({
 
                 {!isLocked && (
                   <div
-                    className="mt-2 flex flex-wrap items-center gap-1.5"
-                    style={{ minHeight: "32px" }}
+                    className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-[168px_168px]"
+                    style={{ minHeight: "70px" }}
                   >
                     {!handoverManagerSignature.signedAt &&
                       Boolean(currentUserName || currentUserEmail) && (
@@ -2793,9 +3374,11 @@ export function ExitChecklistForm({
       <Card>
         <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-xs text-muted-foreground">
-            {isInternalMode
-              ? "Po uzamčení formuláře již nepůjde běžným uživatelům měnit."
-              : "Výstupní list můžete doplnit, podepsat a uložit pod svým přihlášeným účtem."}
+            {isLocked
+              ? "Výstupní list je uzamčený. Lze vygenerovat PDF, odeslat PDF nebo jej odemknout pro úpravy."
+              : isInternalMode
+                ? "Po uzamčení formuláře již nepůjde běžným uživatelům měnit."
+                : "Výstupní list můžete doplnit, podepsat a uložit pod svým přihlášeným účtem."}
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -2832,9 +3415,36 @@ export function ExitChecklistForm({
                 size="sm"
                 onClick={requestGeneratePdf}
                 className="gap-1"
-                disabled={saving}
+                disabled={saving || sendingPdf}
               >
                 <Printer className="size-4" /> {pdfButtonLabel}
+              </Button>
+            )}
+
+            {canSendPdf && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setSendPdfDialogOpen(true)}
+                className="gap-1"
+                disabled={saving || sendingPdf}
+              >
+                <Send className="size-4" /> Odeslat PDF
+              </Button>
+            )}
+
+            {canUnlock && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void handleUnlock()}
+                disabled={saving}
+                className="gap-1"
+              >
+                <Undo2 className="size-4" />
+                Odemknout pro úpravy
               </Button>
             )}
 
@@ -2881,20 +3491,22 @@ export function ExitChecklistForm({
               <AlertDialogTitle className="text-xl font-semibold">
                 {handoverSendDialogMode === "resend"
                   ? "Odeslat informace znovu?"
-                  : "Odeslat informace příjemcům?"}
+                  : "Odeslat informace odpovědným osobám?"}
               </AlertDialogTitle>
 
               <AlertDialogDescription asChild>
                 <div className="space-y-4 text-sm leading-6 text-muted-foreground">
                   {handoverSendDialogMode === "resend" ? (
                     <p>
-                      Informace pro příjemce předávané agendy už byly odeslány.
-                      Pokud je odešlete znovu, příjemci dostanou nový e-mail.
+                      Informace pro osoby uvedené v poli „Za dokumenty odpovídá“
+                      už byly odeslány. Pokud je odešlete znovu, příjemci
+                      dostanou nový e-mail.
                     </p>
                   ) : (
                     <p>
-                      Příjemcům předávané agendy bude odeslán e-mail s
-                      informací, že mají převzít agendu uvedeného zaměstnance,
+                      Osobám uvedeným v poli „Za dokumenty odpovídá“ bude
+                      odeslán e-mail s informací, že u nich byla uvedena
+                      odpovědnost za dokumenty/agendu uvedeného zaměstnance,
                       který ukončuje pracovní poměr. Tato akce se uloží hned,
                       nezávisle na uložení celého formuláře.
                     </p>
@@ -2920,7 +3532,7 @@ export function ExitChecklistForm({
 
                   <div className="rounded-md border bg-background p-3 text-xs">
                     <p className="mb-2 font-medium text-foreground">
-                      Příjemci e-mailu
+                      Osoby uvedené v poli „Za dokumenty odpovídá“
                     </p>
                     <ul className="max-h-48 space-y-2 overflow-y-auto pr-1">
                       {validHandoverRecipients.map((recipient) => (
@@ -2974,6 +3586,90 @@ export function ExitChecklistForm({
                   <>
                     <Send className="mr-2 size-4" />
                     Odeslat
+                  </>
+                )}
+              </Button>
+            </AlertDialogFooter>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={sendPdfDialogOpen}
+        onOpenChange={(open) => {
+          if (!sendingPdf) {
+            setSendPdfDialogOpen(open)
+          }
+        }}
+      >
+        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-lg overflow-hidden p-0">
+          <div className="p-6 sm:px-8 sm:py-7">
+            <AlertDialogHeader className="space-y-3 text-left">
+              <AlertDialogTitle className="text-xl font-semibold">
+                Odeslat PDF výstupního listu
+              </AlertDialogTitle>
+
+              <AlertDialogDescription className="text-sm leading-6">
+                Výstupní list bude vygenerován jako PDF a odeslán vybrané osobě
+                jako příloha e-mailu.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+
+            <div className="mt-5 space-y-3">
+              <div className="space-y-1.5">
+                <Label>Jméno příjemce</Label>
+                <Input
+                  value={pdfRecipientName}
+                  onChange={(e) => setPdfRecipientName(e.target.value)}
+                  placeholder="např. Jana Nováková"
+                  disabled={sendingPdf}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>E-mail příjemce *</Label>
+                <Input
+                  value={pdfRecipientEmail}
+                  onChange={(e) => setPdfRecipientEmail(e.target.value)}
+                  placeholder="email@praha6.cz"
+                  disabled={sendingPdf}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Doplňující zpráva</Label>
+                <Input
+                  value={pdfMessage}
+                  onChange={(e) => setPdfMessage(e.target.value)}
+                  placeholder="Volitelná zpráva k e-mailu"
+                  disabled={sendingPdf}
+                />
+              </div>
+            </div>
+
+            <AlertDialogFooter className="mt-6 gap-2 sm:gap-2">
+              <AlertDialogCancel
+                disabled={sendingPdf}
+                className="h-10 min-w-[120px]"
+              >
+                Zrušit
+              </AlertDialogCancel>
+
+              <Button
+                type="button"
+                className="h-10 min-w-[150px] bg-[#00847C] text-white hover:bg-[#0B6D73]"
+                onClick={() => void handleSendPdf()}
+                disabled={sendingPdf}
+              >
+                {sendingPdf ? (
+                  <>
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                    Odesílám…
+                  </>
+                ) : (
+                  <>
+                    <Send className="mr-2 size-4" />
+                    Odeslat PDF
                   </>
                 )}
               </Button>

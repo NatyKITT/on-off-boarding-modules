@@ -174,6 +174,9 @@ export async function POST(
       await sendSignatureInviteEmail({
         to: inviteeEmail,
         employeeName,
+        employeePosition: offboarding.positionName ?? "",
+        employeeDepartment: offboarding.department ?? "",
+        employmentEndDate,
         sentByName,
         signUrl,
       })

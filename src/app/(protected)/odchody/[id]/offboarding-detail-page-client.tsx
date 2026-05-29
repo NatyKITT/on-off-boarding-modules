@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { format } from "date-fns"
 import { cs } from "date-fns/locale"
-import { ArrowLeft, CheckCircle, XCircle } from "lucide-react"
+import { AlertTriangle, ArrowLeft, CheckCircle, XCircle } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -16,6 +16,17 @@ import {
   type FormValues,
 } from "@/components/forms/offboarding-form"
 import { HistoryDialog } from "@/components/history/history-dialog"
+
+type LinkedOnboardingInfo = {
+  id: number
+  plannedStart: string | null
+  actualStart: string | null
+  probationEnd: string | null
+  positionName: string | null
+  exitDuringProbation: boolean
+  label: string
+  description: string
+}
 
 type OffboardingDetail = {
   id: number
@@ -40,6 +51,8 @@ type OffboardingDetail = {
   userEmail?: string | null
   personalNumber?: string | null
   notes?: string | null
+
+  linkedOnboarding?: LinkedOnboardingInfo | null
 }
 
 type SuccessModalProps = {
@@ -126,6 +139,18 @@ function toInitial(d: OffboardingDetail): Partial<FormValues> {
   }
 }
 
+function formatDate(value?: string | null) {
+  if (!value) return "–"
+
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return "–"
+  }
+
+  return format(date, "d.M.yyyy", { locale: cs })
+}
+
 type Props = {
   data: OffboardingDetail
 }
@@ -154,6 +179,10 @@ export function OffboardingDetailPageClient({ data }: Props) {
     IN_PROGRESS: "Zpracovává se",
     COMPLETED: "Odešel/a",
   }
+
+  const fullName = `${data.titleBefore ?? ""} ${data.name} ${data.surname} ${
+    data.titleAfter ?? ""
+  }`.trim()
 
   async function handleDelete() {
     const confirmed = window.confirm("Opravdu chcete smazat tento záznam?")
@@ -198,10 +227,7 @@ export function OffboardingDetailPageClient({ data }: Props) {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="mb-1 text-2xl font-bold">Detail odchodu</h1>
-          <p className="text-muted-foreground">
-            Zaměstnanec:{" "}
-            {`${data.titleBefore ?? ""} ${data.name} ${data.surname} ${data.titleAfter ?? ""}`.trim()}
-          </p>
+          <p className="text-muted-foreground">Zaměstnanec: {fullName}</p>
         </div>
 
         <Link href="/odchody">
@@ -227,7 +253,7 @@ export function OffboardingDetailPageClient({ data }: Props) {
             <strong>
               {isCompleted ? "Skutečný odchod" : "Plánovaný odchod"}:
             </strong>{" "}
-            {format(new Date(displayDate), "d.M.yyyy", { locale: cs })}
+            {formatDate(displayDate)}
           </p>
           <p className="flex items-center gap-2">
             <strong>Stav:</strong>
@@ -256,6 +282,60 @@ export function OffboardingDetailPageClient({ data }: Props) {
           </p>
         </div>
       </div>
+
+      {data.linkedOnboarding && (
+        <div
+          className="
+            rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm
+            text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30
+            dark:text-amber-100
+          "
+        >
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-600 dark:text-amber-400" />
+
+            <div className="min-w-0 flex-1 space-y-2">
+              <div className="font-semibold">{data.linkedOnboarding.label}</div>
+
+              <p>{data.linkedOnboarding.description}</p>
+
+              <div className="grid gap-1 text-xs text-amber-900/80 dark:text-amber-100/80 sm:grid-cols-2">
+                <p>
+                  <strong>Související nástup:</strong>{" "}
+                  {data.linkedOnboarding.actualStart
+                    ? formatDate(data.linkedOnboarding.actualStart)
+                    : formatDate(data.linkedOnboarding.plannedStart)}
+                </p>
+
+                <p>
+                  <strong>Zkušební doba do:</strong>{" "}
+                  {formatDate(data.linkedOnboarding.probationEnd)}
+                </p>
+
+                {data.linkedOnboarding.positionName && (
+                  <p className="sm:col-span-2">
+                    <strong>Pozice při nástupu:</strong>{" "}
+                    {data.linkedOnboarding.positionName}
+                  </p>
+                )}
+              </div>
+
+              {data.linkedOnboarding.exitDuringProbation && (
+                <p className="font-medium">
+                  Odchod spadá do zkušební doby. V navázaném nástupu se má
+                  zastavit vyhodnocování zkušební doby.
+                </p>
+              )}
+
+              <Link href={`/nastupy/${data.linkedOnboarding.id}`}>
+                <Button variant="outline" size="sm" className="mt-1">
+                  Otevřít související nástup
+                </Button>
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Separator />
 
@@ -288,6 +368,7 @@ export function OffboardingDetailPageClient({ data }: Props) {
             <h2 className="mb-2 text-lg font-semibold">
               Potvrdit skutečný odchod
             </h2>
+
             <OffboardingFormUnified
               id={data.id}
               initial={toInitial(data)}

@@ -38,28 +38,49 @@ export interface ExitAssetItem {
   createdById?: string | null
 }
 
-export interface HandoverRecipient {
+export interface HandoverSendHistoryEntry {
   id: string
   name: string
   email: string
   personalNumber?: string | null
   department?: string | null
+
+  lastSentAt: string | null
+  lastSentByName: string | null
+  lastSentByEmail: string | null
+  sentCount: number
 }
+
+export interface HandoverResponsiblePerson {
+  id: string
+  name: string
+  email: string
+  personalNumber?: string | null
+  department?: string | null
+
+  handoverInfoLastSentAt?: string | null
+  handoverInfoLastSentByName?: string | null
+  handoverInfoLastSentByEmail?: string | null
+  handoverInfoSentCount?: number | null
+}
+
+export type HandoverRecipient = HandoverResponsiblePerson
 
 export interface HandoverAgendaData {
   includeHandoverAgenda?: boolean
 
   option1?: boolean
-
   option2?: boolean
   option2Target?: string
   option2TargetPositionNum?: string
 
   option3?: boolean
   option3Reason?: string
+
   responsibleParty?: "KITT6" | "OSS_KT" | null
 
-  handoverRecipients?: HandoverRecipient[]
+  handoverRecipients?: HandoverResponsiblePerson[]
+  handoverSendHistory?: HandoverSendHistoryEntry[]
   handoverRecipientsSentAt?: string | null
   handoverRecipientsSentByName?: string | null
   handoverRecipientsSentByEmail?: string | null
@@ -97,6 +118,13 @@ export interface ExitChecklistData {
   managerEmail?: string | null
   managerName?: string | null
   handoverManagerSignature?: ExitChecklistSignatureValue | null
+
+  completedAt?: string | null
+  completedNotificationSentAt?: string | null
+  completedNotificationSentByName?: string | null
+  completedNotificationSentByEmail?: string | null
+  completedNotificationSentTo?: string | null
+
   items: ExitChecklistItem[]
   assets: ExitAssetItem[]
   handover?: HandoverAgendaData

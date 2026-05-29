@@ -63,6 +63,17 @@ import {
 import { DeletedRecordsDialog } from "@/components/history/deleted-records-dialog"
 import { HistoryDialog } from "@/components/history/history-dialog"
 
+type LinkedOnboardingInfo = {
+  id: number
+  plannedStart: string | null
+  actualStart: string | null
+  probationEnd: string | null
+  positionName: string | null
+  exitDuringProbation: boolean
+  label: string
+  description: string
+}
+
 type Departure = {
   id: number
   name: string
@@ -84,6 +95,8 @@ type Departure = {
   userName?: string | null
   notes?: string | null
   status?: "NEW" | "IN_PROGRESS" | "COMPLETED"
+
+  linkedOnboarding?: LinkedOnboardingInfo | null
 }
 
 function departureToInitial(d: Departure): Partial<FormValues> {

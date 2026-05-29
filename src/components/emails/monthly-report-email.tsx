@@ -148,7 +148,7 @@ export default function MonthlyReportEmail({
 
             <Section className="mt-8 border-t border-gray-200 pt-4">
               <Text className="text-xs text-gray-500">
-                Kontakt: hr@firma.cz • Tento e-mail je notifikační,
+                Kontakt: maronova@praha6.cz • Tento e-mail je notifikační,
                 neodpovídejte na něj.
               </Text>
             </Section>

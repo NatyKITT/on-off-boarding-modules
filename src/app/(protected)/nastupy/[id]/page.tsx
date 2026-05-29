@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { format } from "date-fns"
 import { cs } from "date-fns/locale"
+import { AlertTriangle } from "lucide-react"
 
 import { useToast } from "@/hooks/use-toast"
 
@@ -12,6 +13,19 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { OnboardingFormUnified } from "@/components/forms/onboarding-form"
 import { HistoryDialog } from "@/components/history/history-dialog"
+
+type LinkedOffboardingInfo = {
+  id: number
+  plannedEnd: string | null
+  actualEnd: string | null
+  exitDate: string | null
+  isActualExit: boolean
+  leftDuringProbation: boolean
+  probationShouldBeStopped: boolean
+  rowMuted: boolean
+  label: string
+  description: string
+}
 
 type OnboardingDetail = {
   id: number
@@ -42,10 +56,24 @@ type OnboardingDetail = {
   supervisorEmail?: string | null
   mentorName?: string | null
   mentorEmail?: string | null
+
+  linkedOffboarding?: LinkedOffboardingInfo | null
 }
 
 interface PageProps {
   params: { id: string }
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return "–"
+
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return "–"
+  }
+
+  return format(date, "d.M.yyyy", { locale: cs })
 }
 
 export default function OnboardingDetailPage({ params }: PageProps) {
@@ -153,8 +181,9 @@ export default function OnboardingDetailPage({ params }: PageProps) {
     CANCELLED: "Zrušeno",
   }
 
-  const fullName =
-    `${data.titleBefore ?? ""} ${data.name} ${data.surname} ${data.titleAfter ?? ""}`.trim()
+  const fullName = `${data.titleBefore ?? ""} ${data.name} ${data.surname} ${
+    data.titleAfter ?? ""
+  }`.trim()
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 px-4 py-6">
@@ -178,7 +207,7 @@ export default function OnboardingDetailPage({ params }: PageProps) {
             <strong>
               {isCompleted ? "Skutečný nástup" : "Plánovaný nástup"}:
             </strong>{" "}
-            {format(new Date(displayDate), "d.M.yyyy", { locale: cs })}
+            {formatDate(displayDate)}
           </p>
           <p className="flex items-center gap-2">
             <strong>Stav:</strong> <Badge>{statusLabels[data.status]}</Badge>
@@ -209,6 +238,67 @@ export default function OnboardingDetailPage({ params }: PageProps) {
           </p>
         </div>
       </div>
+
+      {data.linkedOffboarding && (
+        <div
+          className="
+            rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm
+            text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30
+            dark:text-amber-100
+          "
+        >
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-600 dark:text-amber-400" />
+
+            <div className="min-w-0 flex-1 space-y-2">
+              <div className="font-semibold">
+                {data.linkedOffboarding.label}
+              </div>
+
+              <p>{data.linkedOffboarding.description}</p>
+
+              <div className="grid gap-1 text-xs text-amber-900/80 dark:text-amber-100/80 sm:grid-cols-2">
+                <p>
+                  <strong>Související odchod:</strong>{" "}
+                  {formatDate(data.linkedOffboarding.exitDate)}
+                </p>
+
+                <p>
+                  <strong>Typ odchodu:</strong>{" "}
+                  {data.linkedOffboarding.isActualExit
+                    ? "Skutečný odchod"
+                    : "Plánovaný odchod"}
+                </p>
+
+                <p>
+                  <strong>Zkušební doba:</strong>{" "}
+                  {data.linkedOffboarding.leftDuringProbation
+                    ? "Odchod ve zkušební době"
+                    : "Mimo zkušební dobu / neurčeno"}
+                </p>
+              </div>
+
+              {data.linkedOffboarding.probationShouldBeStopped && (
+                <p className="font-medium">
+                  Hodnocení zkušební doby se má pro tento nástup zastavit a
+                  neměly by odcházet navazující e-mailové výzvy.
+                </p>
+              )}
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-1"
+                onClick={() =>
+                  router.push(`/odchody/${data.linkedOffboarding?.id}`)
+                }
+              >
+                Otevřít související odchod
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Separator />
 

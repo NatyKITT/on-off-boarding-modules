@@ -66,6 +66,19 @@ import { OnboardingFormClient } from "@/components/forms/onboarding-form-client"
 import { DeletedRecordsDialog } from "@/components/history/deleted-records-dialog"
 import { HistoryDialog } from "@/components/history/history-dialog"
 
+type LinkedOffboardingInfo = {
+  id: number
+  plannedEnd: string | null
+  actualEnd: string | null
+  exitDate: string | null
+  isActualExit: boolean
+  leftDuringProbation: boolean
+  probationShouldBeStopped: boolean
+  rowMuted: boolean
+  label: string
+  description: string
+}
+
 type Arrival = {
   id: number
   name: string
@@ -98,7 +111,21 @@ type Arrival = {
   cancelledAt?: string | null
   cancelledBy?: string | null
   cancelReason?: string | null
+
+  linkedOffboarding?: LinkedOffboardingInfo | null
 }
+
+type EmployeeViewFilter = "all" | "active" | "withExit" | "former"
+
+const employeeFilterOptions: Array<{
+  value: EmployeeViewFilter
+  label: string
+}> = [
+  { value: "all", label: "Vše" },
+  { value: "active", label: "Aktivní bez odchodu" },
+  { value: "withExit", label: "S navázaným odchodem" },
+  { value: "former", label: "Již odešli" },
+]
 
 function arrivalToInitial(d: Arrival): Partial<FormValues> {
   return {
@@ -399,6 +426,23 @@ export default function OnboardingPage() {
 
   const currentMonth = format(new Date(), "yyyy-MM")
 
+  const [employeeFilter, setEmployeeFilter] =
+    useState<EmployeeViewFilter>("all")
+
+  const employeeFilterCounts = useMemo<
+    Record<EmployeeViewFilter, number>
+  >(() => {
+    const rows = [...planned, ...actual]
+
+    return {
+      all: rows.length,
+      active: rows.filter((row) => !row.linkedOffboarding).length,
+      withExit: rows.filter((row) => Boolean(row.linkedOffboarding)).length,
+      former: rows.filter((row) => Boolean(row.linkedOffboarding?.isActualExit))
+        .length,
+    }
+  }, [planned, actual])
+
   const showSuccess = React.useCallback((title: string, message: string) => {
     setSuccessModal({ open: true, title, message })
   }, [])
@@ -495,13 +539,44 @@ export default function OnboardingPage() {
     return () => window.removeEventListener("onboarding:deleted", handler)
   }, [reload])
 
+  const filterByEmployeeState = React.useCallback(
+    (rows: Arrival[]) => {
+      return rows.filter((row) => {
+        const linkedOffboarding = row.linkedOffboarding ?? null
+
+        if (employeeFilter === "active") return !linkedOffboarding
+
+        if (employeeFilter === "withExit") {
+          return Boolean(linkedOffboarding)
+        }
+
+        if (employeeFilter === "former") {
+          return Boolean(linkedOffboarding?.isActualExit)
+        }
+
+        return true
+      })
+    },
+    [employeeFilter]
+  )
+
+  const filteredPlanned = useMemo(
+    () => filterByEmployeeState(planned),
+    [planned, filterByEmployeeState]
+  )
+
+  const filteredActual = useMemo(
+    () => filterByEmployeeState(actual),
+    [actual, filterByEmployeeState]
+  )
+
   const plannedGrouped = useMemo(
-    () => groupByYearAndMonth(planned, "plannedStart"),
-    [planned]
+    () => groupByYearAndMonth(filteredPlanned, "plannedStart"),
+    [filteredPlanned]
   )
   const actualGrouped = useMemo(
-    () => groupByYearAndMonth(actual, "actualStart"),
-    [actual]
+    () => groupByYearAndMonth(filteredActual, "actualStart"),
+    [filteredActual]
   )
   const cancelledGrouped = useMemo(
     () => groupByYearAndMonth(cancelled, "plannedStart"),
@@ -1182,6 +1257,37 @@ export default function OnboardingPage() {
         <p className="text-muted-foreground">
           Správa plánovaných a skutečných nástupů zaměstnanců
         </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 p-2">
+        <span className="mr-1 text-sm font-medium text-muted-foreground">
+          Zobrazení:
+        </span>
+
+        {employeeFilterOptions.map((option) => (
+          <Button
+            key={option.value}
+            type="button"
+            size="sm"
+            variant={employeeFilter === option.value ? "default" : "outline"}
+            onClick={() => setEmployeeFilter(option.value)}
+            className={
+              employeeFilter === option.value
+                ? "bg-[#00847C] text-white hover:bg-[#0B6D73]"
+                : ""
+            }
+          >
+            {option.label}
+            <Badge
+              variant={
+                employeeFilter === option.value ? "secondary" : "outline"
+              }
+              className="ml-2"
+            >
+              {employeeFilterCounts[option.value]}
+            </Badge>
+          </Button>
+        ))}
       </div>
 
       <Tabs

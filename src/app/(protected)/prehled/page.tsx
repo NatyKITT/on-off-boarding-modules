@@ -991,7 +991,6 @@ export default function DashboardPage(): JSX.Element {
         if (tier === "mobile") return dfFormat(date, "d", { locale: cs })
         if (tier === "tablet")
           return dfFormat(date, "EEEEEE d.", { locale: cs })
-        if (tier === "laptop") return dfFormat(date, "EE d.", { locale: cs })
         return dfFormat(date, "EEEE d.", { locale: cs })
       },
 
@@ -1782,6 +1781,19 @@ export default function DashboardPage(): JSX.Element {
           color: inherit;
         }
 
+        .rbc-header {
+          white-space: nowrap !important;
+          overflow: hidden !important;
+          text-overflow: ellipsis !important;
+        }
+        .rbc-time-header-cell .rbc-header {
+          white-space: nowrap !important;
+          font-size: 11px !important;
+        }
+        .rbc-event {
+          word-break: keep-all !important;
+        }
+
         @media (max-width: 640px) {
           .rbc-calendar {
             font-size: 11px;
@@ -1812,6 +1824,7 @@ export default function DashboardPage(): JSX.Element {
             padding: 3px !important;
             font-size: 10px !important;
             font-weight: 700;
+            white-space: nowrap !important;
           }
           .rbc-date-cell {
             padding: 1px 2px !important;
@@ -1846,6 +1859,7 @@ export default function DashboardPage(): JSX.Element {
           .rbc-header {
             padding: 3px !important;
             font-size: 10px !important;
+            white-space: nowrap !important;
           }
           .rbc-month-view .rbc-event {
             font-size: 10px !important;

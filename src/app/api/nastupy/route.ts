@@ -6,6 +6,11 @@ import { env } from "@/env.mjs"
 
 import { prisma } from "@/lib/db"
 import {
+  buildLinkedOffboardingInfo,
+  normalizePersonalNumber,
+  pickMostRelevantOffboarding,
+} from "@/lib/employment-linking"
+import {
   normalizePersonSnapshot,
   toMentorFields,
   toSupervisorFields,
@@ -29,34 +34,28 @@ const base = z.object({
     .optional()
     .nullable(),
   phone: z.union([z.string(), z.null()]).optional(),
-
   positionNum: z.string().min(1, "Číslo pozice je povinné"),
   positionName: z.string().optional(),
   department: z.string().optional(),
   unitName: z.string().optional(),
-
   startTime: z.union([z.string(), z.null()]).optional(),
   probationEnd: z.preprocess(emptyToUndefined, z.coerce.date()).optional(),
-
   userEmail: z
     .preprocess(emptyToUndefined, z.string().email())
     .optional()
     .nullable(),
   userName: z.union([z.string(), z.null()]).optional(),
   personalNumber: z.union([z.string(), z.null()]).optional(),
-
   supervisorName: z.union([z.string(), z.null()]).optional(),
   supervisorEmail: z
     .preprocess(emptyToUndefined, z.string().email())
     .optional()
     .nullable(),
-
   mentorName: z.union([z.string(), z.null()]).optional(),
   mentorEmail: z
     .preprocess(emptyToUndefined, z.string().email())
     .optional()
     .nullable(),
-
   notes: z.union([z.string(), z.null()]).optional(),
 })
 
@@ -96,7 +95,7 @@ type RawOnboardingBody = {
 function parseEmailList(value?: string): string[] {
   return (value ?? "")
     .split(",")
-    .map((item: string) => item.trim())
+    .map((item) => item.trim())
     .filter(Boolean)
 }
 
@@ -106,6 +105,7 @@ function getHrNotificationRecipients(): string[] {
 
 function buildFullName(parts: Array<string | null | undefined>): string | null {
   const full = parts.filter(Boolean).join(" ").replace(/\s+/g, " ").trim()
+
   return full || null
 }
 
@@ -114,7 +114,6 @@ async function resolveCancelledByName(
 ): Promise<string | null> {
   if (!cancelledBy) return null
 
-  // Pokud to vypadá jako user ID (začíná cm a je dlouhé), dohledáme jméno
   if (cancelledBy.startsWith("cm") && cancelledBy.length > 20) {
     try {
       const user = await prisma.user.findUnique({
@@ -122,23 +121,21 @@ async function resolveCancelledByName(
         select: { name: true, surname: true, email: true },
       })
 
-      if (user?.name && user?.surname) {
-        return `${user.name} ${user.surname}`
-      }
-      if (user?.email) {
-        return user.email
-      }
+      if (user?.name && user?.surname) return `${user.name} ${user.surname}`
+      if (user?.email) return user.email
     } catch (error) {
       console.error("Error resolving cancelledBy user:", error)
     }
   }
 
-  // Jinak vrátíme co je (už je to jméno)
   return cancelledBy
 }
 
 async function serializeOnboardingRecord(
-  record: Awaited<ReturnType<typeof prisma.employeeOnboarding.findMany>>[number]
+  record: Awaited<
+    ReturnType<typeof prisma.employeeOnboarding.findMany>
+  >[number],
+  linkedOffboarding: ReturnType<typeof buildLinkedOffboardingInfo> = null
 ) {
   const cancelledByName = await resolveCancelledByName(record.cancelledBy)
 
@@ -147,12 +144,10 @@ async function serializeOnboardingRecord(
     plannedStart: record.plannedStart?.toISOString() ?? null,
     actualStart: record.actualStart?.toISOString() ?? null,
     probationEnd: record.probationEnd?.toISOString() ?? null,
-
     mentorAssignedFrom: record.mentorAssignedFrom?.toISOString() ?? null,
     mentorAssignedTo: record.mentorAssignedTo?.toISOString() ?? null,
     mentorNotificationSentAt:
       record.mentorNotificationSentAt?.toISOString() ?? null,
-
     probationEvaluationSentAt:
       record.probationEvaluationSentAt?.toISOString() ?? null,
     probationNotification21Sent:
@@ -167,15 +162,12 @@ async function serializeOnboardingRecord(
       record.probationHashExpiresAt?.toISOString() ?? null,
     probationHashUsedAt: record.probationHashUsedAt?.toISOString() ?? null,
     lastProbationReminder: record.lastProbationReminder?.toISOString() ?? null,
-
     cancelledAt: record.cancelledAt?.toISOString() ?? null,
     cancelledBy: cancelledByName,
     cancelReason: record.cancelReason ?? null,
-
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
     deletedAt: record.deletedAt?.toISOString() ?? null,
-
     supervisorName: buildFullName([
       record.supervisorTitleBefore,
       record.supervisorName,
@@ -183,7 +175,6 @@ async function serializeOnboardingRecord(
       record.supervisorTitleAfter,
     ]),
     supervisorEmail: record.supervisorEmail ?? null,
-
     mentorName: buildFullName([
       record.mentorTitleBefore,
       record.mentorName,
@@ -191,11 +182,117 @@ async function serializeOnboardingRecord(
       record.mentorTitleAfter,
     ]),
     mentorEmail: record.mentorEmail ?? null,
+    linkedOffboarding,
   }
 }
 
 async function resolveSupervisor(positionNum: string) {
   return await resolveSupervisorFromPositionNum(positionNum)
+}
+
+function parseGeneratedSkippedPersonalNumbers(
+  raw: RawOnboardingBody
+): string[] {
+  return Array.isArray(raw.generatedSkippedPersonalNumbers)
+    ? raw.generatedSkippedPersonalNumbers
+        .filter(
+          (value: unknown): value is string =>
+            typeof value === "string" &&
+            value.trim() !== "" &&
+            /^\d+$/.test(value.trim())
+        )
+        .map((value) => value.trim())
+    : []
+}
+
+function createEmptySupervisorOverrideFields() {
+  return {
+    supervisorManualOverride: true,
+    supervisorSource: null,
+    supervisorGid: null,
+    supervisorTitleBefore: null,
+    supervisorName: null,
+    supervisorSurname: null,
+    supervisorTitleAfter: null,
+    supervisorEmail: null,
+    supervisorPosition: null,
+    supervisorDepartment: null,
+    supervisorUnitName: null,
+    supervisorPersonalNumber: null,
+  }
+}
+
+async function buildPersonFields(
+  data: z.infer<typeof base>,
+  manualOverride: boolean
+) {
+  const resolvedSupervisor = manualOverride
+    ? null
+    : await resolveSupervisor(data.positionNum)
+
+  const supervisorSnapshot = manualOverride
+    ? data.supervisorName || data.supervisorEmail
+      ? normalizePersonSnapshot(
+          {
+            source: "MANUAL",
+            name: data.supervisorName ?? null,
+            email: data.supervisorEmail ?? null,
+          },
+          "MANUAL"
+        )
+      : null
+    : null
+
+  const supervisorFields = manualOverride
+    ? supervisorSnapshot
+      ? toSupervisorFields(supervisorSnapshot, true)
+      : createEmptySupervisorOverrideFields()
+    : (resolvedSupervisor?.fields ?? {})
+
+  const mentorSnapshot =
+    data.mentorName || data.mentorEmail
+      ? normalizePersonSnapshot(
+          {
+            source: "MANUAL",
+            name: data.mentorName ?? null,
+            email: data.mentorEmail ?? null,
+          },
+          "MANUAL"
+        )
+      : null
+
+  return {
+    supervisorFields,
+    mentorFields: mentorSnapshot ? toMentorFields(mentorSnapshot) : {},
+    mentorAssignedFrom: mentorSnapshot ? new Date() : null,
+  }
+}
+
+async function markPersonalNumbers(
+  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+  generatedSkipped: string[],
+  usedPersonalNumber?: string | null
+) {
+  if (generatedSkipped.length > 0) {
+    await Promise.all(
+      generatedSkipped.map((number) =>
+        tx.personalNumberGap.upsert({
+          where: { number },
+          update: { status: "SKIPPED" },
+          create: { number, status: "SKIPPED" },
+        })
+      )
+    )
+  }
+
+  const used = usedPersonalNumber?.trim()
+
+  if (used) {
+    await tx.personalNumberGap.updateMany({
+      where: { number: used, status: "SKIPPED" },
+      data: { status: "USED", usedAt: new Date() },
+    })
+  }
 }
 
 export async function GET() {
@@ -214,16 +311,68 @@ export async function GET() {
       orderBy: [{ plannedStart: "desc" }, { id: "desc" }],
     })
 
-    const data = await Promise.all(
-      records.map((record) => serializeOnboardingRecord(record))
+    const personalNumbers = Array.from(
+      new Set(
+        records
+          .map((record) => normalizePersonalNumber(record.personalNumber))
+          .filter(Boolean)
+      )
     )
 
-    return NextResponse.json({
-      status: "success",
-      data,
-    })
+    const linkedOffboardings =
+      personalNumbers.length > 0
+        ? await prisma.employeeOffboarding.findMany({
+            where: {
+              personalNumber: { in: personalNumbers },
+              deletedAt: null,
+            },
+            select: {
+              id: true,
+              personalNumber: true,
+              plannedEnd: true,
+              actualEnd: true,
+            },
+          })
+        : []
+
+    const offboardingsByPersonalNumber = new Map<
+      string,
+      typeof linkedOffboardings
+    >()
+
+    for (const offboarding of linkedOffboardings) {
+      const personalNumber = normalizePersonalNumber(offboarding.personalNumber)
+
+      if (!personalNumber) continue
+
+      const current = offboardingsByPersonalNumber.get(personalNumber) ?? []
+      current.push(offboarding)
+      offboardingsByPersonalNumber.set(personalNumber, current)
+    }
+
+    const data = await Promise.all(
+      records.map(async (record) => {
+        const personalNumber = normalizePersonalNumber(record.personalNumber)
+        const linkedRows = personalNumber
+          ? (offboardingsByPersonalNumber.get(personalNumber) ?? [])
+          : []
+
+        const linkedOffboarding = pickMostRelevantOffboarding(linkedRows)
+
+        return serializeOnboardingRecord(
+          record,
+          buildLinkedOffboardingInfo({
+            offboarding: linkedOffboarding,
+            probationEnd: record.probationEnd,
+          })
+        )
+      })
+    )
+
+    return NextResponse.json({ status: "success", data })
   } catch (error) {
     console.error("Error fetching onboarding records:", error)
+
     return NextResponse.json(
       { status: "error", message: "Internal server error" },
       { status: 500 }
@@ -244,20 +393,9 @@ export async function POST(request: NextRequest) {
   try {
     const raw: RawOnboardingBody = await request.json()
     const hasManualSupervisorOverride = raw.supervisorManualOverride === true
-
     const isActual =
       raw.actualStart != null && String(raw.actualStart).trim() !== ""
-
-    const generatedSkipped: string[] = Array.isArray(
-      raw.generatedSkippedPersonalNumbers
-    )
-      ? raw.generatedSkippedPersonalNumbers
-          .filter(
-            (v: unknown): v is string =>
-              typeof v === "string" && v.trim() !== "" && /^\d+$/.test(v.trim())
-          )
-          .map((v: string) => v.trim())
-      : []
+    const generatedSkipped = parseGeneratedSkippedPersonalNumbers(raw)
 
     const createdBy = ((session.user as SessionUser).id ??
       session.user.email ??
@@ -266,56 +404,8 @@ export async function POST(request: NextRequest) {
     if (isActual) {
       const data = createActualSchema.parse(raw)
       const planned = data.plannedStart ?? data.actualStart
-
-      const resolvedSupervisor = hasManualSupervisorOverride
-        ? null
-        : await resolveSupervisor(data.positionNum)
-
-      const supervisorSnapshot = hasManualSupervisorOverride
-        ? data.supervisorName || data.supervisorEmail
-          ? normalizePersonSnapshot(
-              {
-                source: "MANUAL",
-                name: data.supervisorName ?? null,
-                email: data.supervisorEmail ?? null,
-              },
-              "MANUAL"
-            )
-          : null
-        : null
-
-      const supervisorFields = hasManualSupervisorOverride
-        ? supervisorSnapshot
-          ? toSupervisorFields(supervisorSnapshot, true)
-          : {
-              supervisorManualOverride: true,
-              supervisorSource: null,
-              supervisorGid: null,
-              supervisorTitleBefore: null,
-              supervisorName: null,
-              supervisorSurname: null,
-              supervisorTitleAfter: null,
-              supervisorEmail: null,
-              supervisorPosition: null,
-              supervisorDepartment: null,
-              supervisorUnitName: null,
-              supervisorPersonalNumber: null,
-            }
-        : (resolvedSupervisor?.fields ?? {})
-
-      const mentorSnapshot =
-        data.mentorName || data.mentorEmail
-          ? normalizePersonSnapshot(
-              {
-                source: "MANUAL",
-                name: data.mentorName ?? null,
-                email: data.mentorEmail ?? null,
-              },
-              "MANUAL"
-            )
-          : null
-
-      const mentorFields = mentorSnapshot ? toMentorFields(mentorSnapshot) : {}
+      const { supervisorFields, mentorFields, mentorAssignedFrom } =
+        await buildPersonFields(data, hasManualSupervisorOverride)
 
       const created = await prisma.$transaction(async (tx) => {
         const newEmployee = await tx.employeeOnboarding.create({
@@ -326,51 +416,26 @@ export async function POST(request: NextRequest) {
             titleAfter: data.titleAfter ?? null,
             email: data.email ?? null,
             phone: data.phone ?? null,
-
             plannedStart: planned,
             actualStart: data.actualStart,
             startTime: data.startTime ?? null,
             probationEnd: data.probationEnd ?? null,
-
             positionNum: data.positionNum,
             positionName: data.positionName ?? "",
             department: data.department ?? "",
             unitName: data.unitName ?? "",
-
             notes: data.notes ?? null,
             userEmail: data.userEmail ?? null,
             userName: data.userName ?? null,
             personalNumber: data.personalNumber ?? null,
-
             ...supervisorFields,
             ...mentorFields,
-            mentorAssignedFrom: mentorSnapshot ? new Date() : null,
-
+            mentorAssignedFrom,
             status: "COMPLETED",
           },
         })
 
-        if (generatedSkipped.length > 0) {
-          await Promise.all(
-            generatedSkipped.map((num: string) =>
-              tx.personalNumberGap.upsert({
-                where: { number: num },
-                update: { status: "SKIPPED" },
-                create: { number: num, status: "SKIPPED" },
-              })
-            )
-          )
-        }
-
-        if (data.personalNumber && data.personalNumber.trim() !== "") {
-          await tx.personalNumberGap.updateMany({
-            where: {
-              number: data.personalNumber.trim(),
-              status: "SKIPPED",
-            },
-            data: { status: "USED", usedAt: new Date() },
-          })
-        }
+        await markPersonalNumbers(tx, generatedSkipped, data.personalNumber)
 
         await tx.onboardingChangeLog.create({
           data: {
@@ -389,6 +454,7 @@ export async function POST(request: NextRequest) {
         })
 
         const hrRecipients = getHrNotificationRecipients()
+
         if (hrRecipients.length > 0) {
           await tx.mailQueue.create({
             data: {
@@ -417,56 +483,8 @@ export async function POST(request: NextRequest) {
     }
 
     const data = createPlannedSchema.parse(raw)
-
-    const resolvedSupervisor = hasManualSupervisorOverride
-      ? null
-      : await resolveSupervisor(data.positionNum)
-
-    const supervisorSnapshot = hasManualSupervisorOverride
-      ? data.supervisorName || data.supervisorEmail
-        ? normalizePersonSnapshot(
-            {
-              source: "MANUAL",
-              name: data.supervisorName ?? null,
-              email: data.supervisorEmail ?? null,
-            },
-            "MANUAL"
-          )
-        : null
-      : null
-
-    const supervisorFields = hasManualSupervisorOverride
-      ? supervisorSnapshot
-        ? toSupervisorFields(supervisorSnapshot, true)
-        : {
-            supervisorManualOverride: true,
-            supervisorSource: null,
-            supervisorGid: null,
-            supervisorTitleBefore: null,
-            supervisorName: null,
-            supervisorSurname: null,
-            supervisorTitleAfter: null,
-            supervisorEmail: null,
-            supervisorPosition: null,
-            supervisorDepartment: null,
-            supervisorUnitName: null,
-            supervisorPersonalNumber: null,
-          }
-      : (resolvedSupervisor?.fields ?? {})
-
-    const mentorSnapshot =
-      data.mentorName || data.mentorEmail
-        ? normalizePersonSnapshot(
-            {
-              source: "MANUAL",
-              name: data.mentorName ?? null,
-              email: data.mentorEmail ?? null,
-            },
-            "MANUAL"
-          )
-        : null
-
-    const mentorFields = mentorSnapshot ? toMentorFields(mentorSnapshot) : {}
+    const { supervisorFields, mentorFields, mentorAssignedFrom } =
+      await buildPersonFields(data, hasManualSupervisorOverride)
 
     const created = await prisma.$transaction(async (tx) => {
       const newEmployee = await tx.employeeOnboarding.create({
@@ -477,51 +495,26 @@ export async function POST(request: NextRequest) {
           titleAfter: data.titleAfter ?? null,
           email: data.email ?? null,
           phone: data.phone ?? null,
-
           plannedStart: data.plannedStart,
           actualStart: null,
           startTime: data.startTime ?? null,
           probationEnd: data.probationEnd ?? null,
-
           positionNum: data.positionNum,
           positionName: data.positionName ?? "",
           department: data.department ?? "",
           unitName: data.unitName ?? "",
-
           notes: data.notes ?? null,
           userEmail: data.userEmail ?? null,
           userName: data.userName ?? null,
           personalNumber: data.personalNumber ?? null,
-
           ...supervisorFields,
           ...mentorFields,
-          mentorAssignedFrom: mentorSnapshot ? new Date() : null,
-
+          mentorAssignedFrom,
           status: "NEW",
         },
       })
 
-      if (generatedSkipped.length > 0) {
-        await Promise.all(
-          generatedSkipped.map((num: string) =>
-            tx.personalNumberGap.upsert({
-              where: { number: num },
-              update: { status: "SKIPPED" },
-              create: { number: num, status: "SKIPPED" },
-            })
-          )
-        )
-      }
-
-      if (data.personalNumber && data.personalNumber.trim() !== "") {
-        await tx.personalNumberGap.updateMany({
-          where: {
-            number: data.personalNumber.trim(),
-            status: "SKIPPED",
-          },
-          data: { status: "USED", usedAt: new Date() },
-        })
-      }
+      await markPersonalNumbers(tx, generatedSkipped, data.personalNumber)
 
       await tx.onboardingChangeLog.create({
         data: {
@@ -540,6 +533,7 @@ export async function POST(request: NextRequest) {
       })
 
       const hrRecipients = getHrNotificationRecipients()
+
       if (hrRecipients.length > 0) {
         await tx.mailQueue.create({
           data: {
@@ -568,7 +562,7 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     if (err instanceof ZodError) {
       const msg = err.issues
-        .map((i) => `${i.path.join(".")}: ${i.message}`)
+        .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
         .join("; ")
 
       return NextResponse.json(
@@ -578,6 +572,7 @@ export async function POST(request: NextRequest) {
     }
 
     console.error("Chyba při vytváření nástupu:", err)
+
     return NextResponse.json(
       {
         status: "error",

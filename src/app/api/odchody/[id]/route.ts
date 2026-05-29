@@ -1,36 +1,52 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
+import { Prisma } from "@prisma/client"
 import { z, ZodError } from "zod"
 
 import { prisma } from "@/lib/db"
+import { getHrRecipientsFromEnv } from "@/lib/email"
+import {
+  buildLinkedOnboardingInfo,
+  normalizePersonalNumber,
+  pickMostRelevantOnboarding,
+} from "@/lib/employment-linking"
 
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
 export const revalidate = 0
 
-type RouteParams = { params: { id: string } }
+type RouteParams = {
+  params: {
+    id: string
+  }
+}
+
+type OffboardingRecord = NonNullable<
+  Awaited<ReturnType<typeof prisma.employeeOffboarding.findFirst>>
+>
+
+type UpdateData = Prisma.EmployeeOffboardingUncheckedUpdateInput
 
 const emptyToUndefined = (v: unknown) =>
+  v === null
+    ? undefined
+    : typeof v === "string" && v.trim() === ""
+      ? undefined
+      : v
+
+const emptyStringToUndefined = (v: unknown) =>
   typeof v === "string" && v.trim() === "" ? undefined : v
+
+const nullableDate = z.preprocess(
+  emptyStringToUndefined,
+  z.union([z.null(), z.coerce.date()]).optional()
+)
 
 const updateSchema = z.object({
   titleBefore: z.union([z.string(), z.null()]).optional(),
-  name: z.string().min(1).optional(),
-  surname: z.string().min(1).optional(),
+  name: z.string().optional(),
+  surname: z.string().optional(),
   titleAfter: z.union([z.string(), z.null()]).optional(),
-  phone: z.union([z.string(), z.null()]).optional(),
-  positionNum: z.string().optional(),
-  positionName: z.string().optional(),
-  department: z.string().optional(),
-  unitName: z.string().optional(),
-
-  plannedEnd: z.preprocess(emptyToUndefined, z.coerce.date()).optional(),
-  actualEnd: z.preprocess(emptyToUndefined, z.coerce.date()).optional(),
-  noticePeriodEnd: z.preprocess(emptyToUndefined, z.coerce.date()).optional(),
-  noticeEnd: z.preprocess(emptyToUndefined, z.coerce.date()).optional(),
-
-  noticeMonths: z.number().optional(),
-  hasCustomDates: z.boolean().optional(),
 
   userEmail: z
     .preprocess(emptyToUndefined, z.string().email())
@@ -38,41 +54,23 @@ const updateSchema = z.object({
     .nullable(),
   userName: z.union([z.string(), z.null()]).optional(),
   personalNumber: z.union([z.string(), z.null()]).optional(),
+
+  positionNum: z.string().optional(),
+  positionName: z.string().optional(),
+  department: z.string().optional(),
+  unitName: z.string().optional(),
+
+  plannedEnd: nullableDate,
+  actualEnd: nullableDate,
+  noticeEnd: nullableDate,
+  noticePeriodEnd: nullableDate,
+
+  noticeMonths: z.preprocess(emptyToUndefined, z.coerce.number()).optional(),
+  hasCustomDates: z.boolean().optional(),
+
   notes: z.union([z.string(), z.null()]).optional(),
   status: z.enum(["NEW", "IN_PROGRESS", "COMPLETED"]).optional(),
 })
-
-type UpdateData = {
-  updatedAt: Date
-  titleBefore?: string | null
-  name?: string
-  surname?: string
-  titleAfter?: string | null
-  phone?: string | null
-  positionNum?: string
-  positionName?: string
-  department?: string
-  unitName?: string
-
-  plannedEnd?: Date
-  actualEnd?: Date | null
-  noticeEnd?: Date | null
-  noticeMonths?: number | null
-  hasCustomDates?: boolean
-
-  userEmail?: string | null
-  userName?: string | null
-  personalNumber?: string | null
-  notes?: string | null
-  status?: "NEW" | "IN_PROGRESS" | "COMPLETED"
-}
-
-const toStr = (v: unknown) => {
-  if (v === null || v === undefined) return ""
-  if (v instanceof Date) return v.toISOString()
-  if (typeof v === "boolean") return v ? "true" : "false"
-  return String(v)
-}
 
 function canReadOffboarding(role?: string | null) {
   return ["ADMIN", "HR", "IT", "READONLY"].includes(role ?? "")
@@ -80,6 +78,65 @@ function canReadOffboarding(role?: string | null) {
 
 function canWriteOffboarding(role?: string | null) {
   return ["ADMIN", "HR", "IT"].includes(role ?? "")
+}
+
+function toStr(value: unknown): string {
+  if (value instanceof Date) return value.toISOString()
+  if (value === null || value === undefined) return ""
+  return String(value)
+}
+
+async function getLinkedOnboardingForOffboarding(
+  personalNumber: string | null | undefined,
+  exitDate: Date | null | undefined
+) {
+  const normalizedPersonalNumber = normalizePersonalNumber(personalNumber)
+
+  if (!normalizedPersonalNumber) {
+    return buildLinkedOnboardingInfo({
+      onboarding: null,
+      exitDate,
+    })
+  }
+
+  const linkedOnboardings = await prisma.employeeOnboarding.findMany({
+    where: {
+      personalNumber: normalizedPersonalNumber,
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+      personalNumber: true,
+      plannedStart: true,
+      actualStart: true,
+      probationEnd: true,
+      positionName: true,
+    },
+  })
+
+  return buildLinkedOnboardingInfo({
+    onboarding: pickMostRelevantOnboarding(linkedOnboardings),
+    exitDate,
+  })
+}
+
+async function serializeOffboardingRecord(record: OffboardingRecord) {
+  const linkedOnboarding = await getLinkedOnboardingForOffboarding(
+    record.personalNumber,
+    record.actualEnd ?? record.plannedEnd
+  )
+
+  return {
+    ...record,
+    plannedEnd: record.plannedEnd?.toISOString() ?? null,
+    actualEnd: record.actualEnd?.toISOString() ?? null,
+    noticeEnd: record.noticeEnd?.toISOString() ?? null,
+    noticeMonths: record.noticeMonths ?? 2,
+    hasCustomDates: record.hasCustomDates ?? false,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString(),
+    linkedOnboarding,
+  }
 }
 
 export async function GET(_: NextRequest, { params }: RouteParams) {
@@ -93,6 +150,7 @@ export async function GET(_: NextRequest, { params }: RouteParams) {
   }
 
   const role = session.user.role ?? "USER"
+
   if (!canReadOffboarding(role)) {
     return NextResponse.json(
       { status: "error", message: "Nemáte oprávnění číst záznam odchodu." },
@@ -101,6 +159,7 @@ export async function GET(_: NextRequest, { params }: RouteParams) {
   }
 
   const id = Number(params.id)
+
   if (!Number.isFinite(id)) {
     return NextResponse.json(
       { status: "error", message: "Neplatné ID." },
@@ -109,8 +168,11 @@ export async function GET(_: NextRequest, { params }: RouteParams) {
   }
 
   try {
-    const record = await prisma.employeeOffboarding.findUnique({
-      where: { id, deletedAt: null },
+    const record = await prisma.employeeOffboarding.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+      },
     })
 
     if (!record) {
@@ -122,19 +184,11 @@ export async function GET(_: NextRequest, { params }: RouteParams) {
 
     return NextResponse.json({
       status: "success",
-      data: {
-        ...record,
-        plannedEnd: record.plannedEnd?.toISOString() ?? null,
-        actualEnd: record.actualEnd?.toISOString() ?? null,
-        noticeEnd: record.noticeEnd?.toISOString() ?? null,
-        noticeMonths: record.noticeMonths ?? 2,
-        hasCustomDates: record.hasCustomDates ?? false,
-        createdAt: record.createdAt.toISOString(),
-        updatedAt: record.updatedAt.toISOString(),
-      },
+      data: await serializeOffboardingRecord(record),
     })
   } catch (error) {
     console.error("GET /odchody/[id] error:", error)
+
     return NextResponse.json(
       { status: "error", message: "Nepodařilo se načíst záznam." },
       { status: 500 }
@@ -153,6 +207,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   }
 
   const role = session.user.role ?? "USER"
+
   if (!canWriteOffboarding(role)) {
     return NextResponse.json(
       {
@@ -164,6 +219,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   }
 
   const id = Number(params.id)
+
   if (!Number.isFinite(id)) {
     return NextResponse.json(
       { status: "error", message: "Neplatné ID." },
@@ -180,8 +236,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       session.user.email ??
       "unknown"
 
-    const before = await prisma.employeeOffboarding.findUnique({
-      where: { id, deletedAt: null },
+    const before = await prisma.employeeOffboarding.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+      },
     })
 
     if (!before) {
@@ -192,36 +251,53 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
 
     const updated = await prisma.$transaction(async (tx) => {
-      const updateData: UpdateData = { updatedAt: new Date() }
+      const updateData: UpdateData = {
+        updatedAt: new Date(),
+      }
 
       for (const [key, value] of Object.entries(data)) {
         if (value === undefined) continue
 
         switch (key) {
           case "noticePeriodEnd": {
-            updateData.noticeEnd = value as Date
+            updateData.noticeEnd = value as Date | null
             break
           }
+
           case "noticeEnd": {
             if (!("noticePeriodEnd" in data)) {
-              updateData.noticeEnd = value as Date
+              updateData.noticeEnd = value as Date | null
             }
             break
           }
+
           case "plannedEnd": {
             if (value !== null) {
               updateData.plannedEnd = value as Date
             }
             break
           }
+
           case "actualEnd": {
-            updateData.actualEnd = value as Date
+            updateData.actualEnd = value as Date | null
             break
           }
+
+          case "noticeMonths": {
+            updateData.noticeMonths = value as number
+            break
+          }
+
           case "hasCustomDates": {
             updateData.hasCustomDates = Boolean(value)
             break
           }
+
+          case "status": {
+            updateData.status = value as "NEW" | "IN_PROGRESS" | "COMPLETED"
+            break
+          }
+
           default: {
             ;(updateData as Record<string, unknown>)[key] = value
           }
@@ -242,12 +318,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         data: updateData,
       })
 
-      const beforeRec: Record<string, unknown> = before as unknown as Record<
-        string,
-        unknown
-      >
-      const updateRec: Record<string, unknown> =
-        updateData as unknown as Record<string, unknown>
+      const beforeRec = before as unknown as Record<string, unknown>
+      const updateRec = updateData as unknown as Record<string, unknown>
 
       const changes: Array<{
         field: string
@@ -255,13 +327,19 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         newValue: string
       }> = []
 
-      for (const [k, newVal] of Object.entries(updateRec)) {
-        if (k === "updatedAt") continue
-        const oldVal = beforeRec[k]
-        const oldStr = toStr(oldVal)
-        const newStr = toStr(newVal)
+      for (const [key, newValue] of Object.entries(updateRec)) {
+        if (key === "updatedAt") continue
+
+        const oldValue = beforeRec[key]
+        const oldStr = toStr(oldValue)
+        const newStr = toStr(newValue)
+
         if (oldStr !== newStr) {
-          changes.push({ field: k, oldValue: oldStr, newValue: newStr })
+          changes.push({
+            field: key,
+            oldValue: oldStr,
+            newValue: newStr,
+          })
         }
       }
 
@@ -297,21 +375,12 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({
       status: "success",
       message: "Záznam byl úspěšně aktualizován.",
-      data: {
-        ...updated,
-        plannedEnd: updated.plannedEnd?.toISOString() ?? null,
-        actualEnd: updated.actualEnd?.toISOString() ?? null,
-        noticeEnd: updated.noticeEnd?.toISOString() ?? null,
-        noticeMonths: updated.noticeMonths ?? 2,
-        hasCustomDates: updated.hasCustomDates ?? false,
-        createdAt: updated.createdAt.toISOString(),
-        updatedAt: updated.updatedAt.toISOString(),
-      },
+      data: await serializeOffboardingRecord(updated),
     })
   } catch (err) {
     if (err instanceof ZodError) {
       const msg = err.issues
-        .map((i) => `${i.path.join(".")}: ${i.message}`)
+        .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
         .join("; ")
 
       return NextResponse.json(
@@ -321,6 +390,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
 
     console.error("PATCH /odchody/[id] error:", err)
+
     return NextResponse.json(
       { status: "error", message: "Chyba při aktualizaci záznamu." },
       { status: 500 }
@@ -339,6 +409,7 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
   }
 
   const role = session.user.role ?? "USER"
+
   if (!canWriteOffboarding(role)) {
     return NextResponse.json(
       { status: "error", message: "Nemáte oprávnění mazat záznam odchodu." },
@@ -347,6 +418,7 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
   }
 
   const id = Number(params.id)
+
   if (!Number.isFinite(id)) {
     return NextResponse.json(
       { status: "error", message: "Neplatné ID." },
@@ -354,8 +426,11 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
     )
   }
 
-  const before = await prisma.employeeOffboarding.findUnique({
-    where: { id },
+  const before = await prisma.employeeOffboarding.findFirst({
+    where: {
+      id,
+      deletedAt: null,
+    },
     select: {
       id: true,
       name: true,
@@ -385,6 +460,7 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
     "unknown"
 
   const now = new Date()
+  const hrRecipients = getHrRecipientsFromEnv()
 
   await prisma.$transaction(async (tx) => {
     await tx.employeeOffboarding.update({
@@ -407,24 +483,26 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
       },
     })
 
-    try {
-      await tx.mailQueue.create({
-        data: {
-          type: "SYSTEM_NOTIFICATION",
-          payload: {
-            type: "employee_offboarding_deleted",
-            employeeId: before.id,
-            employeeName: `${before.name} ${before.surname}`,
-            deletedBy: userKey,
-            recipients: ["hr@company.com"],
-            subject: `Smazán záznam odchodu - ${before.name} ${before.surname}`,
+    if (hrRecipients.length > 0) {
+      try {
+        await tx.mailQueue.create({
+          data: {
+            type: "SYSTEM_NOTIFICATION",
+            payload: {
+              type: "employee_offboarding_deleted",
+              employeeId: before.id,
+              employeeName: `${before.name} ${before.surname}`,
+              deletedBy: userKey,
+              recipients: hrRecipients,
+              subject: `Smazán záznam odchodu - ${before.name} ${before.surname}`,
+            },
+            priority: 5,
+            createdBy: userKey,
           },
-          priority: 5,
-          createdBy: userKey,
-        },
-      })
-    } catch (mailErr) {
-      console.warn("Warning: Could not create mail queue entry:", mailErr)
+        })
+      } catch (mailErr) {
+        console.warn("Warning: Could not create mail queue entry:", mailErr)
+      }
     }
   })
 

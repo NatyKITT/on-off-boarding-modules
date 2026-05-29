@@ -10,6 +10,10 @@ import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
 
 import { prisma } from "@/lib/db"
 import {
+  getHrRecipientsFromEnv,
+  sendExitChecklistCompletedEmail,
+} from "@/lib/email"
+import {
   buildHeaderFromOff,
   getOrCreateChecklist,
   mapToExitChecklistData,
@@ -19,7 +23,8 @@ import {
   sanitizeSignatureValueForJson,
   sanitizeText,
 } from "@/lib/exit-checklist"
-import { hasPerm } from "@/lib/rbac"
+import { getExitChecklistCompletionState } from "@/lib/exit-checklist-copletion"
+import { canAccessInternalApp, hasPerm } from "@/lib/rbac"
 import { getSession } from "@/lib/session"
 
 export const runtime = "nodejs"
@@ -30,6 +35,31 @@ export const revalidate = 0
 function getJsonRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {}
   return value as Record<string, unknown>
+}
+
+function getAppBaseUrl() {
+  return (
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.AUTH_URL ||
+    process.env.NEXTAUTH_URL ||
+    ""
+  ).replace(/\/$/, "")
+}
+
+function getExistingCompletionMetadata(
+  currentHeader: Record<string, unknown>
+): Prisma.InputJsonObject {
+  return {
+    completedAt: sanitizeText(currentHeader.completedAt) || null,
+    completedNotificationSentAt:
+      sanitizeText(currentHeader.completedNotificationSentAt) || null,
+    completedNotificationSentByName:
+      sanitizeText(currentHeader.completedNotificationSentByName) || null,
+    completedNotificationSentByEmail:
+      sanitizeText(currentHeader.completedNotificationSentByEmail) || null,
+    completedNotificationSentTo:
+      sanitizeText(currentHeader.completedNotificationSentTo) || null,
+  }
 }
 
 async function requireExitChecklistRead() {
@@ -46,11 +76,11 @@ async function requireExitChecklistRead() {
   }
 
   const role = user.role ?? "USER"
-
   const canRead =
-    hasPerm(role, "EXIT_CHECKLIST_READ") ||
-    hasPerm(role, "EXIT_CHECKLIST_SIGN") ||
-    hasPerm(role, "EXIT_CHECKLIST_ADMIN")
+    canAccessInternalApp(role) &&
+    (hasPerm(role, "EXIT_CHECKLIST_READ") ||
+      hasPerm(role, "EXIT_CHECKLIST_SIGN") ||
+      hasPerm(role, "EXIT_CHECKLIST_ADMIN"))
 
   if (!canRead) {
     return {
@@ -99,6 +129,7 @@ export async function GET(
     return NextResponse.json({
       status: "success",
       data,
+      completion: getExitChecklistCompletionState(data),
     })
   } catch (error) {
     console.error("[EXIT-CHECKLIST GET] Error:", error)
@@ -139,6 +170,17 @@ export async function PUT(
 
   const userId = user.id ?? null
   const userRole = user.role ?? "USER"
+
+  if (!canAccessInternalApp(userRole)) {
+    return NextResponse.json(
+      {
+        status: "error",
+        message: "Nemáte přístup do interní části výstupního listu.",
+      },
+      { status: 403 }
+    )
+  }
+
   const canAdmin = hasPerm(userRole, "EXIT_CHECKLIST_ADMIN")
   const canSign = hasPerm(userRole, "EXIT_CHECKLIST_SIGN")
 
@@ -158,7 +200,19 @@ export async function PUT(
     )
   }
 
-  const lock = Boolean((body as { lock?: unknown }).lock)
+  const bodyRecord = body as Record<string, unknown>
+  const lock = Boolean(bodyRecord.lock)
+  const unlock = Boolean(bodyRecord.unlock)
+
+  if (lock && unlock) {
+    return NextResponse.json(
+      {
+        status: "error",
+        message: "Nelze současně uzamknout i odemknout výstupní list.",
+      },
+      { status: 400 }
+    )
+  }
 
   if (lock && !canAdmin) {
     return NextResponse.json(
@@ -167,15 +221,12 @@ export async function PUT(
     )
   }
 
-  const bodyRecord = body as Record<string, unknown>
-
-  const items = (
-    Array.isArray(bodyRecord.items) ? bodyRecord.items : []
-  ) as ExitChecklistItem[]
-
-  const assets = (
-    Array.isArray(bodyRecord.assets) ? bodyRecord.assets : []
-  ) as ExitAssetItem[]
+  if (unlock && !canAdmin) {
+    return NextResponse.json(
+      { status: "error", message: "Nemáte oprávnění odemknout formulář." },
+      { status: 403 }
+    )
+  }
 
   try {
     const result = await getOrCreateChecklist(offboardingId)
@@ -189,16 +240,67 @@ export async function PUT(
 
     const { off, checklist } = result
 
+    if (unlock) {
+      const unlockedChecklist = await prisma.exitChecklist.update({
+        where: {
+          id: checklist.id,
+        },
+        data: {
+          lockedAt: null,
+          lockedById: null,
+        },
+        include: {
+          items: true,
+          assets: true,
+          offboarding: true,
+        },
+      })
+
+      const data = mapToExitChecklistData(off, unlockedChecklist)
+
+      return NextResponse.json({
+        status: "success",
+        message: "Výstupní list byl odemknut pro úpravy.",
+        data,
+        completion: getExitChecklistCompletionState(data),
+      })
+    }
+
+    if (checklist.lockedAt) {
+      return NextResponse.json(
+        {
+          status: "error",
+          message:
+            "Výstupní list je uzamčený. Pro další úpravy ho nejdříve odemkněte.",
+        },
+        { status: 423 }
+      )
+    }
+
+    const items = (
+      Array.isArray(bodyRecord.items) ? bodyRecord.items : []
+    ) as ExitChecklistItem[]
+
+    const assets = (
+      Array.isArray(bodyRecord.assets) ? bodyRecord.assets : []
+    ) as ExitAssetItem[]
+
     const currentHeader = getJsonRecord(checklist.header)
     const currentHandover = currentHeader.handover
+
+    const incomingHandover =
+      sanitizeHandoverForJson(bodyRecord.handover) ??
+      sanitizeHandoverForJson(currentHandover)
+
     const handover = preserveHandoverSendMetadata(
-      sanitizeHandoverForJson(bodyRecord.handover),
+      incomingHandover,
       currentHandover
     )
 
     const signatures = sanitizeSignaturesForJson(bodyRecord.signatures)
-
     const header = buildHeaderFromOff(off)
+    const existingCompletionMetadata =
+      getExistingCompletionMetadata(currentHeader)
 
     const updatedHeader: Prisma.InputJsonObject = {
       employeeName: header.employeeName,
@@ -214,6 +316,7 @@ export async function PUT(
       ),
       handover,
       signatures,
+      ...existingCompletionMetadata,
     }
 
     for (let index = 0; index < EXIT_CHECKLIST_ROWS.length; index++) {
@@ -332,12 +435,12 @@ export async function PUT(
       })
     }
 
-    let lockedAt = checklist.lockedAt
-    let lockedById = checklist.lockedById
+    let nextLockedAt: Date | null = checklist.lockedAt ?? null
+    let nextLockedById: string | null = checklist.lockedById ?? null
 
-    if (lock && !lockedAt) {
-      lockedAt = new Date()
-      lockedById = userId
+    if (lock && !nextLockedAt) {
+      nextLockedAt = new Date()
+      nextLockedById = userId
     }
 
     const updatedChecklist = await prisma.exitChecklist.update({
@@ -346,8 +449,8 @@ export async function PUT(
       },
       data: {
         header: updatedHeader,
-        lockedAt,
-        lockedById,
+        lockedAt: nextLockedAt,
+        lockedById: nextLockedById,
       },
       include: {
         items: true,
@@ -356,11 +459,70 @@ export async function PUT(
       },
     })
 
-    const data = mapToExitChecklistData(off, updatedChecklist)
+    let data = mapToExitChecklistData(off, updatedChecklist)
+    const completion = getExitChecklistCompletionState(data)
+
+    const alreadyNotified = Boolean(
+      sanitizeText(currentHeader.completedNotificationSentAt)
+    )
+
+    if (completion.isComplete && !alreadyNotified) {
+      const recipients = getHrRecipientsFromEnv()
+      const baseUrl = getAppBaseUrl()
+
+      if (recipients.length > 0 && baseUrl) {
+        try {
+          await sendExitChecklistCompletedEmail({
+            to: recipients,
+            employeeName: data.employeeName,
+            employeePosition: off.positionName ?? "",
+            employeeDepartment: [data.department, data.unitName]
+              .filter(Boolean)
+              .join(" – "),
+            employmentEndDate:
+              off.actualEnd ?? off.plannedEnd ?? data.employmentEndDate,
+            completedByName: user.name ?? user.email ?? null,
+            checklistUrl: `${baseUrl}/odchody/${offboardingId}/vystupni-list`,
+          })
+
+          const completedAt = new Date().toISOString()
+          const headerWithCompletedNotification: Prisma.InputJsonObject = {
+            ...updatedHeader,
+            completedAt,
+            completedNotificationSentAt: completedAt,
+            completedNotificationSentByName: user.name ?? user.email ?? null,
+            completedNotificationSentByEmail: user.email ?? null,
+            completedNotificationSentTo: recipients.join(", "),
+          }
+
+          const completedChecklist = await prisma.exitChecklist.update({
+            where: {
+              id: checklist.id,
+            },
+            data: {
+              header: headerWithCompletedNotification,
+            },
+            include: {
+              items: true,
+              assets: true,
+              offboarding: true,
+            },
+          })
+
+          data = mapToExitChecklistData(off, completedChecklist)
+        } catch (emailError) {
+          console.warn(
+            "[EXIT-CHECKLIST PUT] Výstupní list je dokončený, ale HR e-mail se nepodařilo odeslat:",
+            emailError
+          )
+        }
+      }
+    }
 
     return NextResponse.json({
       status: "success",
       data,
+      completion,
     })
   } catch (error) {
     console.error("[EXIT-CHECKLIST PUT] Error:", error)

@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils"
 
 import { AuthStatusFeedback } from "@/components/auth/auth-status-feedback"
 import { ClientLayout } from "@/components/layout/client-layout"
+import { ChunkLoadRecovery } from "@/components/system/chunk-load-recovery"
 
 
 
@@ -64,6 +65,8 @@ export default function RootLayout({
         fontHeading.variable
       )}
     >
+    <ChunkLoadRecovery />
+
     <React.Suspense fallback={null}>
       <AuthStatusFeedback />
     </React.Suspense>

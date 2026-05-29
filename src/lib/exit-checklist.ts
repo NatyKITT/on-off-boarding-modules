@@ -14,6 +14,7 @@ import type {
   ExitChecklistSignatureValue,
   HandoverAgendaData,
   HandoverRecipient,
+  HandoverSendHistoryEntry,
 } from "@/types/exit-checklist"
 import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
 
@@ -95,6 +96,23 @@ function sanitizeNullableNumber(value: unknown): number | null {
   return null
 }
 
+function normalizeEmail(value: unknown): string {
+  return sanitizeText(value).toLowerCase()
+}
+
+function createStableId(parts: Array<string | null | undefined>) {
+  const value = parts
+    .map((part) => sanitizeText(part))
+    .filter(Boolean)
+    .join("-")
+    .toLowerCase()
+    .replace(/[^a-z0-9@._-]+/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+
+  return value || `item-${Date.now()}`
+}
+
 export function sanitizeSignatureValueForJson(
   value: unknown
 ): Prisma.InputJsonObject {
@@ -125,42 +143,220 @@ function sanitizeHandoverRecipientsForResponse(
   if (!Array.isArray(raw.handoverRecipients)) return []
 
   return raw.handoverRecipients
-    .map((recipient, index) => {
-      const rec = getRecord(recipient)
-
-      const id =
-        sanitizeText(rec.id) ||
-        sanitizeText(rec.email) ||
-        `recipient-${index + 1}`
+    .filter((item): item is Record<string, unknown> => {
+      return Boolean(item) && typeof item === "object"
+    })
+    .map((item) => {
+      const email = normalizeEmail(item.email)
+      const name = sanitizeText(item.name)
 
       return {
-        id,
-        name: sanitizeText(rec.name),
-        email: sanitizeText(rec.email).toLowerCase(),
-        personalNumber: sanitizeNullableText(rec.personalNumber),
-        department: sanitizeNullableText(rec.department),
+        id:
+          sanitizeText(item.id) ||
+          email ||
+          createStableId([name, sanitizeText(item.personalNumber)]),
+        name,
+        email,
+        personalNumber: sanitizeNullableText(item.personalNumber),
+        department: sanitizeNullableText(item.department),
+
+        handoverInfoLastSentAt: sanitizeNullableText(
+          item.handoverInfoLastSentAt
+        ),
+        handoverInfoLastSentByName: sanitizeNullableText(
+          item.handoverInfoLastSentByName
+        ),
+        handoverInfoLastSentByEmail: sanitizeNullableText(
+          item.handoverInfoLastSentByEmail
+        ),
+        handoverInfoSentCount: sanitizeNullableNumber(
+          item.handoverInfoSentCount
+        ),
       }
     })
-    .filter((recipient) => Boolean(recipient.name) && Boolean(recipient.email))
+    .filter((recipient) => Boolean(recipient.name && recipient.email))
 }
 
 function sanitizeHandoverRecipientsForJson(
   raw: Record<string, unknown>
 ): Prisma.InputJsonArray {
-  const recipients = sanitizeHandoverRecipientsForResponse(raw)
-
-  return recipients.map(
+  return sanitizeHandoverRecipientsForResponse(raw).map(
     (recipient): Prisma.InputJsonObject => ({
       id: recipient.id,
       name: recipient.name,
       email: recipient.email,
       personalNumber: recipient.personalNumber,
       department: recipient.department,
+
+      handoverInfoLastSentAt: recipient.handoverInfoLastSentAt ?? null,
+      handoverInfoLastSentByName: recipient.handoverInfoLastSentByName ?? null,
+      handoverInfoLastSentByEmail:
+        recipient.handoverInfoLastSentByEmail ?? null,
+      handoverInfoSentCount: recipient.handoverInfoSentCount ?? null,
     })
   )
 }
 
-function getHandoverSendMetadataForJson(
+function normalizeHistoryEntry(
+  item: Record<string, unknown>
+): HandoverSendHistoryEntry | null {
+  const email = normalizeEmail(item.email)
+  if (!email) return null
+
+  const name = sanitizeText(item.name) || email
+
+  return {
+    id: sanitizeText(item.id) || email,
+    name,
+    email,
+    personalNumber: sanitizeNullableText(item.personalNumber),
+    department: sanitizeNullableText(item.department),
+    lastSentAt: sanitizeNullableText(item.lastSentAt),
+    lastSentByName: sanitizeNullableText(item.lastSentByName),
+    lastSentByEmail: sanitizeNullableText(item.lastSentByEmail),
+    sentCount: sanitizeNullableNumber(item.sentCount) ?? 0,
+  }
+}
+
+function upsertHistoryEntry(
+  map: Map<string, HandoverSendHistoryEntry>,
+  next: HandoverSendHistoryEntry
+) {
+  const existing = map.get(next.email)
+
+  if (!existing) {
+    map.set(next.email, next)
+    return
+  }
+
+  const existingTime = existing.lastSentAt
+    ? new Date(existing.lastSentAt).getTime()
+    : 0
+  const nextTime = next.lastSentAt ? new Date(next.lastSentAt).getTime() : 0
+
+  const useNextAsMain = nextTime >= existingTime
+
+  map.set(next.email, {
+    id: useNextAsMain ? next.id : existing.id,
+    name: useNextAsMain ? next.name : existing.name,
+    email: next.email,
+    personalNumber:
+      (useNextAsMain ? next.personalNumber : existing.personalNumber) ??
+      existing.personalNumber ??
+      next.personalNumber ??
+      null,
+    department:
+      (useNextAsMain ? next.department : existing.department) ??
+      existing.department ??
+      next.department ??
+      null,
+    lastSentAt: useNextAsMain ? next.lastSentAt : existing.lastSentAt,
+    lastSentByName: useNextAsMain
+      ? next.lastSentByName
+      : existing.lastSentByName,
+    lastSentByEmail: useNextAsMain
+      ? next.lastSentByEmail
+      : existing.lastSentByEmail,
+    sentCount: Math.max(existing.sentCount ?? 0, next.sentCount ?? 0),
+  })
+}
+
+function sanitizeHandoverSendHistoryForResponse(
+  raw: Record<string, unknown>
+): HandoverSendHistoryEntry[] {
+  const historyByEmail = new Map<string, HandoverSendHistoryEntry>()
+
+  if (Array.isArray(raw.handoverSendHistory)) {
+    for (const item of raw.handoverSendHistory) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue
+
+      const entry = normalizeHistoryEntry(item as Record<string, unknown>)
+      if (entry) upsertHistoryEntry(historyByEmail, entry)
+    }
+  }
+
+  if (Array.isArray(raw.handoverRecipients)) {
+    for (const item of raw.handoverRecipients) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue
+
+      const record = item as Record<string, unknown>
+      const email = normalizeEmail(record.email)
+      const lastSentAt = sanitizeNullableText(record.handoverInfoLastSentAt)
+      const sentCount = sanitizeNullableNumber(record.handoverInfoSentCount)
+
+      if (!email || (!lastSentAt && !sentCount)) continue
+
+      upsertHistoryEntry(historyByEmail, {
+        id: sanitizeText(record.id) || email,
+        name: sanitizeText(record.name) || email,
+        email,
+        personalNumber: sanitizeNullableText(record.personalNumber),
+        department: sanitizeNullableText(record.department),
+        lastSentAt,
+        lastSentByName: sanitizeNullableText(record.handoverInfoLastSentByName),
+        lastSentByEmail: sanitizeNullableText(
+          record.handoverInfoLastSentByEmail
+        ),
+        sentCount: sentCount ?? 0,
+      })
+    }
+  }
+
+  return Array.from(historyByEmail.values()).sort((a, b) => {
+    const aTime = a.lastSentAt ? new Date(a.lastSentAt).getTime() : 0
+    const bTime = b.lastSentAt ? new Date(b.lastSentAt).getTime() : 0
+
+    return bTime - aTime
+  })
+}
+
+function sanitizeHandoverSendHistoryForJson(
+  raw: Record<string, unknown>
+): Prisma.InputJsonArray {
+  return sanitizeHandoverSendHistoryForResponse(raw).map(
+    (entry): Prisma.InputJsonObject => ({
+      id: entry.id,
+      name: entry.name,
+      email: entry.email,
+      personalNumber: entry.personalNumber,
+      department: entry.department,
+      lastSentAt: entry.lastSentAt,
+      lastSentByName: entry.lastSentByName,
+      lastSentByEmail: entry.lastSentByEmail,
+      sentCount: entry.sentCount,
+    })
+  )
+}
+
+function getHandoverSendMetadataForJson(raw: Record<string, unknown>): {
+  handoverRecipientsSentAt: string | null
+  handoverRecipientsSentByName: string | null
+  handoverRecipientsSentByEmail: string | null
+  handoverRecipientsSentHash: string | null
+  handoverRecipientsSentCount: number | null
+  handoverSendHistory: Prisma.InputJsonArray
+} {
+  return {
+    handoverRecipientsSentAt: sanitizeNullableText(
+      raw.handoverRecipientsSentAt
+    ),
+    handoverRecipientsSentByName: sanitizeNullableText(
+      raw.handoverRecipientsSentByName
+    ),
+    handoverRecipientsSentByEmail: sanitizeNullableText(
+      raw.handoverRecipientsSentByEmail
+    ),
+    handoverRecipientsSentHash: sanitizeNullableText(
+      raw.handoverRecipientsSentHash
+    ),
+    handoverRecipientsSentCount: sanitizeNullableNumber(
+      raw.handoverRecipientsSentCount
+    ),
+    handoverSendHistory: sanitizeHandoverSendHistoryForJson(raw),
+  }
+}
+
+function getHandoverSendMetadataForResponse(
   raw: Record<string, unknown>
 ): Pick<
   HandoverAgendaData,
@@ -169,6 +365,7 @@ function getHandoverSendMetadataForJson(
   | "handoverRecipientsSentByEmail"
   | "handoverRecipientsSentHash"
   | "handoverRecipientsSentCount"
+  | "handoverSendHistory"
 > {
   return {
     handoverRecipientsSentAt: sanitizeNullableText(
@@ -186,7 +383,49 @@ function getHandoverSendMetadataForJson(
     handoverRecipientsSentCount: sanitizeNullableNumber(
       raw.handoverRecipientsSentCount
     ),
+    handoverSendHistory: sanitizeHandoverSendHistoryForResponse(raw),
   }
+}
+
+function getCompletionMetadataForResponse(
+  raw: Record<string, unknown>
+): Pick<
+  ExitChecklistData,
+  | "completedAt"
+  | "completedNotificationSentAt"
+  | "completedNotificationSentByName"
+  | "completedNotificationSentByEmail"
+  | "completedNotificationSentTo"
+> {
+  return {
+    completedAt: sanitizeNullableText(raw.completedAt),
+    completedNotificationSentAt: sanitizeNullableText(
+      raw.completedNotificationSentAt
+    ),
+    completedNotificationSentByName: sanitizeNullableText(
+      raw.completedNotificationSentByName
+    ),
+    completedNotificationSentByEmail: sanitizeNullableText(
+      raw.completedNotificationSentByEmail
+    ),
+    completedNotificationSentTo: sanitizeNullableText(
+      raw.completedNotificationSentTo
+    ),
+  }
+}
+
+function mergeHistoryArrays(
+  nextHistory: unknown,
+  previousHistory: unknown
+): Prisma.InputJsonArray {
+  const mergedRaw: Record<string, unknown> = {
+    handoverSendHistory: [
+      ...(Array.isArray(previousHistory) ? previousHistory : []),
+      ...(Array.isArray(nextHistory) ? nextHistory : []),
+    ],
+  }
+
+  return sanitizeHandoverSendHistoryForJson(mergedRaw)
 }
 
 export function sanitizeHandoverForJson(
@@ -228,7 +467,9 @@ export function sanitizeHandoverForJson(
     ? sanitizeResponsibleParty(raw.responsibleParty)
     : null
 
-  const handoverRecipients = sanitizeHandoverRecipientsForJson(raw)
+  const handoverRecipients = option3
+    ? sanitizeHandoverRecipientsForJson(raw)
+    : []
 
   return {
     includeHandoverAgenda: true,
@@ -254,7 +495,7 @@ export function sanitizeHandoverForResponse(
   const raw = value as Record<string, unknown>
   const includeHandoverAgenda = Boolean(raw.includeHandoverAgenda)
 
-  const metadata = getHandoverSendMetadataForJson(raw)
+  const metadata = getHandoverSendMetadataForResponse(raw)
 
   if (!includeHandoverAgenda) {
     return {
@@ -275,7 +516,9 @@ export function sanitizeHandoverForResponse(
   const option2 = Boolean(raw.option2)
   const option3 = Boolean(raw.option3)
 
-  const handoverRecipients = sanitizeHandoverRecipientsForResponse(raw)
+  const handoverRecipients = option3
+    ? sanitizeHandoverRecipientsForResponse(raw)
+    : []
 
   return {
     includeHandoverAgenda: true,
@@ -303,41 +546,43 @@ export function preserveHandoverSendMetadata(
 
   const previousRaw = getRecord(previousHandover)
   const previousMetadata = getHandoverSendMetadataForJson(previousRaw)
+  const nextRecord = nextHandover as Record<string, unknown>
+
+  const nextMetadata = getHandoverSendMetadataForJson(nextRecord)
+  const mergedHistory = mergeHistoryArrays(
+    nextMetadata.handoverSendHistory,
+    previousMetadata.handoverSendHistory
+  )
 
   return {
     ...nextHandover,
+
     handoverRecipientsSentAt:
+      nextMetadata.handoverRecipientsSentAt ??
       previousMetadata.handoverRecipientsSentAt ??
-      (nextHandover.handoverRecipientsSentAt as string | null | undefined) ??
       null,
+
     handoverRecipientsSentByName:
+      nextMetadata.handoverRecipientsSentByName ??
       previousMetadata.handoverRecipientsSentByName ??
-      (nextHandover.handoverRecipientsSentByName as
-        | string
-        | null
-        | undefined) ??
       null,
+
     handoverRecipientsSentByEmail:
+      nextMetadata.handoverRecipientsSentByEmail ??
       previousMetadata.handoverRecipientsSentByEmail ??
-      (nextHandover.handoverRecipientsSentByEmail as
-        | string
-        | null
-        | undefined) ??
       null,
+
     handoverRecipientsSentHash:
+      nextMetadata.handoverRecipientsSentHash ??
       previousMetadata.handoverRecipientsSentHash ??
-      (nextHandover.handoverRecipientsSentHash as
-        | string
-        | null
-        | undefined) ??
       null,
+
     handoverRecipientsSentCount:
+      nextMetadata.handoverRecipientsSentCount ??
       previousMetadata.handoverRecipientsSentCount ??
-      (nextHandover.handoverRecipientsSentCount as
-        | number
-        | null
-        | undefined) ??
       null,
+
+    handoverSendHistory: mergedHistory,
   }
 }
 
@@ -351,6 +596,7 @@ export function sanitizeSignaturesForJson(
     manager: sanitizeSignatureValueForJson(raw.manager),
     issuer: sanitizeSignatureValueForJson(raw.issuer),
     issuedDate: sanitizeIsoDate(raw.issuedDate),
+    managerEmail: sanitizeNullableText(raw.managerEmail),
   }
 }
 
@@ -364,6 +610,7 @@ export function sanitizeSignaturesForResponse(
     manager: sanitizeSignatureValueForResponse(raw.manager),
     issuer: sanitizeSignatureValueForResponse(raw.issuer),
     issuedDate: sanitizeIsoDate(raw.issuedDate),
+    managerEmail: sanitizeNullableText(raw.managerEmail),
   }
 }
 
@@ -411,6 +658,7 @@ export function mapToExitChecklistData(
 
   const handover = sanitizeHandoverForResponse(headerData.handover)
   const signatures = sanitizeSignaturesForResponse(headerData.signatures)
+  const completionMetadata = getCompletionMetadataForResponse(headerData)
 
   return {
     id: checklist.id,
@@ -418,20 +666,26 @@ export function mapToExitChecklistData(
     publicToken: checklist.publicToken,
     conflictOfInterest: Boolean(headerData.conflictOfInterest),
     positionNum: off.positionNum ?? null,
+
     employeeName: header.employeeName,
     personalNumber: header.personalNumber,
     department: header.department,
     unitName: header.unitName,
     employmentEndDate: header.employmentEndDate,
     employeeEmail: off.userEmail ?? null,
+
     managerEmail: sanitizeText(headerData.managerEmail) || null,
     managerName: sanitizeText(headerData.managerName) || null,
     handoverManagerSignature:
       sanitizeSignatureValueForResponse(headerData.handoverManagerSignature) ??
       null,
+
     lockedAt: checklist.lockedAt
       ? new Date(checklist.lockedAt).toISOString()
       : null,
+
+    ...completionMetadata,
+
     items,
     assets,
     handover,

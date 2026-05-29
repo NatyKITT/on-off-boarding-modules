@@ -9,6 +9,8 @@ import { getSession } from "@/lib/session"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
+export const fetchCache = "force-no-store"
+export const revalidate = 0
 
 const recipientSchema = z.object({
   id: z.string().optional().nullable(),
@@ -31,6 +33,7 @@ const bodySchema = z.object({
       option3: z.boolean().optional(),
       option3Reason: z.string().optional().nullable(),
       responsibleParty: z.enum(["KITT6", "OSS_KT"]).optional().nullable(),
+
       handoverRecipientsSentAt: z.string().optional().nullable(),
       handoverRecipientsSentByName: z.string().optional().nullable(),
       handoverRecipientsSentByEmail: z.string().optional().nullable(),
@@ -48,8 +51,23 @@ function sanitizeText(value: unknown): string {
   return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : ""
 }
 
+function sanitizeNullableText(value: unknown): string | null {
+  return sanitizeText(value) || null
+}
+
 function normalizeEmail(value: unknown): string {
   return sanitizeText(value).toLowerCase()
+}
+
+function sanitizeNumber(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value
+
+  if (typeof value === "string") {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+
+  return 0
 }
 
 function formatCzDate(date: Date | null | undefined) {
@@ -75,6 +93,15 @@ function buildEmployeeName(offboarding: {
     .trim()
 }
 
+function buildEmployeeDepartment(offboarding: {
+  department: string | null
+  unitName?: string | null
+}) {
+  return [offboarding.department, offboarding.unitName]
+    .filter(Boolean)
+    .join(" – ")
+}
+
 function normalizeRecipients(recipients: NormalizedRecipient[]) {
   return Array.from(
     new Map(
@@ -84,11 +111,11 @@ function normalizeRecipients(recipients: NormalizedRecipient[]) {
         return [
           email,
           {
-            id: recipient.id ?? email,
+            id: sanitizeText(recipient.id) || email,
             name: sanitizeText(recipient.name),
             email,
-            personalNumber: sanitizeText(recipient.personalNumber) || null,
-            department: sanitizeText(recipient.department) || null,
+            personalNumber: sanitizeNullableText(recipient.personalNumber),
+            department: sanitizeNullableText(recipient.department),
           },
         ]
       })
@@ -101,6 +128,7 @@ function buildRecipientHash(
     email: string
     name: string
     personalNumber?: string | null
+    department?: string | null
   }>
 ) {
   return recipients
@@ -108,10 +136,16 @@ function buildRecipientHash(
       email: normalizeEmail(recipient.email),
       name: sanitizeText(recipient.name),
       personalNumber: sanitizeText(recipient.personalNumber) || "",
+      department: sanitizeText(recipient.department) || "",
     }))
     .sort((a, b) => a.email.localeCompare(b.email))
     .map((recipient) =>
-      [recipient.email, recipient.name, recipient.personalNumber].join("|")
+      [
+        recipient.email,
+        recipient.name,
+        recipient.personalNumber,
+        recipient.department,
+      ].join("|")
     )
     .join(";;")
 }
@@ -124,11 +158,160 @@ function getHeaderObject(value: unknown): Record<string, unknown> {
 
 function getHandoverObject(value: unknown): Record<string, unknown> {
   const header = getHeaderObject(value)
+
   return header.handover &&
     typeof header.handover === "object" &&
     !Array.isArray(header.handover)
     ? (header.handover as Record<string, unknown>)
     : {}
+}
+
+function getExistingHandoverSendHistory(
+  existingHandover: Record<string, unknown>
+) {
+  return Array.isArray(existingHandover.handoverSendHistory)
+    ? existingHandover.handoverSendHistory.filter(
+        (item): item is Record<string, unknown> =>
+          Boolean(item) && typeof item === "object" && !Array.isArray(item)
+      )
+    : []
+}
+
+function getExistingRecipientsWithSendMetadata(
+  existingHandover: Record<string, unknown>
+) {
+  return Array.isArray(existingHandover.handoverRecipients)
+    ? existingHandover.handoverRecipients.filter(
+        (item): item is Record<string, unknown> =>
+          Boolean(item) && typeof item === "object" && !Array.isArray(item)
+      )
+    : []
+}
+
+function mergeHandoverSendHistory({
+  existingHandover,
+  recipients,
+  sentAt,
+  sentByName,
+  sentByEmail,
+}: {
+  existingHandover: Record<string, unknown>
+  recipients: ReturnType<typeof normalizeRecipients>
+  sentAt: string
+  sentByName: string | null
+  sentByEmail: string | null
+}): Prisma.InputJsonArray {
+  const historyByEmail = new Map<string, Prisma.InputJsonObject>()
+
+  for (const item of getExistingHandoverSendHistory(existingHandover)) {
+    const email = normalizeEmail(item.email)
+
+    if (!email) continue
+
+    historyByEmail.set(email, {
+      id: sanitizeText(item.id) || email,
+      name: sanitizeText(item.name) || email,
+      email,
+      personalNumber: sanitizeNullableText(item.personalNumber),
+      department: sanitizeNullableText(item.department),
+      lastSentAt: sanitizeNullableText(item.lastSentAt),
+      lastSentByName: sanitizeNullableText(item.lastSentByName),
+      lastSentByEmail: sanitizeNullableText(item.lastSentByEmail),
+      sentCount: sanitizeNumber(item.sentCount),
+    })
+  }
+
+  for (const item of getExistingRecipientsWithSendMetadata(existingHandover)) {
+    const email = normalizeEmail(item.email)
+    if (!email || historyByEmail.has(email)) continue
+
+    const lastSentAt = sanitizeNullableText(item.handoverInfoLastSentAt)
+    const sentCount = sanitizeNumber(item.handoverInfoSentCount)
+
+    if (!lastSentAt && sentCount <= 0) continue
+
+    historyByEmail.set(email, {
+      id: sanitizeText(item.id) || email,
+      name: sanitizeText(item.name) || email,
+      email,
+      personalNumber: sanitizeNullableText(item.personalNumber),
+      department: sanitizeNullableText(item.department),
+      lastSentAt,
+      lastSentByName: sanitizeNullableText(item.handoverInfoLastSentByName),
+      lastSentByEmail: sanitizeNullableText(item.handoverInfoLastSentByEmail),
+      sentCount,
+    })
+  }
+
+  for (const recipient of recipients) {
+    const email = normalizeEmail(recipient.email)
+    if (!email) continue
+
+    const previous = historyByEmail.get(email)
+    const previousCount = sanitizeNumber(previous?.sentCount)
+
+    historyByEmail.set(email, {
+      id: recipient.id || sanitizeText(previous?.id) || email,
+      name: recipient.name || sanitizeText(previous?.name) || email,
+      email,
+      personalNumber:
+        recipient.personalNumber ||
+        sanitizeNullableText(previous?.personalNumber),
+      department:
+        recipient.department || sanitizeNullableText(previous?.department),
+      lastSentAt: sentAt,
+      lastSentByName: sentByName,
+      lastSentByEmail: sentByEmail,
+      sentCount: previousCount + 1,
+    })
+  }
+
+  return Array.from(historyByEmail.values()).sort((a, b) => {
+    const aTime = sanitizeText(a.lastSentAt)
+      ? new Date(String(a.lastSentAt)).getTime()
+      : 0
+    const bTime = sanitizeText(b.lastSentAt)
+      ? new Date(String(b.lastSentAt)).getTime()
+      : 0
+
+    return bTime - aTime
+  })
+}
+
+function getExistingRecipientSendState(
+  existingHandover: Record<string, unknown>,
+  email: string
+) {
+  const normalizedEmail = normalizeEmail(email)
+
+  const existingRecipient = getExistingRecipientsWithSendMetadata(
+    existingHandover
+  ).find((item) => normalizeEmail(item.email) === normalizedEmail)
+
+  if (existingRecipient) {
+    return {
+      lastSentAt:
+        sanitizeNullableText(existingRecipient.handoverInfoLastSentAt) ?? null,
+      lastSentByName:
+        sanitizeNullableText(existingRecipient.handoverInfoLastSentByName) ??
+        null,
+      lastSentByEmail:
+        sanitizeNullableText(existingRecipient.handoverInfoLastSentByEmail) ??
+        null,
+      sentCount: sanitizeNumber(existingRecipient.handoverInfoSentCount),
+    }
+  }
+
+  const existingHistory = getExistingHandoverSendHistory(existingHandover).find(
+    (item) => normalizeEmail(item.email) === normalizedEmail
+  )
+
+  return {
+    lastSentAt: sanitizeNullableText(existingHistory?.lastSentAt),
+    lastSentByName: sanitizeNullableText(existingHistory?.lastSentByName),
+    lastSentByEmail: sanitizeNullableText(existingHistory?.lastSentByEmail),
+    sentCount: sanitizeNumber(existingHistory?.sentCount),
+  }
 }
 
 function buildNextHandoverJson({
@@ -149,39 +332,55 @@ function buildNextHandoverJson({
   recipientsHash: string
 }): Prisma.InputJsonObject {
   const source = rawHandover ?? existingHandover
-  const previousCount = Number(
-    existingHandover.handoverRecipientsSentCount ?? 0
+  const previousCount = sanitizeNumber(
+    existingHandover.handoverRecipientsSentCount
   )
+
+  const handoverSendHistory = mergeHandoverSendHistory({
+    existingHandover,
+    recipients,
+    sentAt,
+    sentByName,
+    sentByEmail,
+  })
 
   return {
     includeHandoverAgenda: Boolean(source.includeHandoverAgenda ?? true),
     option1: Boolean(source.option1),
-    option2: Boolean(source.option2 ?? true),
+    option2: Boolean(source.option2 ?? false),
     option2Target: sanitizeText(source.option2Target),
     option2TargetPositionNum: sanitizeText(source.option2TargetPositionNum),
     option3: Boolean(source.option3),
     option3Reason: sanitizeText(source.option3Reason),
-    responsibleParty:
-      source.responsibleParty === "KITT6" ||
-      source.responsibleParty === "OSS_KT"
-        ? source.responsibleParty
-        : null,
-    handoverRecipients: recipients.map(
-      (recipient): Prisma.InputJsonObject => ({
+    responsibleParty: null,
+
+    handoverRecipients: recipients.map((recipient): Prisma.InputJsonObject => {
+      const previous = getExistingRecipientSendState(
+        existingHandover,
+        recipient.email
+      )
+
+      return {
         id: recipient.id,
         name: recipient.name,
         email: recipient.email,
         personalNumber: recipient.personalNumber,
         department: recipient.department,
-      })
-    ) as Prisma.InputJsonArray,
+
+        handoverInfoLastSentAt: sentAt,
+        handoverInfoLastSentByName: sentByName,
+        handoverInfoLastSentByEmail: sentByEmail,
+        handoverInfoSentCount: previous.sentCount + 1,
+      }
+    }) as Prisma.InputJsonArray,
+
+    handoverSendHistory,
+
     handoverRecipientsSentAt: sentAt,
     handoverRecipientsSentByName: sentByName,
     handoverRecipientsSentByEmail: sentByEmail,
     handoverRecipientsSentHash: recipientsHash,
-    handoverRecipientsSentCount: Number.isFinite(previousCount)
-      ? previousCount + 1
-      : 1,
+    handoverRecipientsSentCount: previousCount + 1,
   }
 }
 
@@ -248,12 +447,15 @@ export async function POST(
         titleAfter: true,
         positionName: true,
         department: true,
+        unitName: true,
         actualEnd: true,
         plannedEnd: true,
+        deletedAt: true,
         exitChecklist: {
           select: {
             id: true,
             header: true,
+            lockedAt: true,
           },
         },
       },
@@ -266,6 +468,16 @@ export async function POST(
       )
     }
 
+    if (offboarding.deletedAt) {
+      return NextResponse.json(
+        {
+          status: "error",
+          message: "Nelze odesílat informace ke smazanému záznamu odchodu.",
+        },
+        { status: 409 }
+      )
+    }
+
     if (!offboarding.exitChecklist) {
       return NextResponse.json(
         {
@@ -274,6 +486,17 @@ export async function POST(
             "Výstupní list ještě nebyl vytvořen. Nejdříve ho otevřete a uložte.",
         },
         { status: 404 }
+      )
+    }
+
+    if (offboarding.exitChecklist.lockedAt) {
+      return NextResponse.json(
+        {
+          status: "error",
+          message:
+            "Výstupní list je uzamčený. Po uzamčení už nelze odesílat informace příjemcům agendy.",
+        },
+        { status: 423 }
       )
     }
 
@@ -296,6 +519,7 @@ export async function POST(
             sentAt: existingHandover.handoverRecipientsSentAt,
             sentByName: existingHandover.handoverRecipientsSentByName ?? null,
             recipientsHash,
+            handoverSendHistory: existingHandover.handoverSendHistory ?? null,
           },
         },
         { status: 409 }
@@ -307,14 +531,25 @@ export async function POST(
       offboarding.actualEnd ?? offboarding.plannedEnd
     )
 
+    const sentAt = new Date().toISOString()
+    const sentByName = user.name ?? user.email ?? null
+    const sentByEmail = user.email ?? null
+
+    const employeeDepartment = buildEmployeeDepartment(offboarding)
+
     const results = await Promise.allSettled(
       uniqueRecipients.map((recipient) =>
         sendHandoverRecipientEmail({
           to: recipient.email,
           employeeName,
           employeePosition: offboarding.positionName ?? "",
-          employeeDepartment: offboarding.department ?? "",
+          employeeDepartment,
           employmentEndDate,
+          option3Reason:
+            sanitizeText(handover?.option3Reason) ||
+            sanitizeText(existingHandover.option3Reason) ||
+            null,
+          sentByName,
         })
       )
     )
@@ -344,10 +579,6 @@ export async function POST(
       )
     }
 
-    const sentAt = new Date().toISOString()
-    const sentByName = user.name ?? user.email ?? null
-    const sentByEmail = user.email ?? null
-
     const nextHandover = buildNextHandoverJson({
       rawHandover: handover,
       existingHandover,
@@ -368,18 +599,20 @@ export async function POST(
       data: { header: nextHeader },
     })
 
-    const sendCount = Number(nextHandover.handoverRecipientsSentCount ?? 1)
+    const sendCount = sanitizeNumber(nextHandover.handoverRecipientsSentCount)
 
     return NextResponse.json({
       status: "success",
       message: force
         ? "Informace byly odeslány znovu."
-        : "Informace byly odeslány příjemcům předávané agendy.",
+        : "Informace byly odeslány osobám uvedeným v části „Za dokumenty odpovídá“.",
       sentAt,
       sentByName,
       sentByEmail,
       sentHash: recipientsHash,
       sentCount: sendCount,
+      handoverSendHistory: nextHandover.handoverSendHistory,
+      history: nextHandover.handoverSendHistory,
       data: {
         requested: recipients.length,
         sent: uniqueRecipients.length,
@@ -391,6 +624,9 @@ export async function POST(
         recipientsHash,
         sentCount: sendCount,
         sendCount,
+        recipients: nextHandover.handoverRecipients,
+        handoverSendHistory: nextHandover.handoverSendHistory,
+        history: nextHandover.handoverSendHistory,
       },
     })
   } catch (error) {

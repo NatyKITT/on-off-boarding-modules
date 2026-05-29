@@ -7,6 +7,11 @@ import { env } from "@/env.mjs"
 
 import { prisma } from "@/lib/db"
 import {
+  buildLinkedOffboardingInfo,
+  normalizePersonalNumber,
+  pickMostRelevantOffboarding,
+} from "@/lib/employment-linking"
+import {
   normalizePersonSnapshot,
   toMentorFields,
   toSupervisorFields,
@@ -92,10 +97,47 @@ function buildFullName(parts: Array<string | null | undefined>): string | null {
   return full || null
 }
 
-function serializeOnboarding(
+async function getLinkedOffboardingForOnboarding(
+  personalNumber: string | null | undefined,
+  probationEnd: Date | null | undefined
+) {
+  const normalizedPersonalNumber = normalizePersonalNumber(personalNumber)
+
+  if (!normalizedPersonalNumber) {
+    return buildLinkedOffboardingInfo({
+      offboarding: null,
+      probationEnd,
+    })
+  }
+
+  const linkedOffboardings = await prisma.employeeOffboarding.findMany({
+    where: {
+      personalNumber: normalizedPersonalNumber,
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+      personalNumber: true,
+      plannedEnd: true,
+      actualEnd: true,
+    },
+  })
+
+  return buildLinkedOffboardingInfo({
+    offboarding: pickMostRelevantOffboarding(linkedOffboardings),
+    probationEnd,
+  })
+}
+
+async function serializeOnboarding(
   record: Awaited<ReturnType<typeof prisma.employeeOnboarding.findFirst>>
 ) {
   if (!record) return null
+
+  const linkedOffboarding = await getLinkedOffboardingForOnboarding(
+    record.personalNumber,
+    record.probationEnd
+  )
 
   return {
     ...record,
@@ -145,6 +187,8 @@ function serializeOnboarding(
     cancelledAt: record.cancelledAt?.toISOString() ?? null,
     cancelledBy: record.cancelledBy ?? null,
     cancelReason: record.cancelReason ?? null,
+
+    linkedOffboarding,
   }
 }
 
@@ -222,7 +266,7 @@ export async function GET(_: NextRequest, { params }: Params) {
 
     return NextResponse.json({
       status: "success",
-      data: serializeOnboarding(record),
+      data: await serializeOnboarding(record),
     })
   } catch (error) {
     console.error("Chyba při načítání záznamu:", error)
@@ -374,7 +418,6 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         })
       }
 
-      // mentor
       if (data.mentorName !== undefined || data.mentorEmail !== undefined) {
         const mentorSnapshot =
           data.mentorName || data.mentorEmail
@@ -520,7 +563,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
     return NextResponse.json({
       status: "success",
-      data: serializeOnboarding(updated),
+      data: await serializeOnboarding(updated),
       message: "Záznam byl úspěšně aktualizován.",
     })
   } catch (err) {

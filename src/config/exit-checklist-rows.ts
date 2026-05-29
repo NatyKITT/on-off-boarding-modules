@@ -38,31 +38,32 @@ export const EXIT_CHECKLIST_ROWS: ExitChecklistRowDefinition[] = [
   },
   {
     key: "serviceTools",
-    organization: "Odbor služeb\nIng. Martina Krýzová\nPřízemí - č. dv. 006",
-    obligation: "služební pomůcky",
+    organization:
+      "Odbor oddělení vnitřní správy\nOdbor služeb\nIng. Martina Krýzová\nPřízemí - č. dv. 006",
+    obligation: "služební pomůcky (dále viz B. Výpis z osobní karty)",
   },
   {
     key: "serviceId",
     organization:
-      "Vedoucí personálního oddělení\nKancelář tajemníka\nMgr. Michaela Aronová - č. dv. 521",
+      "Vedoucí personálního oddělení\nKancelář tajemníka\nMgr. Michaela Aronová\nč. dv. 521",
     obligation: "služební průkaz",
   },
   {
     key: "centralRegistry",
     organization:
-      "Vedoucí oddělení spisové služby\nKancelář tajemníka\nHana Štičková - č. dv. 119",
+      "Vedoucí oddělení spisové služby\nKancelář tajemníka\nHana Štičková\nč. dv. 119",
     obligation: "závazky ve vztahu k centrální spisovně",
   },
   {
     key: "classifiedDocs",
     organization:
-      "Vedoucí oddělení krizového řízení a bezpečnosti\nKancelář tajemníka\nMgr. Petr Duben - č. dv. 617A",
+      "Vedoucí oddělení krizového řízení a bezpečnosti\nKancelář tajemníka\nMgr. Petr Duben\nč. dv. 617A",
     obligation: "utajované písemnosti",
   },
   {
     key: "fineBlocks",
     organization:
-      "Vedoucí oddělení místních příjmů\nEkonomický odbor\nIng. Blanka Zavřelová - č. dv. 513",
+      "Vedoucí oddělení místních příjmů\nEkonomický odbor\nIng. Blanka Zavřelová\nč. dv. 513",
     obligation: "příkazové bloky na pokuty a jejich vyúčtování",
   },
   {
@@ -93,7 +94,7 @@ export const EXIT_CHECKLIST_ROWS: ExitChecklistRowDefinition[] = [
   },
   {
     key: "lawInfo",
-    organization: "Právní odbor\nIng. Miroslava Bečičková - č. dv. 507",
+    organization: "Právní odbor\nIng. Miroslava Bečičková\nč. dv. 507",
     obligation:
       "Podání informace v návaznosti na ust. § 14a odst. 3 zákona č.159/2006 Sb., o střetu zájmů",
   },
