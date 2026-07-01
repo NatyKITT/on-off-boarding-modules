@@ -1,0 +1,738 @@
+# Crony, e-mailová fronta a technické přístupy
+
+Tento dokument popisuje, k čemu v aplikaci slouží cron endpointy, jak funguje e-mailová fronta, jaké proměnné prostředí je potřeba nastavit, jaká technická oprávnění jsou potřeba a jak ověřit, že je vše správně zapojené.
+
+Dokument je určený pro převzetí, nasazení nebo kontrolu aplikace v jiném prostředí, aby bylo jasné, co je potřeba nastavit mimo samotný kód v GitHubu.
+
+---
+
+## 1. Shrnutí
+
+Aplikace používá cron endpointy pro automatické zpracování agendy zkušební doby a pro odesílání e-mailů z fronty.
+
+Crony se nespouští samy od sebe jen tím, že existuje kód v repozitáři. Musí je volat externí plánovač, například:
+
+- GitHub Actions,
+- hostingový scheduler,
+- serverový cron,
+- ruční HTTP request při testování.
+
+Cron endpointy jsou chráněné přes `CRON_SECRET`. To znamená, že volající systém musí znát stejný secret, jaký má nastavený běžící aplikace ve svém prostředí.
+
+Zjednodušený tok:
+
+1. Cron `probation-notifications` projde nástupy a zkušební doby.
+2. Podle pravidel vytvoří e-mailové úlohy v tabulce `MailQueue`.
+3. Cron `mail-worker` zpracuje čekající položky z `MailQueue`.
+4. Mail worker odešle e-maily přes Resend.
+5. Stav odeslání nebo chyba se zapíše do databáze / historie.
+
+---
+
+## 2. Hlavní cron endpointy
+
+### 2.1 Kontrola zkušebních dob
+
+```txt
+GET /api/cron/probation-notifications
+```
+
+Tento endpoint kontroluje nástupy a konce zkušebních dob.
+
+Typicky zajišťuje:
+
+- dohledání zaměstnanců, kterým se blíží konec zkušební doby,
+- vytvoření e-mailové úlohy pro zaslání formuláře vedoucímu,
+- vytvoření připomínek,
+- vytvoření informace pro HR, pokud chybí vedoucí,
+- vytvoření informace pro HR, pokud vyhodnocení není dokončeno.
+
+Důležité: tento endpoint běžně e-maily přímo neposílá. Pouze připravuje úlohy do e-mailové fronty.
+
+---
+
+### 2.2 Mail worker
+
+```txt
+GET /api/cron/mail-worker
+```
+
+Tento endpoint zpracovává e-mailovou frontu.
+
+Typicky dělá:
+
+- najde čekající záznamy v `MailQueue`,
+- podle typu úlohy sestaví e-mail,
+- odešle e-mail přes Resend,
+- označí úlohu jako odeslanou,
+- při chybě zapíše chybu do fronty / logu.
+
+---
+
+### 2.3 Obecný cron endpoint
+
+```txt
+GET /api/cron
+```
+
+Obecný endpoint může sloužit pro kompatibilitu nebo pro starší napojení.
+
+Primárně je ale vhodné používat konkrétní endpointy:
+
+```txt
+/api/cron/probation-notifications
+/api/cron/mail-worker
+```
+
+---
+
+## 3. Bezpečnost cron endpointů
+
+Cron endpointy nejsou autorizované přes běžné uživatelské role typu `HR`, `ADMIN`, `IT` nebo `READONLY`.
+
+Cron se autorizuje technicky přes `CRON_SECRET`.
+
+Každé volání cron endpointu musí obsahovat HTTP header:
+
+```txt
+Authorization: Bearer <CRON_SECRET>
+```
+
+Příklad:
+
+```bash
+curl -fsS "https://url-aplikace.cz/api/cron/probation-notifications" \
+  -H "Authorization: Bearer <CRON_SECRET>"
+```
+
+Pokud header chybí nebo secret nesedí, endpoint má vrátit chybu `401` nebo `403`.
+
+---
+
+## 4. Co znamenají „práva“ v kontextu cronů
+
+V kontextu cronů nejde primárně o uživatelská práva v aplikaci, ale o technická oprávnění a přístupy potřebné k tomu, aby crony mohly běžet.
+
+Je potřeba ověřit hlavně následující oblasti.
+
+### 4.1 Přístup k ENV proměnným aplikace
+
+Někdo musí mít možnost nastavit proměnné prostředí v místě, kde aplikace skutečně běží.
+
+Může to být například:
+
+- hosting,
+- server,
+- Docker kontejner,
+- CI/CD prostředí,
+- lokální `.env.local` při lokálním testování.
+
+GitHub Secrets se automaticky nepřenášejí do běžící aplikace. Pokud je aplikace spuštěná jinde, musí mít vlastní ENV nastavené v daném prostředí.
+
+### 4.2 Přístup do GitHub Actions Secrets
+
+Pokud crony spouští GitHub Actions, musí mít repozitář nastavené secrets:
+
+```env
+APP_URL=...
+CRON_SECRET=...
+```
+
+Hodnota `CRON_SECRET` v GitHubu musí být stejná jako hodnota `CRON_SECRET` v běžící aplikaci.
+
+### 4.3 Přístup k běžící aplikaci
+
+GitHub Actions nebo jiný scheduler musí být schopný zavolat veřejnou URL běžící aplikace.
+
+Například:
+
+```txt
+https://url-aplikace.cz/api/cron/probation-notifications
+https://url-aplikace.cz/api/cron/mail-worker
+```
+
+Pokud aplikace není veřejně dostupná, je potřeba cron spouštět ze stejné sítě nebo z prostředí, které má k aplikaci přístup.
+
+### 4.4 Přístup k databázi
+
+Crony pracují s databází.
+
+Prostředí musí mít správně nastavenou `DATABASE_URL` a databáze musí obsahovat aktuální migrace.
+
+Cron `probation-notifications` čte nástupy, zkušební dobu a stav vyhodnocení.
+
+Cron `mail-worker` čte a aktualizuje `MailQueue`.
+
+### 4.5 Přístup k e-mailové službě Resend
+
+Pro odesílání e-mailů je potřeba:
+
+- platný `RESEND_API_KEY`,
+- správně nastavený `EMAIL_FROM`,
+- ověřená doména nebo odesílací adresa v Resendu,
+- nastavení příjemců, například `HR_EMAILS`.
+
+Pokud cron vytvoří úlohu do fronty, ale Resend není správně nastavený, mail worker nebude schopný e-mail odeslat.
+
+### 4.6 Aplikační role
+
+Běžné role v aplikaci zůstávají pro práci ve formulářích a interních obrazovkách:
+
+- `ADMIN`, `HR`, `IT` mohou spravovat vyhodnocení,
+- `READONLY` může pouze číst,
+- veřejný formulář je dostupný přes token a přihlášení oprávněného uživatele.
+
+Cron endpointy se ale neřídí těmito rolemi. Cron se ověřuje přes `CRON_SECRET`.
+
+---
+
+## 5. ENV proměnné v aplikaci
+
+V prostředí, kde aplikace běží, musí být nastavené minimálně následující proměnné.
+
+### 5.1 Cron a URL aplikace
+
+```env
+CRON_SECRET=dlouhy-nahodny-token
+NEXT_PUBLIC_APP_URL=https://url-aplikace.cz
+AUTH_URL=https://url-aplikace.cz
+NEXTAUTH_URL=https://url-aplikace.cz
+```
+
+Poznámky:
+
+- `CRON_SECRET` chrání cron endpointy.
+- `NEXT_PUBLIC_APP_URL` se používá pro sestavování odkazů do aplikace.
+- `AUTH_URL` / `NEXTAUTH_URL` musí odpovídat URL běžící aplikace.
+- Podle použité verze Auth.js / NextAuth může být relevantní `AUTH_URL`, `NEXTAUTH_URL`, případně oboje. Bezpečné je mít nastavené oboje na stejnou URL.
+
+### 5.2 E-mailové proměnné
+
+```env
+RESEND_API_KEY=...
+EMAIL_FROM=...
+HR_EMAILS=hr1@praha6.cz,hr2@praha6.cz
+```
+
+Poznámky:
+
+- `RESEND_API_KEY` je API klíč pro Resend.
+- `EMAIL_FROM` musí být adresa/doména povolená v Resendu.
+- `HR_EMAILS` je seznam HR příjemců oddělený čárkou.
+
+### 5.3 Běžné aplikační proměnné
+
+```env
+DATABASE_URL=...
+AUTH_SECRET=...
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+```
+
+Poznámky:
+
+- `DATABASE_URL` musí ukazovat na správnou databázi pro dané prostředí.
+- `AUTH_SECRET` musí být samostatný náhodný secret. Nemá to být Google Client ID.
+- `GOOGLE_CLIENT_ID` a `GOOGLE_CLIENT_SECRET` jsou potřeba pro Google OAuth přihlášení.
+
+Doporučené vygenerování `AUTH_SECRET`:
+
+```bash
+openssl rand -base64 32
+```
+
+Doporučené vygenerování `CRON_SECRET`:
+
+```bash
+openssl rand -base64 32
+```
+
+---
+
+## 6. GitHub Actions Secrets
+
+Pokud cron spouští GitHub Actions, musí být v GitHubu nastavené secrets.
+
+Minimálně:
+
+```env
+APP_URL=https://url-bezici-aplikace.cz
+CRON_SECRET=stejny-token-jako-v-env-aplikace
+```
+
+Důležité pravidlo:
+
+```txt
+CRON_SECRET v GitHub Actions musí být stejný jako CRON_SECRET v ENV běžící aplikace.
+```
+
+GitHub Actions funguje pouze jako externí volající. Zavolá URL aplikace a pošle jí token v headeru.
+
+GitHub Secrets se automaticky nepoužijí:
+
+- při lokálním spuštění aplikace,
+- na hostingu,
+- na serveru,
+- v Docker kontejneru,
+- v jiném CI/CD prostředí.
+
+Každé prostředí musí mít svoje vlastní ENV.
+
+---
+
+## 7. DEV a PROD prostředí
+
+Doporučuje se mít oddělené hodnoty pro DEV a PROD.
+
+### 7.1 DEV
+
+```env
+APP_URL=https://dev-url-aplikace.cz
+CRON_SECRET=dev-dlouhy-secret
+```
+
+### 7.2 PROD
+
+```env
+APP_URL=https://produkce-url-aplikace.cz
+CRON_SECRET=prod-dlouhy-secret
+```
+
+Nedoporučuje se používat stejný `CRON_SECRET` pro DEV i PROD.
+
+### 7.3 Možnosti nastavení v GitHubu
+
+Existují dvě praktické varianty.
+
+#### Varianta A: GitHub Environments
+
+V GitHubu se vytvoří environments například:
+
+- `dev`,
+- `production`.
+
+V každém environmentu mohou být secrets se stejným názvem, ale s jinou hodnotou:
+
+```env
+APP_URL=...
+CRON_SECRET=...
+```
+
+Workflow potom musí mít u jobu uvedeno například:
+
+```yml
+environment: production
+```
+
+Bez uvedení environmentu si job nevezme environment secrets.
+
+#### Varianta B: samostatné názvy secrets
+
+V GitHubu se nastaví například:
+
+```env
+DEV_APP_URL=...
+DEV_CRON_SECRET=...
+PROD_APP_URL=...
+PROD_CRON_SECRET=...
+```
+
+Workflow potom musí používat odpovídající názvy secrets.
+
+---
+
+## 8. Příklad GitHub Actions workflow
+
+### 8.1 Kontrola zkušebních dob
+
+Soubor například:
+
+```txt
+.github/workflows/probation-check.yml
+```
+
+Příklad:
+
+```yml
+name: Probation Check
+
+on:
+  schedule:
+    - cron: "7 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  probation-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call probation notifications cron
+        run: |
+          curl -fsS "$APP_URL/api/cron/probation-notifications" \
+            -H "Authorization: Bearer $CRON_SECRET"
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+```
+
+Poznámka: čas v GitHub Actions cron zápisu je v UTC.
+
+---
+
+### 8.2 Mail worker
+
+Soubor například:
+
+```txt
+.github/workflows/mail-worker.yml
+```
+
+Příklad:
+
+```yml
+name: Mail Worker
+
+on:
+  schedule:
+    - cron: "10 6-17 * * *"
+  workflow_dispatch:
+
+jobs:
+  mail-worker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call mail worker cron
+        run: |
+          curl -fsS "$APP_URL/api/cron/mail-worker" \
+            -H "Authorization: Bearer $CRON_SECRET"
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+```
+
+Tento příklad spouští mail worker každou hodinu v rozmezí 6–17 UTC.
+
+---
+
+## 9. Ruční testování cron endpointů
+
+### 9.1 Test kontroly zkušebních dob
+
+```bash
+curl -fsS "https://url-aplikace.cz/api/cron/probation-notifications" \
+  -H "Authorization: Bearer <CRON_SECRET>"
+```
+
+### 9.2 Test mail workeru
+
+```bash
+curl -fsS "https://url-aplikace.cz/api/cron/mail-worker" \
+  -H "Authorization: Bearer <CRON_SECRET>"
+```
+
+### 9.3 Lokální test
+
+V `.env.local` musí být například:
+
+```env
+CRON_SECRET=local-secret
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+AUTH_URL=http://localhost:3000
+NEXTAUTH_URL=http://localhost:3000
+```
+
+Potom lze volat:
+
+```bash
+curl -fsS "http://localhost:3000/api/cron/probation-notifications" \
+  -H "Authorization: Bearer local-secret"
+```
+
+nebo:
+
+```bash
+curl -fsS "http://localhost:3000/api/cron/mail-worker" \
+  -H "Authorization: Bearer local-secret"
+```
+
+---
+
+## 10. E-mailová fronta `MailQueue`
+
+E-mailová fronta slouží k oddělení vytvoření e-mailové úlohy od samotného odeslání.
+
+Typický tok:
+
+1. Cron nebo aplikační akce vytvoří záznam v `MailQueue`.
+2. Záznam má typ e-mailu, payload a stav.
+3. Mail worker najde čekající záznamy.
+4. Podle typu e-mailu zavolá odpovídající odesílací funkci.
+5. Po úspěchu označí záznam jako odeslaný.
+6. Při chybě zapíše chybu a podle nastavení může dojít k opakování.
+
+Typické probation e-mailové typy:
+
+```txt
+PROBATION_EVALUATION_INVITE
+PROBATION_EVALUATION_REMINDER
+PROBATION_EVALUATION_HR_INFO
+PROBATION_EVALUATION_HR_MISSING_SUPERVISOR
+PROBATION_EVALUATION_HR_NOT_COMPLETED
+```
+
+Finální PDF vyplněného formuláře se neposílá přes běžnou frontu. Viz další kapitola.
+
+---
+
+## 11. Finální vyhodnocení zkušební doby a PDF pro HR
+
+Finální uložení vyhodnocení zkušební doby funguje jinak než běžné cron e-maily.
+
+Při finálním uložení aplikace:
+
+1. uloží vyplněné vyhodnocení,
+2. označí request jako `COMPLETED`,
+3. vytvoří aktivní záznam vyhodnocení,
+4. vygeneruje PDF,
+5. odešle PDF na HR,
+6. zapíše událost do historie.
+
+Toto se děje přímo při finálním uložení formuláře, protože e-mail obsahuje aktuálně vygenerovanou PDF přílohu.
+
+### 11.1 Rozpracované uložení
+
+Rozpracované uložení formuláře pouze uloží data.
+
+Nemá:
+
+- odesílat e-mail,
+- generovat PDF,
+- zobrazovat hlášku, že e-mail byl odeslán,
+- uzavírat formulář jako dokončený.
+
+### 11.2 Finální uložení
+
+Finální uložení:
+
+- uloží formulář jako dokončený,
+- vygeneruje PDF,
+- odešle PDF na HR,
+- zobrazí úspěšnou hlášku.
+
+### 11.3 Revize / uložení změn
+
+Pokud je již dokončený formulář otevřený k úpravě:
+
+- po kliknutí na „Otevřít k úpravě“ má uživatel zůstat ve formuláři,
+- po kliknutí na „Uložit změny“ se revize uloží,
+- formulář se znovu uzavře,
+- vygeneruje se nové PDF,
+- aktuální PDF se znovu odešle HR,
+- změna se zapíše do historie.
+
+---
+
+## 12. Jak ověřit nastavení v GitHubu
+
+V repozitáři:
+
+```txt
+Settings → Secrets and variables → Actions
+```
+
+nebo při použití environments:
+
+```txt
+Settings → Environments → dev / production → Environment secrets
+```
+
+Zkontrolovat, že existují secrets:
+
+```txt
+APP_URL
+CRON_SECRET
+```
+
+Hodnotu secretu GitHub zpětně neukáže. Uvidět lze pouze název secretu a informaci, že existuje.
+
+Pokud není jisté, jaká hodnota tam je, je potřeba secret přepsat novou hodnotou a stejnou hodnotu nastavit i do ENV aplikace.
+
+---
+
+## 13. Kontrolní checklist pro nové prostředí
+
+Před spuštěním cronů v novém prostředí ověřit:
+
+- [ ] Aplikace běží na známé URL.
+- [ ] V aplikaci je nastavený `CRON_SECRET`.
+- [ ] V GitHub Actions je nastavený stejný `CRON_SECRET`.
+- [ ] V GitHub Actions je nastavené správné `APP_URL`.
+- [ ] `APP_URL` ukazuje na běžící instanci aplikace.
+- [ ] Cron endpoint lze ručně zavolat přes `curl` s Authorization headerem.
+- [ ] Je nastavená `DATABASE_URL`.
+- [ ] Jsou nasazené databázové migrace.
+- [ ] Je nastavený `RESEND_API_KEY`.
+- [ ] Je nastavený `EMAIL_FROM`.
+- [ ] Odesílací doména/adresa je ověřená v Resendu.
+- [ ] Jsou nastavené příjemci, například `HR_EMAILS`.
+- [ ] Mail worker umí zpracovat čekající položky v `MailQueue`.
+- [ ] DEV a PROD mají ideálně oddělené secrety a URL.
+
+---
+
+## 14. Nejčastější problémy a řešení
+
+### 14.1 Cron vrací 401 nebo 403
+
+Pravděpodobná příčina:
+
+- chybí Authorization header,
+- nesedí `CRON_SECRET`,
+- GitHub má jiný secret než běžící aplikace.
+
+Ověřit:
+
+```txt
+Authorization: Bearer <CRON_SECRET>
+```
+
+A porovnat:
+
+- `CRON_SECRET` v ENV aplikace,
+- `CRON_SECRET` v GitHub Actions secrets.
+
+---
+
+### 14.2 GitHub Actions běží, ale volá špatnou aplikaci
+
+Pravděpodobná příčina:
+
+- špatně nastavené `APP_URL`,
+- DEV workflow volá PROD,
+- PROD workflow volá DEV,
+- URL neobsahuje správnou doménu.
+
+Ověřit:
+
+```txt
+APP_URL
+```
+
+Musí ukazovat na konkrétní běžící instanci.
+
+---
+
+### 14.3 Lokálně cron nefunguje
+
+GitHub Secrets se lokálně nepoužívají.
+
+Pro lokální test je potřeba `.env.local`.
+
+Minimální příklad:
+
+```env
+CRON_SECRET=local-secret
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+AUTH_URL=http://localhost:3000
+NEXTAUTH_URL=http://localhost:3000
+```
+
+---
+
+### 14.4 Cron vytvoří úlohy, ale e-maily nechodí
+
+Ověřit:
+
+- `RESEND_API_KEY`,
+- `EMAIL_FROM`,
+- ověření domény v Resendu,
+- `HR_EMAILS`,
+- záznamy v `MailQueue`,
+- logy endpointu `/api/cron/mail-worker`,
+- jestli mail worker opravdu běží.
+
+---
+
+### 14.5 Mail worker neběží
+
+Ověřit:
+
+- existenci workflow `.github/workflows/mail-worker.yml`,
+- jestli workflow není disabled,
+- jestli běží schedule nebo `workflow_dispatch`,
+- jestli má workflow přístup k `APP_URL` a `CRON_SECRET`,
+- jestli curl request nepadá na 401/403/500.
+
+---
+
+### 14.6 Finální vyhodnocení dlouho ukládá
+
+Finální uložení může trvat déle, protože aplikace:
+
+- ukládá data,
+- generuje PDF,
+- odesílá e-mail na HR,
+- zapisuje historii.
+
+Proto má UI zobrazovat loading stav typu „Ukládám a odesílám…“.
+
+---
+
+### 14.7 Rozpracované uložení ukazuje hlášku o odeslaném e-mailu
+
+To je chyba UI callbacku, ne nutně chyba backendu.
+
+Rozpracované uložení má pouze uložit draft. Nemá spouštět callback nebo toast určený pro odeslání e-mailu.
+
+Správné chování:
+
+- `draft` → uložit data, zobrazit hlášku o uložení rozpracované verze,
+- `final` → uložit, vygenerovat PDF, odeslat HR, zobrazit success,
+- `revision` → uložit změny, vygenerovat nové PDF, odeslat HR, zobrazit success.
+
+---
+
+## 15. Doporučený text pro předání
+
+Krátké shrnutí pro správce nebo vedoucího:
+
+```txt
+Crony v aplikaci nejsou spouštěné automaticky samotným Next.js kódem. Musí je volat externí plánovač, aktuálně ideálně GitHub Actions. Pro fungování je potřeba mít CRON_SECRET nastavený jak v běžící aplikaci, tak v GitHub Actions secrets. Hodnoty musí být stejné. GitHub dále potřebuje APP_URL, což je URL běžící instance aplikace.
+
+Cron probation-notifications pouze kontroluje zkušební doby a vytváří e-mailové úlohy do MailQueue. Samotné odesílání provádí cron mail-worker, který zpracovává MailQueue a posílá e-maily přes Resend.
+
+Pro e-maily musí být v běžícím prostředí nastavený RESEND_API_KEY, EMAIL_FROM a příjemci, například HR_EMAILS. Pro DEV a PROD je doporučené mít oddělené APP_URL a CRON_SECRET.
+
+Cron endpointy se neautorizují přes role HR/ADMIN v aplikaci, ale technicky přes Authorization: Bearer <CRON_SECRET>.
+```
+
+---
+
+## 16. Co je potřeba mít v repozitáři
+
+Doporučené soubory:
+
+```txt
+.github/workflows/probation-check.yml
+.github/workflows/mail-worker.yml
+docs/crony-a-emailova-fronta.md
+```
+
+Doporučené dokumentovat:
+
+- endpointy,
+- required ENV,
+- required GitHub Secrets,
+- rozdíl mezi DEV a PROD,
+- ruční curl test,
+- troubleshooting.
+
+---
+
+## 17. Rychlá odpověď na otázku „co to dělá?“
+
+Cron pro zkušební dobu automaticky hlídá blížící se konec zkušební doby u nástupů a připravuje e-mailové notifikace pro vedoucí nebo HR.
+
+Mail worker následně bere připravené zprávy z e-mailové fronty a fyzicky je odesílá přes Resend.
+
+Finálně vyplněné hodnocení zkušební doby se řeší samostatně: při finálním uložení se vygeneruje PDF a odešle se HR.
+
