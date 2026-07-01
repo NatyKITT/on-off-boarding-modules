@@ -600,6 +600,365 @@ export async function renderMonthlyReportHtml(args: {
   `
 }
 
+export type EmployeeChangeEmailRecord = {
+  id: number
+  type: "POSITION" | "NAME" | "NAME_AND_POSITION"
+  status: string
+  audience?: string | null
+
+  effectiveDate: string | Date | null
+
+  titleBefore: string | null
+  name: string
+  surname: string
+  titleAfter: string | null
+
+  personalNumber: string | null
+
+  oldTitleBefore: string | null
+  newTitleBefore: string | null
+  oldName: string | null
+  newName: string | null
+  oldSurname: string | null
+  newSurname: string | null
+  oldTitleAfter: string | null
+  newTitleAfter: string | null
+
+  oldDepartment: string | null
+  newDepartment: string | null
+  oldUnitName: string | null
+  newUnitName: string | null
+  oldPositionName: string | null
+  newPositionName: string | null
+  oldPositionNum: string | null
+  newPositionNum: string | null
+}
+
+export type EmployeeChangeReportAudience = "ONBOARDING_GROUP" | "ALL_EMPLOYEES"
+
+function isEmployeePositionChange(type: EmployeeChangeEmailRecord["type"]) {
+  return type === "POSITION" || type === "NAME_AND_POSITION"
+}
+
+function isEmployeeNameChange(type: EmployeeChangeEmailRecord["type"]) {
+  return type === "NAME" || type === "NAME_AND_POSITION"
+}
+
+function formatEmployeeChangeName(record: EmployeeChangeEmailRecord) {
+  return [record.titleBefore, record.name, record.surname, record.titleAfter]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function formatEmployeeChangeNewName(record: EmployeeChangeEmailRecord) {
+  return [
+    record.newTitleBefore ?? record.titleBefore,
+    record.newName ?? record.name,
+    record.newSurname ?? record.surname,
+    record.newTitleAfter ?? record.titleAfter,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function uniqueEffectiveDates(records: EmployeeChangeEmailRecord[]) {
+  const values = records
+    .map((record) => fmtDate(record.effectiveDate))
+    .filter((date) => date !== "—")
+
+  return Array.from(new Set(values))
+}
+
+export function buildEmployeeChangeReportSubject(args: {
+  month: string
+  audience: EmployeeChangeReportAudience
+}) {
+  const baseDate = new Date(`${args.month}-01T00:00:00`)
+  const monthLabel = format(baseDate, "LLLL yyyy", { locale: cs })
+
+  return `Podklady pro personální změny – ${monthLabel}`
+}
+
+function renderChangePositionTableForSelectedGroup(
+  records: EmployeeChangeEmailRecord[]
+) {
+  const rows = records.filter((record) => isEmployeePositionChange(record.type))
+
+  if (!rows.length) return ""
+
+  return `
+    <p style="margin:26px 0 8px 0;font-size:15px;font-weight:700;color:#111827;">
+      Změna pozice / odboru
+    </p>
+
+    <table border="0" cellpadding="0" cellspacing="0" width="100%"
+      style="width:100%;border-collapse:collapse;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;font-size:13px;margin-bottom:24px;">
+      <thead>
+        <tr style="background-color:#00847C;color:#ffffff;">
+          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Zaměstnanec</th>
+          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Účinnost</th>
+          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Původní odbor</th>
+          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Nový odbor</th>
+          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Osobní číslo</th>
+          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Původní pozice</th>
+          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Nová pozice</th>
+          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Původní č. funkce</th>
+          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Nové č. funkce</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        ${rows
+          .map(
+            (record, index) => `
+              <tr style="background-color:${index % 2 === 0 ? "#ffffff" : "#f9fafb"};">
+                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;font-weight:600;">
+                  ${escapeHtml(formatEmployeeChangeName(record))}
+                </td>
+                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;white-space:nowrap;">
+                  ${escapeHtml(fmtDate(record.effectiveDate))}
+                </td>
+                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;">
+                  ${escapeHtml(record.oldDepartment || "—")}
+                </td>
+                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;">
+                  ${escapeHtml(record.newDepartment || "—")}
+                </td>
+                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;white-space:nowrap;">
+                  ${escapeHtml(record.personalNumber || "—")}
+                </td>
+                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;">
+                  ${escapeHtml(record.oldPositionName || "—")}
+                </td>
+                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;">
+                  ${escapeHtml(record.newPositionName || "—")}
+                </td>
+                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;white-space:nowrap;">
+                  ${escapeHtml(record.oldPositionNum || "—")}
+                </td>
+                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;white-space:nowrap;">
+                  ${escapeHtml(record.newPositionNum || "—")}
+                </td>
+              </tr>
+            `
+          )
+          .join("")}
+      </tbody>
+    </table>
+  `
+}
+
+function renderChangePositionTableForAllEmployees(
+  records: EmployeeChangeEmailRecord[]
+) {
+  const rows = records.filter((record) => isEmployeePositionChange(record.type))
+
+  if (!rows.length) return ""
+
+  return `
+    <p style="margin:26px 0 8px 0;font-size:15px;font-weight:700;color:#111827;">
+      Změna pozice / odboru
+    </p>
+
+    <table border="0" cellpadding="0" cellspacing="0" width="100%"
+      style="width:100%;border-collapse:collapse;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;font-size:14px;margin-bottom:24px;">
+      <thead>
+        <tr style="background-color:#08cdb5;color:#000000;">
+          <th align="left" style="padding:9px 8px;font-weight:700;">Zaměstnanec</th>
+          <th align="left" style="padding:9px 8px;font-weight:700;">Odbor</th>
+          <th align="left" style="padding:9px 8px;font-weight:700;">Původní pozice</th>
+          <th align="left" style="padding:9px 8px;font-weight:700;">Nová pozice</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        ${rows
+          .map(
+            (record) => `
+              <tr>
+                <td style="padding:9px 8px;border:1px solid #111827;font-weight:600;">
+                  ${escapeHtml(formatEmployeeChangeName(record))}
+                </td>
+                <td style="padding:9px 8px;border:1px solid #111827;font-weight:600;">
+                  ${escapeHtml(record.newDepartment || record.oldDepartment || "—")}
+                </td>
+                <td style="padding:9px 8px;border:1px solid #111827;font-weight:600;">
+                  ${escapeHtml(record.oldPositionName || "—")}
+                </td>
+                <td style="padding:9px 8px;border:1px solid #111827;font-weight:600;">
+                  ${escapeHtml(record.newPositionName || "—")}
+                </td>
+              </tr>
+            `
+          )
+          .join("")}
+      </tbody>
+    </table>
+  `
+}
+
+function renderChangeNameTable(records: EmployeeChangeEmailRecord[]) {
+  const rows = records.filter((record) => isEmployeeNameChange(record.type))
+
+  if (!rows.length) return ""
+
+  return `
+    <p style="margin:26px 0 8px 0;font-size:15px;font-weight:700;color:#111827;">
+      Změna jména / příjmení / titulu
+    </p>
+
+    <table border="0" cellpadding="0" cellspacing="0" width="100%"
+      style="width:100%;border-collapse:collapse;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;font-size:13px;margin-bottom:24px;">
+      <thead>
+        <tr style="background-color:#00847C;color:#ffffff;">
+          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Zaměstnanec</th>
+          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Účinnost</th>
+          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Nové příjmení</th>
+          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Nové celé jméno</th>
+          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Odbor</th>
+          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Osobní číslo</th>
+          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Pozice</th>
+          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Číslo funkce</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        ${rows
+          .map(
+            (record, index) => `
+              <tr style="background-color:${index % 2 === 0 ? "#ffffff" : "#f9fafb"};">
+                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;font-weight:600;">
+                  ${escapeHtml(formatEmployeeChangeName(record))}
+                </td>
+                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;white-space:nowrap;">
+                  ${escapeHtml(fmtDate(record.effectiveDate))}
+                </td>
+                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;">
+                  ${escapeHtml(record.newSurname || record.surname || "—")}
+                </td>
+                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;">
+                  ${escapeHtml(formatEmployeeChangeNewName(record) || "—")}
+                </td>
+                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;">
+                  ${escapeHtml(record.newDepartment || record.oldDepartment || "—")}
+                </td>
+                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;white-space:nowrap;">
+                  ${escapeHtml(record.personalNumber || "—")}
+                </td>
+                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;">
+                  ${escapeHtml(record.newPositionName || record.oldPositionName || "—")}
+                </td>
+                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;white-space:nowrap;">
+                  ${escapeHtml(record.newPositionNum || record.oldPositionNum || "—")}
+                </td>
+              </tr>
+            `
+          )
+          .join("")}
+      </tbody>
+    </table>
+  `
+}
+
+export async function renderEmployeeChangeReportHtml(args: {
+  records: EmployeeChangeEmailRecord[]
+  month: string
+  audience: EmployeeChangeReportAudience
+}): Promise<string> {
+  const { records, month, audience } = args
+  const dates = uniqueEffectiveDates(records)
+
+  const primary = "#00847C"
+  const bgLight = "#E5F5F2"
+
+  const positionTable =
+    audience === "ONBOARDING_GROUP"
+      ? renderChangePositionTableForSelectedGroup(records)
+      : renderChangePositionTableForAllEmployees(records)
+
+  const nameTable = renderChangeNameTable(records)
+
+  const effectiveText =
+    dates.length === 1
+      ? `s účinností od ${dates[0]}:`
+      : "s účinností dle data uvedeného u jednotlivých záznamů:"
+
+  return `
+  <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+  <html xmlns="http://www.w3.org/1999/xhtml" lang="cs">
+    <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <title>${escapeHtml(buildEmployeeChangeReportSubject({ month, audience }))}</title>
+    </head>
+
+    <body style="margin:0;padding:0;background-color:${bgLight};width:100% !important;">
+      <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
+        <tr>
+          <td align="center" style="padding:30px 10px;">
+            <table border="0" cellpadding="0" cellspacing="0" width="860"
+              style="max-width:860px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;border-collapse:separate;">
+              
+              <tr>
+                <td bgcolor="${primary}" style="padding:24px 30px;background-color:${primary};">
+                  <div style="font-family:'Civil Premium','Segoe UI',Arial,sans-serif;color:#ffffff;font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;">
+                    Personální změny
+                  </div>
+                  <div style="font-family:'Civil Premium','Segoe UI',Arial,sans-serif;color:#ffffff;font-size:23px;font-weight:700;line-height:1.25;">
+                    ${escapeHtml(buildEmployeeChangeReportSubject({ month, audience }))}
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td style="padding:28px 30px;background-color:#ffffff;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;color:#111827;">
+                  <p style="margin:0 0 26px 0;font-size:15px;line-height:1.6;">
+                    Vážené kolegyně, vážení kolegové,
+                  </p>
+
+                  <p style="margin:0 0 18px 0;font-size:15px;line-height:1.6;">
+                    tímto vás informuji o následujících změnách:
+                  </p>
+
+                  <p style="margin:0 0 18px 0;font-size:15px;line-height:1.6;font-weight:700;">
+                    ${escapeHtml(effectiveText)}
+                  </p>
+
+                  ${positionTable}
+                  ${nameTable}
+
+                  ${
+                    !positionTable && !nameTable
+                      ? `<p style="margin:24px 0;font-size:14px;color:#6b7280;">Pro vybrané období nejsou evidované žádné změny.</p>`
+                      : ""
+                  }
+
+                  <p style="margin:36px 0 0 0;font-size:15px;line-height:1.6;">
+                    S pozdravem
+                  </p>
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;font-size:12px;color:#4b5563;border-top:1px solid #d9ece7;">
+                  Tento e-mail byl automaticky vygenerován systémem
+                  <strong>On-Off-Boarding Modul ÚMČ Praha&nbsp;6</strong>.<br/>
+                  Prosíme, neodpovídejte na tuto zprávu. V případě dotazů kontaktujte personální oddělení.
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+  </html>
+  `
+}
+
 type SendSignatureInviteEmailParams = {
   to: string
   employeeName: string
@@ -863,6 +1222,7 @@ export async function sendMail(params: {
 export async function logEmailHistory(args: {
   onboardingEmployeeId?: number | null
   offboardingEmployeeId?: number | null
+  changeId?: number | null
   mailQueueId?: number | null
   emailType: MailJobType
   recipients: string[]
@@ -876,6 +1236,7 @@ export async function logEmailHistory(args: {
     data: {
       onboardingEmployeeId: args.onboardingEmployeeId ?? null,
       offboardingEmployeeId: args.offboardingEmployeeId ?? null,
+      changeId: args.changeId ?? null,
       mailQueueId: args.mailQueueId ?? null,
       emailType: args.emailType,
       recipients: args.recipients,
@@ -886,6 +1247,822 @@ export async function logEmailHistory(args: {
       createdBy: args.createdBy,
     },
   })
+}
+
+export type SendProbationNotificationEmailParams = {
+  to: string[]
+  subject: string
+  intro: string
+  employeeName?: string | null
+  employeePosition?: string | null
+  employeeDepartment?: string | null
+  employeeUnitName?: string | null
+  probationEndDate?: string | Date | null
+  supervisorName?: string | null
+  supervisorEmail?: string | null
+  evaluationLink?: string | null
+  recommendation?: string | null
+  evaluatorName?: string | null
+  evaluatorEmail?: string | null
+  formType?: string | null
+}
+
+export type SendProbationEvaluationInviteEmailParams = {
+  to: string
+  employeeName: string
+  employeePosition?: string | null
+  employeeDepartment?: string | null
+  employeeUnitName?: string | null
+  probationEndDate?: string | Date | null
+  supervisorName?: string | null
+  supervisorEmail?: string | null
+  evaluationLink: string
+  formType?: string | null
+  sentByName?: string | null
+}
+
+export type SendProbationEvaluationReminderEmailParams =
+  SendProbationEvaluationInviteEmailParams
+
+export type SendProbationEvaluationPdfEmailParams = {
+  to: string
+  employeeName: string
+  employeePosition?: string | null
+  employeeDepartment?: string | null
+  employeeUnitName?: string | null
+  probationEndDate?: string | Date | null
+  recommendation?: string | null
+  evaluatorName?: string | null
+  evaluatorEmail?: string | null
+  message?: string | null
+  sentByName?: string | null
+  pdfBuffer: Buffer
+  filename: string
+}
+
+export type SendProbationEvaluationCompletedEmailParams = {
+  to: string[]
+  employeeName: string
+  employeePosition?: string | null
+  employeeDepartment?: string | null
+  employeeUnitName?: string | null
+  probationEndDate?: string | Date | null
+  recommendation?: string | null
+  evaluatorName?: string | null
+  evaluatorEmail?: string | null
+  completedByName?: string | null
+  pdfBuffer: Buffer
+  filename: string
+}
+
+export type ProbationMailQueuePayload = {
+  recipients?: string[]
+  to?: string
+  supervisorEmail?: string | null
+  employeeName?: string | null
+  position?: string | null
+  employeePosition?: string | null
+  department?: string | null
+  employeeDepartment?: string | null
+  unitName?: string | null
+  employeeUnitName?: string | null
+  probationEndDate?: string | Date | null
+  supervisorName?: string | null
+  evaluationLink?: string | null
+  formType?: string | null
+  recommendation?: string | null
+  evaluatorName?: string | null
+  evaluatorEmail?: string | null
+  subject?: string | null
+  intro?: string | null
+  message?: string | null
+  sentByName?: string | null
+}
+
+function probationFormTypeLabel(value?: string | null) {
+  if (value === "MANAGERIAL") return "Vedoucí / manažerská pozice"
+  if (value === "REGULAR_EMPLOYEE") return "Zaměstnanec"
+  return null
+}
+
+function normalizeEmailList(values?: Array<string | null | undefined>) {
+  return Array.from(
+    new Set(
+      (values ?? [])
+        .map((email) => email?.trim())
+        .filter((email): email is string =>
+          Boolean(email && email.includes("@"))
+        )
+    )
+  )
+}
+
+function normalizeProbationRecipients(payload: ProbationMailQueuePayload) {
+  return normalizeEmailList([...(payload.recipients ?? []), payload.to])
+}
+
+function getProbationEmployeePosition(payload: ProbationMailQueuePayload) {
+  return payload.employeePosition ?? payload.position ?? null
+}
+
+function getProbationEmployeeDepartment(payload: ProbationMailQueuePayload) {
+  return payload.employeeDepartment ?? payload.department ?? null
+}
+
+function getProbationEmployeeUnitName(payload: ProbationMailQueuePayload) {
+  return payload.employeeUnitName ?? payload.unitName ?? null
+}
+
+function renderProbationInfoTable(args: {
+  primary: string
+  bgLight: string
+  employeeName?: string | null
+  employeePosition?: string | null
+  employeeDepartment?: string | null
+  employeeUnitName?: string | null
+  probationEndDate?: string | Date | null
+  supervisorName?: string | null
+  supervisorEmail?: string | null
+  recommendation?: string | null
+  evaluatorName?: string | null
+  evaluatorEmail?: string | null
+  formType?: string | null
+}) {
+  const rows = [
+    {
+      label: "Zaměstnanec",
+      value: args.employeeName || "—",
+      strong: true,
+    },
+    {
+      label: "Pozice",
+      value: args.employeePosition || "—",
+    },
+    {
+      label: "Odbor",
+      value: args.employeeDepartment || "—",
+    },
+    {
+      label: "Oddělení",
+      value: args.employeeUnitName || "—",
+    },
+    {
+      label: "Typ formuláře",
+      value: probationFormTypeLabel(args.formType) || null,
+    },
+    {
+      label: "Konec zkušební doby",
+      value: fmtDate(args.probationEndDate),
+    },
+    {
+      label: "Vedoucí / hodnotitel",
+      value: args.supervisorName || null,
+    },
+    {
+      label: "E-mail vedoucího",
+      value: args.supervisorEmail || null,
+    },
+    {
+      label: "Doporučení",
+      value: args.recommendation || null,
+    },
+    {
+      label: "Hodnotil(a)",
+      value: args.evaluatorName || null,
+    },
+    {
+      label: "E-mail hodnotitele",
+      value: args.evaluatorEmail || null,
+    },
+  ].filter((row) => Boolean(row.value) && row.value !== "—")
+
+  return `
+    <table border="0" cellpadding="0" cellspacing="0" width="100%"
+      style="margin-bottom:24px;border:1px solid #d9ece7;border-radius:8px;overflow:hidden;border-collapse:separate;">
+      ${rows
+        .map((row, index) => {
+          const bg = index % 2 === 0 ? args.bgLight : "#ffffff"
+          const strong = row.strong === true
+
+          return `
+            <tr style="background-color:${bg};">
+              <td style="padding:10px 16px;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:1px;width:170px;">
+                ${escapeHtml(row.label)}
+              </td>
+              <td style="padding:10px 16px;font-size:14px;line-height:1.4;color:${
+                strong ? "#082B2A" : "#374151"
+              };font-weight:${strong ? 700 : 400};">
+                ${escapeHtml(row.value || "—")}
+              </td>
+            </tr>
+          `
+        })
+        .join("")}
+    </table>
+  `
+}
+
+export async function sendProbationNotificationEmail({
+  to,
+  subject,
+  intro,
+  employeeName,
+  employeePosition,
+  employeeDepartment,
+  employeeUnitName,
+  probationEndDate,
+  supervisorName,
+  supervisorEmail,
+  evaluationLink,
+  recommendation,
+  evaluatorName,
+  evaluatorEmail,
+  formType,
+}: SendProbationNotificationEmailParams): Promise<void> {
+  const recipients = normalizeEmailList(to)
+
+  if (!recipients.length) {
+    throw new Error("Chybí příjemce e-mailu.")
+  }
+
+  const primary = "#00847C"
+  const bgLight = "#E5F5F2"
+
+  const html = `
+  <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+  <html xmlns="http://www.w3.org/1999/xhtml" lang="cs">
+    <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <title>${escapeHtml(subject)}</title>
+    </head>
+
+    <body style="margin:0;padding:0;background-color:${bgLight};font-family:'Segoe UI',Arial,sans-serif;">
+      <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
+        <tr>
+          <td align="center" style="padding:30px 10px;">
+            <table border="0" cellpadding="0" cellspacing="0" width="600"
+              style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
+
+              <tr>
+                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};">
+                  <div style="color:#ffffff;font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:.9;">
+                    Zkušební doba
+                  </div>
+                  <div style="color:#ffffff;font-size:22px;font-weight:bold;line-height:1.2;">
+                    ${escapeHtml(subject)}
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td style="padding:26px 30px;background-color:#ffffff;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;">
+                  <p style="margin:0 0 16px 0;font-size:14px;color:#082B2A;">
+                    Dobrý den,
+                  </p>
+
+                  <p style="margin:0 0 18px 0;font-size:14px;color:#374151;line-height:1.6;">
+                    ${escapeHtml(intro)}
+                  </p>
+
+                  ${renderProbationInfoTable({
+                    primary,
+                    bgLight,
+                    employeeName,
+                    employeePosition,
+                    employeeDepartment,
+                    employeeUnitName,
+                    probationEndDate,
+                    supervisorName,
+                    supervisorEmail,
+                    recommendation,
+                    evaluatorName,
+                    evaluatorEmail,
+                    formType,
+                  })}
+
+                  ${
+                    evaluationLink
+                      ? `
+                    <table border="0" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+                      <tr>
+                        <td bgcolor="${primary}" style="border-radius:6px;background-color:${primary};">
+                          <a
+                            href="${escapeHtml(evaluationLink)}"
+                            style="display:inline-block;padding:12px 28px;color:#ffffff;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;font-size:15px;font-weight:bold;text-decoration:none;border-radius:6px;"
+                          >
+                            Otevřít vyhodnocení
+                          </a>
+                        </td>
+                      </tr>
+                    </table>
+
+                    <p style="margin:0 0 4px 0;font-size:12px;color:#6b7280;">
+                      Pokud tlačítko nefunguje, zkopírujte tento odkaz do prohlížeče:
+                    </p>
+                    <p style="margin:0;word-break:break-all;">
+                      <a href="${escapeHtml(evaluationLink)}" style="font-family:monospace;font-size:12px;color:${primary};">
+                        ${escapeHtml(evaluationLink)}
+                      </a>
+                    </p>
+                    `
+                      : ""
+                  }
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
+                  Tento e-mail byl automaticky vygenerován. Prosíme, neodpovídejte na tuto zprávu.
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+  </html>`
+
+  const text = [
+    "Dobrý den,",
+    "",
+    intro,
+    "",
+    employeeName ? `Zaměstnanec: ${employeeName}` : "",
+    employeePosition ? `Pozice: ${employeePosition}` : "",
+    employeeDepartment ? `Odbor: ${employeeDepartment}` : "",
+    employeeUnitName ? `Oddělení: ${employeeUnitName}` : "",
+    formType
+      ? `Typ formuláře: ${probationFormTypeLabel(formType) || formType}`
+      : "",
+    probationEndDate ? `Konec zkušební doby: ${fmtDate(probationEndDate)}` : "",
+    supervisorName ? `Vedoucí / hodnotitel: ${supervisorName}` : "",
+    supervisorEmail ? `E-mail vedoucího: ${supervisorEmail}` : "",
+    recommendation ? `Doporučení: ${recommendation}` : "",
+    evaluatorName ? `Hodnotil(a): ${evaluatorName}` : "",
+    evaluatorEmail ? `E-mail hodnotitele: ${evaluatorEmail}` : "",
+    evaluationLink ? `Odkaz: ${evaluationLink}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n")
+
+  await sendMail({
+    to: recipients,
+    subject,
+    html,
+    text,
+  })
+}
+
+export async function sendProbationEvaluationInviteEmail(
+  args: SendProbationEvaluationInviteEmailParams
+): Promise<void> {
+  await sendProbationNotificationEmail({
+    to: [args.to],
+    subject: `Vyhodnocení zkušební doby – ${args.employeeName}`,
+    intro: `${
+      args.sentByName ? `${args.sentByName} vám zaslal(a)` : "Zasíláme vám"
+    } odkaz k vyplnění formuláře k vyhodnocení zkušební doby.`,
+    employeeName: args.employeeName,
+    employeePosition: args.employeePosition,
+    employeeDepartment: args.employeeDepartment,
+    employeeUnitName: args.employeeUnitName,
+    probationEndDate: args.probationEndDate,
+    supervisorName: args.supervisorName,
+    supervisorEmail: args.supervisorEmail,
+    evaluationLink: args.evaluationLink,
+    formType: args.formType,
+  })
+}
+
+export async function sendProbationEvaluationReminderEmail(
+  args: SendProbationEvaluationReminderEmailParams
+): Promise<void> {
+  await sendProbationNotificationEmail({
+    to: [args.to],
+    subject: `Připomínka: vyhodnocení zkušební doby – ${args.employeeName}`,
+    intro: `${
+      args.sentByName ? `${args.sentByName} připomíná` : "Připomínáme"
+    }, že formulář k vyhodnocení zkušební doby zatím není finálně vyplněný.`,
+    employeeName: args.employeeName,
+    employeePosition: args.employeePosition,
+    employeeDepartment: args.employeeDepartment,
+    employeeUnitName: args.employeeUnitName,
+    probationEndDate: args.probationEndDate,
+    supervisorName: args.supervisorName,
+    supervisorEmail: args.supervisorEmail,
+    evaluationLink: args.evaluationLink,
+    formType: args.formType,
+  })
+}
+
+export async function sendProbationHrReminderEmail(args: {
+  to: string[]
+  employeeName: string
+  employeePosition?: string | null
+  employeeDepartment?: string | null
+  employeeUnitName?: string | null
+  probationEndDate?: string | Date | null
+  supervisorName?: string | null
+  supervisorEmail?: string | null
+  evaluationLink?: string | null
+  formType?: string | null
+}) {
+  await sendProbationNotificationEmail({
+    to: args.to,
+    subject: `HR připomínka: nevyplněné vyhodnocení zkušební doby – ${args.employeeName}`,
+    intro:
+      "Formulář k vyhodnocení zkušební doby zatím není finálně vyplněný. Prosíme o kontrolu stavu a případné kontaktování vedoucího.",
+    employeeName: args.employeeName,
+    employeePosition: args.employeePosition,
+    employeeDepartment: args.employeeDepartment,
+    employeeUnitName: args.employeeUnitName,
+    probationEndDate: args.probationEndDate,
+    supervisorName: args.supervisorName,
+    supervisorEmail: args.supervisorEmail,
+    evaluationLink: args.evaluationLink,
+    formType: args.formType,
+  })
+}
+
+export async function sendProbationMissingSupervisorEmail(args: {
+  to: string[]
+  employeeName: string
+  employeePosition?: string | null
+  employeeDepartment?: string | null
+  employeeUnitName?: string | null
+  probationEndDate?: string | Date | null
+  formType?: string | null
+}) {
+  await sendProbationNotificationEmail({
+    to: args.to,
+    subject: `Chybí vedoucí pro vyhodnocení zkušební doby – ${args.employeeName}`,
+    intro:
+      "U zaměstnance chybí vedoucí nebo e-mail vedoucího. Formulář proto nelze automaticky odeslat k vyplnění.",
+    employeeName: args.employeeName,
+    employeePosition: args.employeePosition,
+    employeeDepartment: args.employeeDepartment,
+    employeeUnitName: args.employeeUnitName,
+    probationEndDate: args.probationEndDate,
+    formType: args.formType,
+  })
+}
+
+export async function sendProbationEvaluationPdfEmail(
+  args: SendProbationEvaluationPdfEmailParams
+): Promise<void> {
+  const primary = "#00847C"
+  const bgLight = "#E5F5F2"
+  const subject = `Vyhodnocení zkušební doby – ${args.employeeName}`
+
+  const html = `
+  <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+  <html xmlns="http://www.w3.org/1999/xhtml" lang="cs">
+    <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <title>${escapeHtml(subject)}</title>
+    </head>
+
+    <body style="margin:0;padding:0;background-color:${bgLight};font-family:'Segoe UI',Arial,sans-serif;">
+      <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
+        <tr>
+          <td align="center" style="padding:30px 10px;">
+            <table border="0" cellpadding="0" cellspacing="0" width="600"
+              style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
+              <tr>
+                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};">
+                  <div style="color:#ffffff;font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:.9;">
+                    Zkušební doba
+                  </div>
+                  <div style="color:#ffffff;font-size:22px;font-weight:bold;line-height:1.2;">
+                    PDF formuláře v příloze
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td style="padding:26px 30px;background-color:#ffffff;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;">
+                  <p style="margin:0 0 16px 0;font-size:14px;color:#082B2A;">
+                    Dobrý den,
+                  </p>
+
+                  <p style="margin:0 0 18px 0;font-size:14px;color:#374151;line-height:1.6;">
+                    v příloze zasíláme PDF formuláře k vyhodnocení zkušební doby níže uvedeného zaměstnance.
+                  </p>
+
+                  ${renderProbationInfoTable({
+                    primary,
+                    bgLight,
+                    employeeName: args.employeeName,
+                    employeePosition: args.employeePosition,
+                    employeeDepartment: args.employeeDepartment,
+                    employeeUnitName: args.employeeUnitName,
+                    probationEndDate: args.probationEndDate,
+                    recommendation: args.recommendation,
+                    evaluatorName: args.evaluatorName,
+                    evaluatorEmail: args.evaluatorEmail,
+                  })}
+
+                  ${
+                    args.message?.trim()
+                      ? `<p style="margin:0 0 18px 0;padding:12px 14px;border-left:4px solid ${primary};background:#f0fdfa;font-size:14px;color:#374151;line-height:1.6;">${escapeHtml(args.message.trim())}</p>`
+                      : ""
+                  }
+
+                  ${
+                    args.sentByName?.trim()
+                      ? `<p style="margin:0 0 12px 0;font-size:13px;color:#6b7280;line-height:1.5;">Odeslal(a): ${escapeHtml(args.sentByName.trim())}</p>`
+                      : ""
+                  }
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
+                  Tento e-mail byl automaticky vygenerován. Prosíme, neodpovídejte na tuto zprávu.
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+  </html>`
+
+  const text = [
+    "Dobrý den,",
+    "",
+    "v příloze zasíláme PDF formuláře k vyhodnocení zkušební doby níže uvedeného zaměstnance.",
+    "",
+    `Zaměstnanec: ${args.employeeName}`,
+    `Pozice: ${args.employeePosition || "—"}`,
+    `Odbor: ${args.employeeDepartment || "—"}`,
+    `Oddělení: ${args.employeeUnitName || "—"}`,
+    `Konec zkušební doby: ${fmtDate(args.probationEndDate)}`,
+    args.recommendation ? `Doporučení: ${args.recommendation}` : "",
+    args.evaluatorName ? `Hodnotil(a): ${args.evaluatorName}` : "",
+    args.evaluatorEmail ? `E-mail hodnotitele: ${args.evaluatorEmail}` : "",
+    args.message ? `Zpráva: ${args.message}` : "",
+    args.sentByName ? `Odeslal(a): ${args.sentByName}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n")
+
+  await sendMail({
+    to: [args.to],
+    subject,
+    html,
+    text,
+    attachments: [
+      {
+        filename: args.filename,
+        content: args.pdfBuffer,
+        contentType: "application/pdf",
+      },
+    ],
+  })
+}
+
+export async function sendProbationEvaluationCompletedEmail(
+  args: SendProbationEvaluationCompletedEmailParams
+): Promise<void> {
+  const recipients = normalizeEmailList(args.to)
+
+  if (!recipients.length) {
+    return
+  }
+
+  const subject = `Vyhodnocení zkušební doby bylo vyplněno – ${args.employeeName}`
+  const primary = "#00847C"
+  const bgLight = "#E5F5F2"
+
+  const html = `
+  <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+  <html xmlns="http://www.w3.org/1999/xhtml" lang="cs">
+    <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <title>${escapeHtml(subject)}</title>
+    </head>
+
+    <body style="margin:0;padding:0;background-color:${bgLight};font-family:'Segoe UI',Arial,sans-serif;">
+      <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
+        <tr>
+          <td align="center" style="padding:30px 10px;">
+            <table border="0" cellpadding="0" cellspacing="0" width="600"
+              style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
+              <tr>
+                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};">
+                  <div style="color:#ffffff;font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:.9;">
+                    Zkušební doba
+                  </div>
+                  <div style="color:#ffffff;font-size:22px;font-weight:bold;line-height:1.2;">
+                    Vyhodnocení bylo finálně vyplněno
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td style="padding:26px 30px;background-color:#ffffff;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;">
+                  <p style="margin:0 0 16px 0;font-size:14px;color:#082B2A;">
+                    Dobrý den,
+                  </p>
+
+                  <p style="margin:0 0 18px 0;font-size:14px;color:#374151;line-height:1.6;">
+                    formulář k vyhodnocení zkušební doby byl finálně vyplněn. PDF formulář najdete v příloze.
+                  </p>
+
+                  ${renderProbationInfoTable({
+                    primary,
+                    bgLight,
+                    employeeName: args.employeeName,
+                    employeePosition: args.employeePosition,
+                    employeeDepartment: args.employeeDepartment,
+                    employeeUnitName: args.employeeUnitName,
+                    probationEndDate: args.probationEndDate,
+                    recommendation: args.recommendation,
+                    evaluatorName: args.evaluatorName,
+                    evaluatorEmail: args.evaluatorEmail,
+                  })}
+
+                  ${
+                    args.completedByName?.trim()
+                      ? `<p style="margin:0 0 12px 0;font-size:13px;color:#6b7280;line-height:1.5;">Uložil(a): ${escapeHtml(args.completedByName.trim())}</p>`
+                      : ""
+                  }
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
+                  Tento e-mail byl automaticky vygenerován. Prosíme, neodpovídejte na tuto zprávu.
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+  </html>`
+
+  const text = [
+    "Dobrý den,",
+    "",
+    "formulář k vyhodnocení zkušební doby byl finálně vyplněn. PDF formulář najdete v příloze.",
+    "",
+    `Zaměstnanec: ${args.employeeName}`,
+    `Pozice: ${args.employeePosition || "—"}`,
+    `Odbor: ${args.employeeDepartment || "—"}`,
+    `Oddělení: ${args.employeeUnitName || "—"}`,
+    `Konec zkušební doby: ${fmtDate(args.probationEndDate)}`,
+    args.recommendation ? `Doporučení: ${args.recommendation}` : "",
+    args.evaluatorName ? `Hodnotil(a): ${args.evaluatorName}` : "",
+    args.evaluatorEmail ? `E-mail hodnotitele: ${args.evaluatorEmail}` : "",
+    args.completedByName ? `Uložil(a): ${args.completedByName}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n")
+
+  await sendMail({
+    to: recipients,
+    subject,
+    html,
+    text,
+    attachments: [
+      {
+        filename: args.filename,
+        content: args.pdfBuffer,
+        contentType: "application/pdf",
+      },
+    ],
+  })
+}
+
+export async function sendQueuedProbationEmail(args: {
+  type: MailJobType | string
+  payload: ProbationMailQueuePayload
+}): Promise<void> {
+  const type = String(args.type)
+  const payload = args.payload
+
+  const employeeName = payload.employeeName?.trim() || "zaměstnanec"
+  const employeePosition = getProbationEmployeePosition(payload)
+  const employeeDepartment = getProbationEmployeeDepartment(payload)
+  const employeeUnitName = getProbationEmployeeUnitName(payload)
+  const recipients = normalizeProbationRecipients(payload)
+
+  if (!recipients.length) {
+    throw new Error("Chybí příjemci pro probation e-mail z fronty.")
+  }
+
+  if (type === "PROBATION_EVALUATION_INVITE" || type === "PROBATION_INVITE") {
+    const to = payload.supervisorEmail || recipients[0]
+
+    await sendProbationEvaluationInviteEmail({
+      to,
+      employeeName,
+      employeePosition,
+      employeeDepartment,
+      employeeUnitName,
+      probationEndDate: payload.probationEndDate,
+      supervisorName: payload.supervisorName,
+      supervisorEmail: payload.supervisorEmail,
+      evaluationLink: payload.evaluationLink || "",
+      formType: payload.formType,
+      sentByName: payload.sentByName,
+    })
+
+    return
+  }
+
+  if (
+    type === "PROBATION_EVALUATION_REMINDER" ||
+    type === "PROBATION_REMINDER"
+  ) {
+    const to = payload.supervisorEmail || recipients[0]
+
+    await sendProbationEvaluationReminderEmail({
+      to,
+      employeeName,
+      employeePosition,
+      employeeDepartment,
+      employeeUnitName,
+      probationEndDate: payload.probationEndDate,
+      supervisorName: payload.supervisorName,
+      supervisorEmail: payload.supervisorEmail,
+      evaluationLink: payload.evaluationLink || "",
+      formType: payload.formType,
+      sentByName: payload.sentByName,
+    })
+
+    return
+  }
+
+  if (
+    type === "PROBATION_MISSING_SUPERVISOR" ||
+    type === "PROBATION_EVALUATION_MISSING_SUPERVISOR" ||
+    type === "PROBATION_EVALUATION_HR_MISSING_SUPERVISOR"
+  ) {
+    await sendProbationMissingSupervisorEmail({
+      to: recipients,
+      employeeName,
+      employeePosition,
+      employeeDepartment,
+      employeeUnitName,
+      probationEndDate: payload.probationEndDate,
+      formType: payload.formType,
+    })
+
+    return
+  }
+
+  if (
+    type === "PROBATION_HR_REMINDER" ||
+    type === "PROBATION_EVALUATION_HR_NOT_COMPLETED"
+  ) {
+    await sendProbationHrReminderEmail({
+      to: recipients,
+      employeeName,
+      employeePosition,
+      employeeDepartment,
+      employeeUnitName,
+      probationEndDate: payload.probationEndDate,
+      supervisorName: payload.supervisorName,
+      supervisorEmail: payload.supervisorEmail,
+      evaluationLink: payload.evaluationLink,
+      formType: payload.formType,
+    })
+
+    return
+  }
+
+  if (type === "PROBATION_HR_INFO" || type === "PROBATION_EVALUATION_HR_INFO") {
+    await sendProbationNotificationEmail({
+      to: recipients,
+      subject:
+        payload.subject ||
+        `Informace k vyhodnocení zkušební doby – ${employeeName}`,
+      intro:
+        payload.intro || "Níže zasíláme informaci k vyhodnocení zkušební doby.",
+      employeeName,
+      employeePosition,
+      employeeDepartment,
+      employeeUnitName,
+      probationEndDate: payload.probationEndDate,
+      supervisorName: payload.supervisorName,
+      supervisorEmail: payload.supervisorEmail,
+      evaluationLink: payload.evaluationLink,
+      recommendation: payload.recommendation,
+      evaluatorName: payload.evaluatorName,
+      evaluatorEmail: payload.evaluatorEmail,
+      formType: payload.formType,
+    })
+
+    return
+  }
+
+  throw new Error(`Nepodporovaný typ probation e-mailu ve frontě: ${type}`)
 }
 
 export function getEmailSender() {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
+import { canManageEmploymentDocuments } from "@/lib/rbac"
 
 interface Params {
   params: { id: string }
@@ -9,6 +10,7 @@ interface Params {
 
 export async function PATCH(req: NextRequest, { params }: Params) {
   const session = await auth()
+
   if (!session?.user) {
     return NextResponse.json(
       { message: "Nejste přihlášen(a)." },
@@ -16,7 +18,15 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     )
   }
 
+  if (!canManageEmploymentDocuments(session.user.role)) {
+    return NextResponse.json(
+      { message: "Nemáte oprávnění zamykat dokumenty." },
+      { status: 403 }
+    )
+  }
+
   const id = Number(params.id)
+
   if (!Number.isFinite(id)) {
     return NextResponse.json({ message: "Neplatné ID." }, { status: 400 })
   }
@@ -24,6 +34,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const body = (await req.json().catch(() => null)) as {
     locked?: boolean
   } | null
+
   if (!body || typeof body.locked !== "boolean") {
     return NextResponse.json(
       { message: "Neplatný požadavek." },

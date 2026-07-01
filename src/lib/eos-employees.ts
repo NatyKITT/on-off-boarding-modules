@@ -1,9 +1,5 @@
 import { env } from "@/env.mjs"
 
-
-
-
-
 export type EosPerson = {
   id?: string
   gid?: string

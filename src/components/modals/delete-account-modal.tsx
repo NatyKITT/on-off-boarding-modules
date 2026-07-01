@@ -26,7 +26,6 @@ function DeleteAccountModal({
       },
     }).then(async (res) => {
       if (res.status === 200) {
-        // delay to allow for the route change to complete
         await new Promise((resolve) =>
           setTimeout(() => {
             signOut({

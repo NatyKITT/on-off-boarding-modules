@@ -14,6 +14,7 @@ export const sidebarLinks: SidebarNavItem[] = [
       { href: "/prehled", icon: "dashboard", title: "Přehled" },
       { href: "/nastupy", icon: "userPlus", title: "Nástupy" },
       { href: "/odchody", icon: "userMinus", title: "Odchody" },
+      { href: "/zmeny", icon: "arrowLeftRight", title: "Změny" },
     ],
   },
   {

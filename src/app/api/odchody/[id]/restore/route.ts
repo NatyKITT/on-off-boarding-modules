@@ -2,26 +2,49 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
+import { canWriteOffboarding } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
 export const revalidate = 0
 
-type MaybeUser = { id?: string; email?: string } | null | undefined
+type MaybeUser =
+  | { id?: string | null; email?: string | null }
+  | null
+  | undefined
 
-function getUserKey(u: MaybeUser): string {
-  if (u && typeof u === "object") {
-    if (typeof u.id === "string" && u.id.length > 0) return u.id
-    if (typeof u.email === "string" && u.email.length > 0) return u.email
+function getUserKey(user: MaybeUser): string {
+  if (user && typeof user === "object") {
+    if (typeof user.id === "string" && user.id.length > 0) return user.id
+    if (typeof user.email === "string" && user.email.length > 0)
+      return user.email
   }
+
   return "unknown"
 }
 
+function parseEmailList(value?: string): string[] {
+  return (value ?? "")
+    .split(/[;,]/)
+    .map((email) => email.trim())
+    .filter((email) => email.length > 0 && email.includes("@"))
+}
+
+function getHrNotificationRecipients(): string[] {
+  return Array.from(
+    new Set([
+      ...parseEmailList(process.env.HR_NOTIFICATION_EMAILS),
+      ...parseEmailList(process.env.HR_EMAILS),
+    ])
+  )
+}
+
 export async function POST(
-  req: NextRequest,
+  _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const session = await auth()
+
   if (!session?.user) {
     return NextResponse.json(
       { status: "error", message: "Nejste přihlášeni." },
@@ -29,7 +52,18 @@ export async function POST(
     )
   }
 
+  if (!canWriteOffboarding(session.user.role)) {
+    return NextResponse.json(
+      {
+        status: "error",
+        message: "Nemáte oprávnění obnovovat odchody.",
+      },
+      { status: 403 }
+    )
+  }
+
   const id = Number(params.id)
+
   if (!Number.isFinite(id)) {
     return NextResponse.json(
       { status: "error", message: "Neplatné ID." },
@@ -67,13 +101,13 @@ export async function POST(
       )
     }
 
-    // ✅ Kontrola duplicity - zda už neexistuje aktivní záznam s tímto osobním číslem
     if (employee.personalNumber) {
       const existing = await prisma.employeeOffboarding.findFirst({
         where: {
           personalNumber: employee.personalNumber,
           deletedAt: null,
         },
+        select: { id: true },
       })
 
       if (existing) {
@@ -87,6 +121,9 @@ export async function POST(
       }
     }
 
+    const restoredAt = new Date()
+    const hrRecipients = getHrNotificationRecipients()
+
     await prisma.$transaction(async (tx) => {
       await tx.employeeOffboarding.update({
         where: { id },
@@ -94,6 +131,7 @@ export async function POST(
           deletedAt: null,
           deletedBy: null,
           deleteReason: null,
+          updatedAt: restoredAt,
         },
       })
 
@@ -108,8 +146,24 @@ export async function POST(
         },
       })
 
-      // Volitelné - mail notifikace
-      try {
+      await tx.offboardingChangeLog.create({
+        data: {
+          employeeId: id,
+          userId: createdBy,
+          action: "RESTORED",
+          field: "restore_info",
+          oldValue: JSON.stringify({
+            deletedBy: employee.deletedBy,
+            deleteReason: employee.deleteReason,
+          }),
+          newValue: JSON.stringify({
+            restoredBy: createdBy,
+            restoredAt: restoredAt.toISOString(),
+          }),
+        },
+      })
+
+      if (hrRecipients.length > 0) {
         await tx.mailQueue.create({
           data: {
             type: "SYSTEM_NOTIFICATION",
@@ -118,17 +172,16 @@ export async function POST(
               employeeId: id,
               employeeName: `${employee.name} ${employee.surname}`,
               restoredBy: createdBy,
+              restoredAt: restoredAt.toISOString(),
               originalDeletedBy: employee.deletedBy,
               originalDeleteReason: employee.deleteReason,
-              recipients: [process.env.HR_NOTIFICATION_EMAILS || ""],
-              subject: `Obnoven záznam zaměstnance - ${employee.name} ${employee.surname}`,
+              recipients: hrRecipients,
+              subject: `Obnoven záznam odchodu - ${employee.name} ${employee.surname}`,
             },
             priority: 3,
             createdBy,
           },
         })
-      } catch (mailError) {
-        console.warn("Warning: Could not create mail queue entry:", mailError)
       }
     })
 
@@ -138,12 +191,13 @@ export async function POST(
       data: {
         id: employee.id,
         name: `${employee.name} ${employee.surname}`,
-        restoredAt: new Date().toISOString(),
+        restoredAt: restoredAt.toISOString(),
         restoredBy: createdBy,
       },
     })
   } catch (error) {
     console.error("Chyba při obnovování záznamu:", error)
+
     return NextResponse.json(
       {
         status: "error",

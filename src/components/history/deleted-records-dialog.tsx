@@ -32,10 +32,11 @@ interface DeletedRecord {
   personalNumber?: string | null
   deletedAt: string
   deletedBy: string
+  effectiveDate?: string | null
 }
 
 interface DeletedRecordsDialogProps {
-  kind: "onboarding" | "offboarding"
+  kind: "onboarding" | "offboarding" | "employee-change"
   title: string
   triggerLabel?: string
   successEvent?: string
@@ -60,7 +61,12 @@ export function DeletedRecordsDialog({
     setLoading(true)
     setError(null)
     try {
-      const endpoint = kind === "onboarding" ? "nastupy" : "odchody"
+      const endpoint =
+        kind === "onboarding"
+          ? "nastupy"
+          : kind === "offboarding"
+            ? "odchody"
+            : "zmeny"
       const res = await fetch(`/api/${endpoint}/deleted`, {
         cache: "no-store",
       })
@@ -97,7 +103,12 @@ export function DeletedRecordsDialog({
     setRestoring(record.id)
     setError(null)
     try {
-      const endpoint = kind === "onboarding" ? "nastupy" : "odchody"
+      const endpoint =
+        kind === "onboarding"
+          ? "nastupy"
+          : kind === "offboarding"
+            ? "odchody"
+            : "zmeny"
       const res = await fetch(`/api/${endpoint}/${record.id}/restore`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -134,6 +145,11 @@ export function DeletedRecordsDialog({
     if (kind === "onboarding") {
       const date = record.actualStart || record.plannedStart
       return date ? format(new Date(date), "d.M.yyyy", { locale: cs }) : "–"
+    }
+    if (kind === "employee-change") {
+      return record.effectiveDate
+        ? format(new Date(record.effectiveDate), "d.M.yyyy", { locale: cs })
+        : "–"
     } else {
       const date = record.actualEnd || record.plannedEnd
       return date ? format(new Date(date), "d.M.yyyy", { locale: cs }) : "–"
@@ -203,7 +219,11 @@ export function DeletedRecordsDialog({
                       <div className="flex flex-wrap gap-4 text-sm">
                         <div>
                           <span className="text-muted-foreground">
-                            {kind === "onboarding" ? "Nástup:" : "Odchod:"}
+                            {kind === "onboarding"
+                              ? "Nástup:"
+                              : kind === "employee-change"
+                                ? "Účinnost:"
+                                : "Odchod:"}
                           </span>{" "}
                           <span className="font-medium">
                             {getDateLabel(record)}
@@ -229,7 +249,9 @@ export function DeletedRecordsDialog({
                             {format(
                               new Date(record.deletedAt),
                               "d.M.yyyy HH:mm",
-                              { locale: cs }
+                              {
+                                locale: cs,
+                              }
                             )}
                           </span>
                         </div>
@@ -243,7 +265,7 @@ export function DeletedRecordsDialog({
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => handleRestore(record)}
+                      onClick={() => void handleRestore(record)}
                       disabled={restoring === record.id}
                       className="shrink-0"
                     >

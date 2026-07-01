@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
+import { auth } from "@/auth"
 import { z } from "zod"
 
 import { prisma } from "@/lib/db"
 import { getEmployees } from "@/lib/eos-employees"
+import { canReadInternalApp } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
@@ -18,6 +20,11 @@ const querySchema = z.object({
     .string()
     .trim()
     .regex(/^\d+$/, "excludeOnboardingId musí být číslo.")
+    .optional(),
+  excludeOffboardingId: z
+    .string()
+    .trim()
+    .regex(/^\d+$/, "excludeOffboardingId musí být číslo.")
     .optional(),
 })
 
@@ -50,23 +57,76 @@ function buildFullName(args: {
     .trim()
 }
 
+async function isCurrentRecordPersonalNumber(args: {
+  personalNumber: string
+  excludeOnboardingId: number | null
+  excludeOffboardingId: number | null
+}) {
+  if (args.excludeOnboardingId) {
+    const currentOnboarding = await prisma.employeeOnboarding.findUnique({
+      where: { id: args.excludeOnboardingId },
+      select: { personalNumber: true },
+    })
+
+    if (currentOnboarding?.personalNumber === args.personalNumber) {
+      return true
+    }
+  }
+
+  if (args.excludeOffboardingId) {
+    const currentOffboarding = await prisma.employeeOffboarding.findUnique({
+      where: { id: args.excludeOffboardingId },
+      select: { personalNumber: true },
+    })
+
+    if (currentOffboarding?.personalNumber === args.personalNumber) {
+      return true
+    }
+  }
+
+  return false
+}
+
 export async function GET(request: NextRequest) {
+  const session = await auth()
+
+  if (!session?.user) {
+    return NextResponse.json<CheckResponse>(
+      {
+        ok: false,
+        message: "Nejste přihlášeni.",
+      },
+      { status: 401 }
+    )
+  }
+
+  if (!canReadInternalApp(session.user.role)) {
+    return NextResponse.json<CheckResponse>(
+      {
+        ok: false,
+        message: "Nemáte oprávnění ověřovat osobní čísla.",
+      },
+      { status: 403 }
+    )
+  }
+
   try {
-    const url = new URL(request.url)
-    const rawNumber = url.searchParams.get("number")
+    const rawNumber = request.nextUrl.searchParams.get("number")
     const rawExcludeOnboardingId =
-      url.searchParams.get("excludeOnboardingId") ?? undefined
+      request.nextUrl.searchParams.get("excludeOnboardingId") ?? undefined
+    const rawExcludeOffboardingId =
+      request.nextUrl.searchParams.get("excludeOffboardingId") ?? undefined
 
     const parsed = querySchema.safeParse({
       number: rawNumber,
       excludeOnboardingId: rawExcludeOnboardingId,
+      excludeOffboardingId: rawExcludeOffboardingId,
     })
 
     if (!parsed.success) {
       return NextResponse.json<CheckResponse>(
         {
           ok: false,
-          usedBy: undefined,
           message: "Neplatné osobní číslo.",
         },
         { status: 400 }
@@ -77,6 +137,19 @@ export async function GET(request: NextRequest) {
     const excludeOnboardingId = parsed.data.excludeOnboardingId
       ? Number(parsed.data.excludeOnboardingId)
       : null
+    const excludeOffboardingId = parsed.data.excludeOffboardingId
+      ? Number(parsed.data.excludeOffboardingId)
+      : null
+
+    const isCurrent = await isCurrentRecordPersonalNumber({
+      personalNumber,
+      excludeOnboardingId,
+      excludeOffboardingId,
+    })
+
+    if (isCurrent) {
+      return NextResponse.json<CheckResponse>({ ok: true })
+    }
 
     try {
       const employees = (await getEmployees(personalNumber)) as
@@ -85,31 +158,20 @@ export async function GET(request: NextRequest) {
 
       if (Array.isArray(employees) && employees.length > 0) {
         const eosEmployee = employees.find(
-          (e) => e.personalNumber === personalNumber
+          (employee) => employee.personalNumber === personalNumber
         )
 
         if (eosEmployee) {
-          if (excludeOnboardingId) {
-            const currentOnboarding =
-              await prisma.employeeOnboarding.findUnique({
-                where: { id: excludeOnboardingId },
-                select: { personalNumber: true },
-              })
-
-            if (currentOnboarding?.personalNumber === personalNumber) {
-              return NextResponse.json<CheckResponse>({ ok: true })
-            }
-          }
-
           const usedBy = buildFullName(eosEmployee)
+
           return NextResponse.json<CheckResponse>({
             ok: false,
             usedBy: usedBy || undefined,
           })
         }
       }
-    } catch (e) {
-      console.error("EOS kontrola osobního čísla selhala:", e)
+    } catch (error) {
+      console.error("EOS kontrola osobního čísla selhala:", error)
     }
 
     const user = await prisma.user.findFirst({
@@ -122,11 +184,10 @@ export async function GET(request: NextRequest) {
 
     if (user) {
       const usedBy = buildFullName({
-        titleBefore: null,
         name: user.name ?? null,
         surname: user.surname ?? null,
-        titleAfter: null,
       })
+
       return NextResponse.json<CheckResponse>({
         ok: false,
         usedBy: usedBy || undefined,
@@ -150,6 +211,7 @@ export async function GET(request: NextRequest) {
 
     if (onboarding) {
       const usedBy = buildFullName(onboarding)
+
       return NextResponse.json<CheckResponse>({
         ok: false,
         usedBy: usedBy || undefined,
@@ -160,6 +222,7 @@ export async function GET(request: NextRequest) {
       where: {
         personalNumber,
         deletedAt: null,
+        ...(excludeOffboardingId ? { id: { not: excludeOffboardingId } } : {}),
       },
       select: {
         titleBefore: true,
@@ -172,6 +235,7 @@ export async function GET(request: NextRequest) {
 
     if (offboarding) {
       const usedBy = buildFullName(offboarding)
+
       return NextResponse.json<CheckResponse>({
         ok: false,
         usedBy: usedBy || undefined,
@@ -186,17 +250,17 @@ export async function GET(request: NextRequest) {
     if (gap?.status === "USED") {
       return NextResponse.json<CheckResponse>({
         ok: false,
-        usedBy: undefined,
+        message: "Osobní číslo je již označené jako použité.",
       })
     }
 
     return NextResponse.json<CheckResponse>({ ok: true })
   } catch (error) {
     console.error("Chyba při ověřování osobního čísla:", error)
+
     return NextResponse.json<CheckResponse>(
       {
         ok: false,
-        usedBy: undefined,
         message: "Chyba při ověřování osobního čísla.",
       },
       { status: 500 }

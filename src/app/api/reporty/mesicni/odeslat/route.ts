@@ -10,6 +10,7 @@ import {
   type EmailRecord,
 } from "@/lib/email"
 import { recipientsFor } from "@/lib/email-config"
+import { canSendMonthlyReports } from "@/lib/rbac"
 
 type Kind = "planned" | "actual"
 type Mode = "selected" | "all" | "unsentOnly"
@@ -31,8 +32,16 @@ type UiRecordIncoming = {
 
 export async function POST(request: Request) {
   const session = await auth()
+
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  if (!canSendMonthlyReports(session.user.role)) {
+    return NextResponse.json(
+      { error: "Nemáte oprávnění odesílat měsíční reporty." },
+      { status: 403 }
+    )
   }
 
   const body = (await request.json()) as {
@@ -74,6 +83,7 @@ export async function POST(request: Request) {
           },
         })
       }
+
       return rep
     }
 
@@ -100,6 +110,7 @@ export async function POST(request: Request) {
     const alreadyPlanned = new Set(
       existedPlanned.map((e) => `${e.recordType}-${e.recordId}`)
     )
+
     const alreadyActual = new Set(
       existedActual.map((e) => `${e.recordType}-${e.recordId}`)
     )
@@ -109,6 +120,7 @@ export async function POST(request: Request) {
     if (mode === "unsentOnly") {
       payloadRows = records.filter((r) => {
         const key = `${r.type}_${r.originKind}-${r.id}`
+
         return r.originKind === "planned"
           ? !alreadyPlanned.has(key)
           : !alreadyActual.has(key)
@@ -210,6 +222,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, sent: payloadRows.length })
   } catch (e) {
     console.error(e)
+
     await logEmailHistory({
       emailType: "MONTHLY_SUMMARY",
       recipients: [],
@@ -219,6 +232,7 @@ export async function POST(request: Request) {
       error: e instanceof Error ? e.message : String(e),
       createdBy: (session.user as { id?: string }).id ?? "unknown",
     })
+
     return NextResponse.json({ error: "Chyba při odesílání" }, { status: 500 })
   }
 }

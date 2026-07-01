@@ -36,7 +36,7 @@ type SystemizaceResponse = {
 }
 
 const SYSTEMIZACE_URL =
-  "https://systemizace.kitt6.dev/api/1.0/position/list?detail=1"
+  "https://systemizace.praha6.cz/api/1.0/position/list?detail=1"
 
 export async function getPositions(): Promise<Position[]> {
   const res = await fetch(SYSTEMIZACE_URL, {

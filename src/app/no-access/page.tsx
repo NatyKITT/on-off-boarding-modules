@@ -1,5 +1,3 @@
-import Link from "next/link"
-
 import { SignOutButton } from "@/components/auth/signout-button"
 
 export default function NoAccessPage() {
@@ -20,18 +18,11 @@ export default function NoAccessPage() {
         </p>
 
         <div className="mt-6 flex flex-col gap-2 sm:flex-row">
-          <Link
-            href="/signin"
-            className="inline-flex h-10 items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
-          >
-            Zpět na přihlášení
-          </Link>
-
           <SignOutButton
             variant="outline"
             className="h-10 justify-center px-4 py-2"
           >
-            Odhlásit účet
+            Zpět na přihlášení
           </SignOutButton>
         </div>
       </div>

@@ -136,10 +136,16 @@ export async function PATCH(
     select: { id: true },
   })
 
-  const hrRecipients = (process.env.HR_NOTIFICATION_EMAILS ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
+  const hrRecipients = [
+    ...(process.env.HR_NOTIFICATION_EMAILS ?? "").split(/[;,]/),
+    ...(process.env.HR_EMAILS ?? "").split(/[;,]/),
+  ]
+    .map((email) => email.trim())
+    .filter((email, index, arr) => {
+      return (
+        email.length > 0 && email.includes("@") && arr.indexOf(email) === index
+      )
+    })
 
   const payrollRecipients = (process.env.PAYROLL_NOTIFICATION_EMAILS ?? "")
     .split(",")
@@ -212,10 +218,11 @@ export async function PATCH(
     let pdfBuffer: ArrayBuffer | null = null
 
     try {
-      const origin = (process.env.AUTH_URL ?? "http://localhost:3001").replace(
-        /\/$/,
-        ""
-      )
+      const origin = (
+        process.env.NEXT_PUBLIC_APP_URL ??
+        process.env.AUTH_URL ??
+        req.nextUrl.origin
+      ).replace(/\/$/, "")
       const pdfUrl = `${origin}/api/dokumenty/public/${hash}/pdf`
       const pdfResponse = await fetch(pdfUrl)
 

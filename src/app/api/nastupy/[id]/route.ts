@@ -7,6 +7,7 @@ import { env } from "@/env.mjs"
 
 import { prisma } from "@/lib/db"
 import {
+  buildLinkedEmployeeChangeInfos,
   buildLinkedOffboardingInfo,
   normalizePersonalNumber,
   pickMostRelevantOffboarding,
@@ -16,6 +17,7 @@ import {
   toMentorFields,
   toSupervisorFields,
 } from "@/lib/person-snapshot"
+import { canReadOnboarding, canWriteOnboarding } from "@/lib/rbac"
 import { resolveSupervisorFromPositionNum } from "@/lib/systemizace-superior"
 
 export const dynamic = "force-dynamic"
@@ -26,8 +28,30 @@ interface Params {
   params: { id: string }
 }
 
+type OnboardingRecord = NonNullable<
+  Awaited<ReturnType<typeof prisma.employeeOnboarding.findFirst>>
+>
+
 const emptyToUndefined = (v: unknown) =>
   typeof v === "string" && v.trim() === "" ? undefined : v
+
+const probationExtensionTypeSchema = z.enum([
+  "sick_leave",
+  "vacation",
+  "family_care",
+  "maternity_parental",
+  "other_obstacle",
+  "unexcused_absence",
+])
+
+const probationExtensionSchema = z.object({
+  id: z.string(),
+  type: probationExtensionTypeSchema,
+  from: z.string(),
+  to: z.string(),
+  days: z.number().int().nonnegative(),
+  note: z.string().optional(),
+})
 
 const updateSchema = z.object({
   titleBefore: z.union([z.string(), z.null()]).optional(),
@@ -51,6 +75,9 @@ const updateSchema = z.object({
   actualStart: z.preprocess(emptyToUndefined, z.coerce.date()).optional(),
   startTime: z.union([z.string(), z.null()]).optional(),
   probationEnd: z.preprocess(emptyToUndefined, z.coerce.date()).optional(),
+  hasCustomDates: z.boolean().optional(),
+  probationExtensions: z.array(probationExtensionSchema).optional(),
+  probationExtensionSummary: z.union([z.string(), z.null()]).optional(),
 
   userEmail: z
     .preprocess(emptyToUndefined, z.string().email())
@@ -64,6 +91,9 @@ const updateSchema = z.object({
     .preprocess(emptyToUndefined, z.string().email())
     .optional()
     .nullable(),
+  supervisorPosition: z.union([z.string(), z.null()]).optional(),
+  supervisorDepartment: z.union([z.string(), z.null()]).optional(),
+  supervisorUnitName: z.union([z.string(), z.null()]).optional(),
 
   mentorName: z.union([z.string(), z.null()]).optional(),
   mentorEmail: z
@@ -129,14 +159,35 @@ async function getLinkedOffboardingForOnboarding(
   })
 }
 
-async function serializeOnboarding(
-  record: Awaited<ReturnType<typeof prisma.employeeOnboarding.findFirst>>
+async function getLinkedChangesForPersonalNumber(
+  personalNumber: string | null | undefined
 ) {
-  if (!record) return null
+  const normalizedPersonalNumber = normalizePersonalNumber(personalNumber)
 
+  if (!normalizedPersonalNumber) return []
+
+  const changes = await prisma.employeeChange.findMany({
+    where: {
+      personalNumber: normalizedPersonalNumber,
+      deletedAt: null,
+      status: {
+        not: "CANCELLED",
+      },
+    },
+    orderBy: [{ effectiveDate: "desc" }, { id: "desc" }],
+  })
+
+  return buildLinkedEmployeeChangeInfos(changes)
+}
+
+async function serializeOnboarding(record: OnboardingRecord) {
   const linkedOffboarding = await getLinkedOffboardingForOnboarding(
     record.personalNumber,
     record.probationEnd
+  )
+
+  const linkedChanges = await getLinkedChangesForPersonalNumber(
+    record.personalNumber
   )
 
   return {
@@ -144,26 +195,16 @@ async function serializeOnboarding(
     plannedStart: record.plannedStart?.toISOString() || null,
     actualStart: record.actualStart?.toISOString() || null,
     probationEnd: record.probationEnd?.toISOString() || null,
+    hasCustomDates: record.hasCustomDates,
+    probationExtensions: Array.isArray(record.probationExtensions)
+      ? record.probationExtensions
+      : [],
+    probationExtensionSummary: record.probationExtensionSummary ?? null,
 
     mentorAssignedFrom: record.mentorAssignedFrom?.toISOString() || null,
     mentorAssignedTo: record.mentorAssignedTo?.toISOString() || null,
     mentorNotificationSentAt:
       record.mentorNotificationSentAt?.toISOString() || null,
-
-    probationEvaluationSentAt:
-      record.probationEvaluationSentAt?.toISOString() || null,
-    probationNotification21Sent:
-      record.probationNotification21Sent?.toISOString() || null,
-    probationNotificationHRSent:
-      record.probationNotificationHRSent?.toISOString() || null,
-    probationReminder1DaySent:
-      record.probationReminder1DaySent?.toISOString() || null,
-    probationCompletedNotified:
-      record.probationCompletedNotified?.toISOString() || null,
-    probationHashExpiresAt:
-      record.probationHashExpiresAt?.toISOString() || null,
-    probationHashUsedAt: record.probationHashUsedAt?.toISOString() || null,
-    lastProbationReminder: record.lastProbationReminder?.toISOString() || null,
 
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
@@ -175,6 +216,9 @@ async function serializeOnboarding(
       record.supervisorTitleAfter,
     ]),
     supervisorEmail: record.supervisorEmail ?? null,
+    supervisorPosition: record.supervisorPosition ?? null,
+    supervisorDepartment: record.supervisorDepartment ?? null,
+    supervisorUnitName: record.supervisorUnitName ?? null,
 
     mentorName: buildFullName([
       record.mentorTitleBefore,
@@ -189,6 +233,7 @@ async function serializeOnboarding(
     cancelReason: record.cancelReason ?? null,
 
     linkedOffboarding,
+    linkedChanges,
   }
 }
 
@@ -241,6 +286,16 @@ export async function GET(_: NextRequest, { params }: Params) {
     )
   }
 
+  if (!canReadOnboarding(session.user.role)) {
+    return NextResponse.json(
+      {
+        status: "error",
+        message: "Nemáte oprávnění zobrazit nástup.",
+      },
+      { status: 403 }
+    )
+  }
+
   const id = Number(params.id)
   if (!Number.isFinite(id)) {
     return NextResponse.json(
@@ -284,6 +339,16 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     return NextResponse.json(
       { status: "error", message: "Nejste přihlášeni." },
       { status: 401 }
+    )
+  }
+
+  if (!canWriteOnboarding(session.user.role)) {
+    return NextResponse.json(
+      {
+        status: "error",
+        message: "Nemáte oprávnění upravovat nástupy.",
+      },
+      { status: 403 }
     )
   }
 
@@ -369,6 +434,18 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       if (data.probationEnd !== undefined)
         updateData.probationEnd = data.probationEnd
 
+      if (data.hasCustomDates !== undefined) {
+        updateData.hasCustomDates = data.hasCustomDates
+      }
+      if (data.probationExtensions !== undefined) {
+        updateData.probationExtensions = (data.probationExtensions ??
+          []) as Prisma.InputJsonValue
+      }
+      if (data.probationExtensionSummary !== undefined) {
+        updateData.probationExtensionSummary =
+          data.probationExtensionSummary ?? null
+      }
+
       if (data.userEmail !== undefined) updateData.userEmail = data.userEmail
       if (data.userName !== undefined) updateData.userName = data.userName
       if (data.notes !== undefined) updateData.notes = data.notes
@@ -386,15 +463,24 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
       if (hasManualSupervisorOverride) {
         const manualSupervisorSnapshot =
-          data.supervisorName || data.supervisorEmail
-            ? normalizePersonSnapshot(
-                {
-                  source: "MANUAL",
+          data.supervisorName ||
+          data.supervisorEmail ||
+          data.supervisorPosition ||
+          data.supervisorDepartment ||
+          data.supervisorUnitName
+            ? (() => {
+                const snapshotInput = {
+                  source: "MANUAL" as const,
                   name: data.supervisorName ?? null,
                   email: data.supervisorEmail ?? null,
-                },
-                "MANUAL"
-              )
+                  position: data.supervisorPosition ?? null,
+                  positionName: data.supervisorPosition ?? null,
+                  department: data.supervisorDepartment ?? null,
+                  unitName: data.supervisorUnitName ?? null,
+                }
+
+                return normalizePersonSnapshot(snapshotInput, "MANUAL")
+              })()
             : null
 
         Object.assign(
@@ -423,7 +509,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
           data.mentorName || data.mentorEmail
             ? normalizePersonSnapshot(
                 {
-                  source: "MANUAL",
+                  source: "MANUAL" as const,
                   name: data.mentorName ?? null,
                   email: data.mentorEmail ?? null,
                 },
@@ -597,6 +683,16 @@ export async function DELETE(_: NextRequest, { params }: Params) {
     return NextResponse.json(
       { status: "error", message: "Musíte být přihlášeni." },
       { status: 401 }
+    )
+  }
+
+  if (!canWriteOnboarding(session.user.role)) {
+    return NextResponse.json(
+      {
+        status: "error",
+        message: "Nemáte oprávnění mazat nástupy.",
+      },
+      { status: 403 }
     )
   }
 

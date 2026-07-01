@@ -11,7 +11,10 @@ import { useToast } from "@/hooks/use-toast"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
-import { OnboardingFormUnified } from "@/components/forms/onboarding-form"
+import {
+  OnboardingFormUnified,
+  type ProbationExtension,
+} from "@/components/forms/onboarding-form"
 import { HistoryDialog } from "@/components/history/history-dialog"
 
 type LinkedOffboardingInfo = {
@@ -34,6 +37,9 @@ type OnboardingDetail = {
   actualStart?: string | null
   probationEnd?: string | null
   startTime?: string | null
+  hasCustomDates?: boolean | null
+  probationExtensions?: ProbationExtension[] | null
+  probationExtensionSummary?: string | null
 
   titleBefore?: string | null
   name: string
@@ -54,6 +60,9 @@ type OnboardingDetail = {
 
   supervisorName?: string | null
   supervisorEmail?: string | null
+  supervisorPosition?: string | null
+  supervisorDepartment?: string | null
+  supervisorUnitName?: string | null
   mentorName?: string | null
   mentorEmail?: string | null
 
@@ -350,11 +359,18 @@ export default function OnboardingDetailPage({ params }: PageProps) {
                 probationEnd: data.probationEnd
                   ? data.probationEnd.slice(0, 10)
                   : undefined,
+                hasCustomDates: data.hasCustomDates ?? undefined,
+                probationExtensions: data.probationExtensions ?? undefined,
                 userEmail: data.userEmail ?? undefined,
                 userName: data.userName ?? undefined,
                 personalNumber: data.personalNumber ?? undefined,
                 notes: data.notes ?? undefined,
                 status: data.status ?? undefined,
+                supervisorName: data.supervisorName ?? undefined,
+                supervisorEmail: data.supervisorEmail ?? undefined,
+                supervisorPosition: data.supervisorPosition ?? undefined,
+                supervisorDepartment: data.supervisorDepartment ?? undefined,
+                supervisorUnitName: data.supervisorUnitName ?? undefined,
               }}
               onSuccess={() => {
                 toast({

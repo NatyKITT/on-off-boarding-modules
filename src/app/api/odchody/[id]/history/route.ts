@@ -2,27 +2,40 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
+import { canReadOffboarding } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
 export const revalidate = 0
 
-function normalizeAction(a: string) {
-  if (a === "CREATED") return "CREATE"
-  if (a === "UPDATED") return "UPDATE"
-  if (a === "DELETED") return "DELETE"
-  return a
+function normalizeAction(action: string) {
+  if (action === "CREATED") return "CREATE"
+  if (action === "UPDATED") return "UPDATE"
+  if (action === "DELETED") return "DELETE"
+
+  return action
 }
 
 export async function GET(
-  req: NextRequest,
+  _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const session = await auth()
+
   if (!session?.user) {
     return NextResponse.json(
       { status: "error", message: "Nejste přihlášeni." },
       { status: 401 }
+    )
+  }
+
+  if (!canReadOffboarding(session.user.role)) {
+    return NextResponse.json(
+      {
+        status: "error",
+        message: "Nemáte oprávnění zobrazit historii odchodu.",
+      },
+      { status: 403 }
     )
   }
 
@@ -47,6 +60,7 @@ export async function GET(
         { status: 404 }
       )
     }
+
     const rows = await prisma.offboardingChangeLog.findMany({
       where: { employeeId: id },
       orderBy: { createdAt: "desc" },
@@ -65,7 +79,11 @@ export async function GET(
     })
 
     const userKeys = Array.from(
-      new Set(rows.map((r) => r.userId).filter((v): v is string => Boolean(v)))
+      new Set(
+        rows
+          .map((row) => row.userId)
+          .filter((value): value is string => Boolean(value))
+      )
     )
 
     const users =
@@ -79,24 +97,30 @@ export async function GET(
         : []
 
     const nameByKey = new Map<string, string>()
-    for (const u of users) {
+
+    for (const user of users) {
       const label =
-        [u.name, u.surname].filter(Boolean).join(" ") || u.email || u.id
-      if (u.id) nameByKey.set(u.id, label)
-      if (u.email) nameByKey.set(u.email, label)
+        [user.name, user.surname].filter(Boolean).join(" ") ||
+        user.email ||
+        user.id
+
+      if (user.id) nameByKey.set(user.id, label)
+      if (user.email) nameByKey.set(user.email, label)
     }
 
-    const data = rows.map((r) => ({
-      id: r.id,
-      employeeId: r.employeeId,
-      userId: r.userId,
+    const data = rows.map((row) => ({
+      id: row.id,
+      employeeId: row.employeeId,
+      userId: row.userId,
       displayUser:
-        (r.userId && nameByKey.get(r.userId)) || r.userId || "Neznámý uživatel",
-      action: normalizeAction(r.action), // <<< tady
-      field: r.field ?? null,
-      oldValue: r.oldValue ?? null,
-      newValue: r.newValue ?? null,
-      createdAt: r.createdAt.toISOString(),
+        (row.userId && nameByKey.get(row.userId)) ||
+        row.userId ||
+        "Neznámý uživatel",
+      action: normalizeAction(row.action),
+      field: row.field ?? null,
+      oldValue: row.oldValue ?? null,
+      newValue: row.newValue ?? null,
+      createdAt: row.createdAt.toISOString(),
     }))
 
     const newest = data.at(0)?.createdAt ?? null
@@ -107,12 +131,13 @@ export async function GET(
       data,
       summary: {
         total: data.length,
-        actionTypes: Array.from(new Set(data.map((r) => r.action))),
+        actionTypes: Array.from(new Set(data.map((row) => row.action))),
         dateRange: newest && oldest ? { oldest, newest } : null,
       },
     })
   } catch (error) {
     console.error("GET /api/odchody/[id]/history error:", error)
+
     return NextResponse.json(
       {
         status: "error",

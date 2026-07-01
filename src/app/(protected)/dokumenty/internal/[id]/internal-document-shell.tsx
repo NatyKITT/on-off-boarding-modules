@@ -17,7 +17,6 @@ import {
 import { AffidavitForm } from "@/components/forms/affidavit-form"
 import { PayrollInfoForm } from "@/components/forms/payroll-info-form"
 import { PersonalQuestionnaireForm } from "@/components/forms/personal-questionnaire-form"
-import { ProbationEvaluationForm } from "@/components/forms/probation-evaluation-form"
 
 type OnboardingMeta = {
   id: number
@@ -28,16 +27,6 @@ type OnboardingMeta = {
   department: string
   unitName: string
   positionName: string
-  actualStart?: string | null
-}
-
-type ProbationDocumentData = {
-  evaluatorName?: string
-  evaluatorEmail?: string
-  workPerformance?: string
-  socialBehavior?: string
-  recommendation?: "yes" | "no"
-  reasonIfNo?: string
 }
 
 type InternalDocument = {
@@ -53,38 +42,38 @@ type InternalDocument = {
 
 type Props = {
   document: InternalDocument
+  canEdit: boolean
 }
 
-function docTypeLabel(t: EmploymentDocumentType) {
-  switch (t) {
+function docTypeLabel(type: EmploymentDocumentType) {
+  switch (type) {
     case "AFFIDAVIT":
       return "Čestné prohlášení"
     case "PERSONAL_QUESTIONNAIRE":
       return "Osobní dotazník"
     case "PAYROLL_INFO":
       return "Dotazník pro vedení mzdové agendy"
-    case "PROBATION_EVALUATION":
-      return "Hodnocení zkušební doby"
     default:
-      return t
+      return type
   }
 }
 
-const managerialKeywords = ["vedoucí", "ředitel", "tajemník"]
+function formatDateTime(value?: Date | string | null) {
+  if (!value) return null
 
-function isManagerialPosition(positionName?: string): boolean {
-  if (!positionName) return false
-  const lower = positionName.toLowerCase()
-  return managerialKeywords.some((kw) => lower.includes(kw))
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return String(value)
+  }
+
+  return date.toLocaleString("cs-CZ", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  })
 }
 
-function asProbationData(value: unknown): ProbationDocumentData {
-  return value && typeof value === "object"
-    ? (value as ProbationDocumentData)
-    : {}
-}
-
-export function InternalDocumentShell({ document }: Props) {
+export function InternalDocumentShell({ document, canEdit }: Props) {
   const [doc, setDoc] = useState(document)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -96,19 +85,14 @@ export function InternalDocumentShell({ document }: Props) {
 
   const employeeMeta = useMemo(() => {
     if (!doc.onboarding) return undefined
-    const base = buildEmployeeMeta(doc.onboarding)
-    return {
-      ...base,
-      actualStart: doc.onboarding.actualStart ?? undefined,
-    }
-  }, [doc.onboarding])
 
-  const probationData = useMemo(() => asProbationData(doc.data), [doc.data])
+    return buildEmployeeMeta(doc.onboarding)
+  }, [doc.onboarding])
 
   const titleName = employeeMeta?.fullName?.trim()
   const departmentText = employeeMeta?.department?.trim()
   const positionText = employeeMeta?.position?.trim()
-  const readOnly = doc.isLocked
+  const readOnly = doc.isLocked || !canEdit
 
   async function handleSave(data: unknown) {
     if (readOnly) return
@@ -124,9 +108,10 @@ export function InternalDocumentShell({ document }: Props) {
       })
 
       if (!res.ok) {
-        const j = await res.json().catch(() => null)
+        const response = await res.json().catch(() => null)
+
         throw new Error(
-          j?.message ??
+          response?.message ??
             "Uložení dokumentu se nezdařilo. Zkuste to prosím znovu."
         )
       }
@@ -135,20 +120,21 @@ export function InternalDocumentShell({ document }: Props) {
         id: number
         status: DocumentStatus
         completedAt: string | null
+        type?: EmploymentDocumentType
       }
 
-      setDoc((prev) => ({
-        ...prev,
+      setDoc((previous) => ({
+        ...previous,
         data,
-        status: json.status ?? prev.status,
-        completedAt: json.completedAt ?? prev.completedAt,
+        status: json.status ?? previous.status,
+        completedAt: json.completedAt ?? previous.completedAt,
       }))
 
       setResultModal("success")
-    } catch (e) {
+    } catch (saveError) {
       setError(
-        e instanceof Error
-          ? e.message
+        saveError instanceof Error
+          ? saveError.message
           : "Uložení dokumentu se nezdařilo. Zkuste to prosím znovu."
       )
       setResultModal("error")
@@ -177,20 +163,6 @@ export function InternalDocumentShell({ document }: Props) {
       case "PERSONAL_QUESTIONNAIRE":
         return <PersonalQuestionnaireForm {...commonProps} />
 
-      case "PROBATION_EVALUATION":
-        return (
-          <ProbationEvaluationForm
-            {...commonProps}
-            formType={
-              isManagerialPosition(doc.onboarding?.positionName)
-                ? "MANAGERIAL"
-                : "REGULAR_EMPLOYEE"
-            }
-            evaluatorName={probationData.evaluatorName ?? ""}
-            evaluatorEmail={probationData.evaluatorEmail ?? ""}
-          />
-        )
-
       default:
         return (
           <div className="flex items-center gap-2 text-sm text-red-600">
@@ -214,19 +186,24 @@ export function InternalDocumentShell({ document }: Props) {
               Dokument uložen
             </DialogTitle>
           </DialogHeader>
+
           <p className="text-sm text-muted-foreground">
             Údaje byly úspěšně uloženy. Můžete dokument vytisknout nebo se
             vrátit zpět na přehled dokumentů.
           </p>
+
           <div className="mt-4 flex justify-end gap-2">
             <Button
+              type="button"
               variant="outline"
               size="sm"
               onClick={() => setResultModal(null)}
             >
               Zavřít
             </Button>
+
             <Button
+              type="button"
               size="sm"
               onClick={() => {
                 setResultModal(null)
@@ -250,12 +227,18 @@ export function InternalDocumentShell({ document }: Props) {
               Chyba při ukládání
             </DialogTitle>
           </DialogHeader>
+
           <p className="text-sm text-muted-foreground">
             {error ??
               "Dokument se nepodařilo uložit. Zkuste to prosím znovu nebo kontaktujte IT."}
           </p>
+
           <div className="mt-4 flex justify-end">
-            <Button size="sm" onClick={() => setResultModal(null)}>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => setResultModal(null)}
+            >
               Zavřít
             </Button>
           </div>
@@ -276,17 +259,18 @@ export function InternalDocumentShell({ document }: Props) {
           </p>
         )}
 
-        <p className="text-sm text-muted-foreground">
-          {doc.type === "PROBATION_EVALUATION"
-            ? "Zde vidíte formulář hodnocení zkušební doby. V případě potřeby ho můžete upravit a uložit."
-            : "Zde vidíte formulář tak, jak ho vyplnil zaměstnanec. V případě potřeby ho můžete upravit a uložit."}
-        </p>
+        {doc.completedAt && (
+          <p className="text-xs text-muted-foreground">
+            Vyplněno: {formatDateTime(doc.completedAt)}
+          </p>
+        )}
 
         {readOnly && (
           <div className="mt-2 inline-flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
             <Lock className="size-3" />
-            Dokument je uzamčený. Pro úpravy ho nejprve odemkněte v seznamu
-            dokumentů.
+            {doc.isLocked
+              ? "Dokument je uzamčený. Pro úpravy ho nejprve odemkněte v seznamu dokumentů."
+              : "Nemáte oprávnění dokument upravovat. Dokument je zobrazen pouze pro čtení."}
           </div>
         )}
 

@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  ArrowLeftRight,
   ArrowRight,
   ArrowUpRight,
   BookOpen,
@@ -41,6 +42,7 @@ export const Icons = {
   add: Plus,
   arrowRight: ArrowRight,
   arrowUpRight: ArrowUpRight,
+  arrowLeftRight: ArrowLeftRight,
   chevronLeft: ChevronLeft,
   chevronRight: ChevronRight,
   bookOpen: BookOpen,

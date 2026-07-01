@@ -8,6 +8,7 @@ declare module "next-auth" {
       role: Role
       canAccessApp: boolean
       name?: string | null
+      surname?: string | null
     }
   }
 
@@ -26,5 +27,6 @@ declare module "next-auth/jwt" {
     canAccessApp?: boolean
     email?: string | null
     name?: string | null
+    surname?: string | null
   }
 }

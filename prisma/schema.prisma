@@ -38,22 +38,39 @@ enum PersonSource {
 enum MailJobType {
   EMPLOYEE_INFO
   MONTHLY_SUMMARY
-  PROBATION_WARNING
-  PROBATION_REMINDER
-  PROBATION_ENDING
-  PROBATION_EVALUATION_LINK
-  PROBATION_MISSING_EMAIL
-  PROBATION_SUBMITTED
+
+  PROBATION_EVALUATION_INVITE
+  PROBATION_EVALUATION_REMINDER
+  PROBATION_EVALUATION_HR_INFO
+  PROBATION_EVALUATION_HR_MISSING_SUPERVISOR
+  PROBATION_EVALUATION_HR_NOT_COMPLETED
+  PROBATION_EVALUATION_COMPLETED
+
   NOTICE_WARNING
   NOTICE_ENDING
+
+  SIGNATURE_INVITE
+  EXIT_CHECKLIST_SIGNATURE_INVITE
+  EXIT_SIGNATURE_INVITE
+
+  BEHALF_SIGNATURE_INVITE
+  EXIT_CHECKLIST_BEHALF_SIGNATURE
+
+  HANDOVER_RECIPIENT
+  HANDOVER_RECIPIENT_INFO
+  EXIT_CHECKLIST_HANDOVER_RECIPIENT
+
+  EXIT_CHECKLIST_COMPLETED
+  EXIT_CHECKLIST_COMPLETION
+  EXIT_CHECKLIST_PDF
+
+  EMPLOYEE_CHANGE_INFO
+  EMPLOYEE_CHANGE_SUMMARY
+
   MANUAL_EMAIL
   SYSTEM_NOTIFICATION
-  PROBATION_SUPERVISOR_21_DAYS
-  PROBATION_HR_INFO_21_DAYS
-  PROBATION_HR_REMINDER_1_DAY
-  PROBATION_COMPLETED
-  PROBATION_MISSING_SUPERVISOR
-  PROBATION_FORM_COMPLETED
+  GENERIC_EMAIL
+
   MENTOR_ASSIGNED
 }
 
@@ -76,9 +93,8 @@ enum ActionType {
   MAIL_ENQUEUED
   MAIL_FAILED
   STATUS_CHANGED
-  PROBATION_REMINDER_SENT
-  PROBATION_EVALUATION_SENT
   NOTICE_REMINDER_SENT
+  OFFICIAL_CHANGE_APPLIED
 }
 
 enum PersonalNumberStatus {
@@ -92,7 +108,6 @@ enum EmploymentDocumentType {
   EDUCATION
   EXPERIENCE
   PAYROLL_INFO
-  PROBATION_EVALUATION
 }
 
 enum OffboardingDocumentType {
@@ -119,6 +134,71 @@ enum PositionType {
 enum ProbationFormType {
   REGULAR_EMPLOYEE
   MANAGERIAL
+}
+
+enum ProbationEvaluationRequestStatus {
+  DRAFT
+  READY
+  SENT
+  COMPLETED
+  CANCELLED
+  EXPIRED
+}
+
+enum ProbationEvaluationEventAction {
+  CREATED
+  UPDATED
+  INVITE_QUEUED
+  INVITE_SENT
+  REMINDER_QUEUED
+  REMINDER_SENT
+  HR_INFO_QUEUED
+  HR_INFO_SENT
+  HR_REMINDER_QUEUED
+  HR_REMINDER_SENT
+  MISSING_SUPERVISOR
+  COMPLETED
+  EDITED
+  RESET
+  LOCKED
+  UNLOCKED
+  TOKEN_REGENERATED
+  CANCELLED
+  EXPIRED
+  EMAIL_FAILED
+}
+
+enum ProbationEvaluationStatus {
+  ACTIVE
+  VOIDED
+}
+
+enum ProbationEvaluationSendMethod {
+  MANUAL
+  CRON
+}
+
+enum EmployeeChangeType {
+  POSITION
+  NAME
+  NAME_AND_POSITION
+}
+
+enum EmployeeChangeStatus {
+  DRAFT
+  APPLIED
+  CANCELLED
+}
+
+enum EmployeeChangeAudience {
+  ONBOARDING_GROUP
+  ALL_EMPLOYEES
+  HR_GROUP
+}
+
+enum EmployeeChangeTargetType {
+  ONBOARDING
+  OFFBOARDING
 }
 
 model User {
@@ -181,39 +261,39 @@ model Session {
 }
 
 model EmployeeOnboarding {
-  id              Int              @id @default(autoincrement())
-  userId          String?
-  user            User?            @relation("UserOnboardings", fields: [userId], references: [id])
-  status          OnboardingStatus @default(NEW)
-  plannedStart    DateTime
-  actualStart     DateTime?
-  startTime       String?          @default("08:00")
-  titleBefore     String?
-  name            String
-  surname         String
-  titleAfter      String?
-  email           String?
-  phone           String?
-  userName        String?
-  userEmail       String?
-  positionNum     String
-  positionName    String
-  department      String
-  unitName        String
-  personalNumber  String?          @map("evidenceNumber")
-  itStatus        String?
-  notes           String?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  deletedAt       DateTime?
-  deletedBy       String?
-  deleteReason    String?
-  isManager       Boolean          @default(false)
-  probationMonths Int?             @default(4)
-  probationEnd    DateTime?
-
-  lastProbationReminder  DateTime?
-  probationRemindersSent Int       @default(0)
+  id                        Int              @id @default(autoincrement())
+  userId                    String?
+  user                      User?            @relation("UserOnboardings", fields: [userId], references: [id])
+  status                    OnboardingStatus @default(NEW)
+  plannedStart              DateTime
+  actualStart               DateTime?
+  startTime                 String?          @default("08:00")
+  titleBefore               String?
+  name                      String
+  surname                   String
+  titleAfter                String?
+  email                     String?
+  phone                     String?
+  userName                  String?
+  userEmail                 String?
+  positionNum               String
+  positionName              String
+  department                String
+  unitName                  String
+  personalNumber            String?          @map("evidenceNumber")
+  itStatus                  String?
+  notes                     String?
+  createdAt                 DateTime         @default(now())
+  updatedAt                 DateTime         @updatedAt
+  deletedAt                 DateTime?
+  deletedBy                 String?
+  deleteReason              String?
+  isManager                 Boolean          @default(false)
+  probationMonths           Int?             @default(4)
+  probationEnd              DateTime?
+  hasCustomDates            Boolean          @default(false)
+  probationExtensions       Json?
+  probationExtensionSummary String?          @db.Text
 
   positionType PositionType @default(REGULAR)
 
@@ -247,26 +327,15 @@ model EmployeeOnboarding {
   supervisorUnitName       String?
   supervisorPersonalNumber String?
 
-  probationEvaluationSentAt DateTime?
-  probationEvaluationSentBy String?
-
-  probationNotification21Sent DateTime?
-  probationNotificationHRSent DateTime?
-  probationReminder1DaySent   DateTime?
-  probationCompletedNotified  DateTime?
-
-  probationEvaluationHash String?   @unique
-  probationHashExpiresAt  DateTime?
-  probationHashUsedAt     DateTime?
-
   cancelledAt  DateTime?
   cancelledBy  String?
   cancelReason String?
 
-  OnboardingChangeLog  OnboardingChangeLog[]
-  EmailHistory         EmailHistory[]
-  documents            EmploymentDocument[]
-  probationEvaluations ProbationEvaluation[]
+  OnboardingChangeLog        OnboardingChangeLog[]
+  EmailHistory               EmailHistory[]
+  documents                  EmploymentDocument[]
+  probationEvaluationRequest ProbationEvaluationRequest?
+  probationEvaluations       ProbationEvaluation[]
 
   @@index([plannedStart])
   @@index([actualStart])
@@ -277,11 +346,9 @@ model EmployeeOnboarding {
   @@index([mentorEmail])
   @@index([mentorPersonalNumber])
   @@index([positionType])
-  @@index([probationEvaluationHash])
   @@index([supervisorGid])
   @@index([supervisorEmail])
   @@index([supervisorPersonalNumber])
-  @@index([probationEvaluationSentAt])
   @@index([cancelledAt])
 }
 
@@ -337,6 +404,87 @@ model EmployeeOffboarding {
   @@index([noticeEnd])
 }
 
+model EmployeeChange {
+  id Int @id @default(autoincrement())
+
+  type     EmployeeChangeType
+  status   EmployeeChangeStatus    @default(DRAFT)
+  audience EmployeeChangeAudience?
+
+  effectiveDate DateTime
+
+  titleBefore String?
+  name        String
+  surname     String
+  titleAfter  String?
+
+  personalNumber String?
+
+  oldTitleBefore String?
+  newTitleBefore String?
+
+  oldName String?
+  newName String?
+
+  oldSurname String?
+  newSurname String?
+
+  oldTitleAfter String?
+  newTitleAfter String?
+
+  oldDepartment   String?
+  newDepartment   String?
+  oldUnitName     String?
+  newUnitName     String?
+  oldPositionName String?
+  newPositionName String?
+  oldPositionNum  String?
+  newPositionNum  String?
+
+  notes String? @db.Text
+
+  appliedAt DateTime?
+  appliedBy String?
+
+  emailSentAt DateTime?
+  emailSentBy String?
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+  deletedBy    String?
+  deleteReason String?
+
+  targets      EmployeeChangeTarget[]
+  EmailHistory EmailHistory[]
+
+  @@index([type])
+  @@index([status])
+  @@index([audience])
+  @@index([effectiveDate])
+  @@index([personalNumber])
+  @@index([deletedAt])
+}
+
+model EmployeeChangeTarget {
+  id Int @id @default(autoincrement())
+
+  changeId Int
+  change   EmployeeChange @relation(fields: [changeId], references: [id], onDelete: Cascade)
+
+  targetType EmployeeChangeTargetType
+  targetId   Int
+
+  oldValues Json
+  newValues Json
+
+  appliedAt DateTime @default(now())
+  appliedBy String
+
+  @@index([changeId])
+  @@index([targetType, targetId])
+}
+
 model OnboardingChangeLog {
   id         Int                @id @default(autoincrement())
   employee   EmployeeOnboarding @relation(fields: [employeeId], references: [id])
@@ -381,6 +529,9 @@ model EmailHistory {
   offboardingEmployeeId Int?
   offboardingEmployee   EmployeeOffboarding? @relation(fields: [offboardingEmployeeId], references: [id])
 
+  changeId Int?
+  change   EmployeeChange? @relation(fields: [changeId], references: [id])
+
   emailType  MailJobType
   recipients Json
   subject    String
@@ -396,6 +547,7 @@ model EmailHistory {
   @@index([sentAt])
   @@index([onboardingEmployeeId])
   @@index([offboardingEmployeeId])
+  @@index([changeId])
 }
 
 model MailQueue {
@@ -412,7 +564,8 @@ model MailQueue {
   retryCount Int           @default(0)
   maxRetries Int           @default(3)
 
-  EmailHistory EmailHistory[]
+  EmailHistory              EmailHistory[]
+  probationEvaluationEvents ProbationEvaluationRequestEvent[]
 
   @@index([status, sendAt])
   @@index([type])
@@ -570,10 +723,112 @@ model ExitChecklistAsset {
   @@index([checklistId])
 }
 
+model ProbationEvaluationRequest {
+  id           Int                @id @default(autoincrement())
+  onboardingId Int                @unique
+  onboarding   EmployeeOnboarding @relation(fields: [onboardingId], references: [id], onDelete: Cascade)
+
+  formType ProbationFormType
+  status   ProbationEvaluationRequestStatus @default(DRAFT)
+
+  token          String    @unique @default(cuid())
+  tokenExpiresAt DateTime?
+
+  probationEnd DateTime?
+
+  isLocked Boolean @default(false)
+
+  supervisorName  String?
+  supervisorEmail String?
+
+  sentAt     DateTime?
+  sentBy     String?
+  sentByName String?
+  sentMethod ProbationEvaluationSendMethod?
+
+  hrInfoSentAt DateTime?
+  hrInfoSentBy String?
+
+  missingSupervisorNotifiedAt DateTime?
+  missingSupervisorNotifiedBy String?
+
+  lastReminderAt     DateTime?
+  lastReminderBy     String?
+  lastReminderByName String?
+  reminderCount      Int       @default(0)
+
+  hrReminderBeforeEndSentAt DateTime?
+  hrReminderBeforeEndSentBy String?
+
+  completedAt                 DateTime?
+  completedBy                 String?
+  completedByName             String?
+  completedByEmail            String?
+  completedNotificationSentAt DateTime?
+  completedNotificationSentBy String?
+
+  resetAt     DateTime?
+  resetBy     String?
+  resetByName String?
+
+  createdBy     String?
+  createdByName String?
+
+  data Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  evaluations ProbationEvaluation[]
+  events      ProbationEvaluationRequestEvent[]
+
+  @@index([onboardingId])
+  @@index([status])
+  @@index([token])
+  @@index([tokenExpiresAt])
+  @@index([probationEnd])
+  @@index([supervisorEmail])
+  @@index([sentAt])
+  @@index([lastReminderAt])
+  @@index([hrReminderBeforeEndSentAt])
+  @@index([completedAt])
+  @@index([missingSupervisorNotifiedAt])
+}
+
+model ProbationEvaluationRequestEvent {
+  id        Int @id @default(autoincrement())
+  requestId Int
+
+  request ProbationEvaluationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  action  ProbationEvaluationEventAction
+  by      String?
+  byName  String?
+  byEmail String?
+
+  mailQueueId Int?
+  mailQueue   MailQueue? @relation(fields: [mailQueueId], references: [id], onDelete: SetNull)
+
+  message String? @db.Text
+  meta    Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([requestId])
+  @@index([action])
+  @@index([mailQueueId])
+  @@index([createdAt])
+}
+
 model ProbationEvaluation {
   id           Int                @id @default(autoincrement())
   onboardingId Int
   onboarding   EmployeeOnboarding @relation(fields: [onboardingId], references: [id], onDelete: Cascade)
+
+  requestId Int?
+  request   ProbationEvaluationRequest? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+
+  status ProbationEvaluationStatus @default(ACTIVE)
 
   formType ProbationFormType
 
@@ -583,10 +838,20 @@ model ProbationEvaluation {
   reasonIfNo      String? @db.Text
 
   evaluatedById  String?
-  evaluatedBy    User?    @relation("EvaluatedBy", fields: [evaluatedById], references: [id])
+  evaluatedBy    User?    @relation("EvaluatedBy", fields: [evaluatedById], references: [id], onDelete: SetNull)
   evaluatorName  String
   evaluatorEmail String
   evaluatedAt    DateTime @default(now())
+
+  lastEditedAt      DateTime?
+  lastEditedBy      String?
+  lastEditedByName  String?
+  lastEditedByEmail String?
+
+  voidedAt     DateTime?
+  voidedBy     String?
+  voidedByName String?
+  voidReason   String?   @db.Text
 
   pdfUrl         String?
   pdfGeneratedAt DateTime?
@@ -595,7 +860,9 @@ model ProbationEvaluation {
   updatedAt DateTime @updatedAt
 
   @@index([onboardingId])
+  @@index([requestId])
   @@index([evaluatedById])
   @@index([formType])
+  @@index([status])
   @@index([evaluatedAt])
 }

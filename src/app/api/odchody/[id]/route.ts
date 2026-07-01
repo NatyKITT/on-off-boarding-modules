@@ -6,10 +6,12 @@ import { z, ZodError } from "zod"
 import { prisma } from "@/lib/db"
 import { getHrRecipientsFromEnv } from "@/lib/email"
 import {
+  buildLinkedEmployeeChangeInfos,
   buildLinkedOnboardingInfo,
   normalizePersonalNumber,
   pickMostRelevantOnboarding,
 } from "@/lib/employment-linking"
+import { canReadOffboarding, canWriteOffboarding } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
@@ -72,18 +74,31 @@ const updateSchema = z.object({
   status: z.enum(["NEW", "IN_PROGRESS", "COMPLETED"]).optional(),
 })
 
-function canReadOffboarding(role?: string | null) {
-  return ["ADMIN", "HR", "IT", "READONLY"].includes(role ?? "")
-}
-
-function canWriteOffboarding(role?: string | null) {
-  return ["ADMIN", "HR", "IT"].includes(role ?? "")
-}
-
 function toStr(value: unknown): string {
   if (value instanceof Date) return value.toISOString()
   if (value === null || value === undefined) return ""
   return String(value)
+}
+
+async function getLinkedChangesForPersonalNumber(
+  personalNumber: string | null | undefined
+) {
+  const normalizedPersonalNumber = normalizePersonalNumber(personalNumber)
+
+  if (!normalizedPersonalNumber) return []
+
+  const changes = await prisma.employeeChange.findMany({
+    where: {
+      personalNumber: normalizedPersonalNumber,
+      deletedAt: null,
+      status: {
+        not: "CANCELLED",
+      },
+    },
+    orderBy: [{ effectiveDate: "desc" }, { id: "desc" }],
+  })
+
+  return buildLinkedEmployeeChangeInfos(changes)
 }
 
 async function getLinkedOnboardingForOffboarding(
@@ -126,6 +141,10 @@ async function serializeOffboardingRecord(record: OffboardingRecord) {
     record.actualEnd ?? record.plannedEnd
   )
 
+  const linkedChanges = await getLinkedChangesForPersonalNumber(
+    record.personalNumber
+  )
+
   return {
     ...record,
     plannedEnd: record.plannedEnd?.toISOString() ?? null,
@@ -136,6 +155,7 @@ async function serializeOffboardingRecord(record: OffboardingRecord) {
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
     linkedOnboarding,
+    linkedChanges,
   }
 }
 

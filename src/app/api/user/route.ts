@@ -1,48 +1,116 @@
-import { NextRequest } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
+import { Prisma, Role } from "@prisma/client"
 
 import { prisma } from "@/lib/db"
+import { canManageUsers } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
 export const revalidate = 0
 
-type Role = "USER" | "HR" | "IT" | "ADMIN" | undefined
+function parseEnvEmails(envValue: string | undefined): string[] {
+  return (envValue ?? "")
+    .split(/[;,]/)
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean)
+}
 
-const ADMIN_ROLES = new Set<Role>(["ADMIN", "IT"])
+function getProtectedEmails(): ReadonlySet<string> {
+  return new Set([
+    ...parseEnvEmails(process.env.SUPER_ADMIN_EMAILS),
+    ...parseEnvEmails(process.env.HR_EMAILS),
+    ...parseEnvEmails(process.env.IT_EMAILS),
+    ...parseEnvEmails(process.env.READONLY_EMAILS),
+  ])
+}
 
-async function isAdminByUserId(userId: string): Promise<boolean> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { role: true },
-  })
-  return ADMIN_ROLES.has(user?.role as Role)
+function isValidRole(value: unknown): value is Role {
+  return (
+    typeof value === "string" && Object.values(Role).includes(value as Role)
+  )
+}
+
+async function requireUserManagementAccess() {
+  const session = await auth()
+
+  if (!session?.user) {
+    return {
+      error: NextResponse.json(
+        { status: "error", message: "Nejste přihlášen(a)." },
+        { status: 401 }
+      ),
+    }
+  }
+
+  if (!canManageUsers(session.user.role)) {
+    return {
+      error: NextResponse.json(
+        {
+          status: "error",
+          message: "Nemáte oprávnění spravovat uživatele.",
+        },
+        { status: 403 }
+      ),
+    }
+  }
+
+  return { session }
+}
+
+async function getUserRelationCounts(userId: string) {
+  const [
+    onboardings,
+    mentoredOnboardings,
+    offboardings,
+    lockedExitChecklists,
+    exitChecklistAssets,
+    probationEvaluations,
+  ] = await Promise.all([
+    prisma.employeeOnboarding.count({
+      where: { userId },
+    }),
+    prisma.employeeOnboarding.count({
+      where: { mentorId: userId },
+    }),
+    prisma.employeeOffboarding.count({
+      where: { userId },
+    }),
+    prisma.exitChecklist.count({
+      where: { lockedById: userId },
+    }),
+    prisma.exitChecklistAsset.count({
+      where: { createdById: userId },
+    }),
+    prisma.probationEvaluation.count({
+      where: { evaluatedById: userId },
+    }),
+  ])
+
+  const total =
+    onboardings +
+    mentoredOnboardings +
+    offboardings +
+    lockedExitChecklists +
+    exitChecklistAssets +
+    probationEvaluations
+
+  return {
+    total,
+    onboardings,
+    mentoredOnboardings,
+    offboardings,
+    lockedExitChecklists,
+    exitChecklistAssets,
+    probationEvaluations,
+  }
 }
 
 export async function GET() {
-  const session = await auth()
-  if (!session?.user?.id) {
-    return new Response(
-      JSON.stringify({ status: "error", message: "Nejste přihlášeni." }),
-      {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      }
-    )
-  }
+  const access = await requireUserManagementAccess()
 
-  const isAdmin = await isAdminByUserId(session.user.id)
-  if (!isAdmin) {
-    return new Response(
-      JSON.stringify({
-        status: "error",
-        message: "Nemáte oprávnění k této operaci.",
-      }),
-      {
-        status: 403,
-        headers: { "Content-Type": "application/json" },
-      }
-    )
+  if ("error" in access) {
+    return access.error
   }
 
   try {
@@ -53,257 +121,325 @@ export async function GET() {
         surname: true,
         email: true,
         role: true,
+        canAccessApp: true,
         createdAt: true,
       },
       orderBy: { createdAt: "desc" },
     })
 
-    return new Response(JSON.stringify({ status: "success", data: users }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
+    return NextResponse.json({
+      status: "success",
+      data: users,
     })
-  } catch (error: unknown) {
+  } catch (error) {
     console.error("Chyba při načítání uživatelů:", error)
-    return new Response(
-      JSON.stringify({
+
+    return NextResponse.json(
+      {
         status: "error",
         message: "Nepodařilo se načíst seznam uživatelů.",
-      }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
+      },
+      { status: 500 }
     )
   }
 }
 
 export async function DELETE(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user?.id) {
-    return new Response(
-      JSON.stringify({ status: "error", message: "Nejste přihlášeni." }),
-      {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      }
-    )
+  const access = await requireUserManagementAccess()
+
+  if ("error" in access) {
+    return access.error
   }
 
-  const isAdmin = await isAdminByUserId(session.user.id)
-  if (!isAdmin) {
-    return new Response(
-      JSON.stringify({
-        status: "error",
-        message: "Nemáte oprávnění mazat uživatele.",
-      }),
-      {
-        status: 403,
-        headers: { "Content-Type": "application/json" },
-      }
-    )
-  }
+  const currentUser = access.session.user
 
   try {
-    const { searchParams } = new URL(req.url)
-    const targetUserId = searchParams.get("userId")
+    const targetUserId = req.nextUrl.searchParams.get("userId")
+
     if (!targetUserId) {
-      return new Response(
-        JSON.stringify({
+      return NextResponse.json(
+        {
           status: "error",
           message: "ID uživatele je povinné.",
-        }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        }
+        },
+        { status: 400 }
       )
     }
 
-    if (targetUserId === session.user.id) {
-      return new Response(
-        JSON.stringify({
-          status: "error",
-          message: "Nelze smazat svůj vlastní účet.",
-        }),
+    if (targetUserId === currentUser.id) {
+      return NextResponse.json(
         {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        }
+          status: "error",
+          message: "Nemůžete odebrat sama sebe.",
+        },
+        { status: 409 }
       )
     }
 
     const targetUser = await prisma.user.findUnique({
       where: { id: targetUserId },
-      select: { id: true, email: true, role: true, name: true, surname: true },
-    })
-    if (!targetUser) {
-      return new Response(
-        JSON.stringify({ status: "error", message: "Uživatel nenalezen." }),
-        {
-          status: 404,
-          headers: { "Content-Type": "application/json" },
-        }
-      )
-    }
-
-    const hasActiveOffboardings = await prisma.employeeOffboarding.count({
-      where: {
-        OR: [{ userEmail: targetUser.email }, { personalNumber: targetUserId }],
-        status: { in: ["NEW", "IN_PROGRESS"] },
-        deletedAt: null,
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        name: true,
+        surname: true,
       },
     })
-    if (hasActiveOffboardings > 0) {
-      return new Response(
-        JSON.stringify({
+
+    if (!targetUser) {
+      return NextResponse.json(
+        {
+          status: "error",
+          message: "Uživatel nenalezen.",
+        },
+        { status: 404 }
+      )
+    }
+
+    const protectedEmails = getProtectedEmails()
+    const targetEmail = targetUser.email.trim().toLowerCase()
+
+    if (protectedEmails.has(targetEmail)) {
+      return NextResponse.json(
+        {
           status: "error",
           message:
-            "Nelze smazat uživatele - má aktivní procesy odchodů. Nejprve je dokončete.",
-        }),
-        { status: 409, headers: { "Content-Type": "application/json" } }
+            "Tento uživatel je definovaný v ENV a nelze ho odebrat přes administraci.",
+        },
+        { status: 403 }
       )
     }
 
-    await prisma.$transaction(async (tx) => {
-      await tx.employeeOffboarding.updateMany({
-        where: {
-          OR: [
-            { userEmail: targetUser.email },
-            { personalNumber: targetUserId },
-          ],
-        },
-        data: {
-          userEmail: null,
-          notes: `Uživatelský účet byl smazán (admin: ${session.user.id})`,
-        },
-      })
+    const relationCounts = await getUserRelationCounts(targetUser.id)
 
-      await tx.user.delete({ where: { id: targetUserId } })
-    })
+    if (relationCounts.total > 0) {
+      await prisma.$transaction([
+        prisma.session.deleteMany({
+          where: { userId: targetUser.id },
+        }),
+        prisma.user.update({
+          where: { id: targetUser.id },
+          data: {
+            role: Role.USER,
+            canAccessApp: false,
+          },
+        }),
+      ])
 
-    console.log(
-      `Admin ${session.user.id} deleted user: ${targetUserId} (${targetUser.email})`
-    )
-
-    return new Response(
-      JSON.stringify({
+      return NextResponse.json({
         status: "success",
-        message: `Uživatel ${targetUser.name} ${targetUser.surname} byl úspěšně smazán.`,
+        action: "revoked",
+        message:
+          "Uživatel má vazby v systému, proto nebyl fyzicky smazán. Byl mu odebrán přístup do aplikace.",
+        relationCounts,
+      })
+    }
+
+    await prisma.$transaction([
+      prisma.session.deleteMany({
+        where: { userId: targetUser.id },
       }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
-    )
-  } catch (error: unknown) {
+      prisma.account.deleteMany({
+        where: { userId: targetUser.id },
+      }),
+      prisma.user.delete({
+        where: { id: targetUser.id },
+      }),
+    ])
+
+    return NextResponse.json({
+      status: "success",
+      action: "deleted",
+      message: "Uživatel byl odstraněn.",
+    })
+  } catch (error) {
     console.error("Chyba při mazání uživatele:", error)
+
     const code = (error as { code?: string } | null)?.code
+
     if (code === "P2003") {
-      return new Response(
-        JSON.stringify({
+      return NextResponse.json(
+        {
           status: "error",
-          message: "Nelze smazat uživatele - má propojená data v systému.",
-        }),
-        { status: 409, headers: { "Content-Type": "application/json" } }
+          message:
+            "Nelze smazat uživatele, protože má propojená data v systému.",
+        },
+        { status: 409 }
       )
     }
-    return new Response(
-      JSON.stringify({
+
+    return NextResponse.json(
+      {
         status: "error",
         message: "Došlo k neočekávané chybě při mazání uživatele.",
-      }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
+      },
+      { status: 500 }
     )
   }
 }
 
 export async function PUT(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user?.id) {
-    return new Response(
-      JSON.stringify({ status: "error", message: "Nejste přihlášeni." }),
-      {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      }
-    )
+  const access = await requireUserManagementAccess()
+
+  if ("error" in access) {
+    return access.error
   }
 
-  const isAdmin = await isAdminByUserId(session.user.id)
-  if (!isAdmin) {
-    return new Response(
-      JSON.stringify({
-        status: "error",
-        message: "Nemáte oprávnění upravovat uživatele.",
-      }),
-      {
-        status: 403,
-        headers: { "Content-Type": "application/json" },
-      }
-    )
-  }
+  const currentUser = access.session.user
 
   try {
-    const body = await req.json()
-    const { userId, updates } = body as {
-      userId?: string
+    const body = (await req.json().catch(() => null)) as {
+      userId?: unknown
       updates?: Record<string, unknown>
-    }
+    } | null
+
+    const userId = typeof body?.userId === "string" ? body.userId : null
+    const updates = body?.updates
 
     if (!userId) {
-      return new Response(
-        JSON.stringify({
+      return NextResponse.json(
+        {
           status: "error",
           message: "ID uživatele je povinné.",
-        }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        }
+        },
+        { status: 400 }
       )
     }
 
-    const allowedFields = new Set(["name", "surname", "email", "role"])
-    const filteredUpdates: Record<string, unknown> = {}
-    Object.keys(updates ?? {}).forEach((key) => {
-      if (allowedFields.has(key))
-        filteredUpdates[key] = (updates as Record<string, unknown>)[key]
+    if (!updates || typeof updates !== "object") {
+      return NextResponse.json(
+        {
+          status: "error",
+          message: "Chybí data k aktualizaci.",
+        },
+        { status: 400 }
+      )
+    }
+
+    const targetUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+      },
     })
 
-    if (Object.keys(filteredUpdates).length === 0) {
-      return new Response(
-        JSON.stringify({
+    if (!targetUser) {
+      return NextResponse.json(
+        {
+          status: "error",
+          message: "Uživatel nenalezen.",
+        },
+        { status: 404 }
+      )
+    }
+
+    const protectedEmails = getProtectedEmails()
+    const targetEmail = targetUser.email.trim().toLowerCase()
+    const isProtected = protectedEmails.has(targetEmail)
+
+    const data: Prisma.UserUpdateInput = {}
+
+    if (typeof updates.name === "string") {
+      data.name = updates.name.trim() || null
+    }
+
+    if (typeof updates.surname === "string") {
+      data.surname = updates.surname.trim() || null
+    }
+
+    if (typeof updates.email === "string") {
+      if (isProtected) {
+        return NextResponse.json(
+          {
+            status: "error",
+            message:
+              "E-mail uživatele definovaného v ENV nelze měnit přes administraci.",
+          },
+          { status: 403 }
+        )
+      }
+
+      data.email = updates.email.trim().toLowerCase()
+    }
+
+    if (updates.role !== undefined) {
+      if (!isValidRole(updates.role)) {
+        return NextResponse.json(
+          {
+            status: "error",
+            message: "Neplatná role.",
+          },
+          { status: 400 }
+        )
+      }
+
+      if (isProtected) {
+        return NextResponse.json(
+          {
+            status: "error",
+            message:
+              "Role tohoto uživatele je definována v ENV a nelze ji měnit přes administraci.",
+          },
+          { status: 403 }
+        )
+      }
+
+      if (userId === currentUser.id && updates.role !== Role.ADMIN) {
+        return NextResponse.json(
+          {
+            status: "error",
+            message:
+              "Nemůžete sama sobě odebrat administrátorskou roli přes toto rozhraní.",
+          },
+          { status: 409 }
+        )
+      }
+
+      data.role = updates.role
+      data.canAccessApp = updates.role !== Role.USER
+    }
+
+    if (Object.keys(data).length === 0) {
+      return NextResponse.json(
+        {
           status: "error",
           message: "Žádná platná pole k aktualizaci.",
-        }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        }
+        },
+        { status: 400 }
       )
     }
 
     const updatedUser = await prisma.user.update({
       where: { id: userId },
-      data: filteredUpdates,
-      select: { id: true, name: true, surname: true, email: true, role: true },
+      data,
+      select: {
+        id: true,
+        name: true,
+        surname: true,
+        email: true,
+        role: true,
+        canAccessApp: true,
+        createdAt: true,
+      },
     })
 
-    console.log(
-      `Admin ${session.user.id} updated user ${userId}:`,
-      JSON.stringify(filteredUpdates)
-    )
-
-    return new Response(
-      JSON.stringify({
-        status: "success",
-        message: "Uživatel byl úspěšně aktualizován.",
-        data: updatedUser,
-      }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
-    )
-  } catch (error: unknown) {
+    return NextResponse.json({
+      status: "success",
+      message: "Uživatel byl úspěšně aktualizován.",
+      data: updatedUser,
+    })
+  } catch (error) {
     console.error("Chyba při aktualizaci uživatele:", error)
-    return new Response(
-      JSON.stringify({
+
+    return NextResponse.json(
+      {
         status: "error",
         message: "Nepodařilo se aktualizovat uživatele.",
-      }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
+      },
+      { status: 500 }
     )
   }
 }

@@ -1,11 +1,16 @@
 declare module "@/env.mjs" {
   export const env: {
     NODE_ENV: "localhost" | "development" | "production"
+
     NEXT_PUBLIC_APP_URL: string
+    NEXT_PUBLIC_SENTRY_DSN?: string
+    NEXT_PUBLIC_SENTRY_ENVIRONMENT?: string
 
     DATABASE_URL: string
+
     AUTH_SECRET: string
     AUTH_URL: string
+
     GOOGLE_CLIENT_ID: string
     GOOGLE_CLIENT_SECRET: string
 
@@ -19,6 +24,7 @@ declare module "@/env.mjs" {
 
     HR_NOTIFICATION_EMAILS?: string
     PAYROLL_NOTIFICATION_EMAILS?: string
+
     SUPER_ADMIN_EMAILS?: string
     HR_EMAILS?: string
     IT_EMAILS?: string

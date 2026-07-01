@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 
+import { canReadInternalApp } from "@/lib/rbac"
 import { resolveSupervisorFromPositionNum } from "@/lib/systemizace-superior"
 
+export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
 export const revalidate = 0
@@ -49,14 +51,30 @@ export async function GET(req: NextRequest) {
   const session = await auth()
 
   if (!session?.user) {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
+    return NextResponse.json(
+      { status: "error", message: "Nejste přihlášen(a)." },
+      { status: 401 }
+    )
+  }
+
+  if (!canReadInternalApp(session.user.role)) {
+    return NextResponse.json(
+      {
+        status: "error",
+        message: "Nemáte oprávnění načítat vedoucího ze systemizace.",
+      },
+      { status: 403 }
+    )
   }
 
   const positionNum = req.nextUrl.searchParams.get("positionNum")?.trim()
 
   if (!positionNum) {
     return NextResponse.json(
-      { message: "Missing positionNum" },
+      {
+        status: "error",
+        message: "Chybí číslo pozice positionNum.",
+      },
       { status: 400 }
     )
   }
@@ -66,12 +84,17 @@ export async function GET(req: NextRequest) {
 
     if (!result?.snapshot) {
       return NextResponse.json(
-        { message: "Supervisor not found" },
+        {
+          status: "not_found",
+          message: "Vedoucí nebyl nalezen.",
+          supervisor: null,
+        },
         { status: 404 }
       )
     }
 
     return NextResponse.json({
+      status: "success",
       supervisor: toSupervisorResponse({
         gid: result.snapshot.gid,
         titleBefore: result.snapshot.titleBefore,
@@ -88,8 +111,13 @@ export async function GET(req: NextRequest) {
     })
   } catch (error) {
     console.error("Supervisor lookup error:", error)
+
     return NextResponse.json(
-      { message: "Internal server error" },
+      {
+        status: "error",
+        message: "Nepodařilo se načíst vedoucího.",
+        error: error instanceof Error ? error.message : String(error),
+      },
       { status: 500 }
     )
   }

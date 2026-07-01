@@ -10,7 +10,10 @@ import { useToast } from "@/hooks/use-toast"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { OnboardingFormUnified } from "@/components/forms/onboarding-form"
+import {
+  OnboardingFormUnified,
+  type ProbationExtension,
+} from "@/components/forms/onboarding-form"
 
 type OnbRow = {
   id: number
@@ -28,6 +31,11 @@ type OnbRow = {
 
   plannedStart: string | null
   actualStart?: string | null
+  probationEnd?: string | null
+  startTime?: string | null
+  hasCustomDates?: boolean | null
+  probationExtensions?: ProbationExtension[] | null
+  probationExtensionSummary?: string | null
 
   userName?: string | null
   userEmail?: string | null
@@ -37,6 +45,10 @@ type OnbRow = {
 
   supervisorName?: string | null
   supervisorEmail?: string | null
+  supervisorPosition?: string | null
+  supervisorDepartment?: string | null
+  supervisorUnitName?: string | null
+
   mentorName?: string | null
   mentorEmail?: string | null
 }
@@ -46,48 +58,51 @@ interface PageProps {
 }
 
 function normalizePositions(api: unknown): Position[] {
-  const isRecord = (v: unknown): v is Record<string, unknown> =>
-    typeof v === "object" && v !== null
+  const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null
 
-  const src: unknown[] = Array.isArray(api)
+  const source: unknown[] = Array.isArray(api)
     ? api
-    : isRecord(api) && Array.isArray((api as { data?: unknown }).data)
-      ? (api as { data: unknown[] }).data
+    : isRecord(api) && Array.isArray(api.data)
+      ? api.data
       : []
 
-  const out: Position[] = []
-  for (const it of src) {
-    if (
-      isRecord(it) &&
-      typeof it.num === "string" &&
-      typeof it.name === "string"
-    ) {
-      out.push({
-        id: String(
-          typeof it.id === "string" || typeof it.id === "number"
-            ? it.id
-            : it.num
-        ),
-        num: it.num,
-        name: it.name,
-        dept_name: typeof it.dept_name === "string" ? it.dept_name : "",
-        unit_name: typeof it.unit_name === "string" ? it.unit_name : "",
-        supervisorName:
-          typeof it.supervisorName === "string"
-            ? it.supervisorName
-            : typeof it.supervisor_name === "string"
-              ? it.supervisor_name
-              : "",
-        supervisorEmail:
-          typeof it.supervisorEmail === "string"
-            ? it.supervisorEmail
-            : typeof it.supervisor_email === "string"
-              ? it.supervisor_email
-              : "",
-      })
-    }
+  const output: Position[] = []
+
+  for (const item of source) {
+    if (!isRecord(item)) continue
+
+    const num = typeof item.num === "string" ? item.num : ""
+    const name = typeof item.name === "string" ? item.name : ""
+
+    if (!num || !name) continue
+
+    output.push({
+      id: String(
+        typeof item.id === "string" || typeof item.id === "number"
+          ? item.id
+          : num
+      ),
+      num,
+      name,
+      dept_name: typeof item.dept_name === "string" ? item.dept_name : "",
+      unit_name: typeof item.unit_name === "string" ? item.unit_name : "",
+      supervisorName:
+        typeof item.supervisorName === "string"
+          ? item.supervisorName
+          : typeof item.supervisor_name === "string"
+            ? item.supervisor_name
+            : "",
+      supervisorEmail:
+        typeof item.supervisorEmail === "string"
+          ? item.supervisorEmail
+          : typeof item.supervisor_email === "string"
+            ? item.supervisor_email
+            : "",
+    })
   }
-  return out
+
+  return output
 }
 
 export default function OnboardingEditPage({ params }: PageProps) {
@@ -117,42 +132,45 @@ export default function OnboardingEditPage({ params }: PageProps) {
 
         if (cancelled) return
 
-        if (recRes.ok && recJson?.status === "success" && recJson.data) {
-          setRow(recJson.data as OnbRow)
-          setLoading(false)
-
-          setLoadingPositions(true)
-          fetch("/api/systemizace", { cache: "no-store" })
-            .then((res) => res.json())
-            .then((posJson) => {
-              if (!cancelled) {
-                setPositions(normalizePositions(posJson))
-              }
-            })
-            .catch((err) => {
-              console.error("Failed to load positions:", err)
-              if (!cancelled) {
-                toast({
-                  title: "Varování",
-                  description: "Nepodařilo se načíst seznam pozic.",
-                  variant: "destructive",
-                })
-              }
-            })
-            .finally(() => {
-              if (!cancelled) setLoadingPositions(false)
-            })
-        } else {
+        if (!recRes.ok || recJson?.status !== "success" || !recJson.data) {
           toast({
             title: "Nenalezeno",
             description: "Záznam nástupu se nepodařilo načíst.",
             variant: "destructive",
           })
           router.replace("/nastupy")
+          return
         }
-      } catch (err) {
+
+        setRow(recJson.data as OnbRow)
+        setLoading(false)
+
+        setLoadingPositions(true)
+        try {
+          const posRes = await fetch("/api/systemizace", {
+            cache: "no-store",
+          })
+          const posJson = await posRes.json().catch(() => null)
+
+          if (!cancelled && posRes.ok) {
+            setPositions(normalizePositions(posJson))
+          }
+        } catch (error) {
+          console.error("Failed to load positions:", error)
+          if (!cancelled) {
+            toast({
+              title: "Varování",
+              description:
+                "Nepodařilo se načíst seznam pozic. Formulář půjde otevřít a zkusí pozice načíst znovu při vyhledávání.",
+              variant: "destructive",
+            })
+          }
+        } finally {
+          if (!cancelled) setLoadingPositions(false)
+        }
+      } catch (error) {
         if (!cancelled) {
-          console.error("Error loading record:", err)
+          console.error("Error loading record:", error)
           toast({
             title: "Chyba",
             description: "Nepodařilo se načíst data.",
@@ -181,57 +199,71 @@ export default function OnboardingEditPage({ params }: PageProps) {
         <CardContent className="p-6">
           {loading || !row ? (
             <p className="text-sm text-muted-foreground">Načítám záznam…</p>
-          ) : loadingPositions ? (
-            <div className="flex items-center gap-3">
-              <div className="size-5 animate-spin rounded-full border-b-2 border-current" />
-              <p className="text-sm text-muted-foreground">Načítám pozice…</p>
-            </div>
           ) : (
-            <OnboardingFormUnified
-              key={`edit-${row.id}-${editContext}-${positions.length}`}
-              positions={positions}
-              id={row.id}
-              initial={{
-                titleBefore: row.titleBefore || undefined,
-                name: row.name,
-                surname: row.surname,
-                titleAfter: row.titleAfter || undefined,
+            <>
+              {loadingPositions && (
+                <div className="mb-4 flex items-center gap-3 rounded-md border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                  <div className="size-4 animate-spin rounded-full border-b-2 border-current" />
+                  Načítám seznam pozic…
+                </div>
+              )}
 
-                email: row.email || undefined,
+              <OnboardingFormUnified
+                key={`edit-${row.id}-${editContext}`}
+                positions={positions}
+                id={row.id}
+                initial={{
+                  titleBefore: row.titleBefore || undefined,
+                  name: row.name,
+                  surname: row.surname,
+                  titleAfter: row.titleAfter || undefined,
 
-                positionNum: row.positionNum || undefined,
-                positionName: row.positionName || undefined,
-                department: row.department || undefined,
-                unitName: row.unitName || undefined,
+                  email: row.email || undefined,
 
-                plannedStart: row.plannedStart
-                  ? row.plannedStart.slice(0, 10)
-                  : undefined,
-                actualStart: row.actualStart
-                  ? row.actualStart.slice(0, 10)
-                  : undefined,
+                  positionNum: row.positionNum || undefined,
+                  positionName: row.positionName || undefined,
+                  department: row.department || undefined,
+                  unitName: row.unitName || undefined,
 
-                userName: row.userName || undefined,
-                userEmail: row.userEmail || undefined,
-                personalNumber: row.personalNumber || undefined,
-                notes: row.notes || undefined,
-                status: row.status || undefined,
+                  plannedStart: row.plannedStart
+                    ? row.plannedStart.slice(0, 10)
+                    : undefined,
+                  actualStart: row.actualStart
+                    ? row.actualStart.slice(0, 10)
+                    : undefined,
+                  probationEnd: row.probationEnd
+                    ? row.probationEnd.slice(0, 10)
+                    : undefined,
+                  startTime: row.startTime || undefined,
+                  hasCustomDates: row.hasCustomDates ?? undefined,
+                  probationExtensions: row.probationExtensions ?? undefined,
 
-                supervisorName: row.supervisorName || undefined,
-                supervisorEmail: row.supervisorEmail || undefined,
-                mentorName: row.mentorName || undefined,
-                mentorEmail: row.mentorEmail || undefined,
-              }}
-              mode="edit"
-              editContext={editContext}
-              onSuccess={() => {
-                toast({
-                  title: "Uloženo",
-                  description: "Změny byly úspěšně uloženy.",
-                })
-                router.push("/nastupy")
-              }}
-            />
+                  userName: row.userName || undefined,
+                  userEmail: row.userEmail || undefined,
+                  personalNumber: row.personalNumber || undefined,
+                  notes: row.notes || undefined,
+                  status: row.status || undefined,
+
+                  supervisorName: row.supervisorName || undefined,
+                  supervisorEmail: row.supervisorEmail || undefined,
+                  supervisorPosition: row.supervisorPosition || undefined,
+                  supervisorDepartment: row.supervisorDepartment || undefined,
+                  supervisorUnitName: row.supervisorUnitName || undefined,
+
+                  mentorName: row.mentorName || undefined,
+                  mentorEmail: row.mentorEmail || undefined,
+                }}
+                mode="edit"
+                editContext={editContext}
+                onSuccess={() => {
+                  toast({
+                    title: "Uloženo",
+                    description: "Změny byly úspěšně uloženy.",
+                  })
+                  router.push("/nastupy")
+                }}
+              />
+            </>
           )}
         </CardContent>
       </Card>

@@ -52,7 +52,6 @@ export default function MonthlyReportEmail({
               Tento přehled byl vygenerován systémem On-Off-Boarding.
             </Text>
 
-            {/* Nástupy */}
             {onboardings.length > 0 && (
               <Section className="mb-6">
                 <Heading className="mb-3 text-xl font-semibold text-gray-900">
@@ -96,7 +95,6 @@ export default function MonthlyReportEmail({
               </Section>
             )}
 
-            {/* Odchody */}
             {offboardings.length > 0 && (
               <Section className="mb-6">
                 <Heading className="mb-3 text-xl font-semibold text-gray-900">

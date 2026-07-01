@@ -1,21 +1,18 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
-import { DocumentStatus, Prisma, Role } from "@prisma/client"
+import { DocumentStatus, Prisma } from "@prisma/client"
 
 import { prisma } from "@/lib/db"
+import { canManageEmploymentDocuments } from "@/lib/rbac"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
 type Params = { params: { id: string } }
-type SessionUserWithRole = { role?: Role }
-
-function canReset(role?: Role) {
-  return role === "ADMIN" || role === "HR"
-}
 
 export async function PATCH(_req: NextRequest, { params }: Params) {
   const session = await auth()
+
   if (!session?.user) {
     return NextResponse.json(
       { message: "Nejste přihlášen(a)." },
@@ -23,12 +20,15 @@ export async function PATCH(_req: NextRequest, { params }: Params) {
     )
   }
 
-  const role = (session.user as SessionUserWithRole).role
-  if (!canReset(role)) {
-    return NextResponse.json({ message: "Nemáte oprávnění." }, { status: 403 })
+  if (!canManageEmploymentDocuments(session.user.role)) {
+    return NextResponse.json(
+      { message: "Nemáte oprávnění resetovat dokument." },
+      { status: 403 }
+    )
   }
 
   const id = Number(params.id)
+
   if (!Number.isFinite(id)) {
     return NextResponse.json(
       { message: "Neplatné ID dokumentu." },
@@ -38,7 +38,10 @@ export async function PATCH(_req: NextRequest, { params }: Params) {
 
   const existing = await prisma.employmentDocument.findUnique({
     where: { id },
-    select: { id: true, isLocked: true },
+    select: {
+      id: true,
+      isLocked: true,
+    },
   })
 
   if (!existing) {
@@ -72,5 +75,5 @@ export async function PATCH(_req: NextRequest, { params }: Params) {
     },
   })
 
-  return NextResponse.json(updated)
+  return NextResponse.json({ document: updated })
 }

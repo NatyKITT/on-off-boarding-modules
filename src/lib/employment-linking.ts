@@ -1,4 +1,8 @@
-type DateLike = Date | string | null | undefined
+export type DateLike = Date | string | null | undefined
+
+export type LinkableWithPersonalNumber = {
+  personalNumber?: string | null
+}
 
 export type MinimalOffboardingLink = {
   id: number
@@ -14,6 +18,32 @@ export type MinimalOnboardingLink = {
   actualStart: DateLike
   probationEnd: DateLike
   positionName?: string | null
+}
+
+export type MinimalEmployeeChangeLink = {
+  id: number
+  personalNumber: string | null
+  type: string
+  status: string
+  effectiveDate: DateLike
+
+  oldTitleBefore?: string | null
+  newTitleBefore?: string | null
+  oldName?: string | null
+  newName?: string | null
+  oldSurname?: string | null
+  newSurname?: string | null
+  oldTitleAfter?: string | null
+  newTitleAfter?: string | null
+
+  oldDepartment?: string | null
+  newDepartment?: string | null
+  oldUnitName?: string | null
+  newUnitName?: string | null
+  oldPositionName?: string | null
+  newPositionName?: string | null
+  oldPositionNum?: string | null
+  newPositionNum?: string | null
 }
 
 export type LinkedOffboardingInfo = {
@@ -40,41 +70,280 @@ export type LinkedOnboardingInfo = {
   description: string
 }
 
+export type LinkedEmployeeChangeInfo = {
+  id: number
+  type: string
+  status: string
+  effectiveDate: string | null
+  affectsName: boolean
+  affectsPosition: boolean
+  isApplied: boolean
+  label: string
+  description: string
+
+  changedFields?: string[]
+  detail?: string
+  effectiveDateLabel?: string
+  rowMuted?: boolean
+}
+
 export function normalizePersonalNumber(value?: string | null) {
   return (value ?? "").replace(/\s+/g, "").trim()
+}
+
+export function collectNormalizedPersonalNumbers<
+  T extends LinkableWithPersonalNumber,
+>(rows: T[]) {
+  return Array.from(
+    new Set(
+      rows
+        .map((row) => normalizePersonalNumber(row.personalNumber))
+        .filter((value): value is string => value.length > 0)
+    )
+  )
+}
+
+export function groupByNormalizedPersonalNumber<
+  T extends LinkableWithPersonalNumber,
+>(rows: T[]) {
+  const grouped = new Map<string, T[]>()
+
+  for (const row of rows) {
+    const personalNumber = normalizePersonalNumber(row.personalNumber)
+
+    if (!personalNumber) continue
+
+    const current = grouped.get(personalNumber) ?? []
+    current.push(row)
+    grouped.set(personalNumber, current)
+  }
+
+  return grouped
 }
 
 function toDate(value: DateLike): Date | null {
   if (!value) return null
 
-  const d = value instanceof Date ? value : new Date(value)
+  const date = value instanceof Date ? value : new Date(value)
 
-  return Number.isNaN(d.getTime()) ? null : d
+  return Number.isNaN(date.getTime()) ? null : date
 }
 
 function toIso(value: DateLike): string | null {
-  const d = toDate(value)
+  const date = toDate(value)
 
-  return d ? d.toISOString() : null
+  return date ? date.toISOString() : null
 }
 
 function formatDateCz(value: DateLike): string {
-  const d = toDate(value)
+  const date = toDate(value)
 
-  if (!d) return "—"
+  if (!date) return "—"
 
-  return `${String(d.getDate()).padStart(2, "0")}.${String(
-    d.getMonth() + 1
-  ).padStart(2, "0")}.${d.getFullYear()}`
+  return `${String(date.getDate()).padStart(2, "0")}.${String(
+    date.getMonth() + 1
+  ).padStart(2, "0")}.${date.getFullYear()}`
 }
 
 function isSameOrBefore(a: DateLike, b: DateLike): boolean {
-  const da = toDate(a)
-  const db = toDate(b)
+  const dateA = toDate(a)
+  const dateB = toDate(b)
 
-  if (!da || !db) return false
+  if (!dateA || !dateB) return false
 
-  return da.getTime() <= db.getTime()
+  return dateA.getTime() <= dateB.getTime()
+}
+
+function hasValue(value?: string | null) {
+  return typeof value === "string" && value.trim().length > 0
+}
+
+function displayValue(value?: string | null) {
+  return hasValue(value) ? value!.trim() : "—"
+}
+
+export function isEmployeeNameChange(type: string) {
+  return type === "NAME" || type === "NAME_AND_POSITION"
+}
+
+export function isEmployeePositionChange(type: string) {
+  return type === "POSITION" || type === "NAME_AND_POSITION"
+}
+
+export function getEmployeeChangeTypeLabel(type: string) {
+  if (type === "NAME") return "Změna jména / titulu"
+  if (type === "POSITION") return "Změna pozice / odboru"
+  if (type === "NAME_AND_POSITION") return "Změna jména i pozice"
+
+  return "Změna"
+}
+
+function hasChanged(oldValue?: string | null, newValue?: string | null) {
+  return (oldValue ?? null) !== (newValue ?? null)
+}
+
+function buildChangedFields(change: MinimalEmployeeChangeLink) {
+  const fields: string[] = []
+
+  if (isEmployeeNameChange(change.type)) {
+    if (
+      hasChanged(change.oldTitleBefore, change.newTitleBefore) &&
+      (hasValue(change.oldTitleBefore) || hasValue(change.newTitleBefore))
+    ) {
+      fields.push("titleBefore")
+    }
+
+    if (
+      hasChanged(change.oldName, change.newName) &&
+      hasValue(change.newName)
+    ) {
+      fields.push("name")
+    }
+
+    if (
+      hasChanged(change.oldSurname, change.newSurname) &&
+      hasValue(change.newSurname)
+    ) {
+      fields.push("surname")
+    }
+
+    if (
+      hasChanged(change.oldTitleAfter, change.newTitleAfter) &&
+      (hasValue(change.oldTitleAfter) || hasValue(change.newTitleAfter))
+    ) {
+      fields.push("titleAfter")
+    }
+  }
+
+  if (isEmployeePositionChange(change.type)) {
+    if (
+      hasChanged(change.oldDepartment, change.newDepartment) &&
+      (hasValue(change.oldDepartment) || hasValue(change.newDepartment))
+    ) {
+      fields.push("department")
+    }
+
+    if (
+      hasChanged(change.oldUnitName, change.newUnitName) &&
+      (hasValue(change.oldUnitName) || hasValue(change.newUnitName))
+    ) {
+      fields.push("unitName")
+    }
+
+    if (
+      hasChanged(change.oldPositionName, change.newPositionName) &&
+      (hasValue(change.oldPositionName) || hasValue(change.newPositionName))
+    ) {
+      fields.push("positionName")
+    }
+
+    if (
+      hasChanged(change.oldPositionNum, change.newPositionNum) &&
+      (hasValue(change.oldPositionNum) || hasValue(change.newPositionNum))
+    ) {
+      fields.push("positionNum")
+    }
+  }
+
+  return fields
+}
+
+function buildChangeSummary(change: MinimalEmployeeChangeLink) {
+  const parts: string[] = []
+
+  if (isEmployeeNameChange(change.type)) {
+    if (
+      hasChanged(change.oldTitleBefore, change.newTitleBefore) &&
+      (hasValue(change.oldTitleBefore) || hasValue(change.newTitleBefore))
+    ) {
+      parts.push(
+        `titul před ${displayValue(change.oldTitleBefore)} → ${displayValue(
+          change.newTitleBefore
+        )}`
+      )
+    }
+
+    if (
+      hasChanged(change.oldName, change.newName) &&
+      hasValue(change.newName)
+    ) {
+      parts.push(
+        `jméno ${displayValue(change.oldName)} → ${displayValue(
+          change.newName
+        )}`
+      )
+    }
+
+    if (
+      hasChanged(change.oldSurname, change.newSurname) &&
+      hasValue(change.newSurname)
+    ) {
+      parts.push(
+        `příjmení ${displayValue(change.oldSurname)} → ${displayValue(
+          change.newSurname
+        )}`
+      )
+    }
+
+    if (
+      hasChanged(change.oldTitleAfter, change.newTitleAfter) &&
+      (hasValue(change.oldTitleAfter) || hasValue(change.newTitleAfter))
+    ) {
+      parts.push(
+        `titul za ${displayValue(change.oldTitleAfter)} → ${displayValue(
+          change.newTitleAfter
+        )}`
+      )
+    }
+  }
+
+  if (isEmployeePositionChange(change.type)) {
+    if (
+      hasChanged(change.oldDepartment, change.newDepartment) &&
+      (hasValue(change.oldDepartment) || hasValue(change.newDepartment))
+    ) {
+      parts.push(
+        `odbor ${displayValue(change.oldDepartment)} → ${displayValue(
+          change.newDepartment
+        )}`
+      )
+    }
+
+    if (
+      hasChanged(change.oldUnitName, change.newUnitName) &&
+      (hasValue(change.oldUnitName) || hasValue(change.newUnitName))
+    ) {
+      parts.push(
+        `oddělení ${displayValue(change.oldUnitName)} → ${displayValue(
+          change.newUnitName
+        )}`
+      )
+    }
+
+    if (
+      hasChanged(change.oldPositionName, change.newPositionName) &&
+      (hasValue(change.oldPositionName) || hasValue(change.newPositionName))
+    ) {
+      parts.push(
+        `pozice ${displayValue(change.oldPositionName)} → ${displayValue(
+          change.newPositionName
+        )}`
+      )
+    }
+
+    if (
+      hasChanged(change.oldPositionNum, change.newPositionNum) &&
+      (hasValue(change.oldPositionNum) || hasValue(change.newPositionNum))
+    ) {
+      parts.push(
+        `č. funkce ${displayValue(change.oldPositionNum)} → ${displayValue(
+          change.newPositionNum
+        )}`
+      )
+    }
+  }
+
+  return parts.length > 0 ? parts.join("; ") : "bez detailu změny"
 }
 
 export function pickMostRelevantOffboarding<T extends MinimalOffboardingLink>(
@@ -83,10 +352,10 @@ export function pickMostRelevantOffboarding<T extends MinimalOffboardingLink>(
   if (rows.length === 0) return null
 
   return [...rows].sort((a, b) => {
-    const aDate = toDate(a.actualEnd ?? a.plannedEnd)?.getTime() ?? 0
-    const bDate = toDate(b.actualEnd ?? b.plannedEnd)?.getTime() ?? 0
+    const dateA = toDate(a.actualEnd ?? a.plannedEnd)?.getTime() ?? 0
+    const dateB = toDate(b.actualEnd ?? b.plannedEnd)?.getTime() ?? 0
 
-    return bDate - aDate
+    return dateB - dateA
   })[0]
 }
 
@@ -96,10 +365,23 @@ export function pickMostRelevantOnboarding<T extends MinimalOnboardingLink>(
   if (rows.length === 0) return null
 
   return [...rows].sort((a, b) => {
-    const aDate = toDate(a.actualStart ?? a.plannedStart)?.getTime() ?? 0
-    const bDate = toDate(b.actualStart ?? b.plannedStart)?.getTime() ?? 0
+    const dateA = toDate(a.actualStart ?? a.plannedStart)?.getTime() ?? 0
+    const dateB = toDate(b.actualStart ?? b.plannedStart)?.getTime() ?? 0
 
-    return bDate - aDate
+    return dateB - dateA
+  })[0]
+}
+
+export function pickMostRelevantEmployeeChange<
+  T extends MinimalEmployeeChangeLink,
+>(rows: T[]): T | null {
+  if (rows.length === 0) return null
+
+  return [...rows].sort((a, b) => {
+    const dateA = toDate(a.effectiveDate)?.getTime() ?? 0
+    const dateB = toDate(b.effectiveDate)?.getTime() ?? 0
+
+    return dateB - dateA
   })[0]
 }
 
@@ -129,10 +411,16 @@ export function buildLinkedOffboardingInfo(params: {
       leftDuringProbation,
       probationShouldBeStopped,
       rowMuted: true,
-      label: isActualExit ? "Odešel ve zkušebce" : "Plánovaný odchod ve zkušebce",
+      label: isActualExit
+        ? "Odešel ve zkušebce"
+        : "Plánovaný odchod ve zkušebce",
       description: isActualExit
-        ? `Zaměstnanec má skutečný odchod ${formatDateCz(exitDate)}. Zkušební doba se dále nevyhodnocuje.`
-        : `Zaměstnanec má plánovaný odchod ${formatDateCz(exitDate)} ještě v průběhu zkušební doby.`,
+        ? `Zaměstnanec má skutečný odchod ${formatDateCz(
+          exitDate
+        )}. Zkušební doba se dále nevyhodnocuje.`
+        : `Zaměstnanec má plánovaný odchod ${formatDateCz(
+          exitDate
+        )} ještě v průběhu zkušební doby.`,
     }
   }
 
@@ -175,9 +463,59 @@ export function buildLinkedOnboardingInfo(params: {
     exitDuringProbation,
     label: exitDuringProbation ? "Odchod ve zkušebce" : "Existuje v nástupech",
     description: exitDuringProbation
-      ? `Osobní číslo je propojené s nástupem. Odchod spadá do zkušební doby ukončené ${formatDateCz(onboarding.probationEnd)}.`
+      ? `Osobní číslo je propojené s nástupem. Odchod spadá do zkušební doby ukončené ${formatDateCz(
+        onboarding.probationEnd
+      )}.`
       : "Osobní číslo je propojené se záznamem v nástupech.",
   }
+}
+
+export function buildLinkedEmployeeChangeInfo(
+  change: MinimalEmployeeChangeLink | null
+): LinkedEmployeeChangeInfo | null {
+  if (!change) return null
+
+  const affectsName = isEmployeeNameChange(change.type)
+  const affectsPosition = isEmployeePositionChange(change.type)
+  const isApplied = change.status === "APPLIED"
+  const changedFields = buildChangedFields(change)
+  const detail = buildChangeSummary(change)
+  const effectiveDateLabel = formatDateCz(change.effectiveDate)
+
+  return {
+    id: change.id,
+    type: change.type,
+    status: change.status,
+    effectiveDate: toIso(change.effectiveDate),
+    affectsName,
+    affectsPosition,
+    isApplied,
+    label: isApplied
+      ? "Aplikovaná změna"
+      : getEmployeeChangeTypeLabel(change.type),
+    description: `${getEmployeeChangeTypeLabel(
+      change.type
+    )} s účinností ${effectiveDateLabel}: ${detail}.`,
+    changedFields,
+    detail,
+    effectiveDateLabel,
+    rowMuted: change.status === "CANCELLED",
+  }
+}
+
+export function buildLinkedEmployeeChangeInfos<
+  T extends MinimalEmployeeChangeLink,
+>(changes: T[], limit = 5): LinkedEmployeeChangeInfo[] {
+  return [...changes]
+    .sort((a, b) => {
+      const dateA = toDate(a.effectiveDate)?.getTime() ?? 0
+      const dateB = toDate(b.effectiveDate)?.getTime() ?? 0
+
+      return dateB - dateA
+    })
+    .slice(0, limit)
+    .map((change) => buildLinkedEmployeeChangeInfo(change))
+    .filter((change): change is LinkedEmployeeChangeInfo => Boolean(change))
 }
 
 export function shouldSkipProbationEvaluation(params: {

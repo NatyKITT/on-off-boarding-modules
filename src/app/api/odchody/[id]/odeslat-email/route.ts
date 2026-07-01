@@ -3,6 +3,7 @@ import { auth } from "@/auth"
 import { z } from "zod"
 
 import { prisma } from "@/lib/db"
+import { canWriteOffboarding } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
@@ -22,6 +23,16 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     return NextResponse.json(
       { status: "error", message: "Nejste přihlášeni." },
       { status: 401 }
+    )
+  }
+
+  if (!canWriteOffboarding(session.user.role)) {
+    return NextResponse.json(
+      {
+        status: "error",
+        message: "Nemáte oprávnění odesílat e-maily k odchodu.",
+      },
+      { status: 403 }
     )
   }
 

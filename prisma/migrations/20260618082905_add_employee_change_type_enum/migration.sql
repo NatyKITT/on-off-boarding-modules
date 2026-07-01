@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE `EmployeeChange` MODIFY `type` ENUM('POSITION', 'NAME', 'NAME_AND_POSITION') NOT NULL;

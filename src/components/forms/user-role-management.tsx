@@ -2,7 +2,15 @@
 
 import { useEffect, useState } from "react"
 import { Role } from "@prisma/client"
-import { InfoIcon, Lock, Plus, ShieldCheck, UserPlus } from "lucide-react"
+import {
+  AlertTriangle,
+  InfoIcon,
+  Lock,
+  Plus,
+  ShieldCheck,
+  Trash2,
+  UserPlus,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -41,7 +49,17 @@ type DbUser = {
 type EnvUser = {
   email: string
   role: "ADMIN" | "HR" | "IT" | "READONLY"
+  canAccessApp?: boolean
+  source?: "ENV"
 }
+
+type RemoveDialogUser = {
+  id: string
+  email: string
+  name: string | null
+  surname: string | null
+  role: Role
+} | null
 
 const ROLE_LABELS: Record<Role, string> = {
   ADMIN: "Administrátor",
@@ -67,10 +85,15 @@ const ROLE_ACCESS: Record<Role, string> = {
   USER: "Pouze výstupní listy",
 }
 
+function getFullName(user: Pick<DbUser, "name" | "surname">) {
+  return [user.name, user.surname].filter(Boolean).join(" ").trim()
+}
+
 function RoleLegend() {
   return (
     <div className="rounded-lg border bg-muted/30 p-4">
       <p className="mb-3 text-sm font-medium">Přehled rolí</p>
+
       <div className="grid gap-2 sm:grid-cols-2">
         {(Object.entries(ROLE_LABELS) as [Role, string][]).map(
           ([role, label]) => (
@@ -78,6 +101,7 @@ function RoleLegend() {
               <Badge className={`${ROLE_BADGE_CLASS[role]} shrink-0`}>
                 {label}
               </Badge>
+
               <p className="text-xs text-muted-foreground">
                 {ROLE_ACCESS[role]}
               </p>
@@ -96,39 +120,51 @@ function AddUserDialog({ onAdded }: { onAdded: () => void }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const reset = () => {
+  function reset() {
     setEmail("")
     setRole("USER")
     setError(null)
   }
 
-  const handleSubmit = async () => {
+  async function handleSubmit() {
     setError(null)
+
     const normalized = email.trim().toLowerCase()
+
     if (!normalized) {
-      setError("Zadejte email.")
+      setError("Zadejte e-mail.")
       return
     }
-    if (!normalized.endsWith("@praha6.cz")) {
-      setError("Lze přidat pouze uživatele s emailem @praha6.cz.")
+
+    if (!normalized.includes("@")) {
+      setError("Zadejte platný e-mail.")
       return
     }
 
     setLoading(true)
+
     try {
       const res = await fetch("/api/admin/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: normalized, role }),
       })
-      const data = await res.json()
+
+      const data = await res.json().catch(() => null)
+
       if (!res.ok) {
-        setError(data.error ?? "Chyba při přidávání uživatele.")
+        setError(data?.error ?? "Chyba při přidávání uživatele.")
         return
       }
+
+      const createdRole = data?.user?.role as Role | undefined
+
       toast.success(
-        `Uživatel ${normalized} byl přidán s rolí ${ROLE_LABELS[role]}.`
+        `Uživatel ${normalized} byl přidán s rolí ${
+          createdRole ? ROLE_LABELS[createdRole] : ROLE_LABELS[role]
+        }.`
       )
+
       setOpen(false)
       reset()
       onAdded()
@@ -142,9 +178,9 @@ function AddUserDialog({ onAdded }: { onAdded: () => void }) {
   return (
     <Dialog
       open={open}
-      onOpenChange={(v) => {
-        setOpen(v)
-        if (!v) reset()
+      onOpenChange={(value) => {
+        setOpen(value)
+        if (!value) reset()
       }}
     >
       <DialogTrigger asChild>
@@ -158,50 +194,56 @@ function AddUserDialog({ onAdded }: { onAdded: () => void }) {
         <DialogHeader>
           <DialogTitle>Přidat uživatele</DialogTitle>
           <DialogDescription>
-            Předregistrujte uživatele @praha6.cz. Přihlásí se přes Google — role
-            mu bude přiřazena automaticky dle tohoto záznamu.
+            Předregistrujte uživatele s povolenou firemní doménou. Po přihlášení
+            přes Google se jeho účet propojí s tímto záznamem.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
             <Label htmlFor="add-email">
-              Email <span className="text-destructive">*</span>
+              E-mail <span className="text-destructive">*</span>
             </Label>
+
             <Input
               id="add-email"
               type="email"
               placeholder="jmeno@praha6.cz"
               value={email}
-              onChange={(e) => {
-                setEmail(e.target.value)
+              onChange={(event) => {
+                setEmail(event.target.value)
                 setError(null)
               }}
-              onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void handleSubmit()
+              }}
               disabled={loading}
             />
+
             <p className="text-xs text-muted-foreground">
-              Pouze adresy @praha6.cz
+              Povolené domény kontroluje server podle konfigurace.
             </p>
           </div>
 
           <div className="space-y-1.5">
             <Label htmlFor="add-role">Role</Label>
+
             <Select
               value={role}
-              onValueChange={(v) => setRole(v as Role)}
+              onValueChange={(value) => setRole(value as Role)}
               disabled={loading}
             >
               <SelectTrigger id="add-role">
                 <SelectValue />
               </SelectTrigger>
+
               <SelectContent>
                 {(Object.entries(ROLE_LABELS) as [Role, string][]).map(
-                  ([r, label]) => (
-                    <SelectItem key={r} value={r}>
+                  ([itemRole, label]) => (
+                    <SelectItem key={itemRole} value={itemRole}>
                       <span>{label}</span>
                       <span className="ml-2 text-xs text-muted-foreground">
-                        — {ROLE_ACCESS[r]}
+                        — {ROLE_ACCESS[itemRole]}
                       </span>
                     </SelectItem>
                   )
@@ -221,7 +263,8 @@ function AddUserDialog({ onAdded }: { onAdded: () => void }) {
           >
             Zrušit
           </Button>
-          <Button onClick={handleSubmit} disabled={loading}>
+
+          <Button onClick={() => void handleSubmit()} disabled={loading}>
             {loading && <Icons.spinner className="mr-2 size-4 animate-spin" />}
             Přidat
           </Button>
@@ -235,7 +278,7 @@ function EnvUsersList({ envUsers }: { envUsers: EnvUser[] }) {
   if (envUsers.length === 0) {
     return (
       <p className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
-        Žádné emaily v ENV konfiguraci
+        Žádné e-maily v ENV konfiguraci.
       </p>
     )
   }
@@ -253,6 +296,7 @@ function EnvUsersList({ envUsers }: { envUsers: EnvUser[] }) {
               {envUser.email}
             </span>
           </div>
+
           <Badge className={`${ROLE_BADGE_CLASS[envUser.role]} shrink-0`}>
             {ROLE_LABELS[envUser.role]}
           </Badge>
@@ -266,10 +310,12 @@ function DbUsersList({
   users,
   updatingUserId,
   onRoleChange,
+  onRemoveUser,
 }: {
   users: DbUser[]
   updatingUserId: string | null
   onRoleChange: (userId: string, role: Role) => void
+  onRemoveUser: (user: DbUser) => void
 }) {
   if (users.length === 0) {
     return (
@@ -285,6 +331,7 @@ function DbUsersList({
       <div className="space-y-3 md:hidden">
         {users.map((user) => {
           const fullName = [user.name, user.surname].filter(Boolean).join(" ")
+
           return (
             <div key={user.id} className="space-y-3 rounded-md border p-4">
               <div className="flex items-start justify-between gap-2">
@@ -296,10 +343,12 @@ function DbUsersList({
                       Nepřihlášen/a
                     </p>
                   )}
+
                   <p className="truncate text-xs text-muted-foreground">
                     {user.email}
                   </p>
                 </div>
+
                 <Badge className={`${ROLE_BADGE_CLASS[user.role]} shrink-0`}>
                   {ROLE_LABELS[user.role]}
                 </Badge>
@@ -319,7 +368,9 @@ function DbUsersList({
 
                 <Select
                   value={user.role}
-                  onValueChange={(value: Role) => onRoleChange(user.id, value)}
+                  onValueChange={(value) =>
+                    onRoleChange(user.id, value as Role)
+                  }
                   disabled={updatingUserId === user.id}
                 >
                   <SelectTrigger className="h-8 w-[150px] text-xs">
@@ -329,10 +380,15 @@ function DbUsersList({
                       <SelectValue />
                     )}
                   </SelectTrigger>
+
                   <SelectContent>
                     {(Object.entries(ROLE_LABELS) as [Role, string][]).map(
-                      ([r, label]) => (
-                        <SelectItem key={r} value={r} className="text-xs">
+                      ([itemRole, label]) => (
+                        <SelectItem
+                          key={itemRole}
+                          value={itemRole}
+                          className="text-xs"
+                        >
                           {label}
                         </SelectItem>
                       )
@@ -340,6 +396,17 @@ function DbUsersList({
                   </SelectContent>
                 </Select>
               </div>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full text-destructive hover:text-destructive"
+                disabled={updatingUserId === user.id}
+                onClick={() => onRemoveUser(user)}
+              >
+                <Trash2 className="mr-2 size-4" />
+                Odebrat uživatele
+              </Button>
             </div>
           )
         })}
@@ -353,7 +420,7 @@ function DbUsersList({
                 Jméno
               </th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                Email
+                E-mail
               </th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">
                 Přístup
@@ -364,8 +431,12 @@ function DbUsersList({
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">
                 Změnit roli
               </th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                Akce
+              </th>
             </tr>
           </thead>
+
           <tbody className="divide-y">
             {users.map((user) => (
               <tr key={user.id}>
@@ -376,9 +447,11 @@ function DbUsersList({
                     </span>
                   )}
                 </td>
+
                 <td className="px-4 py-3 text-muted-foreground">
                   {user.email}
                 </td>
+
                 <td className="px-4 py-3">
                   {user.canAccessApp ? (
                     <Badge className="border-green-200 bg-green-100 text-green-800">
@@ -390,16 +463,18 @@ function DbUsersList({
                     </Badge>
                   )}
                 </td>
+
                 <td className="px-4 py-3">
                   <Badge className={ROLE_BADGE_CLASS[user.role]}>
                     {ROLE_LABELS[user.role]}
                   </Badge>
                 </td>
+
                 <td className="px-4 py-3">
                   <Select
                     value={user.role}
-                    onValueChange={(value: Role) =>
-                      onRoleChange(user.id, value)
+                    onValueChange={(value) =>
+                      onRoleChange(user.id, value as Role)
                     }
                     disabled={updatingUserId === user.id}
                   >
@@ -410,16 +485,30 @@ function DbUsersList({
                         <SelectValue />
                       )}
                     </SelectTrigger>
+
                     <SelectContent>
                       {(Object.entries(ROLE_LABELS) as [Role, string][]).map(
-                        ([r, label]) => (
-                          <SelectItem key={r} value={r}>
+                        ([itemRole, label]) => (
+                          <SelectItem key={itemRole} value={itemRole}>
                             {label}
                           </SelectItem>
                         )
                       )}
                     </SelectContent>
                   </Select>
+                </td>
+
+                <td className="px-4 py-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-destructive hover:text-destructive"
+                    disabled={updatingUserId === user.id}
+                    onClick={() => onRemoveUser(user)}
+                  >
+                    <Trash2 className="mr-2 size-4" />
+                    Odebrat
+                  </Button>
                 </td>
               </tr>
             ))}
@@ -430,27 +519,115 @@ function DbUsersList({
   )
 }
 
+function RemoveUserDialog({
+  user,
+  loading,
+  onCancel,
+  onConfirm,
+}: {
+  user: RemoveDialogUser
+  loading: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const fullName = user ? getFullName(user) : ""
+
+  return (
+    <Dialog open={Boolean(user)} onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <div className="mb-2 flex size-11 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+            <AlertTriangle className="size-5" />
+          </div>
+
+          <DialogTitle>Odebrat uživatele?</DialogTitle>
+
+          <DialogDescription>
+            Tuto akci potvrďte pouze v případě, že uživatel už nemá mít přístup
+            do aplikace.
+          </DialogDescription>
+        </DialogHeader>
+
+        {user && (
+          <div className="space-y-4">
+            <div className="rounded-lg border bg-muted/40 p-4">
+              <p className="text-sm font-medium">
+                {fullName || "Nepřihlášený uživatel"}
+              </p>
+
+              <p className="mt-0.5 break-all text-sm text-muted-foreground">
+                {user.email}
+              </p>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Badge className={ROLE_BADGE_CLASS[user.role]}>
+                  {ROLE_LABELS[user.role]}
+                </Badge>
+              </div>
+            </div>
+
+            <Alert className="border-amber-200 bg-amber-50 text-amber-950">
+              <AlertTriangle className="size-4" />
+              <AlertDescription className="text-sm">
+                Pokud má uživatel vazby v systému, nebude fyzicky smazán.
+                Aplikace mu pouze odebere přístup a nastaví roli{" "}
+                <strong>Uživatel</strong>. Pokud vazby nemá, může být odstraněn
+                úplně.
+              </AlertDescription>
+            </Alert>
+          </div>
+        )}
+
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button variant="outline" onClick={onCancel} disabled={loading}>
+            Zrušit
+          </Button>
+
+          <Button
+            variant="destructive"
+            onClick={onConfirm}
+            disabled={loading || !user}
+          >
+            {loading && <Icons.spinner className="mr-2 size-4 animate-spin" />}
+            Odebrat uživatele
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function UserRoleManagement() {
   const [envUsers, setEnvUsers] = useState<EnvUser[]>([])
   const [dbUsers, setDbUsers] = useState<DbUser[]>([])
   const [loading, setLoading] = useState(true)
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null)
+  const [removeDialogUser, setRemoveDialogUser] =
+    useState<RemoveDialogUser>(null)
 
-  const fetchAll = async () => {
+  async function fetchAll() {
     try {
+      setLoading(true)
+
       const [envRes, dbRes] = await Promise.all([
-        fetch("/api/admin/env-roles"),
-        fetch("/api/admin/users"),
+        fetch("/api/admin/env-roles", { cache: "no-store" }),
+        fetch("/api/admin/users", { cache: "no-store" }),
       ])
+
       const envData = envRes.ok ? await envRes.json() : { envUsers: [] }
       const dbData = dbRes.ok ? await dbRes.json() : { users: [] }
 
       const fetchedEnvUsers: EnvUser[] = envData.envUsers ?? []
       setEnvUsers(fetchedEnvUsers)
 
-      const envEmails = new Set(fetchedEnvUsers.map((u) => u.email))
+      const envEmails = new Set(
+        fetchedEnvUsers.map((envUser) => envUser.email.toLowerCase())
+      )
+
       setDbUsers(
-        (dbData.users ?? []).filter((u: DbUser) => !envEmails.has(u.email))
+        (dbData.users ?? []).filter((dbUser: DbUser) => {
+          return !envEmails.has(dbUser.email.toLowerCase())
+        })
       )
     } catch {
       toast.error("Nepodařilo se načíst uživatele.")
@@ -460,21 +637,24 @@ export function UserRoleManagement() {
   }
 
   useEffect(() => {
-    fetchAll()
+    void fetchAll()
   }, [])
 
-  const updateUserRole = async (userId: string, newRole: Role) => {
+  async function updateUserRole(userId: string, newRole: Role) {
     setUpdatingUserId(userId)
+
     try {
       const res = await fetch(`/api/admin/users/${userId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: newRole }),
       })
+
       if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.error ?? "Chyba při aktualizaci.")
+        const errorData = await res.json().catch(() => null)
+        throw new Error(errorData?.error ?? "Chyba při aktualizaci.")
       }
+
       toast.success("Role byla aktualizována.")
       await fetchAll()
     } catch (error) {
@@ -488,6 +668,36 @@ export function UserRoleManagement() {
     }
   }
 
+  async function removeUser() {
+    if (!removeDialogUser) return
+
+    setUpdatingUserId(removeDialogUser.id)
+
+    try {
+      const res = await fetch(`/api/admin/users/${removeDialogUser.id}`, {
+        method: "DELETE",
+      })
+
+      const data = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        throw new Error(data?.error ?? "Uživatele se nepodařilo odebrat.")
+      }
+
+      toast.success(data?.message ?? "Uživatel byl odebrán.")
+      setRemoveDialogUser(null)
+      await fetchAll()
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Uživatele se nepodařilo odebrat."
+      )
+    } finally {
+      setUpdatingUserId(null)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -495,6 +705,10 @@ export function UserRoleManagement() {
       </div>
     )
   }
+
+  const removeDialogLoading = Boolean(
+    removeDialogUser && updatingUserId === removeDialogUser.id
+  )
 
   return (
     <div className="space-y-6">
@@ -512,8 +726,8 @@ export function UserRoleManagement() {
         <Alert>
           <InfoIcon className="size-4" />
           <AlertDescription className="text-sm">
-            Role definované v ENV proměnných. Nelze měnit přes toto rozhraní —
-            vyžaduje editaci ENV a restart.
+            Role definované v ENV proměnných. Nelze měnit ani odebrat přes toto
+            rozhraní — vyžaduje editaci ENV a restart aplikace.
           </AlertDescription>
         </Alert>
 
@@ -524,30 +738,49 @@ export function UserRoleManagement() {
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <Plus className="size-4 text-muted-foreground" />
-            <h3 className="font-medium">Ostatní uživatelé @praha6.cz</h3>
+            <h3 className="font-medium">Ostatní uživatelé mimo ENV</h3>
             <Badge variant="secondary" className="text-xs">
               {dbUsers.length}
             </Badge>
           </div>
+
           <AddUserDialog onAdded={fetchAll} />
         </div>
 
         <p className="text-sm text-muted-foreground">
           Uživatelé registrovaní přihlášením přes Google nebo předregistrovaní
-          adminem. Jejich roli lze měnit.
+          administrátorem. Jejich roli lze měnit a lze jim odebrat přístup.
         </p>
 
         <DbUsersList
           users={dbUsers}
           updatingUserId={updatingUserId}
           onRoleChange={updateUserRole}
+          onRemoveUser={(user) =>
+            setRemoveDialogUser({
+              id: user.id,
+              email: user.email,
+              name: user.name,
+              surname: user.surname,
+              role: user.role,
+            })
+          }
         />
       </div>
 
       <p className="text-xs text-muted-foreground">
         Celkem: <strong>{envUsers.length}</strong> ENV uživatelů,{" "}
-        <strong>{dbUsers.length}</strong> DB uživatelů
+        <strong>{dbUsers.length}</strong> DB uživatelů mimo ENV.
       </p>
+
+      <RemoveUserDialog
+        user={removeDialogUser}
+        loading={removeDialogLoading}
+        onCancel={() => {
+          if (!removeDialogLoading) setRemoveDialogUser(null)
+        }}
+        onConfirm={() => void removeUser()}
+      />
     </div>
   )
 }

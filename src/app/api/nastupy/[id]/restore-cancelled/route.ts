@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
+import { canWriteOnboarding } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
 
@@ -16,6 +17,16 @@ export async function POST(_: NextRequest, { params }: Params) {
     return NextResponse.json(
       { status: "error", message: "Nejste přihlášeni." },
       { status: 401 }
+    )
+  }
+
+  if (!canWriteOnboarding(session.user.role)) {
+    return NextResponse.json(
+      {
+        status: "error",
+        message: "Nemáte oprávnění obnovovat zrušené nástupy.",
+      },
+      { status: 403 }
     )
   }
 

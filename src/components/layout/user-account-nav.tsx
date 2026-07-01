@@ -1,8 +1,17 @@
 "use client"
 
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import Link from "next/link"
-import { Eye, LayoutDashboard, Lock, LogOut, Settings } from "lucide-react"
+import {
+  ArrowLeftRight,
+  Eye,
+  LayoutDashboard,
+  Lock,
+  LogOut,
+  Settings,
+  UserMinus,
+  UserPlus,
+} from "lucide-react"
 import { signOut, useSession } from "next-auth/react"
 import { Drawer } from "vaul"
 
@@ -24,9 +33,40 @@ const ROLE_CONFIG: Record<
   string,
   { label: string; variant: "secondary" | "outline" }
 > = {
+  ADMIN: { label: "Administrátor", variant: "secondary" },
   HR: { label: "HR", variant: "secondary" },
   IT: { label: "IT", variant: "secondary" },
   READONLY: { label: "Pouze čtení", variant: "outline" },
+}
+
+type SessionUserWithSurname = {
+  name?: string | null
+  surname?: string | null
+  email?: string | null
+  image?: string | null
+  role?: string | null
+}
+
+type MenuItem = {
+  href: string
+  label: string
+  icon: ReactNode
+  show: boolean
+}
+
+function buildDisplayName(user: SessionUserWithSurname) {
+  const name = user.name?.trim() ?? ""
+  const surname = user.surname?.trim() ?? ""
+
+  if (!name && !surname) return user.email ?? "Uživatel"
+  if (!surname) return name
+  if (!name) return surname
+
+  if (name.toLowerCase().includes(surname.toLowerCase())) {
+    return name
+  }
+
+  return `${name} ${surname}`
 }
 
 function RoleBadge({ role }: { role?: string | null }) {
@@ -36,21 +76,130 @@ function RoleBadge({ role }: { role?: string | null }) {
   if (!config) return null
 
   return (
-    <Badge variant={config.variant} className="w-fit text-xs">
+    <Badge
+      variant={config.variant}
+      className="mt-1 w-fit rounded-full px-3 py-0.5 text-[11px] font-semibold"
+    >
       {role === "READONLY" && <Eye className="mr-1 size-3" />}
       {config.label}
     </Badge>
   )
 }
 
+function DesktopMenuLink({
+  href,
+  label,
+  icon,
+}: {
+  href: string
+  label: string
+  icon: ReactNode
+}) {
+  return (
+    <DropdownMenuItem asChild>
+      <Link href={href} className="flex items-center gap-2.5">
+        {icon}
+        <span>{label}</span>
+      </Link>
+    </DropdownMenuItem>
+  )
+}
+
+function MobileMenuLink({
+  href,
+  label,
+  icon,
+  onClick,
+}: {
+  href: string
+  label: string
+  icon: ReactNode
+  onClick: () => void
+}) {
+  return (
+    <li>
+      <Link
+        href={href}
+        onClick={onClick}
+        className="flex w-full items-center gap-4 rounded-lg px-3 py-2.5 text-foreground hover:bg-muted"
+      >
+        <span className="flex size-5 shrink-0 items-center justify-center">
+          {icon}
+        </span>
+        <span className="text-base">{label}</span>
+      </Link>
+    </li>
+  )
+}
+
 export function UserAccountNav() {
   const { data: session } = useSession()
-  const user = session?.user
+  const rawUser = session?.user as SessionUserWithSurname | undefined
 
   const [open, setOpen] = useState(false)
   const { isMobile } = useMediaQuery()
 
-  function closeDrawer() {
+  if (!rawUser) {
+    return <div className="size-8 animate-pulse rounded-full border bg-muted" />
+  }
+
+  const role = rawUser.role ?? "USER"
+  const isAdmin = role === "ADMIN"
+
+  const canAccessInternalApp =
+    role === "ADMIN" || role === "HR" || role === "IT" || role === "READONLY"
+
+  const displayName = buildDisplayName(rawUser)
+
+  const avatarUser = {
+    name: rawUser.name ?? null,
+    surname: rawUser.surname ?? null,
+    email: rawUser.email ?? null,
+    image: rawUser.image ?? null,
+  }
+
+  const menuItems: MenuItem[] = [
+    {
+      href: "/admin",
+      label: "Administrace",
+      icon: <Lock className="size-4" />,
+      show: isAdmin,
+    },
+    {
+      href: "/prehled",
+      label: "Přehled",
+      icon: <LayoutDashboard className="size-4" />,
+      show: canAccessInternalApp,
+    },
+    {
+      href: "/nastupy",
+      label: "Nástupy",
+      icon: <UserPlus className="size-4" />,
+      show: canAccessInternalApp,
+    },
+    {
+      href: "/odchody",
+      label: "Odchody",
+      icon: <UserMinus className="size-4" />,
+      show: canAccessInternalApp,
+    },
+    {
+      href: "/zmeny",
+      label: "Změny",
+      icon: <ArrowLeftRight className="size-4" />,
+      show: canAccessInternalApp,
+    },
+    {
+      href: "/nastaveni",
+      label: "Nastavení",
+      icon: <Settings className="size-4" />,
+      show: isAdmin,
+    },
+  ]
+
+  const visibleMenuItems = menuItems.filter((item) => item.show)
+
+  function closeMenu() {
     setOpen(false)
   }
 
@@ -61,29 +210,33 @@ export function UserAccountNav() {
     })
   }
 
-  if (!user) {
-    return <div className="size-8 animate-pulse rounded-full border bg-muted" />
-  }
-
   const userInfo = (
-    <div className="flex flex-col gap-1">
-      {user.name && <p className="font-medium">{user.name}</p>}
-      {user.email && (
-        <p className="w-[200px] truncate text-sm text-muted-foreground">
-          {user.email}
+    <div className="min-w-0 flex-1">
+      <p className="whitespace-normal break-words text-sm font-semibold leading-snug text-foreground">
+        {displayName}
+      </p>
+
+      {rawUser.email && (
+        <p className="mt-0.5 break-all text-xs leading-snug text-muted-foreground">
+          {rawUser.email}
         </p>
       )}
-      <RoleBadge role={user.role} />
+
+      <RoleBadge role={role} />
     </div>
   )
 
   if (isMobile) {
     return (
-      <Drawer.Root open={open} onClose={closeDrawer}>
+      <Drawer.Root open={open} onOpenChange={setOpen} direction="top">
         <Drawer.Trigger asChild>
-          <button type="button" onClick={() => setOpen(true)}>
+          <button
+            type="button"
+            className="rounded-full"
+            aria-label="Uživatelské menu"
+          >
             <UserAvatar
-              user={{ name: user.name || null, image: user.image || null }}
+              user={avatarUser}
               className="size-9 border"
               aria-label="Uživatelské menu"
             />
@@ -92,70 +245,54 @@ export function UserAccountNav() {
 
         <Drawer.Portal>
           <Drawer.Overlay
-            className="fixed inset-0 z-40 h-full bg-background/80 backdrop-blur-sm"
-            onClick={closeDrawer}
+            className="fixed inset-0 z-40 bg-background/70 backdrop-blur-sm"
+            onClick={closeMenu}
           />
 
           <Drawer.Content
-            className="fixed inset-x-0 bottom-0 z-50 mt-24 overflow-hidden rounded-t-[10px] border bg-background px-3 text-sm"
-            onOpenAutoFocus={(e) => e.preventDefault()}
+            className="
+            fixed inset-x-0 top-0 z-50 rounded-b-2xl border-b bg-background
+            px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))]
+            shadow-2xl
+          "
+            onOpenAutoFocus={(event) => event.preventDefault()}
           >
-            <div className="sticky top-0 z-20 flex w-full items-center justify-center bg-inherit">
-              <div className="my-3 h-1.5 w-16 rounded-full bg-muted-foreground/20" />
+            <Drawer.Title className="sr-only">Uživatelské menu</Drawer.Title>
+
+            <div className="mb-3 flex w-full justify-center">
+              <div className="h-1.5 w-16 rounded-full bg-muted-foreground/20" />
             </div>
 
-            <div className="flex items-center justify-start gap-2 p-2">
+            <div className="flex w-full items-start gap-3 pb-4">
+              <UserAvatar user={avatarUser} className="mt-0.5 size-11 border" />
               {userInfo}
             </div>
 
-            <ul role="list" className="mb-14 mt-1 w-full text-muted-foreground">
-              {user.role === "ADMIN" && (
-                <li className="rounded-lg text-foreground hover:bg-muted">
-                  <Link
-                    href="/admin"
-                    onClick={closeDrawer}
-                    className="flex w-full items-center gap-3 px-2.5 py-2"
-                  >
-                    <Lock className="size-4" />
-                    <p className="text-sm">Administrace</p>
-                  </Link>
-                </li>
-              )}
+            <ul role="list" className="space-y-1">
+              {visibleMenuItems.map((item) => (
+                <MobileMenuLink
+                  key={item.href}
+                  href={item.href}
+                  label={item.label}
+                  icon={item.icon}
+                  onClick={closeMenu}
+                />
+              ))}
 
-              <li className="rounded-lg text-foreground hover:bg-muted">
-                <Link
-                  href="/prehled"
-                  onClick={closeDrawer}
-                  className="flex w-full items-center gap-3 px-2.5 py-2"
-                >
-                  <LayoutDashboard className="size-4" />
-                  <p className="text-sm">Přehled</p>
-                </Link>
-              </li>
-
-              <li className="rounded-lg text-foreground hover:bg-muted">
-                <Link
-                  href="/nastaveni"
-                  onClick={closeDrawer}
-                  className="flex w-full items-center gap-3 px-2.5 py-2"
-                >
-                  <Settings className="size-4" />
-                  <p className="text-sm">Nastavení</p>
-                </Link>
-              </li>
-
-              <li className="rounded-lg text-foreground hover:bg-muted">
+              <li>
                 <button
                   type="button"
                   className="flex w-full items-center gap-3 px-2.5 py-2 text-left"
                   onClick={(event) => {
                     event.preventDefault()
-                    closeDrawer()
+                    closeMenu()
                     handleSignOut()
                   }}
                 >
-                  <LogOut className="size-4" />
-                  <p className="text-sm">Odhlásit se</p>
+                  <span className="flex size-5 shrink-0 items-center justify-center">
+                    <LogOut className="size-4" />
+                  </span>
+                  <span className="text-base">Odhlásit se</span>
                 </button>
               </li>
             </ul>
@@ -175,42 +312,29 @@ export function UserAccountNav() {
           className="rounded-full"
         >
           <UserAvatar
-            user={{ name: user.name || null, image: user.image || null }}
+            user={avatarUser}
             className="size-8 border"
             aria-label="Uživatelské menu"
           />
         </button>
       </DropdownMenuTrigger>
 
-      <DropdownMenuContent align="end">
-        <div className="flex items-center justify-start gap-2 p-2">
+      <DropdownMenuContent align="end" className="w-80">
+        <div className="flex w-full items-start gap-3 p-3">
+          <UserAvatar user={avatarUser} className="mt-0.5 size-10 border" />
           {userInfo}
         </div>
 
         <DropdownMenuSeparator />
 
-        {user.role === "ADMIN" && (
-          <DropdownMenuItem asChild>
-            <Link href="/admin" className="flex items-center space-x-2.5">
-              <Lock className="size-4" />
-              <p className="text-sm">Administrace</p>
-            </Link>
-          </DropdownMenuItem>
-        )}
-
-        <DropdownMenuItem asChild>
-          <Link href="/prehled" className="flex items-center space-x-2.5">
-            <LayoutDashboard className="size-4" />
-            <p className="text-sm">Přehled</p>
-          </Link>
-        </DropdownMenuItem>
-
-        <DropdownMenuItem asChild>
-          <Link href="/nastaveni" className="flex items-center space-x-2.5">
-            <Settings className="size-4" />
-            <p className="text-sm">Nastavení</p>
-          </Link>
-        </DropdownMenuItem>
+        {visibleMenuItems.map((item) => (
+          <DesktopMenuLink
+            key={item.href}
+            href={item.href}
+            label={item.label}
+            icon={item.icon}
+          />
+        ))}
 
         <DropdownMenuSeparator />
 
@@ -221,9 +345,9 @@ export function UserAccountNav() {
             handleSignOut()
           }}
         >
-          <div className="flex items-center space-x-2.5">
+          <div className="flex items-center gap-2.5">
             <LogOut className="size-4" />
-            <p className="text-sm">Odhlásit se</p>
+            <span>Odhlásit se</span>
           </div>
         </DropdownMenuItem>
       </DropdownMenuContent>

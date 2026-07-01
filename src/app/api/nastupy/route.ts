@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
+import { Prisma } from "@prisma/client"
 import { z, ZodError } from "zod"
 
 import { env } from "@/env.mjs"
 
 import { prisma } from "@/lib/db"
 import {
+  buildLinkedEmployeeChangeInfos,
   buildLinkedOffboardingInfo,
   normalizePersonalNumber,
   pickMostRelevantOffboarding,
@@ -15,6 +17,7 @@ import {
   toMentorFields,
   toSupervisorFields,
 } from "@/lib/person-snapshot"
+import { canReadOnboarding, canWriteOnboarding } from "@/lib/rbac"
 import { resolveSupervisorFromPositionNum } from "@/lib/systemizace-superior"
 
 export const dynamic = "force-dynamic"
@@ -23,6 +26,24 @@ export const revalidate = 0
 
 const emptyToUndefined = (v: unknown) =>
   typeof v === "string" && v.trim() === "" ? undefined : v
+
+const probationExtensionTypeSchema = z.enum([
+  "sick_leave",
+  "vacation",
+  "family_care",
+  "maternity_parental",
+  "other_obstacle",
+  "unexcused_absence",
+])
+
+const probationExtensionSchema = z.object({
+  id: z.string(),
+  type: probationExtensionTypeSchema,
+  from: z.string(),
+  to: z.string(),
+  days: z.number().int().nonnegative(),
+  note: z.string().optional(),
+})
 
 const base = z.object({
   titleBefore: z.union([z.string(), z.null()]).optional(),
@@ -34,28 +55,40 @@ const base = z.object({
     .optional()
     .nullable(),
   phone: z.union([z.string(), z.null()]).optional(),
+
   positionNum: z.string().min(1, "Číslo pozice je povinné"),
   positionName: z.string().optional(),
   department: z.string().optional(),
   unitName: z.string().optional(),
+
   startTime: z.union([z.string(), z.null()]).optional(),
   probationEnd: z.preprocess(emptyToUndefined, z.coerce.date()).optional(),
+  hasCustomDates: z.boolean().optional(),
+  probationExtensions: z.array(probationExtensionSchema).optional(),
+  probationExtensionSummary: z.union([z.string(), z.null()]).optional(),
+
   userEmail: z
     .preprocess(emptyToUndefined, z.string().email())
     .optional()
     .nullable(),
   userName: z.union([z.string(), z.null()]).optional(),
   personalNumber: z.union([z.string(), z.null()]).optional(),
+
   supervisorName: z.union([z.string(), z.null()]).optional(),
   supervisorEmail: z
     .preprocess(emptyToUndefined, z.string().email())
     .optional()
     .nullable(),
+  supervisorPosition: z.union([z.string(), z.null()]).optional(),
+  supervisorDepartment: z.union([z.string(), z.null()]).optional(),
+  supervisorUnitName: z.union([z.string(), z.null()]).optional(),
+
   mentorName: z.union([z.string(), z.null()]).optional(),
   mentorEmail: z
     .preprocess(emptyToUndefined, z.string().email())
     .optional()
     .nullable(),
+
   notes: z.union([z.string(), z.null()]).optional(),
 })
 
@@ -92,6 +125,14 @@ type RawOnboardingBody = {
   [key: string]: unknown
 }
 
+type OnboardingRecord = Awaited<
+  ReturnType<typeof prisma.employeeOnboarding.findMany>
+>[number]
+
+type LinkablePersonalNumber = {
+  personalNumber: string | null
+}
+
 function parseEmailList(value?: string): string[] {
   return (value ?? "")
     .split(",")
@@ -107,6 +148,32 @@ function buildFullName(parts: Array<string | null | undefined>): string | null {
   const full = parts.filter(Boolean).join(" ").replace(/\s+/g, " ").trim()
 
   return full || null
+}
+
+function collectPersonalNumbers<T extends LinkablePersonalNumber>(rows: T[]) {
+  return Array.from(
+    new Set(
+      rows
+        .map((row) => normalizePersonalNumber(row.personalNumber))
+        .filter((value): value is string => value.length > 0)
+    )
+  )
+}
+
+function groupByPersonalNumber<T extends LinkablePersonalNumber>(rows: T[]) {
+  const map = new Map<string, T[]>()
+
+  for (const row of rows) {
+    const personalNumber = normalizePersonalNumber(row.personalNumber)
+
+    if (!personalNumber) continue
+
+    const current = map.get(personalNumber) ?? []
+    current.push(row)
+    map.set(personalNumber, current)
+  }
+
+  return map
 }
 
 async function resolveCancelledByName(
@@ -131,11 +198,63 @@ async function resolveCancelledByName(
   return cancelledBy
 }
 
+async function getLinkedOffboardingForOnboarding(
+  personalNumber: string | null | undefined,
+  probationEnd: Date | null | undefined
+) {
+  const normalizedPersonalNumber = normalizePersonalNumber(personalNumber)
+
+  if (!normalizedPersonalNumber) {
+    return buildLinkedOffboardingInfo({
+      offboarding: null,
+      probationEnd,
+    })
+  }
+
+  const linkedOffboardings = await prisma.employeeOffboarding.findMany({
+    where: {
+      personalNumber: normalizedPersonalNumber,
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+      personalNumber: true,
+      plannedEnd: true,
+      actualEnd: true,
+    },
+  })
+
+  return buildLinkedOffboardingInfo({
+    offboarding: pickMostRelevantOffboarding(linkedOffboardings),
+    probationEnd,
+  })
+}
+
+async function getLinkedChangesForPersonalNumber(
+  personalNumber: string | null | undefined
+) {
+  const normalizedPersonalNumber = normalizePersonalNumber(personalNumber)
+
+  if (!normalizedPersonalNumber) return []
+
+  const changes = await prisma.employeeChange.findMany({
+    where: {
+      personalNumber: normalizedPersonalNumber,
+      deletedAt: null,
+      status: {
+        not: "CANCELLED",
+      },
+    },
+    orderBy: [{ effectiveDate: "desc" }, { id: "desc" }],
+  })
+
+  return buildLinkedEmployeeChangeInfos(changes)
+}
+
 async function serializeOnboardingRecord(
-  record: Awaited<
-    ReturnType<typeof prisma.employeeOnboarding.findMany>
-  >[number],
-  linkedOffboarding: ReturnType<typeof buildLinkedOffboardingInfo> = null
+  record: OnboardingRecord,
+  linkedOffboarding: ReturnType<typeof buildLinkedOffboardingInfo> = null,
+  linkedChanges: ReturnType<typeof buildLinkedEmployeeChangeInfos> = []
 ) {
   const cancelledByName = await resolveCancelledByName(record.cancelledBy)
 
@@ -144,24 +263,15 @@ async function serializeOnboardingRecord(
     plannedStart: record.plannedStart?.toISOString() ?? null,
     actualStart: record.actualStart?.toISOString() ?? null,
     probationEnd: record.probationEnd?.toISOString() ?? null,
+    hasCustomDates: record.hasCustomDates,
+    probationExtensions: Array.isArray(record.probationExtensions)
+      ? record.probationExtensions
+      : [],
+    probationExtensionSummary: record.probationExtensionSummary ?? null,
     mentorAssignedFrom: record.mentorAssignedFrom?.toISOString() ?? null,
     mentorAssignedTo: record.mentorAssignedTo?.toISOString() ?? null,
     mentorNotificationSentAt:
       record.mentorNotificationSentAt?.toISOString() ?? null,
-    probationEvaluationSentAt:
-      record.probationEvaluationSentAt?.toISOString() ?? null,
-    probationNotification21Sent:
-      record.probationNotification21Sent?.toISOString() ?? null,
-    probationNotificationHRSent:
-      record.probationNotificationHRSent?.toISOString() ?? null,
-    probationReminder1DaySent:
-      record.probationReminder1DaySent?.toISOString() ?? null,
-    probationCompletedNotified:
-      record.probationCompletedNotified?.toISOString() ?? null,
-    probationHashExpiresAt:
-      record.probationHashExpiresAt?.toISOString() ?? null,
-    probationHashUsedAt: record.probationHashUsedAt?.toISOString() ?? null,
-    lastProbationReminder: record.lastProbationReminder?.toISOString() ?? null,
     cancelledAt: record.cancelledAt?.toISOString() ?? null,
     cancelledBy: cancelledByName,
     cancelReason: record.cancelReason ?? null,
@@ -175,6 +285,9 @@ async function serializeOnboardingRecord(
       record.supervisorTitleAfter,
     ]),
     supervisorEmail: record.supervisorEmail ?? null,
+    supervisorPosition: record.supervisorPosition ?? null,
+    supervisorDepartment: record.supervisorDepartment ?? null,
+    supervisorUnitName: record.supervisorUnitName ?? null,
     mentorName: buildFullName([
       record.mentorTitleBefore,
       record.mentorName,
@@ -183,7 +296,21 @@ async function serializeOnboardingRecord(
     ]),
     mentorEmail: record.mentorEmail ?? null,
     linkedOffboarding,
+    linkedChanges,
   }
+}
+
+async function serializeOnboardingRecordWithLinks(record: OnboardingRecord) {
+  const linkedOffboarding = await getLinkedOffboardingForOnboarding(
+    record.personalNumber,
+    record.probationEnd
+  )
+
+  const linkedChanges = await getLinkedChangesForPersonalNumber(
+    record.personalNumber
+  )
+
+  return serializeOnboardingRecord(record, linkedOffboarding, linkedChanges)
 }
 
 async function resolveSupervisor(positionNum: string) {
@@ -231,15 +358,24 @@ async function buildPersonFields(
     : await resolveSupervisor(data.positionNum)
 
   const supervisorSnapshot = manualOverride
-    ? data.supervisorName || data.supervisorEmail
-      ? normalizePersonSnapshot(
-          {
-            source: "MANUAL",
+    ? data.supervisorName ||
+      data.supervisorEmail ||
+      data.supervisorPosition ||
+      data.supervisorDepartment ||
+      data.supervisorUnitName
+      ? (() => {
+          const snapshotInput = {
+            source: "MANUAL" as const,
             name: data.supervisorName ?? null,
             email: data.supervisorEmail ?? null,
-          },
-          "MANUAL"
-        )
+            position: data.supervisorPosition ?? null,
+            positionName: data.supervisorPosition ?? null,
+            department: data.supervisorDepartment ?? null,
+            unitName: data.supervisorUnitName ?? null,
+          }
+
+          return normalizePersonSnapshot(snapshotInput, "MANUAL")
+        })()
       : null
     : null
 
@@ -253,7 +389,7 @@ async function buildPersonFields(
     data.mentorName || data.mentorEmail
       ? normalizePersonSnapshot(
           {
-            source: "MANUAL",
+            source: "MANUAL" as const,
             name: data.mentorName ?? null,
             email: data.mentorEmail ?? null,
           },
@@ -305,25 +441,31 @@ export async function GET() {
     )
   }
 
+  if (!canReadOnboarding(session.user.role)) {
+    return NextResponse.json(
+      {
+        status: "error",
+        message: "Nemáte oprávnění zobrazit nástupy.",
+      },
+      { status: 403 }
+    )
+  }
+
   try {
     const records = await prisma.employeeOnboarding.findMany({
       where: { deletedAt: null },
       orderBy: [{ plannedStart: "desc" }, { id: "desc" }],
     })
 
-    const personalNumbers = Array.from(
-      new Set(
-        records
-          .map((record) => normalizePersonalNumber(record.personalNumber))
-          .filter(Boolean)
-      )
-    )
+    const personalNumbers = collectPersonalNumbers(records)
 
     const linkedOffboardings =
       personalNumbers.length > 0
         ? await prisma.employeeOffboarding.findMany({
             where: {
-              personalNumber: { in: personalNumbers },
+              personalNumber: {
+                in: personalNumbers,
+              },
               deletedAt: null,
             },
             select: {
@@ -335,36 +477,50 @@ export async function GET() {
           })
         : []
 
-    const offboardingsByPersonalNumber = new Map<
-      string,
-      typeof linkedOffboardings
-    >()
+    const linkedEmployeeChanges =
+      personalNumbers.length > 0
+        ? await prisma.employeeChange.findMany({
+            where: {
+              personalNumber: {
+                in: personalNumbers,
+              },
+              deletedAt: null,
+              status: {
+                not: "CANCELLED",
+              },
+            },
+            orderBy: [{ effectiveDate: "desc" }, { id: "desc" }],
+          })
+        : []
 
-    for (const offboarding of linkedOffboardings) {
-      const personalNumber = normalizePersonalNumber(offboarding.personalNumber)
+    const offboardingsByPersonalNumber =
+      groupByPersonalNumber(linkedOffboardings)
 
-      if (!personalNumber) continue
-
-      const current = offboardingsByPersonalNumber.get(personalNumber) ?? []
-      current.push(offboarding)
-      offboardingsByPersonalNumber.set(personalNumber, current)
-    }
+    const changesByPersonalNumber = groupByPersonalNumber(linkedEmployeeChanges)
 
     const data = await Promise.all(
       records.map(async (record) => {
         const personalNumber = normalizePersonalNumber(record.personalNumber)
-        const linkedRows = personalNumber
-          ? (offboardingsByPersonalNumber.get(personalNumber) ?? [])
-          : []
 
-        const linkedOffboarding = pickMostRelevantOffboarding(linkedRows)
+        const linkedOffboarding = pickMostRelevantOffboarding(
+          personalNumber
+            ? (offboardingsByPersonalNumber.get(personalNumber) ?? [])
+            : []
+        )
+
+        const linkedChanges = buildLinkedEmployeeChangeInfos(
+          personalNumber
+            ? (changesByPersonalNumber.get(personalNumber) ?? [])
+            : []
+        )
 
         return serializeOnboardingRecord(
           record,
           buildLinkedOffboardingInfo({
             offboarding: linkedOffboarding,
             probationEnd: record.probationEnd,
-          })
+          }),
+          linkedChanges
         )
       })
     )
@@ -387,6 +543,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { status: "error", message: "Nejste přihlášeni." },
       { status: 401 }
+    )
+  }
+
+  if (!canWriteOnboarding(session.user.role)) {
+    return NextResponse.json(
+      {
+        status: "error",
+        message: "Nemáte oprávnění vytvářet nástupy.",
+      },
+      { status: 403 }
     )
   }
 
@@ -420,6 +586,10 @@ export async function POST(request: NextRequest) {
             actualStart: data.actualStart,
             startTime: data.startTime ?? null,
             probationEnd: data.probationEnd ?? null,
+            hasCustomDates: data.hasCustomDates ?? false,
+            probationExtensions: (data.probationExtensions ??
+              []) as Prisma.InputJsonValue,
+            probationExtensionSummary: data.probationExtensionSummary ?? null,
             positionNum: data.positionNum,
             positionName: data.positionName ?? "",
             department: data.department ?? "",
@@ -478,7 +648,7 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({
         status: "success",
-        data: await serializeOnboardingRecord(created),
+        data: await serializeOnboardingRecordWithLinks(created),
       })
     }
 
@@ -499,6 +669,10 @@ export async function POST(request: NextRequest) {
           actualStart: null,
           startTime: data.startTime ?? null,
           probationEnd: data.probationEnd ?? null,
+          hasCustomDates: data.hasCustomDates ?? false,
+          probationExtensions: (data.probationExtensions ??
+            []) as Prisma.InputJsonValue,
+          probationExtensionSummary: data.probationExtensionSummary ?? null,
           positionNum: data.positionNum,
           positionName: data.positionName ?? "",
           department: data.department ?? "",
@@ -557,7 +731,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       status: "success",
-      data: await serializeOnboardingRecord(created),
+      data: await serializeOnboardingRecordWithLinks(created),
     })
   } catch (err) {
     if (err instanceof ZodError) {

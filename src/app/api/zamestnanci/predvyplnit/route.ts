@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
+import { auth } from "@/auth"
 
 import { getEmployees, type Employee } from "@/lib/eos-employees"
+import { canReadInternalApp } from "@/lib/rbac"
 
+export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
 export const revalidate = 0
@@ -26,21 +29,51 @@ function employeeToOffboardingData(employee: Employee) {
 }
 
 export async function GET(req: NextRequest) {
+  const session = await auth()
+
+  if (!session?.user) {
+    return NextResponse.json(
+      { status: "error", message: "Nejste přihlášen(a)." },
+      { status: 401 }
+    )
+  }
+
+  if (!canReadInternalApp(session.user.role)) {
+    return NextResponse.json(
+      {
+        status: "error",
+        message: "Nemáte oprávnění načítat data zaměstnance z EOS.",
+      },
+      { status: 403 }
+    )
+  }
+
   try {
-    const { searchParams } = new URL(req.url)
-    const personalNumber = searchParams.get("personalNumber")
+    const personalNumber = req.nextUrl.searchParams
+      .get("personalNumber")
+      ?.trim()
+
     if (!personalNumber) {
       return NextResponse.json(
-        { error: "Osobní číslo je povinné." },
+        {
+          status: "error",
+          message: "Osobní číslo je povinné.",
+        },
         { status: 400 }
       )
     }
 
     const employees = await getEmployees(personalNumber)
-    const employee = employees.find((e) => e.personalNumber === personalNumber)
+    const employee = employees.find(
+      (item) => item.personalNumber === personalNumber
+    )
+
     if (!employee) {
       return NextResponse.json(
-        { error: "Zaměstnanec nenalezen." },
+        {
+          status: "error",
+          message: "Zaměstnanec nenalezen.",
+        },
         { status: 404 }
       )
     }
@@ -51,17 +84,26 @@ export async function GET(req: NextRequest) {
     })
   } catch (error) {
     console.error("Chyba při předvyplňování z EOS:", error)
+
     if (
       error instanceof Error &&
       error.message.includes("EOS hledání selhalo")
     ) {
       return NextResponse.json(
-        { error: "EOS služba není dostupná." },
+        {
+          status: "error",
+          message: "EOS služba není dostupná.",
+        },
         { status: 502 }
       )
     }
+
     return NextResponse.json(
-      { error: "Nepodařilo se načíst data z EOS." },
+      {
+        status: "error",
+        message: "Nepodařilo se načíst data z EOS.",
+        error: error instanceof Error ? error.message : "Unknown error",
+      },
       { status: 500 }
     )
   }

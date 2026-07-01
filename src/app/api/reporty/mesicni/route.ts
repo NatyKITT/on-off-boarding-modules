@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
+import { Prisma } from "@prisma/client"
 import { endOfMonth, format, startOfMonth } from "date-fns"
 import { cs } from "date-fns/locale"
 import { z } from "zod"
 
 import { prisma } from "@/lib/db"
+import { canReadMonthlyReports, canSendMonthlyReports } from "@/lib/rbac"
 
+export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
 export const revalidate = 0
@@ -13,7 +16,10 @@ export const revalidate = 0
 type OnboardingStatus = "NEW" | "IN_PROGRESS" | "COMPLETED"
 type OffboardingStatus = "NEW" | "IN_PROGRESS" | "COMPLETED"
 
-type SessionUser = { id?: string | null; email?: string | null }
+type SessionUser = {
+  id?: string | null
+  email?: string | null
+}
 
 type OnbRow = {
   id: number
@@ -74,15 +80,24 @@ type MonthlyReportData = {
 }
 
 const bodySchema = z.object({
-  month: z.string().regex(/^\d{4}-\d{2}$/), // "2024-01"
+  month: z.string().regex(/^\d{4}-\d{2}$/),
   reportType: z.enum(["onboarding", "offboarding", "combined"]),
   recipients: z.array(z.string().email()).min(1),
   includeDetails: z.boolean().default(true),
   sendEmail: z.boolean().default(true),
 })
 
+function getUserKey(user: SessionUser): string {
+  return user.id ?? user.email ?? "unknown"
+}
+
+function toPrismaJson(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue
+}
+
 export async function POST(req: NextRequest) {
   const session = await auth()
+
   if (!session?.user) {
     return NextResponse.json(
       { status: "error", message: "Nejste přihlášeni." },
@@ -90,18 +105,18 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const me = await prisma.user.findUnique({
-    where: { email: session.user.email! },
-    select: { role: true },
-  })
-  if (!me || !["HR", "ADMIN"].includes(me.role)) {
+  if (!canSendMonthlyReports(session.user.role)) {
     return NextResponse.json(
-      { status: "error", message: "Nemáte oprávnění k této akci." },
+      {
+        status: "error",
+        message: "Nemáte oprávnění generovat nebo odesílat měsíční reporty.",
+      },
       { status: 403 }
     )
   }
 
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})))
+
   if (!parsed.success) {
     return NextResponse.json(
       {
@@ -121,9 +136,7 @@ export async function POST(req: NextRequest) {
     const monthStart = startOfMonth(monthDate)
     const monthEnd = endOfMonth(monthDate)
 
-    const createdBy = ((session.user as SessionUser).id ??
-      session.user.email ??
-      "unknown") as string
+    const createdBy = getUserKey(session.user as SessionUser)
 
     const reportData: MonthlyReportData = {}
 
@@ -245,13 +258,15 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const reportDataJson = toPrismaJson(reportData)
+
     const monthlyReport = await prisma.monthlyReport.create({
       data: {
         month,
         reportType,
         recipients,
         generatedBy: createdBy,
-        data: reportData,
+        data: reportDataJson,
         sentAt: sendEmail ? new Date() : null,
       },
     })
@@ -269,7 +284,7 @@ export async function POST(req: NextRequest) {
             monthName: monthNameCz,
             reportType,
             recipients,
-            data: reportData,
+            data: reportDataJson,
             includeDetails,
             subject,
           },
@@ -297,6 +312,7 @@ export async function POST(req: NextRequest) {
     })
   } catch (error) {
     console.error("Chyba při generování měsíčního reportu:", error)
+
     return NextResponse.json(
       {
         status: "error",
@@ -310,10 +326,21 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   const session = await auth()
+
   if (!session?.user) {
     return NextResponse.json(
       { status: "error", message: "Nejste přihlášeni." },
       { status: 401 }
+    )
+  }
+
+  if (!canReadMonthlyReports(session.user.role)) {
+    return NextResponse.json(
+      {
+        status: "error",
+        message: "Nemáte oprávnění zobrazit měsíční reporty.",
+      },
+      { status: 403 }
     )
   }
 
@@ -339,12 +366,20 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       status: "success",
-      data: { existingReports, availableMonths, year },
+      data: {
+        existingReports,
+        availableMonths,
+        year,
+      },
     })
   } catch (error) {
     console.error("Chyba při načítání reportů:", error)
+
     return NextResponse.json(
-      { status: "error", message: "Chyba při načítání dat." },
+      {
+        status: "error",
+        message: "Chyba při načítání dat.",
+      },
       { status: 500 }
     )
   }
@@ -353,9 +388,10 @@ export async function GET(req: NextRequest) {
 function groupByDepartment<T extends { department: string | null | undefined }>(
   employees: T[]
 ): DeptBreakdown {
-  return employees.reduce<DeptBreakdown>((acc, emp) => {
-    const dept = emp.department || "Nespecifikováno"
-    acc[dept] = (acc[dept] ?? 0) + 1
+  return employees.reduce<DeptBreakdown>((acc, employee) => {
+    const department = employee.department || "Nespecifikováno"
+    acc[department] = (acc[department] ?? 0) + 1
+
     return acc
   }, {})
 }
@@ -364,9 +400,10 @@ function groupByStatus<S extends string>(
   employees: { status: S | null | undefined }[],
   fallback: S
 ): StatusBreakdown<S> {
-  return employees.reduce<StatusBreakdown<S>>((acc, emp) => {
-    const key = (emp.status ?? fallback) as S
+  return employees.reduce<StatusBreakdown<S>>((acc, employee) => {
+    const key = (employee.status ?? fallback) as S
     acc[key] = (acc[key] ?? 0) + 1
+
     return acc
   }, {} as StatusBreakdown<S>)
 }
@@ -384,7 +421,10 @@ async function getAvailableMonths(year: string) {
           { actualStart: { gte: startDate, lte: endDate } },
         ],
       },
-      select: { plannedStart: true, actualStart: true },
+      select: {
+        plannedStart: true,
+        actualStart: true,
+      },
     }),
     prisma.employeeOffboarding.findMany({
       where: {
@@ -394,18 +434,23 @@ async function getAvailableMonths(year: string) {
           { actualEnd: { gte: startDate, lte: endDate } },
         ],
       },
-      select: { plannedEnd: true, actualEnd: true },
+      select: {
+        plannedEnd: true,
+        actualEnd: true,
+      },
     }),
   ])
 
   const months = new Set<string>()
-  onb.forEach((r) => {
-    if (r.plannedStart) months.add(format(r.plannedStart, "yyyy-MM"))
-    if (r.actualStart) months.add(format(r.actualStart, "yyyy-MM"))
+
+  onb.forEach((record) => {
+    if (record.plannedStart) months.add(format(record.plannedStart, "yyyy-MM"))
+    if (record.actualStart) months.add(format(record.actualStart, "yyyy-MM"))
   })
-  offb.forEach((r) => {
-    if (r.plannedEnd) months.add(format(r.plannedEnd, "yyyy-MM"))
-    if (r.actualEnd) months.add(format(r.actualEnd, "yyyy-MM"))
+
+  offb.forEach((record) => {
+    if (record.plannedEnd) months.add(format(record.plannedEnd, "yyyy-MM"))
+    if (record.actualEnd) months.add(format(record.actualEnd, "yyyy-MM"))
   })
 
   return Array.from(months).sort().reverse()

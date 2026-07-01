@@ -2,6 +2,7 @@ import fs from "fs/promises"
 import path from "path"
 
 import type { NextRequest } from "next/server"
+import { auth } from "@/auth"
 import fontkit from "@pdf-lib/fontkit"
 import { PDFDocument, rgb, type PDFFont, type PDFPage } from "pdf-lib"
 
@@ -10,6 +11,8 @@ import type {
   ExitChecklistSignatureValue,
   HandoverAgendaData,
 } from "@/types/exit-checklist"
+
+import { canAccessInternalApp, canReadExitChecklist } from "@/lib/rbac"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -1051,6 +1054,30 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    const session = await auth()
+    const user = session?.user
+
+    if (!user) {
+      return new Response(JSON.stringify({ error: "Nejste přihlášen(a)." }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      })
+    }
+
+    const role = user.role ?? "USER"
+
+    if (!canAccessInternalApp(role) || !canReadExitChecklist(role)) {
+      return new Response(
+        JSON.stringify({
+          error: "Nemáte oprávnění zobrazit PDF výstupního listu.",
+        }),
+        {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        }
+      )
+    }
+
     const id = Number(params.id)
     if (Number.isNaN(id)) throw new Error("Neplatné ID odchodu.")
 

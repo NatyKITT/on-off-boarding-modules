@@ -54,6 +54,7 @@ type Props = {
   onSelect?: (employee: EmployeeItem) => void | Promise<void>
   fetchLimit?: number
   excludePersonalNumbers?: string[]
+  searchMode?: "eager" | "lazy"
 }
 
 const toStr = (v: unknown) =>
@@ -80,14 +81,17 @@ export function EmployeeCombobox({
   onSelect,
   fetchLimit = 500,
   excludePersonalNumbers = [],
+  searchMode = "eager",
 }: Props) {
   const form = useFormContext()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [allEmployees, setAllEmployees] = useState<EmployeeItem[]>([])
+  const [lazyResults, setLazyResults] = useState<EmployeeItem[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const commandInputRef = useRef<HTMLInputElement>(null)
 
   const watchedPersonalNumber = useWatch({
     control: form.control,
@@ -101,9 +105,11 @@ export function EmployeeCombobox({
       currentPersonalNumber
         ? (allEmployees.find(
             (e) => e.personalNumber === currentPersonalNumber
-          ) ?? null)
+          ) ??
+          lazyResults.find((e) => e.personalNumber === currentPersonalNumber) ??
+          null)
         : null,
-    [allEmployees, currentPersonalNumber]
+    [allEmployees, lazyResults, currentPersonalNumber]
   )
 
   const selectedLabel = selectedEmployee
@@ -115,9 +121,12 @@ export function EmployeeCombobox({
       ]
         .filter(Boolean)
         .join(" ")}`
-    : ""
+    : currentPersonalNumber
+      ? `${currentPersonalNumber}  ·  (načítám…)`
+      : ""
 
   useEffect(() => {
+    if (searchMode !== "eager") return
     if (!open || allEmployees.length > 0) return
 
     const controller = new AbortController()
@@ -147,8 +156,7 @@ export function EmployeeCombobox({
           )
         }
         const json = await res.json().catch(() => null)
-        const data: EmployeeItem[] = Array.isArray(json?.data) ? json.data : []
-        setAllEmployees(data)
+        setAllEmployees(Array.isArray(json?.data) ? json.data : [])
       } catch (e) {
         if ((e as Error).name !== "AbortError") {
           setError((e as Error).message || "Chyba vyhledávání")
@@ -159,13 +167,82 @@ export function EmployeeCombobox({
     })()
 
     return () => controller.abort()
-  }, [open, allEmployees.length, fetchLimit, excludePersonalNumbers])
+  }, [
+    searchMode,
+    open,
+    allEmployees.length,
+    fetchLimit,
+    excludePersonalNumbers,
+  ])
 
   useEffect(() => {
-    if (!open) setQuery("")
-  }, [open])
+    if (searchMode !== "lazy") return
+    if (!open) return
 
-  const filtered = useMemo(() => {
+    const q = query.trim()
+
+    if (q.length < 2) {
+      setLazyResults([])
+      setError(null)
+      setLoading(false)
+      return
+    }
+
+    setLoading(true)
+    const timeout = setTimeout(async () => {
+      abortRef.current?.abort()
+      const controller = new AbortController()
+      abortRef.current = controller
+
+      try {
+        const url = new URL("/api/zamestnanci/hledat", window.location.origin)
+        url.searchParams.set("q", q)
+        url.searchParams.set("limit", String(Math.min(fetchLimit, 20)))
+        if (excludePersonalNumbers.length > 0) {
+          url.searchParams.set("exclude", excludePersonalNumbers.join(","))
+        }
+
+        const res = await fetch(url.toString(), {
+          cache: "no-store",
+          signal: controller.signal,
+          headers: { Accept: "application/json" },
+        })
+        if (!res.ok) {
+          throw new Error(
+            res.status === 502
+              ? "EOS služba není dostupná"
+              : `Chyba při hledání (${res.status})`
+          )
+        }
+        const json = await res.json().catch(() => null)
+        setLazyResults(Array.isArray(json?.data) ? json.data : [])
+        setError(null)
+      } catch (e) {
+        if ((e as Error).name !== "AbortError") {
+          setError((e as Error).message || "Chyba vyhledávání")
+          setLazyResults([])
+        }
+      } finally {
+        setLoading(false)
+      }
+    }, 300)
+
+    return () => {
+      clearTimeout(timeout)
+      abortRef.current?.abort()
+    }
+  }, [searchMode, open, query, fetchLimit, excludePersonalNumbers])
+
+  useEffect(() => {
+    if (!open) {
+      setQuery("")
+      if (searchMode === "lazy") setLazyResults([])
+    }
+  }, [open, searchMode])
+
+  const displayItems = useMemo(() => {
+    if (searchMode === "lazy") return lazyResults
+
     const q = normalize(query.trim())
     if (!q) return allEmployees
     return allEmployees.filter((e) => {
@@ -176,7 +253,7 @@ export function EmployeeCombobox({
       const org = normalize(`${e.positionName} ${e.department} ${e.unitName}`)
       return num.includes(q) || nm.includes(q) || org.includes(q)
     })
-  }, [allEmployees, query])
+  }, [searchMode, allEmployees, lazyResults, query])
 
   async function applyEmployee(e: EmployeeItem) {
     const opts = {
@@ -203,6 +280,7 @@ export function EmployeeCombobox({
     await onSelect?.(e)
     setOpen(false)
     setQuery("")
+    if (searchMode === "lazy") setLazyResults([])
     await form.trigger()
   }
 
@@ -232,13 +310,22 @@ export function EmployeeCombobox({
     form.clearErrors?.("personalNumber")
     setQuery("")
     setOpen(false)
+    if (searchMode === "lazy") setLazyResults([])
 
-    setTimeout(() => {
-      void form.trigger()
-    }, 0)
+    setTimeout(() => void form.trigger(), 0)
   }
 
   const inputKey = `employee-input-${currentPersonalNumber || "empty"}`
+
+  const lazyPlaceholder =
+    searchMode === "lazy"
+      ? "Pište jméno nebo osobní číslo (min. 2 znaky)…"
+      : "Pište číslo, jméno nebo příjmení…"
+
+  const lazyEmptyHint =
+    searchMode === "lazy" && query.trim().length < 2
+      ? "Zadejte alespoň 2 znaky pro vyhledání."
+      : null
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -287,16 +374,19 @@ export function EmployeeCombobox({
         className="w-[--radix-popover-trigger-width] p-0"
         sideOffset={4}
         align="start"
-        onOpenAutoFocus={(e) => e.preventDefault()}
+        onOpenAutoFocus={(e) => {
+          e.preventDefault()
+          setTimeout(() => commandInputRef.current?.focus(), 0)
+        }}
         onWheelCapture={(e) => e.stopPropagation()}
       >
         <Command shouldFilter={false}>
           <div className="relative">
             <CommandInput
-              placeholder="Pište číslo, jméno nebo příjmení…"
+              ref={commandInputRef}
+              placeholder={lazyPlaceholder}
               value={query}
               onValueChange={setQuery}
-              autoFocus
               className={focusRing}
             />
             {query && (
@@ -316,7 +406,11 @@ export function EmployeeCombobox({
             {loading ? (
               <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
                 <div className="mr-2 size-4 animate-spin rounded-full border-b-2 border-current" />
-                Načítám zaměstnance…
+                {searchMode === "lazy" ? "Hledám…" : "Načítám zaměstnance…"}
+              </div>
+            ) : lazyEmptyHint ? (
+              <div className="py-6 text-center text-sm text-muted-foreground">
+                {lazyEmptyHint}
               </div>
             ) : error ? (
               <div className="flex flex-col items-center justify-center py-6 text-sm text-destructive">
@@ -333,12 +427,10 @@ export function EmployeeCombobox({
 
           <CommandList
             className="max-h-80 overflow-y-auto overscroll-contain"
-            onWheelCapture={(e) => {
-              e.stopPropagation()
-            }}
+            onWheelCapture={(e) => e.stopPropagation()}
           >
             <CommandGroup>
-              {filtered.map((e) => (
+              {displayItems.map((e) => (
                 <CommandItem
                   key={e.id}
                   value={e.personalNumber}
@@ -365,7 +457,6 @@ export function EmployeeCombobox({
                           .join(" ")}
                       </span>
                     </div>
-
                     <div className="mt-1 space-y-1 text-sm text-muted-foreground">
                       {e.positionName && (
                         <div className="truncate">

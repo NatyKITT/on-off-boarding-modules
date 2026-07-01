@@ -1,11 +1,8 @@
-import { readFile } from "fs/promises"
-import path from "path"
-
 import { NextRequest } from "next/server"
-import fontkit from "@pdf-lib/fontkit"
 import { PDFDocument, rgb, type PDFFont, type PDFPage } from "pdf-lib"
 
 import { prisma } from "@/lib/db"
+import { loadPdfFonts } from "@/lib/pdf-fonts"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -510,6 +507,7 @@ export async function GET(
         data: true,
         createdAt: true,
         completedAt: true,
+        expiresAt: true,
         onboarding: {
           select: {
             name: true,
@@ -534,6 +532,18 @@ export async function GET(
       )
     }
 
+    const now = new Date()
+
+    if (doc.expiresAt && doc.expiresAt < now) {
+      return new Response(
+        JSON.stringify({ message: "Odkaz na dokument již vypršel." }),
+        {
+          status: 410,
+          headers: { "Content-Type": "application/json" },
+        }
+      )
+    }
+
     if (doc.type !== "PAYROLL_INFO") {
       return new Response(
         JSON.stringify({
@@ -547,19 +557,21 @@ export async function GET(
       )
     }
 
-    const pdfDoc = await PDFDocument.create()
-    pdfDoc.registerFontkit(fontkit)
+    if (doc.status !== "SIGNED" && doc.status !== "COMPLETED") {
+      return new Response(
+        JSON.stringify({ message: "Dokument ještě nebyl vyplněn." }),
+        {
+          status: 409,
+          headers: { "Content-Type": "application/json" },
+        }
+      )
+    }
 
-    const fontPath = path.join(
-      process.cwd(),
-      "public",
-      "assets",
-      "fonts",
-      "NotoSans-Regular.ttf"
-    )
-    const fontBytes = await readFile(fontPath)
-    const font = await pdfDoc.embedFont(fontBytes)
-    const fontBold = font
+    const pdfDoc = await PDFDocument.create()
+
+    const fonts = await loadPdfFonts(pdfDoc)
+    const font = fonts.regular
+    const fontBold = fonts.bold
 
     const docInfo: DocumentInfo = {
       id: doc.id,

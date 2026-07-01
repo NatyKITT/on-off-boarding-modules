@@ -6,6 +6,7 @@ import { z } from "zod"
 import { prisma } from "@/lib/db"
 import { sendMail } from "@/lib/email"
 import { buildEmployeeMeta } from "@/lib/employee-meta"
+import { canManageEmploymentDocuments } from "@/lib/rbac"
 import { absoluteUrl } from "@/lib/url"
 
 export const runtime = "nodejs"
@@ -40,10 +41,18 @@ function docTypeLabel(t: EmploymentDocumentType) {
 
 export async function POST(req: NextRequest) {
   const session = await auth()
+
   if (!session?.user) {
     return NextResponse.json(
       { message: "Nejste přihlášen(a)." },
       { status: 401 }
+    )
+  }
+
+  if (!canManageEmploymentDocuments(session.user.role)) {
+    return NextResponse.json(
+      { message: "Nemáte oprávnění odesílat odkazy na dokumenty." },
+      { status: 403 }
     )
   }
 
@@ -58,10 +67,13 @@ export async function POST(req: NextRequest) {
   }
 
   const { onboardingId, email, documents } = parsed.data
-  const ids = documents.map((d) => d.id)
+  const ids = documents.map((document) => document.id)
 
-  const onboarding = await prisma.employeeOnboarding.findUnique({
-    where: { id: onboardingId },
+  const onboarding = await prisma.employeeOnboarding.findFirst({
+    where: {
+      id: onboardingId,
+      deletedAt: null,
+    },
     select: {
       id: true,
       titleBefore: true,
@@ -87,8 +99,13 @@ export async function POST(req: NextRequest) {
   const employeeName =
     meta.fullName || `${onboarding.name} ${onboarding.surname}`.trim()
 
+  const now = new Date()
+
   const docsFromDb = await prisma.employmentDocument.findMany({
-    where: { id: { in: ids }, onboardingId },
+    where: {
+      id: { in: ids },
+      onboardingId,
+    },
     select: {
       id: true,
       type: true,
@@ -100,17 +117,27 @@ export async function POST(req: NextRequest) {
   })
 
   const mapped = docsFromDb
-    .filter((d) => d.accessHash)
-    .map((d) => ({
-      id: d.id,
-      type: d.type,
-      url: absoluteUrl(`/dokumenty/${d.accessHash}`, req),
-      label: docTypeLabel(d.type),
+    .filter((document) => {
+      if (!document.accessHash) return false
+      if (document.isLocked) return false
+      if (document.status !== "DRAFT") return false
+      if (document.expiresAt && document.expiresAt < now) return false
+
+      return true
+    })
+    .map((document) => ({
+      id: document.id,
+      type: document.type,
+      url: absoluteUrl(`/dokumenty/${document.accessHash}`, req),
+      label: docTypeLabel(document.type),
     }))
 
   if (!mapped.length) {
     return NextResponse.json(
-      { message: "Vybrané dokumenty nemají veřejný odkaz (chybí hash)." },
+      {
+        message:
+          "Vybrané dokumenty nejsou připravené k odeslání. Zkontrolujte, že mají veřejný odkaz, nejsou uzamčené, nejsou vyplněné a nevypršely.",
+      },
       { status: 400 }
     )
   }
@@ -127,8 +154,16 @@ export async function POST(req: NextRequest) {
       ? `
         <div style="margin: 12px 0 0 0; padding: 10px 12px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
           <div style="font-size: 12px; color: #374151;">
-            ${positionText ? `<div><strong>Pozice:</strong> ${positionText}</div>` : ""}
-            ${departmentText ? `<div><strong>Odbor / oddělení:</strong> ${departmentText}</div>` : ""}
+            ${
+              positionText
+                ? `<div><strong>Pozice:</strong> ${positionText}</div>`
+                : ""
+            }
+            ${
+              departmentText
+                ? `<div><strong>Odbor / oddělení:</strong> ${departmentText}</div>`
+                : ""
+            }
           </div>
         </div>
       `
@@ -148,10 +183,10 @@ export async function POST(req: NextRequest) {
       <ul style="padding-left: 18px; margin: 14px 0 14px 0;">
         ${mapped
           .map(
-            (d) => `
+            (document) => `
           <li style="margin: 6px 0;">
-            <strong>${d.label}</strong> –
-            <a href="${d.url}" target="_blank" rel="noopener noreferrer">${d.url}</a>
+            <strong>${document.label}</strong> –
+            <a href="${document.url}" target="_blank" rel="noopener noreferrer">${document.url}</a>
           </li>`
           )
           .join("")}
@@ -180,5 +215,9 @@ export async function POST(req: NextRequest) {
     html,
   })
 
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({
+    ok: true,
+    sentTo: email,
+    documentIds: mapped.map((document) => document.id),
+  })
 }

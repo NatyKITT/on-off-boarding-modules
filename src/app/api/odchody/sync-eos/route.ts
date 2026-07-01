@@ -3,6 +3,7 @@ import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
 import { getEmployees } from "@/lib/eos-employees"
+import { canWriteOffboarding } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
@@ -10,6 +11,7 @@ export const revalidate = 0
 
 export async function POST(req: NextRequest) {
   const session = await auth()
+
   if (!session?.user) {
     return NextResponse.json(
       { status: "error", message: "Nejste přihlášeni." },
@@ -17,18 +19,37 @@ export async function POST(req: NextRequest) {
     )
   }
 
+  if (!canWriteOffboarding(session.user.role)) {
+    return NextResponse.json(
+      {
+        status: "error",
+        message: "Nemáte oprávnění synchronizovat odchod s EOS.",
+      },
+      { status: 403 }
+    )
+  }
+
   try {
-    const { offboardingId } = await req.json()
-    if (!offboardingId) {
+    const body = (await req.json().catch(() => null)) as {
+      offboardingId?: unknown
+    } | null
+
+    const offboardingId = Number(body?.offboardingId)
+
+    if (!Number.isFinite(offboardingId)) {
       return NextResponse.json(
         { error: "ID odchodu je povinné." },
         { status: 400 }
       )
     }
 
-    const offboarding = await prisma.employeeOffboarding.findUnique({
-      where: { id: offboardingId, deletedAt: null },
+    const offboarding = await prisma.employeeOffboarding.findFirst({
+      where: {
+        id: offboardingId,
+        deletedAt: null,
+      },
     })
+
     if (!offboarding || !offboarding.personalNumber) {
       return NextResponse.json(
         { error: "Odchod nenalezen nebo nemá osobní číslo." },
@@ -37,9 +58,11 @@ export async function POST(req: NextRequest) {
     }
 
     const employees = await getEmployees(offboarding.personalNumber)
+
     const employee = employees.find(
-      (e) => e.personalNumber === offboarding.personalNumber
+      (item) => item.personalNumber === offboarding.personalNumber
     )
+
     if (!employee) {
       return NextResponse.json({
         status: "info",
@@ -71,6 +94,7 @@ export async function POST(req: NextRequest) {
     })
   } catch (error) {
     console.error("Chyba při synchronizaci s EOS:", error)
+
     if (
       error instanceof Error &&
       error.message.includes("EOS hledání selhalo")
@@ -80,6 +104,7 @@ export async function POST(req: NextRequest) {
         { status: 502 }
       )
     }
+
     return NextResponse.json(
       { error: "Nepodařilo se synchronizovat s EOS." },
       { status: 500 }

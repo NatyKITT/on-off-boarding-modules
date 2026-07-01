@@ -8,7 +8,7 @@ import { useSession } from "next-auth/react"
 import { useForm } from "react-hook-form"
 import { toast } from "sonner"
 
-import { userSchema } from "@/lib/validations/user"
+import { updateUserNameSchema } from "@/lib/validations/user"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -26,18 +26,14 @@ export function UpdateUserNameForm({ user }: UpdateUserNameFormProps) {
   const [isPending, startTransition] = useTransition()
   const updateUserNameWithId = updateUserName.bind(null, user.id)
 
-  const checkUpdate = (value: string) => {
-    setUpdated(user.name !== value)
-  }
-
   const {
     handleSubmit,
     register,
     formState: { errors },
   } = useForm<FormData>({
-    resolver: zodResolver(userSchema),
+    resolver: zodResolver(updateUserNameSchema),
     defaultValues: {
-      name: user?.name || "",
+      name: user.name || "",
     },
   })
 
@@ -49,11 +45,12 @@ export function UpdateUserNameForm({ user }: UpdateUserNameFormProps) {
         toast.error("Něco se pokazilo.", {
           description: "Nepodařilo se uložit změnu. Zkuste to prosím znovu.",
         })
-      } else {
-        await update()
-        setUpdated(false)
-        toast.success("Jméno bylo aktualizováno.")
+        return
       }
+
+      await update()
+      setUpdated(false)
+      toast.success("Jméno bylo aktualizováno.")
     })
   })
 
@@ -67,13 +64,18 @@ export function UpdateUserNameForm({ user }: UpdateUserNameFormProps) {
           <Label className="sr-only" htmlFor="name">
             Jméno
           </Label>
+
           <Input
             id="name"
             className="flex-1"
             size={32}
             {...register("name")}
-            onChange={(e) => checkUpdate(e.target.value)}
+            onChange={(event) => {
+              register("name").onChange(event)
+              setUpdated((user.name || "") !== event.target.value)
+            }}
           />
+
           <Button
             type="submit"
             variant={updated ? "default" : "disable"}
@@ -83,17 +85,19 @@ export function UpdateUserNameForm({ user }: UpdateUserNameFormProps) {
             {isPending ? (
               <Icons.spinner className="size-4 animate-spin" />
             ) : (
-              <p>Uložit</p>
+              <span>Uložit</span>
             )}
           </Button>
         </div>
+
         <div className="flex flex-col justify-between p-1">
-          {errors?.name && (
+          {errors.name && (
             <p className="pb-0.5 text-[13px] text-red-600">
               {errors.name.message}
             </p>
           )}
-          <p className="text-[13px] text-muted-foreground">Max. 32 znaků</p>
+
+          <p className="text-[13px] text-muted-foreground">Max. 64 znaků</p>
         </div>
       </SectionColumns>
     </form>

@@ -3,6 +3,7 @@ import { auth } from "@/auth"
 import { endOfMonth, format, startOfMonth } from "date-fns"
 
 import { prisma } from "@/lib/db"
+import { canReadMonthlyReports } from "@/lib/rbac"
 
 type Kind = "planned" | "actual"
 type TypeFilter = "nastupy" | "odchody"
@@ -28,8 +29,17 @@ export type RecordRow = {
 
 export async function GET(req: Request) {
   const session = await auth()
-  if (!session?.user)
+
+  if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  if (!canReadMonthlyReports(session.user.role)) {
+    return NextResponse.json(
+      { error: "Nemáte oprávnění zobrazit měsíční reporty." },
+      { status: 403 }
+    )
+  }
 
   const { searchParams } = new URL(req.url)
   const month = searchParams.get("month") || format(new Date(), "yyyy-MM")
@@ -56,6 +66,7 @@ export async function GET(req: Request) {
   })
 
   const sentMap = new Map<string, Date>()
+
   for (const r of monthly?.records ?? []) {
     sentMap.set(`${r.recordType}-${r.recordId}`, r.sentAt)
   }
@@ -101,6 +112,7 @@ export async function GET(req: Request) {
     for (const o of rows) {
       const key = `onboarding_${kind}-${o.id}`
       const sentAt = sentMap.get(key) ?? null
+
       out.push({
         id: o.id,
         name: o.name,
@@ -162,6 +174,7 @@ export async function GET(req: Request) {
     for (const o of rows) {
       const key = `offboarding_${kind}-${o.id}`
       const sentAt = sentMap.get(key) ?? null
+
       out.push({
         id: o.id,
         name: o.name,

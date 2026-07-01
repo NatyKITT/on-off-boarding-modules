@@ -1,46 +1,66 @@
 import { NextRequest, NextResponse } from "next/server"
+import { Role } from "@prisma/client"
 
 import { prisma } from "@/lib/db"
+import { canManageUsers } from "@/lib/rbac"
 import { getCurrentUser } from "@/lib/session"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
+const ALLOWED_USER_EMAIL_DOMAINS = ["praha6.cz", "kitt6.cz"] as const
+
 function parseEnvEmails(envValue: string | undefined): string[] {
   return (envValue ?? "")
     .split(/[;,]/)
-    .map((v) => v.trim().toLowerCase())
+    .map((value) => value.trim().toLowerCase())
     .filter(Boolean)
 }
 
-function getEnvRole(email: string): "ADMIN" | "HR" | "IT" | "READONLY" | null {
+function getEnvRole(email: string): Role | null {
   const lower = email.toLowerCase()
 
   if (parseEnvEmails(process.env.SUPER_ADMIN_EMAILS).includes(lower)) {
-    return "ADMIN"
+    return Role.ADMIN
   }
 
-  if (parseEnvEmails(process.env.HR_EMAILS).includes(lower)) return "HR"
-  if (parseEnvEmails(process.env.IT_EMAILS).includes(lower)) return "IT"
+  if (parseEnvEmails(process.env.HR_EMAILS).includes(lower)) return Role.HR
+  if (parseEnvEmails(process.env.IT_EMAILS).includes(lower)) return Role.IT
 
   if (parseEnvEmails(process.env.READONLY_EMAILS).includes(lower)) {
-    return "READONLY"
+    return Role.READONLY
   }
 
   return null
 }
 
+function isValidRole(value: unknown): value is Role {
+  return (
+    typeof value === "string" && Object.values(Role).includes(value as Role)
+  )
+}
+
+function isAllowedEmail(email: string) {
+  return ALLOWED_USER_EMAIL_DOMAINS.some((domain) =>
+    email.endsWith(`@${domain}`)
+  )
+}
+
 export async function GET() {
   try {
-    const user = await getCurrentUser()
+    const currentUser = await getCurrentUser()
 
-    if (!user || user.role !== "ADMIN") {
+    if (!currentUser || !canManageUsers(currentUser.role)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
     }
 
     const users = await prisma.user.findMany({
       where: {
-        email: { endsWith: "@praha6.cz" },
+        OR: ALLOWED_USER_EMAIL_DOMAINS.map((domain) => ({
+          email: {
+            endsWith: `@${domain}`,
+          },
+        })),
       },
       select: {
         id: true,
@@ -69,12 +89,17 @@ export async function POST(req: NextRequest) {
   try {
     const currentUser = await getCurrentUser()
 
-    if (!currentUser || currentUser.role !== "ADMIN") {
+    if (!currentUser || !canManageUsers(currentUser.role)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
     }
 
-    const body = await req.json()
-    const { email, role } = body as { email?: string; role?: string }
+    const body = (await req.json().catch(() => null)) as {
+      email?: unknown
+      role?: unknown
+    } | null
+
+    const email = body?.email
+    const requestedRole = body?.role
 
     if (!email || typeof email !== "string") {
       return NextResponse.json({ error: "Email je povinný." }, { status: 400 })
@@ -82,50 +107,58 @@ export async function POST(req: NextRequest) {
 
     const normalizedEmail = email.trim().toLowerCase()
 
-    if (!normalizedEmail.endsWith("@praha6.cz")) {
+    if (!normalizedEmail.includes("@")) {
       return NextResponse.json(
-        { error: "Lze přidat pouze uživatele s emailem @praha6.cz." },
+        { error: "Zadejte platný e-mail." },
         { status: 400 }
       )
     }
 
-    const envRole = getEnvRole(normalizedEmail)
-
-    if (envRole !== null) {
+    if (!isAllowedEmail(normalizedEmail)) {
       return NextResponse.json(
         {
-          error: `Tento email má roli definovanou v ENV (${envRole}). Přidá se automaticky při prvním přihlášení.`,
-        },
-        { status: 409 }
-      )
-    }
-
-    if (role && role !== "USER") {
-      return NextResponse.json(
-        {
-          error:
-            "Zvýšené role nastavujte přes ENV. Uživatel mimo ENV bude vytvořen pouze jako USER.",
+          error: `Lze přidat pouze uživatele s e-mailem ${ALLOWED_USER_EMAIL_DOMAINS.map(
+            (domain) => `@${domain}`
+          ).join(" nebo ")}.`,
         },
         { status: 400 }
       )
+    }
+
+    if (requestedRole !== undefined && !isValidRole(requestedRole)) {
+      return NextResponse.json({ error: "Neplatná role." }, { status: 400 })
     }
 
     const existing = await prisma.user.findUnique({
       where: { email: normalizedEmail },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        canAccessApp: true,
+      },
     })
 
     if (existing) {
       return NextResponse.json(
-        { error: "Uživatel s tímto emailem je již registrován." },
+        {
+          error:
+            "Uživatel s tímto e-mailem už existuje. Roli změňte přes seznam uživatelů.",
+          user: existing,
+        },
         { status: 409 }
       )
     }
 
+    const envRole = getEnvRole(normalizedEmail)
+    const finalRole = envRole ?? requestedRole ?? Role.USER
+    const canAccessApp = finalRole !== Role.USER
+
     const newUser = await prisma.user.create({
       data: {
         email: normalizedEmail,
-        role: "USER",
-        canAccessApp: false,
+        role: finalRole,
+        canAccessApp,
       },
       select: {
         id: true,
@@ -138,7 +171,16 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    return NextResponse.json({ user: newUser }, { status: 201 })
+    return NextResponse.json(
+      {
+        user: newUser,
+        roleSource: envRole ? "ENV" : "ADMIN",
+        message: envRole
+          ? `Uživatel byl vytvořen s rolí ${envRole}, protože je definovaný v ENV.`
+          : "Uživatel byl vytvořen.",
+      },
+      { status: 201 }
+    )
   } catch (error) {
     console.error("Error creating user:", error)
 

@@ -2,13 +2,22 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
+import { canReadEmploymentDocuments } from "@/lib/rbac"
 
 export async function GET(req: NextRequest) {
   const session = await auth()
+
   if (!session?.user) {
     return NextResponse.json(
       { message: "Nejste přihlášen(a)." },
       { status: 401 }
+    )
+  }
+
+  if (!canReadEmploymentDocuments(session.user.role)) {
+    return NextResponse.json(
+      { message: "Nemáte oprávnění zobrazit dokumenty." },
+      { status: 403 }
     )
   }
 
@@ -22,7 +31,9 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  const baseUrl = process.env.AUTH_URL ?? req.nextUrl.origin
+  const baseUrl = (
+    process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin
+  ).replace(/\/$/, "")
 
   const documents = await prisma.employmentDocument.findMany({
     where: { onboardingId },
@@ -35,13 +46,16 @@ export async function GET(req: NextRequest) {
       fileUrl: true,
       accessHash: true,
       isLocked: true,
+      expiresAt: true,
     },
     orderBy: { createdAt: "desc" },
   })
 
-  const docsWithUrl = documents.map((d) => ({
-    ...d,
-    publicUrl: d.accessHash ? `${baseUrl}/dokumenty/${d.accessHash}` : null,
+  const docsWithUrl = documents.map((document) => ({
+    ...document,
+    publicUrl: document.accessHash
+      ? `${baseUrl}/dokumenty/${document.accessHash}`
+      : null,
   }))
 
   return NextResponse.json({ documents: docsWithUrl })

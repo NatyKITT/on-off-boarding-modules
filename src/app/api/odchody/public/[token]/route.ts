@@ -27,8 +27,12 @@ import {
   sanitizeSignatureValueForJson,
   sanitizeText,
 } from "@/lib/exit-checklist"
-import { getExitChecklistCompletionState } from "@/lib/exit-checklist-copletion"
-import { hasPerm } from "@/lib/rbac"
+import { getExitChecklistCompletionState } from "@/lib/exit-checklist-completion"
+import {
+  canAdminExitChecklist,
+  canReadExitChecklist,
+  canSignExitChecklist,
+} from "@/lib/rbac"
 import { getSession } from "@/lib/session"
 
 export const runtime = "nodejs"
@@ -39,11 +43,13 @@ export const revalidate = 0
 function toResolution(value: ExitChecklistItem["resolved"]) {
   if (value === "YES") return ChecklistResolution.YES
   if (value === "NO") return ChecklistResolution.NO
+
   return ChecklistResolution.NOT_APPLICABLE
 }
 
 function getJsonRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {}
+
   return value as Record<string, unknown>
 }
 
@@ -51,9 +57,12 @@ function getAppBaseUrl() {
   return (
     process.env.NEXT_PUBLIC_APP_URL ||
     process.env.AUTH_URL ||
-    process.env.NEXTAUTH_URL ||
     ""
   ).replace(/\/$/, "")
+}
+
+function normalizeEmail(value?: string | null) {
+  return sanitizeText(value).toLowerCase()
 }
 
 function canOverwriteSignature(
@@ -66,7 +75,10 @@ function canOverwriteSignature(
 ) {
   if (!existing.signedAt) return true
   if (canAdmin) return true
-  return existing.signedByEmail === currentUserEmail
+
+  return (
+    normalizeEmail(existing.signedByEmail) === normalizeEmail(currentUserEmail)
+  )
 }
 
 function isSignatureValue(value: unknown): value is ExitChecklistSignatureValue {
@@ -106,7 +118,11 @@ function normalizeProtectedSignatureValue(
   const canTouch =
     !existingIsSigned ||
     canAdmin ||
-    Boolean(existing.signedByEmail && existing.signedByEmail === currentUserEmail)
+    Boolean(
+      existing.signedByEmail &&
+      normalizeEmail(existing.signedByEmail) ===
+      normalizeEmail(currentUserEmail)
+    )
 
   if (!canTouch) return existing
 
@@ -127,22 +143,6 @@ function getCurrentSignatures(currentHeader: Record<string, unknown>) {
     issuedDate: sanitizeIsoDate(currentSignaturesRaw.issuedDate),
     managerEmail: sanitizeText(currentSignaturesRaw.managerEmail) || null,
   } satisfies ExitChecklistSignatures
-}
-
-function getExistingCompletionMetadata(
-  currentHeader: Record<string, unknown>
-): Prisma.InputJsonObject {
-  return {
-    completedAt: sanitizeText(currentHeader.completedAt) || null,
-    completedNotificationSentAt:
-      sanitizeText(currentHeader.completedNotificationSentAt) || null,
-    completedNotificationSentByName:
-      sanitizeText(currentHeader.completedNotificationSentByName) || null,
-    completedNotificationSentByEmail:
-      sanitizeText(currentHeader.completedNotificationSentByEmail) || null,
-    completedNotificationSentTo:
-      sanitizeText(currentHeader.completedNotificationSentTo) || null,
-  }
 }
 
 function buildNextSignatures(args: {
@@ -170,7 +170,9 @@ function buildNextSignatures(args: {
       args.currentUserEmail,
       args.canAdmin
     ),
-    issuedDate: sanitizeIsoDate(args.incoming.issuedDate || args.current.issuedDate),
+    issuedDate: sanitizeIsoDate(
+      args.incoming.issuedDate || args.current.issuedDate
+    ),
     managerEmail: args.current.managerEmail ?? null,
   }
 }
@@ -195,6 +197,22 @@ function buildNextHandoverManagerSignature(args: {
   )
 }
 
+function getExistingCompletionMetadata(
+  currentHeader: Record<string, unknown>
+): Prisma.InputJsonObject {
+  return {
+    completedAt: sanitizeText(currentHeader.completedAt) || null,
+    completedNotificationSentAt:
+      sanitizeText(currentHeader.completedNotificationSentAt) || null,
+    completedNotificationSentByName:
+      sanitizeText(currentHeader.completedNotificationSentByName) || null,
+    completedNotificationSentByEmail:
+      sanitizeText(currentHeader.completedNotificationSentByEmail) || null,
+    completedNotificationSentTo:
+      sanitizeText(currentHeader.completedNotificationSentTo) || null,
+  }
+}
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: { token: string } }
@@ -205,6 +223,13 @@ export async function GET(
   if (!user?.email || !isPraha6OrKitt6(user.email)) {
     return NextResponse.json(
       { status: "error", message: "Nemáte oprávnění k této stránce." },
+      { status: 403 }
+    )
+  }
+
+  if (!canReadExitChecklist(user.role ?? "USER")) {
+    return NextResponse.json(
+      { status: "error", message: "Nemáte oprávnění číst výstupní list." },
       { status: 403 }
     )
   }
@@ -242,12 +267,15 @@ export async function PUT(
   }
 
   const role = user.role ?? "USER"
-  const canSign = hasPerm(role, "EXIT_CHECKLIST_SIGN")
-  const canAdmin = hasPerm(role, "EXIT_CHECKLIST_ADMIN")
+  const canSign = canSignExitChecklist(role)
+  const canAdmin = canAdminExitChecklist(role)
 
   if (!canSign) {
     return NextResponse.json(
-      { status: "error", message: "Nemáte oprávnění upravovat výstupní list." },
+      {
+        status: "error",
+        message: "Nemáte oprávnění podepisovat výstupní list.",
+      },
       { status: 403 }
     )
   }
@@ -292,7 +320,9 @@ export async function PUT(
   ) as ExitAssetItem[]
 
   const currentHeader = getJsonRecord(checklist.header)
+  const currentHandover = currentHeader.handover
   const currentSignatures = getCurrentSignatures(currentHeader)
+
   const incomingSignatures =
     getJsonRecord(bodyRecord.signatures) as unknown as ExitChecklistSignatures
 
@@ -311,21 +341,20 @@ export async function PUT(
   })
 
   const existingConflictOfInterest = Boolean(currentHeader.conflictOfInterest)
+
   const conflictOfInterest = canAdmin
     ? Boolean(bodyRecord.conflictOfInterest)
     : existingConflictOfInterest
 
-  const currentHandover = currentHeader.handover
+  const incomingHandover = canAdmin
+    ? sanitizeHandoverForJson(bodyRecord.handover) ??
+    sanitizeHandoverForJson(currentHandover)
+    : sanitizeHandoverForJson(currentHandover)
 
-  const handover = canAdmin
-    ? preserveHandoverSendMetadata(
-      sanitizeHandoverForJson(bodyRecord.handover),
-      currentHandover
-    )
-    : preserveHandoverSendMetadata(
-      sanitizeHandoverForJson(currentHandover),
-      currentHandover
-    )
+  const handover = preserveHandoverSendMetadata(
+    incomingHandover,
+    currentHandover
+  )
 
   try {
     for (let index = 0; index < EXIT_CHECKLIST_ROWS.length; index++) {
@@ -346,26 +375,26 @@ export async function PUT(
 
       const resolution = isInactiveLawInfo
         ? ChecklistResolution.NOT_APPLICABLE
-        : canTouchRow
-          ? toResolution(incoming?.resolved ?? null)
+        : incoming && canTouchRow
+          ? toResolution(incoming.resolved)
           : existing?.resolution ?? ChecklistResolution.NOT_APPLICABLE
 
       const signedByName = isInactiveLawInfo
         ? null
-        : canTouchRow
-          ? sanitizeText(incoming?.signedByName) || null
+        : incoming && canTouchRow
+          ? sanitizeText(incoming.signedByName) || null
           : existing?.signedByName ?? null
 
       const signedByEmail = isInactiveLawInfo
         ? null
-        : canTouchRow
-          ? sanitizeText(incoming?.signedByEmail) || null
+        : incoming && canTouchRow
+          ? sanitizeText(incoming.signedByEmail) || null
           : existing?.signedByEmail ?? null
 
       const signedAt = isInactiveLawInfo
         ? null
-        : canTouchRow
-          ? incoming?.signedAt
+        : incoming && canTouchRow
+          ? incoming.signedAt
             ? new Date(incoming.signedAt)
             : null
           : existing?.signedAt ?? null
@@ -402,12 +431,15 @@ export async function PUT(
 
     if (canAdmin) {
       const existingAssets = await prisma.exitChecklistAsset.findMany({
-        where: { checklistId: checklist.id },
+        where: {
+          checklistId: checklist.id,
+        },
       })
 
       const existingById = new Map(
         existingAssets.map((asset) => [asset.id, asset])
       )
+
       const seenExistingIds = new Set<number>()
 
       for (const asset of assets) {
@@ -420,12 +452,15 @@ export async function PUT(
 
         if (!Number.isNaN(numericId)) {
           const existing = existingById.get(numericId)
+
           if (!existing) continue
 
           seenExistingIds.add(numericId)
 
           await prisma.exitChecklistAsset.update({
-            where: { id: numericId },
+            where: {
+              id: numericId,
+            },
             data: {
               subject,
               inventoryNumber,
@@ -451,13 +486,30 @@ export async function PUT(
 
       if (deletableIds.length > 0) {
         await prisma.exitChecklistAsset.deleteMany({
-          where: { id: { in: deletableIds } },
+          where: {
+            id: {
+              in: deletableIds,
+            },
+          },
         })
       }
     }
 
     const header = buildHeaderFromOff(checklist.offboarding)
-    const existingCompletionMetadata = getExistingCompletionMetadata(currentHeader)
+    const existingCompletionMetadata =
+      getExistingCompletionMetadata(currentHeader)
+
+    const managerEmail = canAdmin
+      ? sanitizeText(bodyRecord.managerEmail) ||
+      sanitizeText(currentHeader.managerEmail) ||
+      null
+      : sanitizeText(currentHeader.managerEmail) || null
+
+    const managerName = canAdmin
+      ? sanitizeText(bodyRecord.managerName) ||
+      sanitizeText(currentHeader.managerName) ||
+      null
+      : sanitizeText(currentHeader.managerName) || null
 
     const updatedHeader: Prisma.InputJsonObject = {
       employeeName: header.employeeName,
@@ -465,14 +517,8 @@ export async function PUT(
       department: header.department,
       unitName: header.unitName,
       employmentEndDate: header.employmentEndDate,
-      managerEmail:
-        sanitizeText(currentHeader.managerEmail) ||
-        sanitizeText(bodyRecord.managerEmail) ||
-        null,
-      managerName:
-        sanitizeText(currentHeader.managerName) ||
-        sanitizeText(bodyRecord.managerName) ||
-        null,
+      managerEmail,
+      managerName,
       conflictOfInterest,
       handoverManagerSignature: sanitizeSignatureValueForJson(
         nextHandoverManagerSignature
@@ -483,7 +529,9 @@ export async function PUT(
     }
 
     const updatedChecklist = await prisma.exitChecklist.update({
-      where: { id: checklist.id },
+      where: {
+        id: checklist.id,
+      },
       data: {
         header: updatedHeader,
       },
@@ -500,6 +548,7 @@ export async function PUT(
     )
 
     const completion = getExitChecklistCompletionState(data)
+
     const alreadyNotified = Boolean(
       sanitizeText(currentHeader.completedNotificationSentAt)
     )
@@ -537,7 +586,9 @@ export async function PUT(
           }
 
           const completedChecklist = await prisma.exitChecklist.update({
-            where: { id: checklist.id },
+            where: {
+              id: checklist.id,
+            },
             data: {
               header: headerWithCompletedNotification,
             },

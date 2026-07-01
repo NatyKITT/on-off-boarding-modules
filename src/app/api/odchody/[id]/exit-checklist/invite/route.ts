@@ -6,11 +6,24 @@ import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
 
 import { prisma } from "@/lib/db"
 import { sendBehalfSignatureEmail, sendSignatureInviteEmail } from "@/lib/email"
+import { canAdminExitChecklist } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
 
 function cleanText(value: unknown): string {
   return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : ""
+}
+
+function isValidEmail(email: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+}
+
+function getAppBaseUrl(req: NextRequest) {
+  return (
+    process.env.NEXT_PUBLIC_APP_URL ??
+    process.env.AUTH_URL ??
+    req.nextUrl.origin
+  ).replace(/\/$/, "")
 }
 
 export async function POST(
@@ -23,9 +36,7 @@ export async function POST(
     return NextResponse.json({ error: "Nejste přihlášen." }, { status: 401 })
   }
 
-  const role = session.user.role ?? "USER"
-
-  if (!["ADMIN", "HR", "IT"].includes(role)) {
+  if (!canAdminExitChecklist(session.user.role)) {
     return NextResponse.json(
       { error: "Nemáte oprávnění odesílat pozvánky k podpisu." },
       { status: 403 }
@@ -34,7 +45,7 @@ export async function POST(
 
   const offboardingId = Number(params.id)
 
-  if (Number.isNaN(offboardingId)) {
+  if (!Number.isFinite(offboardingId)) {
     return NextResponse.json({ error: "Neplatné ID záznamu." }, { status: 400 })
   }
 
@@ -47,12 +58,16 @@ export async function POST(
     )
   }
 
-  const inviteeEmail = cleanText(body.inviteeEmail)
-  const isBehalf = body.isBehalf === true
-  const behalfOf = cleanText(body.behalfOf)
-  const behalfOfName = cleanText(body.behalfOfName)
-  const behalfOfRole = cleanText(body.behalfOfRole)
-  const behalfOfDisplayLabel = cleanText(body.behalfOfDisplayLabel)
+  const inviteeEmail = cleanText(
+    (body as Record<string, unknown>).inviteeEmail
+  ).toLowerCase()
+  const isBehalf = (body as Record<string, unknown>).isBehalf === true
+  const behalfOf = cleanText((body as Record<string, unknown>).behalfOf)
+  const behalfOfName = cleanText((body as Record<string, unknown>).behalfOfName)
+  const behalfOfRole = cleanText((body as Record<string, unknown>).behalfOfRole)
+  const behalfOfDisplayLabel = cleanText(
+    (body as Record<string, unknown>).behalfOfDisplayLabel
+  )
 
   if (!inviteeEmail) {
     return NextResponse.json(
@@ -61,9 +76,7 @@ export async function POST(
     )
   }
 
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-  if (!emailRegex.test(inviteeEmail)) {
+  if (!isValidEmail(inviteeEmail)) {
     return NextResponse.json(
       { error: "Zadaná e-mailová adresa není platná." },
       { status: 400 }
@@ -77,8 +90,11 @@ export async function POST(
     )
   }
 
-  const offboarding = await prisma.employeeOffboarding.findUnique({
-    where: { id: offboardingId },
+  const offboarding = await prisma.employeeOffboarding.findFirst({
+    where: {
+      id: offboardingId,
+      deletedAt: null,
+    },
     select: {
       id: true,
       name: true,
@@ -144,16 +160,14 @@ export async function POST(
     })
   }
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL
-
-  if (!baseUrl) {
+  if (!checklist.publicToken) {
     return NextResponse.json(
-      { error: "Není nastavena proměnná NEXT_PUBLIC_APP_URL." },
+      { error: "Výstupní list nemá veřejný token pro podpis." },
       { status: 500 }
     )
   }
 
-  const signUrl = `${baseUrl}/odchody-public/${checklist.publicToken}`
+  const signUrl = `${getAppBaseUrl(req)}/odchody-public/${checklist.publicToken}`
   const sentByName = session.user.name ?? session.user.email ?? "HR oddělení"
 
   try {
@@ -163,7 +177,6 @@ export async function POST(
         behalfOfName: behalfOfName || behalfOf || "zodpovědnou osobu",
         behalfOfRole,
         behalfOfDisplayLabel: behalfOfDisplayLabel || behalfOf || undefined,
-
         employeeName,
         employeePosition: offboarding.positionName ?? "",
         employeeDepartment: offboarding.department ?? "",
@@ -181,8 +194,11 @@ export async function POST(
         signUrl,
       })
     }
-  } catch (err) {
-    console.error("[exit-checklist/invite] E-mail se nepodařilo odeslat:", err)
+  } catch (error) {
+    console.error(
+      "[exit-checklist/invite] E-mail se nepodařilo odeslat:",
+      error
+    )
 
     return NextResponse.json(
       {

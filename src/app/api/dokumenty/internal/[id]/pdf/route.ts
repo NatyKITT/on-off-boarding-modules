@@ -1,12 +1,10 @@
-import { readFile } from "fs/promises"
-import path from "path"
-
 import { NextRequest } from "next/server"
 import { auth } from "@/auth"
-import fontkit from "@pdf-lib/fontkit"
 import { PDFDocument, rgb, type PDFFont, type PDFPage } from "pdf-lib"
 
 import { prisma } from "@/lib/db"
+import { loadPdfFonts } from "@/lib/pdf-fonts"
+import { canReadEmploymentDocuments } from "@/lib/rbac"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -2032,6 +2030,7 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   const session = await auth()
+
   if (!session?.user) {
     return new Response(JSON.stringify({ message: "Nejste přihlášen(a)." }), {
       status: 401,
@@ -2039,7 +2038,18 @@ export async function GET(
     })
   }
 
+  if (!canReadEmploymentDocuments(session.user.role)) {
+    return new Response(
+      JSON.stringify({ message: "Nemáte oprávnění zobrazit PDF dokument." }),
+      {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      }
+    )
+  }
+
   const id = Number(params.id)
+
   if (!id || Number.isNaN(id)) {
     return new Response(JSON.stringify({ message: "Neplatné ID dokumentu." }), {
       status: 400,
@@ -2082,18 +2092,10 @@ export async function GET(
     }
 
     const pdfDoc = await PDFDocument.create()
-    pdfDoc.registerFontkit(fontkit)
 
-    const fontPath = path.join(
-      process.cwd(),
-      "public",
-      "assets",
-      "fonts",
-      "NotoSans-Regular.ttf"
-    )
-    const fontBytes = await readFile(fontPath)
-    const font = await pdfDoc.embedFont(fontBytes)
-    const fontBold = font
+    const fonts = await loadPdfFonts(pdfDoc)
+    const font = fonts.regular
+    const fontBold = fonts.bold
 
     const docInfo: DocumentInfo = {
       id: doc.id,

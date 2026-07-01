@@ -6,6 +6,7 @@ import { EmploymentDocumentType } from "@prisma/client"
 import { z } from "zod"
 
 import { prisma } from "@/lib/db"
+import { canManageEmploymentDocuments } from "@/lib/rbac"
 import { absoluteUrl } from "@/lib/url"
 
 const assignSchema = z.object({
@@ -23,8 +24,40 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const json = await req.json()
-  const { onboardingId, documentType } = assignSchema.parse(json)
+  if (!canManageEmploymentDocuments(session.user.role)) {
+    return NextResponse.json(
+      { message: "Nemáte oprávnění vytvářet dokumenty." },
+      { status: 403 }
+    )
+  }
+
+  const parsed = assignSchema.safeParse(await req.json().catch(() => null))
+
+  if (!parsed.success) {
+    return NextResponse.json(
+      { message: "Neplatný požadavek." },
+      { status: 400 }
+    )
+  }
+
+  const { onboardingId, documentType } = parsed.data
+
+  const onboarding = await prisma.employeeOnboarding.findFirst({
+    where: {
+      id: onboardingId,
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+    },
+  })
+
+  if (!onboarding) {
+    return NextResponse.json(
+      { message: "Nástup nebyl nalezen." },
+      { status: 404 }
+    )
+  }
 
   const accessHash = randomBytes(16).toString("hex")
   const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)

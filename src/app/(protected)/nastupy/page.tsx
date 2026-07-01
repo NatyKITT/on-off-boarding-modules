@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { format, parseISO } from "date-fns"
+import { addMonths, format, parseISO } from "date-fns"
 import { cs } from "date-fns/locale"
 import {
   AlertTriangle,
@@ -61,6 +61,7 @@ import { SendEmailButton } from "@/components/emails/send-email-button"
 import type {
   FormValues,
   PersonalNumberMeta,
+  ProbationExtension,
 } from "@/components/forms/onboarding-form"
 import { OnboardingFormClient } from "@/components/forms/onboarding-form-client"
 import { DeletedRecordsDialog } from "@/components/history/deleted-records-dialog"
@@ -94,6 +95,10 @@ type Arrival = {
   actualStart?: string | null
   startTime?: string | null
   probationEnd?: string | null
+  hasCustomDates?: boolean | null
+  probationExtensions?: ProbationExtension[] | null
+  probationExtensionSummary?: string | null
+
   userEmail?: string | null
   userName?: string | null
   personalNumber?: string | null
@@ -102,6 +107,9 @@ type Arrival = {
 
   supervisorName?: string | null
   supervisorEmail?: string | null
+  supervisorPosition?: string | null
+  supervisorDepartment?: string | null
+  supervisorUnitName?: string | null
   mentorName?: string | null
   mentorEmail?: string | null
 
@@ -113,6 +121,90 @@ type Arrival = {
   cancelReason?: string | null
 
   linkedOffboarding?: LinkedOffboardingInfo | null
+}
+
+const managerialKeywords = ["vedení", "ředitel", "vedoucí", "tajemník"]
+
+const stripAccents = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+
+function isManagerialPosition(positionName?: string | null) {
+  if (!positionName) return false
+
+  const normalized = stripAccents(positionName)
+
+  return managerialKeywords.some((keyword) =>
+    normalized.includes(stripAccents(keyword))
+  )
+}
+
+function formatIsoDate(date: Date) {
+  return format(date, "yyyy-MM-dd")
+}
+
+function isWeekday(date: Date) {
+  const day = date.getDay()
+  return day >= 1 && day <= 5
+}
+
+function addWeekdaysAfterDate(baseDate: Date, days: number) {
+  const result = new Date(baseDate)
+  let remaining = Math.max(0, days)
+
+  while (remaining > 0) {
+    result.setDate(result.getDate() + 1)
+
+    if (isWeekday(result)) {
+      remaining -= 1
+    }
+  }
+
+  return result
+}
+
+function sumProbationExtensionDays(extensions?: ProbationExtension[] | null) {
+  return (extensions ?? []).reduce(
+    (sum, extension) => sum + (extension.days || 0),
+    0
+  )
+}
+
+function computeBaseProbationEnd(
+  start?: string | null,
+  positionName?: string | null
+) {
+  if (!start) return null
+
+  const date = new Date(`${start}T00:00:00`)
+
+  if (Number.isNaN(date.getTime())) return null
+
+  const months = isManagerialPosition(positionName) ? 8 : 4
+
+  return formatIsoDate(addMonths(date, months))
+}
+
+function computeProbationEndForStart(arrival: Arrival, start: string) {
+  const extensions = arrival.probationExtensions ?? []
+
+  if (extensions.length > 0) {
+    const base = computeBaseProbationEnd(start, arrival.positionName)
+    if (!base) return arrival.probationEnd?.slice(0, 10) ?? null
+
+    const baseDate = new Date(`${base}T00:00:00`)
+    const extensionDays = sumProbationExtensionDays(extensions)
+
+    return formatIsoDate(addWeekdaysAfterDate(baseDate, extensionDays))
+  }
+
+  if (arrival.hasCustomDates) {
+    return arrival.probationEnd?.slice(0, 10) ?? null
+  }
+
+  return computeBaseProbationEnd(start, arrival.positionName)
 }
 
 type EmployeeViewFilter = "all" | "active" | "withExit" | "former"
@@ -142,6 +234,8 @@ function arrivalToInitial(d: Arrival): Partial<FormValues> {
     actualStart: d.actualStart ? d.actualStart.slice(0, 10) : "",
     startTime: d.startTime ?? "",
     probationEnd: d.probationEnd ? d.probationEnd.slice(0, 10) : "",
+    hasCustomDates: d.hasCustomDates ?? undefined,
+    probationExtensions: d.probationExtensions ?? undefined,
     userEmail: d.userEmail ?? "",
     userName: d.userName ?? "",
     personalNumber: d.personalNumber ?? "",
@@ -150,6 +244,9 @@ function arrivalToInitial(d: Arrival): Partial<FormValues> {
 
     supervisorName: d.supervisorName ?? "",
     supervisorEmail: d.supervisorEmail ?? "",
+    supervisorPosition: d.supervisorPosition ?? "",
+    supervisorDepartment: d.supervisorDepartment ?? "",
+    supervisorUnitName: d.supervisorUnitName ?? "",
     mentorName: d.mentorName ?? "",
     mentorEmail: d.mentorEmail ?? "",
   }
@@ -624,18 +721,48 @@ export default function OnboardingPage() {
 
   async function confirmStartWithInput() {
     if (!activeRow || !actualStartInput) return
+
     try {
+      const extensions = activeRow.probationExtensions ?? []
+      const hasExtensionCalculation = extensions.length > 0
+
+      const nextProbationEnd = computeProbationEndForStart(
+        activeRow,
+        actualStartInput
+      )
+
+      const payload: {
+        actualStart: string
+        status: "COMPLETED"
+        probationEnd?: string
+        hasCustomDates: boolean
+        probationExtensions: ProbationExtension[]
+        probationExtensionSummary?: string | null
+      } = {
+        actualStart: actualStartInput,
+        status: "COMPLETED",
+        hasCustomDates: Boolean(
+          activeRow.hasCustomDates || hasExtensionCalculation
+        ),
+        probationExtensions: extensions,
+        probationExtensionSummary: hasExtensionCalculation
+          ? (activeRow.probationExtensionSummary ?? null)
+          : null,
+      }
+
+      if (nextProbationEnd) {
+        payload.probationEnd = nextProbationEnd
+      }
+
       const res = await fetch(`/api/nastupy/${activeRow.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          actualStart: actualStartInput,
-          status: "COMPLETED",
-        }),
+        body: JSON.stringify(payload),
       })
+
       if (!res.ok) {
-        const j = await res.json().catch(() => null)
-        throw new Error(j?.message ?? "Potvrzení se nezdařilo")
+        const json = await res.json().catch(() => null)
+        throw new Error(json?.message ?? "Potvrzení se nezdařilo")
       }
 
       const name = `${activeRow.name} ${activeRow.surname}`
@@ -643,15 +770,17 @@ export default function OnboardingPage() {
       setOpenStart(false)
       setActiveRow(null)
       setActualStartInput("")
+
       showSuccess(
         "Nástup potvrzen",
         `Skutečný nástup pro ${name} byl zaznamenán.`
       )
+
       await reload()
-    } catch (e) {
+    } catch (error) {
       showError(
         "Chyba při potvrzování",
-        e instanceof Error ? e.message : "Potvrzení se nezdařilo"
+        error instanceof Error ? error.message : "Potvrzení se nezdařilo"
       )
     }
   }

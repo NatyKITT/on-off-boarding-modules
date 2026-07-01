@@ -2,19 +2,15 @@ import { randomBytes } from "crypto"
 
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
-import { DocumentStatus, Prisma, Role } from "@prisma/client"
+import { DocumentStatus, Prisma } from "@prisma/client"
 
 import { prisma } from "@/lib/db"
+import { canManageEmploymentDocuments } from "@/lib/rbac"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
 type Params = { params: { id: string } }
-type SessionUserWithRole = { role?: Role }
-
-function canRegenerate(role?: Role) {
-  return role === "ADMIN" || role === "HR"
-}
 
 function createHash() {
   return randomBytes(16).toString("hex")
@@ -22,6 +18,7 @@ function createHash() {
 
 export async function PATCH(_req: NextRequest, { params }: Params) {
   const session = await auth()
+
   if (!session?.user) {
     return NextResponse.json(
       { message: "Nejste přihlášen(a)." },
@@ -29,12 +26,15 @@ export async function PATCH(_req: NextRequest, { params }: Params) {
     )
   }
 
-  const role = (session.user as SessionUserWithRole).role
-  if (!canRegenerate(role)) {
-    return NextResponse.json({ message: "Nemáte oprávnění." }, { status: 403 })
+  if (!canManageEmploymentDocuments(session.user.role)) {
+    return NextResponse.json(
+      { message: "Nemáte oprávnění obnovit odkaz dokumentu." },
+      { status: 403 }
+    )
   }
 
   const id = Number(params.id)
+
   if (!Number.isFinite(id)) {
     return NextResponse.json(
       { message: "Neplatné ID dokumentu." },
@@ -44,7 +44,10 @@ export async function PATCH(_req: NextRequest, { params }: Params) {
 
   const existing = await prisma.employmentDocument.findUnique({
     where: { id },
-    select: { id: true, isLocked: true },
+    select: {
+      id: true,
+      isLocked: true,
+    },
   })
 
   if (!existing) {
@@ -64,6 +67,7 @@ export async function PATCH(_req: NextRequest, { params }: Params) {
   const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
 
   let lastError: unknown = null
+
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const updated = await prisma.employmentDocument.update({
@@ -90,21 +94,24 @@ export async function PATCH(_req: NextRequest, { params }: Params) {
       })
 
       return NextResponse.json({ document: updated })
-    } catch (e) {
-      lastError = e
+    } catch (error) {
+      lastError = error
+
       if (
-        typeof e === "object" &&
-        e !== null &&
-        "code" in e &&
-        (e as { code?: string }).code === "P2002"
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as { code?: string }).code === "P2002"
       ) {
         continue
       }
+
       break
     }
   }
 
   console.error("Regenerate failed:", lastError)
+
   return NextResponse.json(
     { message: "Obnovení odkazu se nezdařilo." },
     { status: 500 }

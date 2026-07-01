@@ -4,7 +4,7 @@ import { z, ZodError } from "zod"
 
 import { prisma } from "@/lib/db"
 import { sendHandoverRecipientEmail } from "@/lib/email"
-import { hasPerm } from "@/lib/rbac"
+import { canAdminExitChecklist } from "@/lib/rbac"
 import { getSession } from "@/lib/session"
 
 export const runtime = "nodejs"
@@ -399,13 +399,13 @@ export async function POST(
   }
 
   const role = user.role ?? "USER"
-  const canSend = hasPerm(role, "EXIT_CHECKLIST_SIGN")
 
-  if (!canSend) {
+  if (!canAdminExitChecklist(role)) {
     return NextResponse.json(
       {
         status: "error",
-        message: "Nemáte oprávnění odesílat informace příjemcům agendy.",
+        message:
+          "Nemáte oprávnění odesílat informace příjemcům předávané agendy.",
       },
       { status: 403 }
     )

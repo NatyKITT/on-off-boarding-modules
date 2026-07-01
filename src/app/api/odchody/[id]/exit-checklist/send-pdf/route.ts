@@ -3,12 +3,30 @@ import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
 import { sendExitChecklistPdfEmail } from "@/lib/email"
+import { canAdminExitChecklist } from "@/lib/rbac"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
 function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+}
+
+function getAppBaseUrl(req: NextRequest) {
+  return (
+    process.env.AUTH_URL ??
+    process.env.NEXT_PUBLIC_APP_URL ??
+    req.nextUrl.origin
+  ).replace(/\/$/, "")
+}
+
+function sanitizeFilename(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w.-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
 }
 
 export async function POST(
@@ -21,9 +39,7 @@ export async function POST(
     return NextResponse.json({ error: "Nejste přihlášen." }, { status: 401 })
   }
 
-  const role = session.user.role ?? "USER"
-
-  if (!["ADMIN", "HR", "IT"].includes(role)) {
+  if (!canAdminExitChecklist(session.user.role)) {
     return NextResponse.json(
       { error: "Nemáte oprávnění odesílat PDF výstupního listu." },
       { status: 403 }
@@ -32,14 +48,21 @@ export async function POST(
 
   const offboardingId = Number(params.id)
 
-  if (Number.isNaN(offboardingId)) {
+  if (!Number.isFinite(offboardingId)) {
     return NextResponse.json({ error: "Neplatné ID záznamu." }, { status: 400 })
   }
 
-  const body = await req.json().catch(() => null)
+  const body = (await req.json().catch(() => null)) as {
+    to?: unknown
+    message?: unknown
+  } | null
 
-  const to = body?.to?.trim()?.toLowerCase()
-  const message = body?.message?.trim() || null
+  const to = typeof body?.to === "string" ? body.to.trim().toLowerCase() : ""
+
+  const message =
+    typeof body?.message === "string" && body.message.trim()
+      ? body.message.trim()
+      : null
 
   if (!to || !isValidEmail(to)) {
     return NextResponse.json(
@@ -48,8 +71,11 @@ export async function POST(
     )
   }
 
-  const offboarding = await prisma.employeeOffboarding.findUnique({
-    where: { id: offboardingId },
+  const offboarding = await prisma.employeeOffboarding.findFirst({
+    where: {
+      id: offboardingId,
+      deletedAt: null,
+    },
     select: {
       id: true,
       name: true,
@@ -71,16 +97,8 @@ export async function POST(
     )
   }
 
-  const baseUrl = process.env.AUTH_URL || process.env.NEXT_PUBLIC_APP_URL
-
-  if (!baseUrl) {
-    return NextResponse.json(
-      { error: "Chybí AUTH_URL nebo NEXT_PUBLIC_APP_URL." },
-      { status: 500 }
-    )
-  }
-
   const cookie = req.headers.get("cookie") ?? ""
+  const baseUrl = getAppBaseUrl(req)
 
   const pdfRes = await fetch(
     `${baseUrl}/api/odchody/${offboardingId}/vystupni-list`,
@@ -111,6 +129,7 @@ export async function POST(
     .trim()
 
   const endDate = offboarding.actualEnd ?? offboarding.plannedEnd
+
   const employmentEndDate = endDate
     ? new Date(endDate).toLocaleDateString("cs-CZ")
     : "—"
@@ -126,7 +145,7 @@ export async function POST(
     message,
     sentByName: session.user.name ?? session.user.email ?? null,
     pdfBuffer,
-    filename: `Vystupni-list-${employeeName.replace(/\s+/g, "-")}.pdf`,
+    filename: `Vystupni-list-${sanitizeFilename(employeeName || String(offboardingId))}.pdf`,
   })
 
   return NextResponse.json({

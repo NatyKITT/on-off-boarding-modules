@@ -7,22 +7,19 @@ import { env } from "@/env.mjs"
 
 import { prisma } from "@/lib/db"
 
-const isProd = process.env.NODE_ENV === "production"
+const DEFAULT_ALLOWED_DOMAINS = ["kitt6.cz", "praha6.cz"] as const
 
-const DEV_ALLOWED_DOMAINS = ["kitt6.cz", "praha6.cz"] as const
-const PROD_ALLOWED_DOMAINS = ["kitt6.cz", "praha6.cz"] as const
+const ALLOWED_DOMAINS: ReadonlySet<string> = new Set(DEFAULT_ALLOWED_DOMAINS)
 
-const ALLOWED_DOMAINS: ReadonlySet<string> = new Set(
-  isProd ? PROD_ALLOWED_DOMAINS : DEV_ALLOWED_DOMAINS
-)
+function parseCsv(value: string | undefined): string[] {
+  return (value ?? "")
+    .split(/[;,]/)
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean)
+}
 
 function parseEmails(envValue: string | undefined): ReadonlySet<string> {
-  return new Set(
-    (envValue ?? "")
-      .split(/[;,]/)
-      .map((v) => v.trim().toLowerCase())
-      .filter(Boolean)
-  )
+  return new Set(parseCsv(envValue))
 }
 
 const SUPER_ADMIN_EMAILS = parseEmails(process.env.SUPER_ADMIN_EMAILS)
@@ -64,6 +61,8 @@ function getDefaultRoleForEmail(email: string): Role {
 
 function canEmailSignIn(email: string | null | undefined): boolean {
   const domain = getDomain(email)
+  if (!domain) return false
+
   return ALLOWED_DOMAINS.has(domain)
 }
 
@@ -152,7 +151,7 @@ export const authConfig = {
     GoogleProvider({
       clientId: env.GOOGLE_CLIENT_ID,
       clientSecret: env.GOOGLE_CLIENT_SECRET,
-      allowDangerousEmailAccountLinking: false,
+      allowDangerousEmailAccountLinking: true,
     }),
   ],
 
@@ -177,7 +176,22 @@ export const authConfig = {
     },
 
     async signIn({ profile }) {
-      return canEmailSignIn(profile?.email)
+      const email =
+        typeof profile?.email === "string" ? profile.email.toLowerCase() : null
+
+      if (!canEmailSignIn(email)) {
+        return false
+      }
+
+      const googleProfile = profile as
+        | { email_verified?: boolean | null }
+        | undefined
+
+      if (googleProfile?.email_verified === false) {
+        return false
+      }
+
+      return true
     },
 
     async redirect({ url, baseUrl }) {

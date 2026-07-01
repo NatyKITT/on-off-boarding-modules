@@ -2,6 +2,10 @@ import { notFound, redirect } from "next/navigation"
 import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
+import {
+  canManageEmploymentDocuments,
+  canReadEmploymentDocuments,
+} from "@/lib/rbac"
 
 import { InternalDocumentShell } from "./internal-document-shell"
 
@@ -11,13 +15,21 @@ type PageProps = {
 
 export default async function InternalDocumentPage({ params }: PageProps) {
   const session = await auth()
+
   if (!session?.user) {
     redirect("/signin")
   }
 
   const id = Number(params.id)
+
   if (!Number.isFinite(id)) {
     notFound()
+  }
+
+  const role = session.user.role
+
+  if (!canReadEmploymentDocuments(role)) {
+    redirect("/no-access")
   }
 
   const doc = await prisma.employmentDocument.findUnique({
@@ -49,10 +61,15 @@ export default async function InternalDocumentPage({ params }: PageProps) {
     notFound()
   }
 
+  const canEditInternalDocument = canManageEmploymentDocuments(role)
+
   return (
     <main className="flex min-h-screen flex-col items-center bg-slate-50 py-10">
       <div className="w-full max-w-3xl rounded-xl bg-white p-6 shadow-sm">
-        <InternalDocumentShell document={doc} />
+        <InternalDocumentShell
+          document={doc}
+          canEdit={canEditInternalDocument}
+        />
       </div>
     </main>
   )

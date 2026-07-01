@@ -1,60 +1,106 @@
-name: Mail Worker (Every 15 min)
+name: Mail Worker
 
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    # GitHub cron běží v UTC. Tohle je 08:10–19:10 v Praze během letního času.
+    - cron: "10 6-17 * * *"
   workflow_dispatch:
+    inputs:
+      environment:
+        description: "GitHub Environment, ve kterém jsou secrets APP_URL a CRON_SECRET"
+        type: choice
+        required: true
+        default: production
+        options:
+          - dev
+          - production
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mail-worker-${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'production' }}
+  cancel-in-progress: false
 
 jobs:
   mail-worker:
-    name: Process Email Queue
+    name: Process email queue
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'production' }}
+
+    env:
+      APP_URL: ${{ secrets.APP_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
 
     steps:
-      - name: 📧 Process Mail Queue
+      - name: Process mail queue
         id: mail
+        shell: bash
         run: |
-          echo "🚀 Starting mail worker..."
-          
-          response=$(curl -s -w "\n%{http_code}" -X POST \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+          set -euo pipefail
+
+          if [ -z "${APP_URL:-}" ]; then
+            echo "::error::Missing GitHub Environment secret APP_URL"
+            exit 1
+          fi
+
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::Missing GitHub Environment secret CRON_SECRET"
+            exit 1
+          fi
+
+          APP_URL="${APP_URL%/}"
+
+          echo "Starting mail worker for $APP_URL ..."
+
+          response=$(curl -sS --retry 2 --retry-delay 5 --retry-all-errors --max-time 90 -w "\n%{http_code}" -X POST \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
             -H "Content-Type: application/json" \
-            "${{ secrets.APP_URL }}/api/cron/mail-worker")
-          
+            "$APP_URL/api/cron/mail-worker")
+
           http_code=$(echo "$response" | tail -n1)
           body=$(echo "$response" | sed '$d')
-          
-          echo "📊 HTTP Status: $http_code"
-          echo "📄 Response:"
+
+          echo "HTTP Status: $http_code"
+          echo "Response:"
           echo "$body" | jq '.' 2>/dev/null || echo "$body"
-          
+
           if [ "$http_code" != "200" ]; then
-            echo "::warning::⚠️ Mail worker returned status $http_code"
-            echo "::warning::Response: $body"
-          else
-            echo "::notice::✅ Mail queue processed successfully"
+            echo "::error::Mail worker returned status $http_code"
+            echo "::error::Response: $body"
+            exit 1
           fi
-          
-          # Parsuj response (pokud je JSON)
+
+          status=$(echo "$body" | jq -r '.status // "unknown"' 2>/dev/null || echo "unknown")
+
+          if [ "$status" != "success" ]; then
+            echo "::error::Mail worker returned non-success status: $status"
+            echo "::error::Response: $body"
+            exit 1
+          fi
+
           processed=$(echo "$body" | jq -r '.processed // 0' 2>/dev/null || echo "0")
           succeeded=$(echo "$body" | jq -r '.succeeded // 0' 2>/dev/null || echo "0")
           failed=$(echo "$body" | jq -r '.failed // 0' 2>/dev/null || echo "0")
-          
-          echo "::notice::📊 Processed: $processed, Succeeded: $succeeded, Failed: $failed"
-          
-          # Ulož výstup
-          echo "processed=$processed" >> $GITHUB_OUTPUT
-          echo "succeeded=$succeeded" >> $GITHUB_OUTPUT
-          echo "failed=$failed" >> $GITHUB_OUTPUT
 
-      - name: 📝 Job Summary
+          if [ "$failed" != "0" ]; then
+            echo "::warning::Some emails failed: $failed"
+          fi
+
+          echo "processed=$processed" >> "$GITHUB_OUTPUT"
+          echo "succeeded=$succeeded" >> "$GITHUB_OUTPUT"
+          echo "failed=$failed" >> "$GITHUB_OUTPUT"
+
+      - name: Job summary
         if: always()
+        shell: bash
         run: |
-          echo "## 📧 Mail Worker Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Status:** ${{ steps.mail.outcome }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Processed:** ${{ steps.mail.outputs.processed }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Succeeded:** ${{ steps.mail.outputs.succeeded }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Failed:** ${{ steps.mail.outputs.failed }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Run time:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "## Mail Worker Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'production' }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Status: ${{ steps.mail.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Processed: ${{ steps.mail.outputs.processed }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Succeeded: ${{ steps.mail.outputs.succeeded }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Failed: ${{ steps.mail.outputs.failed }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Run time: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_STEP_SUMMARY"

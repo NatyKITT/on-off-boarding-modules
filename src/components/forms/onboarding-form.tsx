@@ -61,6 +61,23 @@ import { Textarea } from "@/components/ui/textarea"
 
 type Mode = "create-planned" | "create-actual" | "edit"
 
+type ProbationExtensionType =
+  | "sick_leave"
+  | "vacation"
+  | "family_care"
+  | "maternity_parental"
+  | "other_obstacle"
+  | "unexcused_absence"
+
+export type ProbationExtension = {
+  id: string
+  type: ProbationExtensionType
+  from: string
+  to: string
+  days: number
+  note?: string
+}
+
 export type FormValues = {
   hasCustomDates?: boolean
   titleBefore?: string
@@ -85,11 +102,15 @@ export type FormValues = {
 
   supervisorName?: string
   supervisorEmail?: string
+  supervisorPosition?: string
+  supervisorDepartment?: string
+  supervisorUnitName?: string
   mentorName?: string
   mentorEmail?: string
 
   notes?: string
   status?: "NEW" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED"
+  probationExtensions?: ProbationExtension[]
 }
 
 export type PersonalNumberMeta = {
@@ -122,6 +143,55 @@ type Props = {
 type SearchablePosition = Position & {
   _key: string
   _hay: string
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
+function normalizePositionsResponse(api: unknown): Position[] {
+  const source: unknown[] = Array.isArray(api)
+    ? api
+    : isRecord(api) && Array.isArray(api.data)
+      ? api.data
+      : []
+
+  const output: Position[] = []
+
+  for (const item of source) {
+    if (!isRecord(item)) continue
+
+    const num = typeof item.num === "string" ? item.num : ""
+    const name = typeof item.name === "string" ? item.name : ""
+
+    if (!num || !name) continue
+
+    output.push({
+      id: String(
+        typeof item.id === "string" || typeof item.id === "number"
+          ? item.id
+          : num
+      ),
+      num,
+      name,
+      dept_name: typeof item.dept_name === "string" ? item.dept_name : "",
+      unit_name: typeof item.unit_name === "string" ? item.unit_name : "",
+      supervisorName:
+        typeof item.supervisorName === "string"
+          ? item.supervisorName
+          : typeof item.supervisor_name === "string"
+            ? item.supervisor_name
+            : "",
+      supervisorEmail:
+        typeof item.supervisorEmail === "string"
+          ? item.supervisorEmail
+          : typeof item.supervisor_email === "string"
+            ? item.supervisor_email
+            : "",
+    })
+  }
+
+  return output
 }
 
 type OnboardingRowForMeta = {
@@ -177,7 +247,157 @@ const ensure = (v?: string | null, fb = "NEUVEDENO") => (v ?? "").trim() || fb
 const fmt = (d: Date) => format(d, "yyyy-MM-dd")
 const todayStr = () => fmt(new Date())
 
+function formatDateCz(value?: string | null) {
+  if (!value) return "—"
+
+  const date = new Date(`${value}T00:00:00`)
+
+  if (Number.isNaN(date.getTime())) return "—"
+
+  return format(date, "d.M.yyyy")
+}
+
+function formatDaysLabel(days: number) {
+  if (days === 1) return "1 pracovní den"
+  if (days >= 2 && days <= 4) return `${days} pracovní dny`
+  return `${days} pracovních dnů`
+}
+
 const managerialKeywords = ["vedení", "ředitel", "vedoucí", "tajemník"]
+
+const probationExtensionTypeLabels: Record<ProbationExtensionType, string> = {
+  sick_leave: "Dočasná pracovní neschopnost / nemoc",
+  vacation: "Dovolená",
+  family_care: "OČR / ošetřování člena rodiny",
+  maternity_parental: "Mateřská / rodičovská dovolená",
+  other_obstacle: "Jiná celodenní překážka v práci",
+  unexcused_absence: "Neomluvená absence",
+}
+
+function isWeekday(date: Date) {
+  const day = date.getDay()
+  return day >= 1 && day <= 5
+}
+
+function countWeekdaysInclusive(from?: string, to?: string) {
+  if (!from || !to) return 0
+
+  const start = new Date(`${from}T00:00:00`)
+  const end = new Date(`${to}T00:00:00`)
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0
+  if (end < start) return 0
+
+  let days = 0
+  const cursor = new Date(start)
+
+  while (cursor <= end) {
+    if (isWeekday(cursor)) days += 1
+    cursor.setDate(cursor.getDate() + 1)
+  }
+
+  return days
+}
+
+function parseDateOnly(value?: string | null) {
+  if (!value) return null
+
+  const date = new Date(`${value}T00:00:00`)
+
+  if (Number.isNaN(date.getTime())) return null
+
+  return date
+}
+
+function dateRangesOverlap(args: {
+  firstFrom?: string | null
+  firstTo?: string | null
+  secondFrom?: string | null
+  secondTo?: string | null
+}) {
+  const firstFromDate = parseDateOnly(args.firstFrom)
+  const firstToDate = parseDateOnly(args.firstTo)
+  const secondFromDate = parseDateOnly(args.secondFrom)
+  const secondToDate = parseDateOnly(args.secondTo)
+
+  if (!firstFromDate || !firstToDate || !secondFromDate || !secondToDate) {
+    return false
+  }
+
+  return firstFromDate <= secondToDate && secondFromDate <= firstToDate
+}
+
+function findOverlappingProbationExtension(args: {
+  extensions: ProbationExtension[]
+  from?: string | null
+  to?: string | null
+  excludeId?: string | null
+}) {
+  if (!args.from || !args.to) return null
+
+  return (
+    args.extensions.find((extension) => {
+      if (args.excludeId && extension.id === args.excludeId) return false
+
+      return dateRangesOverlap({
+        firstFrom: args.from,
+        firstTo: args.to,
+        secondFrom: extension.from,
+        secondTo: extension.to,
+      })
+    }) ?? null
+  )
+}
+
+function addWeekdaysAfterDate(baseDate: Date, days: number) {
+  const result = new Date(baseDate)
+  let remaining = Math.max(0, days)
+
+  while (remaining > 0) {
+    result.setDate(result.getDate() + 1)
+    if (isWeekday(result)) remaining -= 1
+  }
+
+  return result
+}
+
+function sumProbationExtensionDays(extensions: ProbationExtension[]) {
+  return extensions.reduce((sum, extension) => sum + (extension.days || 0), 0)
+}
+
+function computeProbationEndWithExtensions(args: {
+  start?: string
+  positionName?: string
+  extensions: ProbationExtension[]
+}) {
+  const base = computeProbationEnd(args.start, args.positionName)
+  if (!base) return null
+
+  const extensionDays = sumProbationExtensionDays(args.extensions)
+  if (extensionDays <= 0) return base
+
+  const baseDate = new Date(`${base}T00:00:00`)
+  if (Number.isNaN(baseDate.getTime())) return base
+
+  return fmt(addWeekdaysAfterDate(baseDate, extensionDays))
+}
+
+function formatProbationExtensionSummary(extensions: ProbationExtension[]) {
+  if (extensions.length === 0) return ""
+
+  const lines = extensions.map((extension) => {
+    const label = probationExtensionTypeLabels[extension.type]
+    const note = extension.note?.trim()
+      ? `; pozn.: ${extension.note.trim()}`
+      : ""
+
+    return `- ${label}: ${formatDateCz(extension.from)} – ${formatDateCz(
+      extension.to
+    )}, prodlouženo o ${formatDaysLabel(extension.days)}${note}`
+  })
+
+  return [`Prodloužení zkušební doby:`, ...lines].join("\n")
+}
 
 const stripAccents = (s: string) =>
   s
@@ -374,6 +594,9 @@ const baseSchema = z.object({
     .email("Neplatný e-mail")
     .or(z.literal(""))
     .optional(),
+  supervisorPosition: z.string().optional(),
+  supervisorDepartment: z.string().optional(),
+  supervisorUnitName: z.string().optional(),
 
   mentorName: z.string().optional(),
   mentorEmail: z.string().email("Neplatný e-mail").or(z.literal("")).optional(),
@@ -735,6 +958,12 @@ export function OnboardingFormUnified({
   const [positionPickerOpen, setPositionPickerOpen] = useState(false)
   const positionTriggerRef = useRef<HTMLButtonElement | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
+  const [fallbackPositions, setFallbackPositions] = useState<Position[]>([])
+  const [positionsLoadingFallback, setPositionsLoadingFallback] =
+    useState(false)
+  const [positionsFallbackError, setPositionsFallbackError] = useState<
+    string | null
+  >(null)
 
   const [skippedOpen, setSkippedOpen] = useState(false)
   const [skippedNumbersState, setSkippedNumbersState] = useState<string[]>([])
@@ -756,6 +985,17 @@ export function OnboardingFormUnified({
   const [manualDates, setManualDates] = useState<boolean>(
     () => inferredManualFlag
   )
+
+  const [probationExtensions, setProbationExtensions] = useState<
+    ProbationExtension[]
+  >(() => initial?.probationExtensions ?? [])
+  const [extensionType, setExtensionType] =
+    useState<ProbationExtensionType>("sick_leave")
+  const [extensionFrom, setExtensionFrom] = useState("")
+  const [extensionTo, setExtensionTo] = useState("")
+  const [extensionNote, setExtensionNote] = useState("")
+  const [probationExtensionApplied, setProbationExtensionApplied] =
+    useState<boolean>(() => Boolean(initial?.probationExtensions?.length))
 
   useEffect(() => {
     setResolvedPersonalMeta(personalNumberMeta)
@@ -801,6 +1041,17 @@ export function OnboardingFormUnified({
   useEffect(() => {
     setManualDates(inferredManualFlag)
   }, [inferredManualFlag, id])
+
+  useEffect(() => {
+    const initialExtensions = initial?.probationExtensions ?? []
+
+    setProbationExtensions(initialExtensions)
+    setProbationExtensionApplied(initialExtensions.length > 0)
+    setExtensionType("sick_leave")
+    setExtensionFrom("")
+    setExtensionTo("")
+    setExtensionNote("")
+  }, [initial?.probationExtensions, id])
 
   useEffect(() => {
     setSupervisorManuallyChanged(false)
@@ -869,6 +1120,9 @@ export function OnboardingFormUnified({
       personalNumber: "",
       supervisorName: "",
       supervisorEmail: "",
+      supervisorPosition: "",
+      supervisorDepartment: "",
+      supervisorUnitName: "",
       mentorName: "",
       mentorEmail: "",
       notes: "",
@@ -940,6 +1194,282 @@ export function OnboardingFormUnified({
   const watchPlannedStart = form.watch("plannedStart")
   const watchActualStart = form.watch("actualStart")
 
+  const activePositions = useMemo(
+    () => (positions.length > 0 ? positions : fallbackPositions),
+    [fallbackPositions, positions]
+  )
+
+  const loadFallbackPositions = useCallback(async () => {
+    if (positions.length > 0 || fallbackPositions.length > 0) return
+
+    try {
+      setPositionsLoadingFallback(true)
+      setPositionsFallbackError(null)
+
+      const res = await fetch("/api/systemizace", { cache: "no-store" })
+
+      if (!res.ok) {
+        throw new Error("Nepodařilo se načíst seznam pozic ze systemizace.")
+      }
+
+      const json = await res.json().catch(() => null)
+      setFallbackPositions(normalizePositionsResponse(json))
+    } catch (error) {
+      console.error("Nepodařilo se načíst pozice:", error)
+      setPositionsFallbackError(
+        error instanceof Error
+          ? error.message
+          : "Nepodařilo se načíst seznam pozic."
+      )
+    } finally {
+      setPositionsLoadingFallback(false)
+    }
+  }, [fallbackPositions.length, positions.length])
+
+  useEffect(() => {
+    if (!positionPickerOpen) return
+    void loadFallbackPositions()
+  }, [positionPickerOpen, loadFallbackPositions])
+
+  const extensionDraftDays = useMemo(
+    () => countWeekdaysInclusive(extensionFrom, extensionTo),
+    [extensionFrom, extensionTo]
+  )
+
+  const baseProbationEnd = useMemo(() => {
+    const start = isActualMode ? watchActualStart : watchPlannedStart
+    return computeProbationEnd(start, watchPositionName)
+  }, [isActualMode, watchActualStart, watchPlannedStart, watchPositionName])
+
+  const draftProbationExtension = useMemo<ProbationExtension | null>(() => {
+    if (!extensionFrom || !extensionTo || extensionDraftDays <= 0) return null
+
+    return {
+      id: "__draft__",
+      type: extensionType,
+      from: extensionFrom,
+      to: extensionTo,
+      days: extensionDraftDays,
+      note: extensionNote.trim() || undefined,
+    }
+  }, [
+    extensionDraftDays,
+    extensionFrom,
+    extensionNote,
+    extensionTo,
+    extensionType,
+  ])
+
+  const overlappingProbationExtension = useMemo(
+    () =>
+      findOverlappingProbationExtension({
+        extensions: probationExtensions,
+        from: extensionFrom,
+        to: extensionTo,
+      }),
+    [extensionFrom, extensionTo, probationExtensions]
+  )
+
+  const invalidExtensionRange = Boolean(
+    extensionFrom && extensionTo && extensionDraftDays <= 0
+  )
+
+  const extensionsWithDraft = useMemo(
+    () =>
+      draftProbationExtension
+        ? [...probationExtensions, draftProbationExtension]
+        : probationExtensions,
+    [draftProbationExtension, probationExtensions]
+  )
+
+  const extendedProbationEnd = useMemo(() => {
+    const start = isActualMode ? watchActualStart : watchPlannedStart
+    return computeProbationEndWithExtensions({
+      start,
+      positionName: watchPositionName,
+      extensions: probationExtensions,
+    })
+  }, [
+    isActualMode,
+    probationExtensions,
+    watchActualStart,
+    watchPlannedStart,
+    watchPositionName,
+  ])
+
+  const proposedProbationEnd = useMemo(() => {
+    const start = isActualMode ? watchActualStart : watchPlannedStart
+    return computeProbationEndWithExtensions({
+      start,
+      positionName: watchPositionName,
+      extensions: extensionsWithDraft,
+    })
+  }, [
+    extensionsWithDraft,
+    isActualMode,
+    watchActualStart,
+    watchPlannedStart,
+    watchPositionName,
+  ])
+
+  const totalExtensionDays = useMemo(
+    () => sumProbationExtensionDays(probationExtensions),
+    [probationExtensions]
+  )
+
+  const proposedTotalExtensionDays = useMemo(
+    () => sumProbationExtensionDays(extensionsWithDraft),
+    [extensionsWithDraft]
+  )
+
+  const hasProbationExtensionCalculation = probationExtensions.length > 0
+  const hasProbationExtensionDraft = Boolean(draftProbationExtension)
+  const canApplyProbationExtensionDraft = Boolean(
+    draftProbationExtension &&
+      proposedProbationEnd &&
+      !overlappingProbationExtension
+  )
+
+  useEffect(() => {
+    if (!probationExtensionApplied) return
+    if (!extendedProbationEnd) return
+
+    if ((form.getValues("probationEnd") || "") !== extendedProbationEnd) {
+      form.setValue("probationEnd", extendedProbationEnd, {
+        shouldDirty: true,
+        shouldValidate: true,
+      })
+    }
+  }, [extendedProbationEnd, form, probationExtensionApplied])
+
+  function clearProbationExtensionDraft() {
+    setExtensionType("sick_leave")
+    setExtensionFrom("")
+    setExtensionTo("")
+    setExtensionNote("")
+  }
+
+  function createProbationExtensionFromDraft(): ProbationExtension | null {
+    const days = countWeekdaysInclusive(extensionFrom, extensionTo)
+
+    if (!extensionFrom || !extensionTo || days <= 0) return null
+
+    return {
+      id:
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      type: extensionType,
+      from: extensionFrom,
+      to: extensionTo,
+      days,
+      note: extensionNote.trim() || undefined,
+    }
+  }
+
+  function buildOverlapMessage(extension: ProbationExtension) {
+    return `Zadané období se překrývá s již použitou nepřítomností: ${
+      probationExtensionTypeLabels[extension.type]
+    } ${formatDateCz(extension.from)} – ${formatDateCz(extension.to)}.`
+  }
+
+  function syncProbationExtensions(nextExtensions: ProbationExtension[]) {
+    setProbationExtensions(nextExtensions)
+    form.setValue("probationExtensions", nextExtensions, {
+      shouldDirty: true,
+      shouldValidate: false,
+    })
+  }
+
+  function applyProbationExtensionsToTerm(
+    nextExtensions: ProbationExtension[]
+  ) {
+    const start = isActualMode
+      ? form.getValues("actualStart")
+      : form.getValues("plannedStart")
+
+    const nextEnd =
+      nextExtensions.length > 0
+        ? computeProbationEndWithExtensions({
+            start,
+            positionName: form.getValues("positionName"),
+            extensions: nextExtensions,
+          })
+        : computeProbationEnd(start, form.getValues("positionName"))
+
+    if (nextEnd) {
+      form.setValue("probationEnd", nextEnd, {
+        shouldDirty: true,
+        shouldValidate: true,
+      })
+    }
+
+    const hasExtensions = nextExtensions.length > 0
+
+    setProbationExtensionApplied(hasExtensions)
+    setManualDates(hasExtensions)
+    form.setValue("hasCustomDates", hasExtensions, {
+      shouldDirty: true,
+      shouldValidate: false,
+    })
+  }
+
+  function removeProbationExtension(extensionId: string) {
+    const nextExtensions = probationExtensions.filter(
+      (extension) => extension.id !== extensionId
+    )
+
+    syncProbationExtensions(nextExtensions)
+    applyProbationExtensionsToTerm(nextExtensions)
+  }
+
+  function applyProbationExtensionEnd() {
+    const nextExtension = createProbationExtensionFromDraft()
+
+    if (!nextExtension) return
+
+    const overlap = findOverlappingProbationExtension({
+      extensions: probationExtensions,
+      from: nextExtension.from,
+      to: nextExtension.to,
+    })
+
+    if (overlap) {
+      setErrorModal({
+        open: true,
+        message: `${buildOverlapMessage(overlap)} Upravte rozsah od–do nebo nejdříve smažte původní řádek v části Termíny nástupu.`,
+      })
+      return
+    }
+
+    const nextExtensions = [...probationExtensions, nextExtension]
+    const start = isActualMode
+      ? form.getValues("actualStart")
+      : form.getValues("plannedStart")
+    const nextEnd = computeProbationEndWithExtensions({
+      start,
+      positionName: form.getValues("positionName"),
+      extensions: nextExtensions,
+    })
+
+    if (!nextEnd) return
+
+    syncProbationExtensions(nextExtensions)
+    setProbationExtensionApplied(true)
+    setManualDates(true)
+
+    form.setValue("hasCustomDates", true, {
+      shouldDirty: true,
+      shouldValidate: false,
+    })
+    form.setValue("probationEnd", nextEnd, {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
+
+    clearProbationExtensionDraft()
+  }
+
   useEffect(() => {
     if (form.getValues("hasCustomDates") !== manualDates) {
       form.setValue("hasCustomDates", manualDates, { shouldDirty: true })
@@ -994,6 +1524,9 @@ export function OnboardingFormUnified({
       if (!trimmed) {
         form.setValue("supervisorName", "", { shouldValidate: true })
         form.setValue("supervisorEmail", "", { shouldValidate: true })
+        form.setValue("supervisorPosition", "", { shouldValidate: false })
+        form.setValue("supervisorDepartment", "", { shouldValidate: false })
+        form.setValue("supervisorUnitName", "", { shouldValidate: false })
         setSupervisorLoadError(null)
         return
       }
@@ -1017,6 +1550,9 @@ export function OnboardingFormUnified({
 
           form.setValue("supervisorName", "", { shouldValidate: true })
           form.setValue("supervisorEmail", "", { shouldValidate: true })
+          form.setValue("supervisorPosition", "", { shouldValidate: false })
+          form.setValue("supervisorDepartment", "", { shouldValidate: false })
+          form.setValue("supervisorUnitName", "", { shouldValidate: false })
           setSupervisorLoadError("Vedoucí nebyl pro tuto pozici nalezen.")
           return
         }
@@ -1037,6 +1573,18 @@ export function OnboardingFormUnified({
           shouldDirty: false,
           shouldValidate: true,
         })
+        form.setValue("supervisorPosition", supervisor?.position ?? "", {
+          shouldDirty: false,
+          shouldValidate: false,
+        })
+        form.setValue("supervisorDepartment", supervisor?.department ?? "", {
+          shouldDirty: false,
+          shouldValidate: false,
+        })
+        form.setValue("supervisorUnitName", supervisor?.unitName ?? "", {
+          shouldDirty: false,
+          shouldValidate: false,
+        })
         setSupervisorLoadError(null)
       } catch (error) {
         if (requestId !== supervisorRequestRef.current) return
@@ -1044,6 +1592,9 @@ export function OnboardingFormUnified({
         console.error("Nepodařilo se dohledat vedoucího:", error)
         form.setValue("supervisorName", "", { shouldValidate: true })
         form.setValue("supervisorEmail", "", { shouldValidate: true })
+        form.setValue("supervisorPosition", "", { shouldValidate: false })
+        form.setValue("supervisorDepartment", "", { shouldValidate: false })
+        form.setValue("supervisorUnitName", "", { shouldValidate: false })
         setSupervisorLoadError("Nepodařilo se načíst vedoucího.")
       } finally {
         if (requestId === supervisorRequestRef.current) {
@@ -1055,33 +1606,64 @@ export function OnboardingFormUnified({
   )
 
   useEffect(() => {
+    if (!watchPositionNum) return
+
+    const pos = activePositions.find((p) => p.num === watchPositionNum)
+    if (!pos) return
+
+    form.setValue("positionName", ensure(pos.name, "(nezjištěno)"), {
+      shouldValidate: true,
+    })
+    form.setValue("department", ensure(pos.dept_name, "(doplnit)"), {
+      shouldValidate: true,
+    })
+    form.setValue("unitName", ensure(pos.unit_name, "(doplnit)"), {
+      shouldValidate: true,
+    })
+  }, [activePositions, watchPositionNum, form])
+
+  const previousAutoSupervisorPositionRef = useRef<string | null>(null)
+
+  useEffect(() => {
     if (!watchPositionNum) {
+      previousAutoSupervisorPositionRef.current = null
       form.setValue("supervisorName", "", { shouldValidate: true })
       form.setValue("supervisorEmail", "", { shouldValidate: true })
+      form.setValue("supervisorPosition", "", { shouldValidate: false })
+      form.setValue("supervisorDepartment", "", { shouldValidate: false })
+      form.setValue("supervisorUnitName", "", { shouldValidate: false })
       setSupervisorLoadError(null)
       return
     }
 
-    if (!positions.length) return
+    if (previousAutoSupervisorPositionRef.current === watchPositionNum) return
+    previousAutoSupervisorPositionRef.current = watchPositionNum
 
-    const pos = positions.find((p) => p.num === watchPositionNum)
-    if (!pos) return
-
-    form.setValue("positionName", ensure(pos.name, "(nezjištěno)"))
-    form.setValue("department", ensure(pos.dept_name, "(doplnit)"))
-    form.setValue("unitName", ensure(pos.unit_name, "(doplnit)"))
+    if (
+      Boolean(id) &&
+      !supervisorManuallyChanged &&
+      form.getValues("supervisorName")
+    ) {
+      return
+    }
 
     void loadSupervisorForPosition(watchPositionNum)
-  }, [watchPositionNum, positions, form, loadSupervisorForPosition])
+  }, [
+    form,
+    id,
+    loadSupervisorForPosition,
+    supervisorManuallyChanged,
+    watchPositionNum,
+  ])
 
   const positionsForSearch: SearchablePosition[] = useMemo(
     () =>
-      positions.map((p) => ({
+      activePositions.map((p) => ({
         ...p,
         _key: `${p.num} ${p.name}`,
         _hay: stripAccents(`${p.num} ${p.name} ${p.dept_name} ${p.unit_name}`),
       })),
-    [positions]
+    [activePositions]
   )
 
   const filteredPositions: SearchablePosition[] = useMemo(() => {
@@ -1104,6 +1686,9 @@ export function OnboardingFormUnified({
 
     form.setValue("supervisorName", "", { shouldValidate: true })
     form.setValue("supervisorEmail", "", { shouldValidate: true })
+    form.setValue("supervisorPosition", "", { shouldValidate: false })
+    form.setValue("supervisorDepartment", "", { shouldValidate: false })
+    form.setValue("supervisorUnitName", "", { shouldValidate: false })
 
     setSupervisorLoadError(null)
     setSupervisorManuallyChanged(false)
@@ -1215,8 +1800,51 @@ export function OnboardingFormUnified({
       const safeDepartment = ensure(values.department, "(doplnit)")
       const safeUnitName = ensure(values.unitName, "(doplnit)")
 
+      const effectiveProbationExtensions = probationExtensions
+      const hasExtensionCalculation = effectiveProbationExtensions.length > 0
+      const hasUnappliedExtensionDraft = Boolean(
+        extensionFrom || extensionTo || extensionNote.trim()
+      )
+
+      if (hasUnappliedExtensionDraft) {
+        throw new Error(
+          "V sekci Prodloužení zkušební doby máte rozpracované zadání. Nejdříve klikněte na „Použít navržený konec zkušební doby“, nebo rozpracované zadání vymažte."
+        )
+      }
+
+      if (hasExtensionCalculation && !extendedProbationEnd) {
+        throw new Error(
+          "Nepodařilo se dopočítat nový konec zkušební doby. Zkontrolujte datum nástupu, pozici a zadané nepřítomnosti."
+        )
+      }
+
+      if (
+        hasExtensionCalculation &&
+        extendedProbationEnd &&
+        values.probationEnd !== extendedProbationEnd
+      ) {
+        throw new Error(
+          "U prodloužení zkušební doby nesedí konec zkušební doby s výpočtem. Klikněte na „Použít navržený konec zkušební doby“, nebo odeberte řádek prodloužení."
+        )
+      }
+
+      const effectiveProbationEnd = values.probationEnd
+
+      const effectiveHasCustomDates = Boolean(
+        manualDates || hasExtensionCalculation
+      )
+
+      const shouldSaveSupervisorSnapshot = Boolean(
+        supervisorManuallyChanged ||
+          values.supervisorName?.trim() ||
+          values.supervisorEmail?.trim() ||
+          values.supervisorPosition?.trim() ||
+          values.supervisorDepartment?.trim() ||
+          values.supervisorUnitName?.trim()
+      )
+
       const payload: OnboardingPayload = {
-        hasCustomDates: manualDates,
+        hasCustomDates: effectiveHasCustomDates,
         titleBefore: nullIfEmpty(values.titleBefore),
         titleAfter: nullIfEmpty(values.titleAfter),
         name: values.name,
@@ -1227,38 +1855,57 @@ export function OnboardingFormUnified({
         department: safeDepartment,
         unitName: safeUnitName,
         startTime: nullIfEmpty(values.startTime),
-        probationEnd: nullIfEmpty(values.probationEnd),
+        probationEnd: nullIfEmpty(effectiveProbationEnd),
         userEmail: nullIfEmpty(values.userEmail),
         userName: nullIfEmpty(values.userName),
         personalNumber: nullIfEmpty(values.personalNumber),
         mentorName: nullIfEmpty(values.mentorName),
         mentorEmail: nullIfEmpty(values.mentorEmail),
         notes: nullIfEmpty(values.notes),
-        supervisorManualOverride: supervisorManuallyChanged,
+        supervisorManualOverride: shouldSaveSupervisorSnapshot,
+        probationExtensions: effectiveProbationExtensions,
+        probationExtensionSummary: hasExtensionCalculation
+          ? formatProbationExtensionSummary(effectiveProbationExtensions)
+          : null,
       }
 
-      if (supervisorManuallyChanged) {
+      if (shouldSaveSupervisorSnapshot) {
         payload.supervisorName = nullIfEmpty(values.supervisorName)
         payload.supervisorEmail = nullIfEmpty(values.supervisorEmail)
+        payload.supervisorPosition = nullIfEmpty(values.supervisorPosition)
+        payload.supervisorDepartment = nullIfEmpty(values.supervisorDepartment)
+        payload.supervisorUnitName = nullIfEmpty(values.supervisorUnitName)
       }
 
       if (isActualMode) {
         const baselineLast = getBaselineLastPersonalNumber(resolvedPersonalMeta)
+
         newlySkipped = computeSkippedPersonalNumbers(
           baselineLast,
           values.personalNumber
         )
+
         if (newlySkipped.length > 0) {
           payload.generatedSkippedPersonalNumbers = newlySkipped
         }
       }
 
       if (isActualMode) {
-        if (values.actualStart) payload.actualStart = values.actualStart
-        if (!id) payload.status = "COMPLETED"
+        if (values.actualStart) {
+          payload.actualStart = values.actualStart
+        }
+
+        if (!id) {
+          payload.status = "COMPLETED"
+        }
       } else {
-        if (values.plannedStart) payload.plannedStart = values.plannedStart
-        if (!id) payload.status = "NEW"
+        if (values.plannedStart) {
+          payload.plannedStart = values.plannedStart
+        }
+
+        if (!id) {
+          payload.status = "NEW"
+        }
       }
 
       const url = id ? `/api/nastupy/${id}` : `/api/nastupy`
@@ -1266,28 +1913,40 @@ export function OnboardingFormUnified({
 
       const res = await fetch(url, {
         method,
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify(payload),
       })
 
       const json = await res.json().catch(() => null)
-      if (!res.ok) throw new Error(json?.message ?? "Operace se nezdařila.")
+
+      if (!res.ok) {
+        throw new Error(json?.message ?? "Operace se nezdařila.")
+      }
 
       if (isActualMode && newlySkipped.length > 0) {
         setSkippedNumbersState((prev) => {
           const set = new Set([...(prev ?? []), ...newlySkipped])
           const arr = Array.from(set)
+
           arr.sort((a, b) => {
             const na = parseInt(a, 10)
             const nb = parseInt(b, 10)
-            if (Number.isNaN(na) || Number.isNaN(nb)) return a.localeCompare(b)
+
+            if (Number.isNaN(na) || Number.isNaN(nb)) {
+              return a.localeCompare(b)
+            }
+
             return na - nb
           })
+
           return arr
         })
       }
 
       const fullName = `${values.name} ${values.surname}`
+
       setSuccessModal({
         open: true,
         mode: id ? "edit" : "create",
@@ -1437,6 +2096,7 @@ export function OnboardingFormUnified({
                           open={positionPickerOpen}
                           onOpenChange={(open) => {
                             setPositionPickerOpen(open)
+                            if (open) void loadFallbackPositions()
                             if (!open) setSearchQuery("")
                           }}
                         >
@@ -1487,7 +2147,10 @@ export function OnboardingFormUnified({
                                 }}
                               />
                               <CommandEmpty>
-                                Žádná pozice nenalezena
+                                {positionsLoadingFallback
+                                  ? "Načítám pozice…"
+                                  : positionsFallbackError ||
+                                    "Žádná pozice nenalezena"}
                               </CommandEmpty>
                               <CommandList className="max-h-[min(60vh,420px)] overflow-y-auto overscroll-contain">
                                 <CommandGroup>
@@ -1647,6 +2310,33 @@ export function OnboardingFormUnified({
                               shouldValidate: true,
                             }
                           )
+                          form.setValue(
+                            "supervisorPosition",
+                            employee.positionName ?? "",
+                            {
+                              shouldDirty: true,
+                              shouldTouch: true,
+                              shouldValidate: false,
+                            }
+                          )
+                          form.setValue(
+                            "supervisorDepartment",
+                            employee.department ?? "",
+                            {
+                              shouldDirty: true,
+                              shouldTouch: true,
+                              shouldValidate: false,
+                            }
+                          )
+                          form.setValue(
+                            "supervisorUnitName",
+                            employee.unitName ?? "",
+                            {
+                              shouldDirty: true,
+                              shouldTouch: true,
+                              shouldValidate: false,
+                            }
+                          )
                         }}
                       />
                     </FormControl>
@@ -1669,6 +2359,18 @@ export function OnboardingFormUnified({
                             className={`${focusRing} leading-normal`}
                             onChange={(e) => {
                               setSupervisorManuallyChanged(true)
+                              form.setValue("supervisorPosition", "", {
+                                shouldDirty: true,
+                                shouldValidate: false,
+                              })
+                              form.setValue("supervisorDepartment", "", {
+                                shouldDirty: true,
+                                shouldValidate: false,
+                              })
+                              form.setValue("supervisorUnitName", "", {
+                                shouldDirty: true,
+                                shouldValidate: false,
+                              })
                               field.onChange(e)
                             }}
                           />
@@ -1692,6 +2394,18 @@ export function OnboardingFormUnified({
                             className={focusRing}
                             onChange={(e) => {
                               setSupervisorManuallyChanged(true)
+                              form.setValue("supervisorPosition", "", {
+                                shouldDirty: true,
+                                shouldValidate: false,
+                              })
+                              form.setValue("supervisorDepartment", "", {
+                                shouldDirty: true,
+                                shouldValidate: false,
+                              })
+                              form.setValue("supervisorUnitName", "", {
+                                shouldDirty: true,
+                                shouldValidate: false,
+                              })
                               field.onChange(e)
                             }}
                           />
@@ -2162,7 +2876,9 @@ export function OnboardingFormUnified({
                       </FormControl>
                       <FormDescription>
                         {manualDates
-                          ? "Můžete upravit ručně."
+                          ? probationExtensionApplied
+                            ? "Datum je nastavené podle prodloužení zkušební doby."
+                            : "Můžete upravit ručně."
                           : form.getValues("positionName") &&
                               isManagerialPosition(
                                 form.getValues("positionName")
@@ -2170,10 +2886,241 @@ export function OnboardingFormUnified({
                             ? "Automatický výpočet (8 měsíců pro manažerské pozice)."
                             : "Automatický výpočet (4 měsíce pro standardní pozice)."}
                       </FormDescription>
+
+                      {hasProbationExtensionCalculation && (
+                        <div className="mt-3 rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                          <div className="font-medium text-foreground">
+                            Info k prodloužení zkušební doby
+                          </div>
+
+                          <div className="mt-2 space-y-2">
+                            {probationExtensions.map((extension, index) => (
+                              <div
+                                key={extension.id}
+                                className="flex items-start justify-between gap-3 rounded-md border bg-background px-3 py-2"
+                              >
+                                <div className="min-w-0">
+                                  <div className="font-medium text-foreground">
+                                    {index + 1}.{" "}
+                                    {
+                                      probationExtensionTypeLabels[
+                                        extension.type
+                                      ]
+                                    }
+                                  </div>
+                                  <div className="mt-0.5 text-muted-foreground">
+                                    {formatDateCz(extension.from)} –{" "}
+                                    {formatDateCz(extension.to)}, prodlouženo o{" "}
+                                    {formatDaysLabel(extension.days)}
+                                    {extension.note
+                                      ? ` · ${extension.note}`
+                                      : ""}
+                                  </div>
+                                </div>
+
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="size-7 shrink-0 text-muted-foreground hover:text-destructive"
+                                  onClick={() =>
+                                    removeProbationExtension(extension.id)
+                                  }
+                                  title="Vymazat tento řádek prodloužení a přepočítat konec zkušební doby"
+                                >
+                                  <X className="size-4" />
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="mt-2 rounded bg-background px-3 py-2">
+                            <div>
+                              Základní konec zkušební doby:{" "}
+                              {formatDateCz(baseProbationEnd)}
+                            </div>
+                            <div>
+                              Prodloužení celkem:{" "}
+                              {formatDaysLabel(totalExtensionDays)}
+                            </div>
+                            <div className="font-semibold text-foreground">
+                              Aktuální konec zkušební doby po prodloužení:{" "}
+                              {formatDateCz(extendedProbationEnd)}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       <FormMessage />
                     </FormItem>
                   )}
                 />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Calendar className="size-5" /> Prodloužení zkušební doby
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Alert>
+                <AlertDescription>
+                  Od 1. 6. 2025 se zkušební doba ze zákona prodlužuje o pracovní
+                  dny, kdy zaměstnanec během zkušební doby neodpracoval celou
+                  směnu z důvodu překážky v práci, dovolené nebo neomluvené
+                  absence. Výpočet níže počítá pondělí až pátek jako pracovní
+                  dny; u jiného rozvrhu směn datum raději zkontrolujte ručně.
+                </AlertDescription>
+              </Alert>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="space-y-2 md:col-span-2">
+                  <FormLabel>Typ nepřítomnosti</FormLabel>
+                  <select
+                    value={extensionType}
+                    onChange={(event) =>
+                      setExtensionType(
+                        event.target.value as ProbationExtensionType
+                      )
+                    }
+                    className={`flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ${focusRing}`}
+                  >
+                    {Object.entries(probationExtensionTypeLabels).map(
+                      ([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      )
+                    )}
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <FormLabel>Od</FormLabel>
+                  <Input
+                    type="date"
+                    value={extensionFrom}
+                    onChange={(event) => setExtensionFrom(event.target.value)}
+                    className={focusRing}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <FormLabel>Do</FormLabel>
+                  <Input
+                    type="date"
+                    value={extensionTo}
+                    onChange={(event) => setExtensionTo(event.target.value)}
+                    className={focusRing}
+                  />
+                </div>
+
+                <div className="space-y-2 md:col-span-2">
+                  <FormLabel>Poznámka</FormLabel>
+                  <Input
+                    value={extensionNote}
+                    onChange={(event) => setExtensionNote(event.target.value)}
+                    placeholder="Např. PN, dovolená, OČR…"
+                    className={focusRing}
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-md border bg-muted/30 p-3 text-sm">
+                <div className="font-medium text-foreground">
+                  Návrh prodloužení podle aktuálně zadané nepřítomnosti
+                </div>
+
+                {hasProbationExtensionDraft ? (
+                  <div className="mt-2 space-y-2 text-muted-foreground">
+                    <div className="space-y-1">
+                      <div>
+                        Typ: {probationExtensionTypeLabels[extensionType]}
+                      </div>
+                      <div>
+                        Rozsah: {formatDateCz(extensionFrom)} –{" "}
+                        {formatDateCz(extensionTo)}
+                      </div>
+                      <div>
+                        Prodloužení za tento řádek:{" "}
+                        {formatDaysLabel(extensionDraftDays)}
+                      </div>
+                      <div>
+                        Základní konec zkušební doby:{" "}
+                        {formatDateCz(baseProbationEnd)}
+                      </div>
+                      {hasProbationExtensionCalculation && (
+                        <div>
+                          Konec po již použitých prodlouženích:{" "}
+                          {formatDateCz(extendedProbationEnd)}
+                        </div>
+                      )}
+                      <div className="font-semibold text-foreground">
+                        Nový navržený konec po přidání této nepřítomnosti:{" "}
+                        {formatDateCz(proposedProbationEnd)}
+                      </div>
+                      <div>
+                        Prodloužení celkem po použití:{" "}
+                        {formatDaysLabel(proposedTotalExtensionDays)}
+                      </div>
+                    </div>
+
+                    {overlappingProbationExtension && (
+                      <Alert className="border-destructive/40 bg-destructive/5 text-destructive">
+                        <AlertDescription>
+                          {buildOverlapMessage(overlappingProbationExtension)}{" "}
+                          Stejné nebo překrývající se datum nelze použít pro
+                          další typ nepřítomnosti.
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                  </div>
+                ) : invalidExtensionRange ? (
+                  <Alert className="mt-2 border-destructive/40 bg-destructive/5 text-destructive">
+                    <AlertDescription>
+                      Datum „Do“ musí být stejné nebo pozdější než datum „Od“ a
+                      rozsah musí obsahovat alespoň jeden pracovní den.
+                    </AlertDescription>
+                  </Alert>
+                ) : (
+                  <p className="mt-2 text-muted-foreground">
+                    Zadejte typ nepřítomnosti a rozsah od–do. Potom použijte
+                    navržený konec zkušební doby. Nepřítomnost se propíše jako
+                    další očíslovaný řádek pod pole „Konec zkušební doby“.
+                  </p>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-sm text-muted-foreground">
+                  Počet pracovních dnů v aktuálně zadaném rozsahu:{" "}
+                  <span className="font-medium text-foreground">
+                    {extensionDraftDays}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={clearProbationExtensionDraft}
+                    disabled={!extensionFrom && !extensionTo && !extensionNote}
+                  >
+                    Vymazat aktuální zadání
+                  </Button>
+                  <Button
+                    type="button"
+                    className="bg-[#00847C] text-white hover:bg-[#0B6D73]"
+                    disabled={!canApplyProbationExtensionDraft}
+                    onClick={applyProbationExtensionEnd}
+                  >
+                    <Check className="mr-2 size-4" />
+                    Použít navržený konec zkušební doby
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>

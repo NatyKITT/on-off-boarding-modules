@@ -17,14 +17,20 @@ import {
 } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
-type Kind = "onboarding" | "offboarding"
+type Kind = "onboarding" | "offboarding" | "employee-change"
 
 type AuditRow = {
   id: number
   employeeId: number
   userId: string
   displayUser?: string
-  action: "UPDATE" | "DELETE" | "CREATE" | "RESTORED" | "STATUS_CHANGED"
+  action:
+    | "UPDATE"
+    | "DELETE"
+    | "CREATE"
+    | "RESTORED"
+    | "STATUS_CHANGED"
+    | string
   field: string | null
   oldValue: string | null
   newValue: string | null
@@ -64,6 +70,27 @@ const CZ_FIELD_LABEL: Record<string, string> = {
   noticePeriodEnd: "Konec výpovědní lhůty",
   noticeEnd: "Konec výpovědní lhůty",
   deleted_at: "Smazání",
+  type: "Typ změny",
+  audience: "Skupina",
+  effectiveDate: "Datum účinnosti",
+  oldTitleBefore: "Původní titul před",
+  newTitleBefore: "Nový titul před",
+  oldName: "Původní jméno",
+  newName: "Nové jméno",
+  oldSurname: "Původní příjmení",
+  newSurname: "Nové příjmení",
+  oldTitleAfter: "Původní titul za",
+  newTitleAfter: "Nový titul za",
+  oldDepartment: "Původní odbor",
+  newDepartment: "Nový odbor",
+  oldUnitName: "Původní oddělení",
+  newUnitName: "Nové oddělení",
+  oldPositionName: "Původní pozice",
+  newPositionName: "Nová pozice",
+  oldPositionNum: "Původní č. funkce",
+  newPositionNum: "Nové č. funkce",
+  appliedAt: "Propojeno",
+  emailSentAt: "Report odeslán",
   "*": "Záznam",
 }
 
@@ -73,46 +100,32 @@ const CZ_ACTION_LABEL: Record<string, string> = {
   DELETE: "Smazání",
   RESTORED: "Obnovení",
   STATUS_CHANGED: "Změna stavu",
+  OFFICIAL_CHANGE_APPLIED: "Propojení se záznamy",
 }
 
 function prettyValue(field: string | null | undefined, val: unknown): string {
   if (val == null || val === "") return "—"
-
   const f = field ?? ""
-
-  const isDateField =
-    f.includes("plannedStart") ||
-    f.includes("actualStart") ||
-    f.includes("plannedEnd") ||
-    f.includes("actualEnd") ||
-    f.includes("probationEnd") ||
-    f.includes("noticePeriodEnd")
-
+  const isDateField = [
+    "plannedStart",
+    "actualStart",
+    "plannedEnd",
+    "actualEnd",
+    "probationEnd",
+    "noticePeriodEnd",
+    "effectiveDate",
+    "appliedAt",
+    "emailSentAt",
+  ].some((k) => f.includes(k))
   if (isDateField) {
     try {
       const iso = typeof val === "string" ? val : String(val)
       const d = new Date(iso.length > 10 ? iso : `${iso}T00:00:00`)
-      if (!isNaN(d.getTime())) {
-        return format(d, "d.M.yyyy", { locale: cs })
-      }
+      if (!isNaN(d.getTime())) return format(d, "d.M.yyyy", { locale: cs })
     } catch {}
   }
-
-  if (
-    f === "positionNum" &&
-    (typeof val === "string" || typeof val === "number")
-  ) {
-    return String(val)
-  }
-
-  if (typeof val === "boolean") {
-    return val ? "Ano" : "Ne"
-  }
-
-  if (typeof val === "string") {
-    return val
-  }
-
+  if (typeof val === "boolean") return val ? "Ano" : "Ne"
+  if (typeof val === "string") return val
   return JSON.stringify(val)
 }
 
@@ -128,9 +141,17 @@ function getActionBadgeVariant(
       return "default"
     case "STATUS_CHANGED":
       return "secondary"
+    case "OFFICIAL_CHANGE_APPLIED":
+      return "secondary"
     default:
       return "outline"
   }
+}
+
+function getEndpoint(kind: Kind, id: number): string {
+  if (kind === "onboarding") return `/api/nastupy/${id}/history`
+  if (kind === "offboarding") return `/api/odchody/${id}/history`
+  return `/api/zmeny/${id}/history`
 }
 
 export function HistoryDialog({
@@ -148,34 +169,22 @@ export function HistoryDialog({
 
   useEffect(() => {
     if (!open) return
-
     const loadHistory = async () => {
       setLoading(true)
       try {
-        const endpoint = kind === "onboarding" ? "nastupy" : "odchody"
-        const res = await fetch(`/api/${endpoint}/${id}/history`, {
-          cache: "no-store",
-        })
-
+        const res = await fetch(getEndpoint(kind, id), { cache: "no-store" })
         if (!res.ok) {
-          console.error("History API error:", res.status, res.statusText)
           setRows([])
           return
         }
-
         const j = await res.json()
-        console.log("History API response:", j)
-
-        const raw: AuditRow[] = Array.isArray(j?.data) ? j.data : []
-        setRows(raw)
-      } catch (err) {
-        console.error("Error loading history:", err)
+        setRows(Array.isArray(j?.data) ? j.data : [])
+      } catch {
         setRows([])
       } finally {
         setLoading(false)
       }
     }
-
     void loadHistory()
   }, [open, kind, id])
 
@@ -183,12 +192,7 @@ export function HistoryDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {trigger ?? (
-          <Button
-            size="icon"
-            variant="ghost"
-            title="Historie změn"
-            aria-label="Historie změn"
-          >
+          <Button size="icon" variant="ghost" title="Historie změn">
             <HistoryIcon className="size-4" />
           </Button>
         )}
@@ -232,16 +236,13 @@ export function HistoryDialog({
                 return (
                   <div key={r.id} className="rounded-lg border bg-muted/30 p-4">
                     <div className="mb-3 flex items-start justify-between gap-3">
-                      <div className="flex flex-col gap-1.5">
-                        <Badge
-                          variant={getActionBadgeVariant(r.action)}
-                          className="w-fit"
-                        >
-                          {actionLabel}
-                          {r.action === "UPDATE" && `: ${fieldLabel}`}
-                        </Badge>
-                      </div>
-
+                      <Badge
+                        variant={getActionBadgeVariant(r.action)}
+                        className="w-fit"
+                      >
+                        {actionLabel}
+                        {r.action === "UPDATE" && `: ${fieldLabel}`}
+                      </Badge>
                       <div className="flex flex-col items-end gap-1 text-xs text-muted-foreground">
                         <div className="flex items-center gap-1.5">
                           <User className="size-3.5" />
@@ -258,7 +259,8 @@ export function HistoryDialog({
                       </div>
                     </div>
 
-                    {r.action === "UPDATE" && (
+                    {(r.action === "UPDATE" ||
+                      r.action === "STATUS_CHANGED") && (
                       <div className="grid gap-3 text-sm md:grid-cols-2">
                         <div className="rounded-md border bg-background/50 p-3">
                           <div className="mb-1.5 text-xs font-semibold uppercase text-muted-foreground">
@@ -279,46 +281,33 @@ export function HistoryDialog({
                       </div>
                     )}
 
-                    {(r.action === "CREATE" ||
-                      r.action === "DELETE" ||
-                      r.action === "RESTORED") && (
+                    {[
+                      "CREATE",
+                      "DELETE",
+                      "RESTORED",
+                      "OFFICIAL_CHANGE_APPLIED",
+                    ].includes(r.action) && (
                       <div className="text-sm text-muted-foreground">
                         {r.action === "CREATE" && <p>Záznam byl vytvořen.</p>}
                         {r.action === "DELETE" && <p>Záznam byl smazán.</p>}
                         {r.action === "RESTORED" && (
                           <p>Záznam byl obnoven ze smazaných.</p>
                         )}
-                        {r.oldValue && (
+                        {r.action === "OFFICIAL_CHANGE_APPLIED" && (
+                          <p>
+                            Změna byla propojena se záznamy nástupů / odchodů.
+                          </p>
+                        )}
+                        {r.newValue && (
                           <details className="mt-2">
                             <summary className="cursor-pointer text-xs hover:text-foreground">
                               Zobrazit detailní data
                             </summary>
                             <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-2 text-[11px]">
-                              {r.oldValue}
+                              {r.newValue}
                             </pre>
                           </details>
                         )}
-                      </div>
-                    )}
-
-                    {r.action === "STATUS_CHANGED" && (
-                      <div className="grid gap-3 text-sm md:grid-cols-2">
-                        <div className="rounded-md border bg-background/50 p-3">
-                          <div className="mb-1.5 text-xs font-semibold uppercase text-muted-foreground">
-                            Původní stav
-                          </div>
-                          <div className="break-words text-muted-foreground">
-                            {prettyValue("status", oldV)}
-                          </div>
-                        </div>
-                        <div className="rounded-md border border-primary/20 bg-primary/5 p-3">
-                          <div className="mb-1.5 text-xs font-semibold uppercase text-muted-foreground">
-                            Nový stav
-                          </div>
-                          <div className="break-words font-semibold">
-                            {prettyValue("status", newV)}
-                          </div>
-                        </div>
                       </div>
                     )}
                   </div>

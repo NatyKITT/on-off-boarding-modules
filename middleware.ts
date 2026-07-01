@@ -12,7 +12,9 @@ type SessionUser = {
   email?: string | null
 }
 
-type SessionWithUser = Session & { user: SessionUser }
+type SessionWithUser = Session & {
+  user: SessionUser
+}
 
 type MiddlewareRequest = {
   url: string
@@ -20,19 +22,41 @@ type MiddlewareRequest = {
   method: string
 }
 
+const DEFAULT_ALLOWED_EMPLOYEE_DOMAINS = ["praha6.cz", "kitt6.cz"] as const
+
+function getAllowedEmployeeDomains() {
+  const fromEnv = process.env.ALLOWED_EMPLOYEE_DOMAINS?.trim()
+
+  if (!fromEnv) {
+    return [...DEFAULT_ALLOWED_EMPLOYEE_DOMAINS]
+  }
+
+  return fromEnv
+    .split(/[;,]/)
+    .map((domain) => domain.trim().toLowerCase())
+    .filter(Boolean)
+}
+
 function getDomain(email?: string | null) {
   return (email ?? "").split("@")[1]?.toLowerCase() ?? ""
 }
 
-function isPraha6OrKitt6(email?: string | null) {
+function isAllowedEmployeeEmail(email?: string | null) {
   const domain = getDomain(email)
-  return domain === "praha6.cz" || domain === "kitt6.cz"
+
+  if (!domain) {
+    return false
+  }
+
+  return getAllowedEmployeeDomains().includes(domain)
 }
 
 function jsonError(status: number, message: string) {
-  return new NextResponse(JSON.stringify({ message }), {
+  return new NextResponse(JSON.stringify({ status: "error", message }), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+    },
   })
 }
 
@@ -43,6 +67,7 @@ function isMutatingMethod(method: string) {
 function redirectWithCurrentSearch(req: MiddlewareRequest, pathname: string) {
   const url = new URL(pathname, req.url)
   url.search = req.nextUrl.search
+
   return NextResponse.redirect(url)
 }
 
@@ -57,14 +82,20 @@ function redirectToSignIn(req: MiddlewareRequest) {
   return NextResponse.redirect(signInUrl)
 }
 
-export default auth((req) => {
-  const request = req as MiddlewareRequest
-  const session = req.auth as SessionWithUser | null
+function isAuthorizedCronRequest(req: Request) {
+  const secret = process.env.CRON_SECRET?.trim()
 
-  const path = req.nextUrl.pathname
-  const method = req.method
-  const isApi = path.startsWith("/api")
+  if (!secret) {
+    return false
+  }
 
+  const authHeader = req.headers.get("authorization")?.trim()
+  const cronSecretHeader = req.headers.get("x-cron-secret")?.trim()
+
+  return authHeader === `Bearer ${secret}` || cronSecretHeader === secret
+}
+
+function isBasicPublicPath(path: string) {
   const publicPaths = [
     "/signin",
     "/no-access",
@@ -74,7 +105,82 @@ export default auth((req) => {
     "/api/health",
   ]
 
-  if (publicPaths.some((p) => path === p || path.startsWith(`${p}/`))) {
+  return publicPaths.some((publicPath) => {
+    return path === publicPath || path.startsWith(`${publicPath}/`)
+  })
+}
+
+function isPublicEmploymentDocumentPath(path: string) {
+  const isInternalDocumentPath =
+    path === "/dokumenty/internal" || path.startsWith("/dokumenty/internal/")
+
+  return (
+    path === "/dokumenty" ||
+    (path.startsWith("/dokumenty/") && !isInternalDocumentPath) ||
+    path === "/api/dokumenty/public" ||
+    path.startsWith("/api/dokumenty/public/")
+  )
+}
+
+function isPublicProbationEvaluationPath(path: string) {
+  const isPublicPage =
+    path === "/vyhodnoceni-zkusebni-doby" ||
+    path.startsWith("/vyhodnoceni-zkusebni-doby/")
+
+  const isPublicApi =
+    path === "/api/nastupy/public" || path.startsWith("/api/nastupy/public/")
+
+  return isPublicPage || isPublicApi
+}
+
+function isPublicExitPath(path: string) {
+  return (
+    path === "/odchody-public" ||
+    path.startsWith("/odchody-public/") ||
+    path === "/api/odchody/public" ||
+    path.startsWith("/api/odchody/public/")
+  )
+}
+
+function isInternalExitPath(path: string) {
+  const isInternalExitPage = /^\/odchody\/\d+\/vystupni-list(\/.*)?$/.test(path)
+  const isInternalExitApi = /^\/api\/odchody\/\d+\/exit-checklist(\/.*)?$/.test(
+    path
+  )
+
+  return isInternalExitPage || isInternalExitApi
+}
+
+function isReadonlyAllowedMutatingApi(path: string) {
+  return (
+    path === "/api/user/vyresit" ||
+    path.startsWith("/api/odchody/public/") ||
+    path.startsWith("/api/nastupy/public/") ||
+    /^\/api\/odchody\/\d+\/exit-checklist(\/.*)?$/.test(path)
+  )
+}
+
+export default auth((req) => {
+  const request = req as MiddlewareRequest
+  const session = req.auth as SessionWithUser | null
+
+  const path = req.nextUrl.pathname
+  const method = req.method
+
+  const isApi = path.startsWith("/api")
+  const isMutatingApi = isApi && isMutatingMethod(method)
+
+  if (isBasicPublicPath(path) || isPublicEmploymentDocumentPath(path)) {
+    return NextResponse.next()
+  }
+
+  const isCronApi = path === "/api/cron" || path.startsWith("/api/cron/")
+
+  if (isCronApi) {
+    if (!isAuthorizedCronRequest(req)) {
+      return jsonError(401, "Unauthorized cron request.")
+    }
+
     return NextResponse.next()
   }
 
@@ -90,28 +196,30 @@ export default auth((req) => {
   const role = (session.user.role ?? "USER") as Role
   const canAccessApp = Boolean(session.user.canAccessApp)
 
-  const isPublicExitPage = path.startsWith("/odchody-public/")
-  const isPublicExitApi = path.startsWith("/api/odchody/public/")
-
-  if (isPublicExitPage || isPublicExitApi) {
-    if (!isPraha6OrKitt6(email)) {
+  if (isPublicProbationEvaluationPath(path)) {
+    if (!isAllowedEmployeeEmail(email)) {
       return isApi
-        ? jsonError(403, "Přístup pouze pro zaměstnance ÚMČ Praha 6.")
+        ? jsonError(403, "Přístup pouze pro povolené firemní účty.")
         : redirectWithCurrentSearch(request, "/no-access")
     }
 
     return NextResponse.next()
   }
 
-  const isInternalExitPage = /^\/odchody\/\d+\/vystupni-list(\/.*)?$/.test(path)
-  const isInternalExitApi = /^\/api\/odchody\/\d+\/exit-checklist(\/.*)?$/.test(
-    path
-  )
-
-  if (isInternalExitPage || isInternalExitApi) {
-    if (!isPraha6OrKitt6(email)) {
+  if (isPublicExitPath(path)) {
+    if (!isAllowedEmployeeEmail(email)) {
       return isApi
-        ? jsonError(403, "Přístup pouze pro zaměstnance ÚMČ Praha 6.")
+        ? jsonError(403, "Přístup pouze pro povolené firemní účty.")
+        : redirectWithCurrentSearch(request, "/no-access")
+    }
+
+    return NextResponse.next()
+  }
+
+  if (isInternalExitPath(path)) {
+    if (!isAllowedEmployeeEmail(email)) {
+      return isApi
+        ? jsonError(403, "Přístup pouze pro povolené firemní účty.")
         : redirectWithCurrentSearch(request, "/no-access")
     }
 
@@ -119,6 +227,16 @@ export default auth((req) => {
       return isApi
         ? jsonError(403, "K internímu výstupnímu listu nemáte přístup.")
         : redirectWithCurrentSearch(request, "/no-access")
+    }
+
+    return NextResponse.next()
+  }
+
+  if (path.startsWith("/admin") || path.startsWith("/api/admin")) {
+    if (role !== "ADMIN") {
+      return isApi
+        ? jsonError(403, "Přístup pouze pro administrátory.")
+        : redirectWithCurrentSearch(request, "/prehled")
     }
 
     return NextResponse.next()
@@ -136,21 +254,11 @@ export default auth((req) => {
       : redirectWithCurrentSearch(request, "/no-access")
   }
 
-  if (path.startsWith("/admin") || path.startsWith("/api/admin")) {
-    if (role !== "ADMIN") {
-      return isApi
-        ? jsonError(403, "Přístup pouze pro administrátory.")
-        : redirectWithCurrentSearch(request, "/prehled")
-    }
-
-    return NextResponse.next()
-  }
-
-  if (role === "READONLY" && isApi && isMutatingMethod(method)) {
-    if (isPublicExitApi || isInternalExitApi) {
-      return NextResponse.next()
-    }
-
+  if (
+    role === "READONLY" &&
+    isMutatingApi &&
+    !isReadonlyAllowedMutatingApi(path)
+  ) {
     return jsonError(
       403,
       "Máte pouze režim pro čtení. Pro úpravy kontaktujte administrátora."
@@ -162,6 +270,6 @@ export default auth((req) => {
 
 export const config = {
   matcher: [
-    "/((?!api/auth|_next/static|_next/image|favicon.ico|assets|.*\\.(png|jpg|jpeg|gif|svg|ico|webp)).*)",
+    "/((?!api/auth|_next/static|_next/image|favicon.ico|assets|.*\\.(png|jpg|jpeg|gif|svg|ico|webp|pdf)).*)",
   ],
 }

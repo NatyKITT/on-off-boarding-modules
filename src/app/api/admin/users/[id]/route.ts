@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { Role } from "@prisma/client"
 
 import { prisma } from "@/lib/db"
+import { canManageUsers } from "@/lib/rbac"
 import { getCurrentUser } from "@/lib/session"
 
 export const runtime = "nodejs"
@@ -10,17 +11,72 @@ export const dynamic = "force-dynamic"
 function parseEnvEmails(envValue: string | undefined): string[] {
   return (envValue ?? "")
     .split(/[;,]/)
-    .map((v) => v.trim().toLowerCase())
+    .map((value) => value.trim().toLowerCase())
     .filter(Boolean)
 }
 
-const getProtectedEmails = (): ReadonlySet<string> =>
-  new Set([
+function getProtectedEmails(): ReadonlySet<string> {
+  return new Set([
     ...parseEnvEmails(process.env.SUPER_ADMIN_EMAILS),
     ...parseEnvEmails(process.env.HR_EMAILS),
     ...parseEnvEmails(process.env.IT_EMAILS),
     ...parseEnvEmails(process.env.READONLY_EMAILS),
   ])
+}
+
+function isValidRole(value: unknown): value is Role {
+  return (
+    typeof value === "string" && Object.values(Role).includes(value as Role)
+  )
+}
+
+async function getUserRelationCounts(userId: string) {
+  const [
+    onboardings,
+    mentoredOnboardings,
+    offboardings,
+    lockedExitChecklists,
+    exitChecklistAssets,
+    probationEvaluations,
+  ] = await Promise.all([
+    prisma.employeeOnboarding.count({
+      where: { userId },
+    }),
+    prisma.employeeOnboarding.count({
+      where: { mentorId: userId },
+    }),
+    prisma.employeeOffboarding.count({
+      where: { userId },
+    }),
+    prisma.exitChecklist.count({
+      where: { lockedById: userId },
+    }),
+    prisma.exitChecklistAsset.count({
+      where: { createdById: userId },
+    }),
+    prisma.probationEvaluation.count({
+      where: { evaluatedById: userId },
+    }),
+  ])
+
+  const total =
+    onboardings +
+    mentoredOnboardings +
+    offboardings +
+    lockedExitChecklists +
+    exitChecklistAssets +
+    probationEvaluations
+
+  return {
+    total,
+    onboardings,
+    mentoredOnboardings,
+    offboardings,
+    lockedExitChecklists,
+    exitChecklistAssets,
+    probationEvaluations,
+  }
+}
 
 export async function PATCH(
   req: NextRequest,
@@ -29,20 +85,27 @@ export async function PATCH(
   try {
     const currentUser = await getCurrentUser()
 
-    if (!currentUser || currentUser.role !== "ADMIN") {
+    if (!currentUser || !canManageUsers(currentUser.role)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
     }
 
-    const body = await req.json()
-    const { role: newRole } = body
+    const body = (await req.json().catch(() => null)) as {
+      role?: unknown
+    } | null
 
-    if (!newRole || !Object.values(Role).includes(newRole)) {
+    const newRole = body?.role
+
+    if (!isValidRole(newRole)) {
       return NextResponse.json({ error: "Neplatná role." }, { status: 400 })
     }
 
     const targetUser = await prisma.user.findUnique({
       where: { id: params.id },
-      select: { email: true },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+      },
     })
 
     if (!targetUser) {
@@ -53,17 +116,29 @@ export async function PATCH(
     }
 
     const protectedEmails = getProtectedEmails()
-    if (protectedEmails.has(targetUser.email.toLowerCase())) {
+    const targetEmail = targetUser.email.trim().toLowerCase()
+
+    if (protectedEmails.has(targetEmail)) {
       return NextResponse.json(
         {
           error:
-            "Role tohoto uživatele je definována v ENV a nelze ji změnit přes toto rozhraní.",
+            "Role tohoto uživatele je definována v ENV a nelze ji změnit přes administraci.",
         },
         { status: 403 }
       )
     }
 
-    const canAccessApp = newRole !== "USER"
+    if (targetUser.id === currentUser.id && newRole !== Role.ADMIN) {
+      return NextResponse.json(
+        {
+          error:
+            "Nemůžete sama sobě odebrat administrátorskou roli přes toto rozhraní.",
+        },
+        { status: 409 }
+      )
+    }
+
+    const canAccessApp = newRole !== Role.USER
 
     const updatedUser = await prisma.user.update({
       where: { id: params.id },
@@ -73,15 +148,126 @@ export async function PATCH(
       },
       select: {
         id: true,
+        name: true,
+        surname: true,
         email: true,
         role: true,
         canAccessApp: true,
+        createdAt: true,
       },
     })
 
-    return NextResponse.json({ success: true, user: updatedUser })
+    if (newRole === Role.USER) {
+      await prisma.session.deleteMany({
+        where: { userId: targetUser.id },
+      })
+    }
+
+    return NextResponse.json({
+      success: true,
+      user: updatedUser,
+    })
   } catch (error) {
     console.error("Error updating user role:", error)
+
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    )
+  }
+}
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const currentUser = await getCurrentUser()
+
+    if (!currentUser || !canManageUsers(currentUser.role)) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
+    }
+
+    const targetUser = await prisma.user.findUnique({
+      where: { id: params.id },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+      },
+    })
+
+    if (!targetUser) {
+      return NextResponse.json(
+        { error: "Uživatel nebyl nalezen." },
+        { status: 404 }
+      )
+    }
+
+    const protectedEmails = getProtectedEmails()
+    const targetEmail = targetUser.email.trim().toLowerCase()
+
+    if (protectedEmails.has(targetEmail)) {
+      return NextResponse.json(
+        {
+          error:
+            "Tento uživatel je definovaný v ENV a nelze ho odebrat přes administraci.",
+        },
+        { status: 403 }
+      )
+    }
+
+    if (targetUser.id === currentUser.id) {
+      return NextResponse.json(
+        {
+          error: "Nemůžete odebrat sama sebe.",
+        },
+        { status: 409 }
+      )
+    }
+
+    const relationCounts = await getUserRelationCounts(targetUser.id)
+
+    if (relationCounts.total > 0) {
+      await prisma.$transaction([
+        prisma.session.deleteMany({
+          where: { userId: targetUser.id },
+        }),
+        prisma.user.update({
+          where: { id: targetUser.id },
+          data: {
+            role: Role.USER,
+            canAccessApp: false,
+          },
+        }),
+      ])
+
+      return NextResponse.json({
+        success: true,
+        action: "revoked",
+        message:
+          "Uživatel má vazby v systému, proto nebyl fyzicky smazán. Byl mu odebrán přístup do aplikace.",
+        relationCounts,
+      })
+    }
+
+    await prisma.$transaction([
+      prisma.session.deleteMany({
+        where: { userId: targetUser.id },
+      }),
+      prisma.user.delete({
+        where: { id: targetUser.id },
+      }),
+    ])
+
+    return NextResponse.json({
+      success: true,
+      action: "deleted",
+      message: "Uživatel byl odstraněn.",
+    })
+  } catch (error) {
+    console.error("Error removing user:", error)
+
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
