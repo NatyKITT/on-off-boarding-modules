@@ -40,6 +40,7 @@ jobs:
 
           HTTP_STATUS="$(
             curl -sS \
+              -X POST \
               -o "$RESPONSE_FILE" \
               -w "%{http_code}" \
               "$ENDPOINT" \
