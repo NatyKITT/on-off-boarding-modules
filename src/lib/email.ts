@@ -1279,6 +1279,8 @@ export type SendProbationEvaluationInviteEmailParams = {
   evaluationLink: string
   formType?: string | null
   sentByName?: string | null
+  subject?: string | null
+  intro?: string | null
 }
 
 export type SendProbationEvaluationReminderEmailParams =
@@ -1619,10 +1621,14 @@ export async function sendProbationEvaluationInviteEmail(
 ): Promise<void> {
   await sendProbationNotificationEmail({
     to: [args.to],
-    subject: `Vyhodnocení zkušební doby – ${args.employeeName}`,
-    intro: `${
-      args.sentByName ? `${args.sentByName} vám zaslal(a)` : "Zasíláme vám"
-    } odkaz k vyplnění formuláře k vyhodnocení zkušební doby.`,
+    subject:
+      args.subject?.trim() ||
+      `Vyhodnocení zkušební doby – ${args.employeeName}`,
+    intro:
+      args.intro?.trim() ||
+      `${
+        args.sentByName ? `${args.sentByName} vám zaslal(a)` : "Zasíláme vám"
+      } odkaz k vyplnění formuláře k vyhodnocení zkušební doby.`,
     employeeName: args.employeeName,
     employeePosition: args.employeePosition,
     employeeDepartment: args.employeeDepartment,
@@ -1640,10 +1646,14 @@ export async function sendProbationEvaluationReminderEmail(
 ): Promise<void> {
   await sendProbationNotificationEmail({
     to: [args.to],
-    subject: `Připomínka: vyhodnocení zkušební doby – ${args.employeeName}`,
-    intro: `${
-      args.sentByName ? `${args.sentByName} připomíná` : "Připomínáme"
-    }, že formulář k vyhodnocení zkušební doby zatím není finálně vyplněný.`,
+    subject:
+      args.subject?.trim() ||
+      `Připomínka: vyhodnocení zkušební doby – ${args.employeeName}`,
+    intro:
+      args.intro?.trim() ||
+      `${
+        args.sentByName ? `${args.sentByName} připomíná` : "Připomínáme"
+      }, že formulář k vyhodnocení zkušební doby zatím není finálně vyplněný.`,
     employeeName: args.employeeName,
     employeePosition: args.employeePosition,
     employeeDepartment: args.employeeDepartment,
@@ -1667,11 +1677,16 @@ export async function sendProbationHrReminderEmail(args: {
   supervisorEmail?: string | null
   evaluationLink?: string | null
   formType?: string | null
+  subject?: string | null
+  intro?: string | null
 }) {
   await sendProbationNotificationEmail({
     to: args.to,
-    subject: `HR připomínka: nevyplněné vyhodnocení zkušební doby – ${args.employeeName}`,
+    subject:
+      args.subject?.trim() ||
+      `HR připomínka: nevyplněné vyhodnocení zkušební doby – ${args.employeeName}`,
     intro:
+      args.intro?.trim() ||
       "Formulář k vyhodnocení zkušební doby zatím není finálně vyplněný. Prosíme o kontrolu stavu a případné kontaktování vedoucího.",
     employeeName: args.employeeName,
     employeePosition: args.employeePosition,
@@ -1971,6 +1986,8 @@ export async function sendQueuedProbationEmail(args: {
       evaluationLink: payload.evaluationLink || "",
       formType: payload.formType,
       sentByName: payload.sentByName,
+      subject: payload.subject,
+      intro: payload.intro,
     })
 
     return
@@ -1994,6 +2011,8 @@ export async function sendQueuedProbationEmail(args: {
       evaluationLink: payload.evaluationLink || "",
       formType: payload.formType,
       sentByName: payload.sentByName,
+      subject: payload.subject,
+      intro: payload.intro,
     })
 
     return
@@ -2032,6 +2051,8 @@ export async function sendQueuedProbationEmail(args: {
       supervisorEmail: payload.supervisorEmail,
       evaluationLink: payload.evaluationLink,
       formType: payload.formType,
+      subject: payload.subject,
+      intro: payload.intro,
     })
 
     return

@@ -2,105 +2,82 @@ name: Mail Worker
 
 on:
   schedule:
-    # GitHub cron běží v UTC. Tohle je 08:10–19:10 v Praze během letního času.
+    # GitHub Actions cron runs in UTC.
+    # 10 6-17 * * * = every day at minute 10 between 06:00 and 17:00 UTC.
     - cron: "10 6-17 * * *"
   workflow_dispatch:
-    inputs:
-      environment:
-        description: "GitHub Environment, ve kterém jsou secrets APP_URL a CRON_SECRET"
-        type: choice
-        required: true
-        default: production
-        options:
-          - dev
-          - production
-
-permissions:
-  contents: read
-
-concurrency:
-  group: mail-worker-${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'production' }}
-  cancel-in-progress: false
 
 jobs:
-  mail-worker:
-    name: Process email queue
+  process-mail-queue:
+    name: Process mail queue
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'production' }}
-
-    env:
-      APP_URL: ${{ secrets.APP_URL }}
-      CRON_SECRET: ${{ secrets.CRON_SECRET }}
 
     steps:
       - name: Process mail queue
-        id: mail
         shell: bash
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           set -euo pipefail
 
           if [ -z "${APP_URL:-}" ]; then
-            echo "::error::Missing GitHub Environment secret APP_URL"
+            echo "Error: APP_URL secret is not configured."
             exit 1
           fi
 
           if [ -z "${CRON_SECRET:-}" ]; then
-            echo "::error::Missing GitHub Environment secret CRON_SECRET"
+            echo "Error: CRON_SECRET secret is not configured."
             exit 1
           fi
 
           APP_URL="${APP_URL%/}"
+          ENDPOINT="$APP_URL/api/cron/mail-worker"
 
           echo "Starting mail worker for $APP_URL ..."
 
-          response=$(curl -sS --retry 2 --retry-delay 5 --retry-all-errors --max-time 90 -w "\n%{http_code}" -X POST \
-            -H "Authorization: Bearer ${CRON_SECRET}" \
-            -H "Content-Type: application/json" \
-            "$APP_URL/api/cron/mail-worker")
+          RESPONSE_FILE="$(mktemp)"
 
-          http_code=$(echo "$response" | tail -n1)
-          body=$(echo "$response" | sed '$d')
+          HTTP_STATUS="$(
+            curl -sS \
+              -o "$RESPONSE_FILE" \
+              -w "%{http_code}" \
+              "$ENDPOINT" \
+              -H "Authorization: Bearer $CRON_SECRET"
+          )"
 
-          echo "HTTP Status: $http_code"
+          RESPONSE="$(cat "$RESPONSE_FILE")"
+
+          echo "HTTP Status: $HTTP_STATUS"
           echo "Response:"
-          echo "$body" | jq '.' 2>/dev/null || echo "$body"
+          echo "$RESPONSE"
 
-          if [ "$http_code" != "200" ]; then
-            echo "::error::Mail worker returned status $http_code"
-            echo "::error::Response: $body"
+          if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
+            echo "Error: Mail worker request failed with HTTP status $HTTP_STATUS."
             exit 1
           fi
 
-          status=$(echo "$body" | jq -r '.status // "unknown"' 2>/dev/null || echo "unknown")
-
-          if [ "$status" != "success" ]; then
-            echo "::error::Mail worker returned non-success status: $status"
-            echo "::error::Response: $body"
+          if ! echo "$RESPONSE" | jq empty >/dev/null 2>&1; then
+            echo "Error: Mail worker returned invalid JSON response."
             exit 1
           fi
 
-          processed=$(echo "$body" | jq -r '.processed // 0' 2>/dev/null || echo "0")
-          succeeded=$(echo "$body" | jq -r '.succeeded // 0' 2>/dev/null || echo "0")
-          failed=$(echo "$body" | jq -r '.failed // 0' 2>/dev/null || echo "0")
+          PROCESSED="$(echo "$RESPONSE" | jq -r '.processed // 0')"
+          SUCCEEDED="$(echo "$RESPONSE" | jq -r '.succeeded // 0')"
+          FAILED="$(echo "$RESPONSE" | jq -r '.failed // 0')"
 
-          if [ "$failed" != "0" ]; then
-            echo "::warning::Some emails failed: $failed"
+          echo "Processed: $PROCESSED"
+          echo "Succeeded: $SUCCEEDED"
+          echo "Failed: $FAILED"
+
+          if ! [[ "$FAILED" =~ ^[0-9]+$ ]]; then
+            echo "Error: Mail worker returned invalid failed count: $FAILED"
+            exit 1
           fi
 
-          echo "processed=$processed" >> "$GITHUB_OUTPUT"
-          echo "succeeded=$succeeded" >> "$GITHUB_OUTPUT"
-          echo "failed=$failed" >> "$GITHUB_OUTPUT"
+          if [ "$FAILED" -gt 0 ]; then
+            echo "Error: Mail worker finished with failed jobs: $FAILED"
+            exit 1
+          fi
 
-      - name: Job summary
-        if: always()
-        shell: bash
-        run: |
-          echo "## Mail Worker Results" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'production' }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Status: ${{ steps.mail.outcome }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Processed: ${{ steps.mail.outputs.processed }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Succeeded: ${{ steps.mail.outputs.succeeded }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Failed: ${{ steps.mail.outputs.failed }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Run time: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_STEP_SUMMARY"
+          echo "Mail worker finished successfully."

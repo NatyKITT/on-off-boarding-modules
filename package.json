@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev -p 3001",
-    "build": "node ./scripts/build-info.mjs && next build",
+    "build": "prisma generate && node ./scripts/build-info.mjs && next build",
     "start": "next start -p 3001",
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
@@ -25,8 +25,7 @@
     "lint": "next lint",
     "lint:fix": "next lint --fix",
     "email:process": "curl -X GET http://localhost:3001/api/cron/mail-worker",
-    "email:stats": "curl -X PUT http://localhost:3001/api/cron/mail-worker",
-    "probation:check": "curl -X POST http://localhost:3001/api/cron/probation-check"
+    "probation:check": "curl -X GET http://localhost:3001/api/cron/probation-notifications"
   },
   "dependencies": {
     "@auth/core": "0.30.0",
@@ -142,6 +141,13 @@
     "remark-gfm": "^4.0.0",
     "tailwindcss": "^3.4.3",
     "typescript": "^5.4.5"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "prisma",
+      "@prisma/engines"
+    ]
   },
   "engines": {
     "node": ">=20.10.0"

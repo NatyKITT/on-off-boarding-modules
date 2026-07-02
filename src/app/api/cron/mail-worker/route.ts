@@ -14,7 +14,7 @@ function getBatchSize() {
   return Number.isFinite(value) && value > 0 ? Math.min(value, 100) : 20
 }
 
-export async function POST(req: NextRequest) {
+async function runMailWorker(req: NextRequest) {
   const unauthorized = requireCronAuthorization(req)
 
   if (unauthorized) {
@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
       failed: result.failed,
     })
   } catch (error) {
-    console.error("[CRON MAIL WORKER]", error)
+    console.error("[CRON_MAIL_WORKER_ERROR]", error)
 
     return NextResponse.json(
       {
@@ -45,4 +45,12 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     )
   }
+}
+
+export async function GET(req: NextRequest) {
+  return runMailWorker(req)
+}
+
+export async function POST(req: NextRequest) {
+  return runMailWorker(req)
 }

@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
 export const revalidate = 0
 
-export async function POST(req: NextRequest) {
+export async function GET(req: NextRequest) {
   const unauthorized = requireCronAuthorization(req)
 
   if (unauthorized) {
@@ -19,4 +19,8 @@ export async function POST(req: NextRequest) {
     message:
       "Použijte /api/cron/probation-notifications pro vytvoření jobů a /api/cron/mail-worker pro odeslání fronty.",
   })
+}
+
+export async function POST(req: NextRequest) {
+  return GET(req)
 }
