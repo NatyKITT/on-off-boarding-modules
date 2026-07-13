@@ -136,7 +136,9 @@ async function getLinkedOnboardingForOffboarding(
 
   const linkedOnboardings = await prisma.employeeOnboarding.findMany({
     where: {
-      personalNumber: normalizedPersonalNumber,
+      personalNumber: {
+        not: null,
+      },
       deletedAt: null,
     },
     select: {
@@ -149,8 +151,14 @@ async function getLinkedOnboardingForOffboarding(
     },
   })
 
+  const matchingOnboardings = linkedOnboardings.filter(
+    (onboarding) =>
+      normalizePersonalNumber(onboarding.personalNumber) ===
+      normalizedPersonalNumber
+  )
+
   return buildLinkedOnboardingInfo({
-    onboarding: pickMostRelevantOnboarding(linkedOnboardings),
+    onboarding: pickMostRelevantOnboarding(matchingOnboardings),
     exitDate,
   })
 }
@@ -164,7 +172,9 @@ async function getLinkedChangesForPersonalNumber(
 
   const changes = await prisma.employeeChange.findMany({
     where: {
-      personalNumber: normalizedPersonalNumber,
+      personalNumber: {
+        not: null,
+      },
       deletedAt: null,
       status: {
         not: "CANCELLED",
@@ -173,7 +183,13 @@ async function getLinkedChangesForPersonalNumber(
     orderBy: [{ effectiveDate: "desc" }, { id: "desc" }],
   })
 
-  return buildLinkedEmployeeChangeInfos(changes)
+  return buildLinkedEmployeeChangeInfos(
+    changes.filter(
+      (change) =>
+        normalizePersonalNumber(change.personalNumber) ===
+        normalizedPersonalNumber
+    )
+  )
 }
 
 export async function GET() {
@@ -208,7 +224,7 @@ export async function GET() {
         ? await prisma.employeeOnboarding.findMany({
             where: {
               personalNumber: {
-                in: personalNumbers,
+                not: null,
               },
               deletedAt: null,
             },
@@ -228,7 +244,7 @@ export async function GET() {
         ? await prisma.employeeChange.findMany({
             where: {
               personalNumber: {
-                in: personalNumbers,
+                not: null,
               },
               deletedAt: null,
               status: {
@@ -329,7 +345,7 @@ export async function POST(request: NextRequest) {
 
           userEmail: data.userEmail ?? null,
           userName: data.userName ?? null,
-          personalNumber: data.personalNumber ?? null,
+          personalNumber: normalizePersonalNumber(data.personalNumber) || null,
 
           notes: data.notes ?? null,
           status: "COMPLETED",

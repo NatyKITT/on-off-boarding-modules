@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/secrets/**)",
+      "Read(**/private/**)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/*.p12)",
+      "Read(**/*.pfx)",
+      "Write(.env)",
+      "Write(.env.*)",
+      "Write(prisma/migrations/**)",
+      "Write(package-lock.json)",
+      "Write(pnpm-lock.yaml)",
+      "Bash(rm -rf *)",
+      "Bash(git push*)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean*)",
+      "Bash(prisma migrate reset*)",
+      "Bash(npx prisma migrate reset*)",
+      "Bash(pnpm prisma migrate reset*)"
+    ],
+    "ask": [
+      "Write(prisma/schema.prisma)",
+      "Write(src/auth.ts)",
+      "Write(src/middleware.ts)",
+      "Write(src/lib/rbac.ts)",
+      "Bash(pnpm install*)",
+      "Bash(npm install*)",
+      "Bash(pnpm prisma migrate*)",
+      "Bash(npx prisma migrate*)"
+    ]
+  }
+}

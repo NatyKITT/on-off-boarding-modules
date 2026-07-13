@@ -21,6 +21,7 @@ import {
 import { Label } from "@/components/ui/label"
 
 type SendMode = "selected" | "all" | "unsentOnly"
+type ReportTypeFilter = "ALL" | "NAME" | "POSITION" | "NAME_AND_POSITION"
 
 type EmployeeChangeType = "POSITION" | "NAME" | "NAME_AND_POSITION"
 type EmployeeChangeStatus = "DRAFT" | "APPLIED" | "CANCELLED"
@@ -82,9 +83,15 @@ function changeTypeLabel(type: EmployeeChangeType) {
 }
 
 function statusLabel(status: EmployeeChangeStatus) {
-  if (status === "APPLIED") return "Aplikováno"
   if (status === "CANCELLED") return "Zrušeno"
-  return "Koncept"
+  return "Aktivní změna"
+}
+
+function reportTypeFilterLabel(type: ReportTypeFilter) {
+  if (type === "NAME") return "Jen jméno / titul"
+  if (type === "POSITION") return "Jen pozice / odbor"
+  if (type === "NAME_AND_POSITION") return "Jméno i pozice"
+  return "Všechny typy změn"
 }
 
 function formatDate(value?: string | null) {
@@ -102,11 +109,15 @@ function buildCompactSummary(record: ChangeReportRecord) {
 
   if (record.type === "NAME" || record.type === "NAME_AND_POSITION") {
     if (record.oldSurname !== record.newSurname && record.newSurname) {
-      parts.push(`Příjmení: ${record.oldSurname || "–"} → ${record.newSurname}`)
+      parts.push(
+        `Příjmení: původně ${record.oldSurname || "–"}, nově ${record.newSurname}`
+      )
     }
 
     if (record.oldName !== record.newName && record.newName) {
-      parts.push(`Jméno: ${record.oldName || "–"} → ${record.newName}`)
+      parts.push(
+        `Jméno: původně ${record.oldName || "–"}, nově ${record.newName}`
+      )
     }
 
     if (
@@ -114,13 +125,13 @@ function buildCompactSummary(record: ChangeReportRecord) {
       record.newTitleBefore
     ) {
       parts.push(
-        `Titul před: ${record.oldTitleBefore || "–"} → ${record.newTitleBefore}`
+        `Titul před: původně ${record.oldTitleBefore || "–"}, nově ${record.newTitleBefore}`
       )
     }
 
     if (record.oldTitleAfter !== record.newTitleAfter && record.newTitleAfter) {
       parts.push(
-        `Titul za: ${record.oldTitleAfter || "–"} → ${record.newTitleAfter}`
+        `Titul za: původně ${record.oldTitleAfter || "–"}, nově ${record.newTitleAfter}`
       )
     }
   }
@@ -128,7 +139,7 @@ function buildCompactSummary(record: ChangeReportRecord) {
   if (record.type === "POSITION" || record.type === "NAME_AND_POSITION") {
     if (record.oldPositionName !== record.newPositionName) {
       parts.push(
-        `Pozice: ${record.oldPositionName || "–"} → ${
+        `Pozice: původně ${record.oldPositionName || "–"}, nově ${
           record.newPositionName || "–"
         }`
       )
@@ -136,13 +147,13 @@ function buildCompactSummary(record: ChangeReportRecord) {
 
     if (record.oldDepartment !== record.newDepartment) {
       parts.push(
-        `Odbor: ${record.oldDepartment || "–"} → ${record.newDepartment || "–"}`
+        `Odbor: původně ${record.oldDepartment || "–"}, nově ${record.newDepartment || "–"}`
       )
     }
 
     if (record.oldPositionNum !== record.newPositionNum) {
       parts.push(
-        `Č. funkce: ${record.oldPositionNum || "–"} → ${
+        `Č. funkce: původně ${record.oldPositionNum || "–"}, nově ${
           record.newPositionNum || "–"
         }`
       )
@@ -168,8 +179,13 @@ export function EmployeeChangeReportModal({
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
   const [audience, setAudience] = useState<
-    "ONBOARDING_GROUP" | "ALL_EMPLOYEES"
+    "ONBOARDING_GROUP" | "ALL_EMPLOYEES" | "HR_GROUP"
   >("ONBOARDING_GROUP")
+  const [typeFilter, setTypeFilter] = useState<ReportTypeFilter>("ALL")
+  const [emailSubject, setEmailSubject] = useState("")
+  const [emailIntro, setEmailIntro] = useState(
+    "Dobrý den, posíláme přehled zaměstnaneckých změn za vybrané období."
+  )
 
   const [confirmState, setConfirmState] = useState<{
     open: boolean
@@ -192,6 +208,16 @@ export function EmployeeChangeReportModal({
     () => fmt(new Date(`${month}-01`), "LLLL yyyy", { locale: cs }),
     [month]
   )
+
+  useEffect(() => {
+    setEmailSubject(`Měsíční report zaměstnaneckých změn – ${monthLabel}`)
+  }, [monthLabel])
+
+  const filteredRecords = useMemo(() => {
+    if (typeFilter === "ALL") return records
+
+    return records.filter((record) => record.type === typeFilter)
+  }, [records, typeFilter])
 
   const loadRecords = useCallback(async () => {
     if (!open) return
@@ -234,28 +260,33 @@ export function EmployeeChangeReportModal({
   }, [loadRecords])
 
   const sentCount = useMemo(
-    () => records.filter((record) => record.wasSent).length,
-    [records]
+    () => filteredRecords.filter((record) => record.wasSent).length,
+    [filteredRecords]
   )
 
   const selectedSentCount = useMemo(
     () =>
-      records.filter(
+      filteredRecords.filter(
         (record) => selectedKeys.includes(rowKey(record)) && record.wasSent
       ).length,
-    [records, selectedKeys]
+    [filteredRecords, selectedKeys]
   )
 
   function toggleAll() {
-    if (records.length > 0 && selectedKeys.length === records.length) {
+    if (
+      filteredRecords.length > 0 &&
+      selectedKeys.length === filteredRecords.length
+    ) {
       setSelectedKeys([])
     } else {
-      setSelectedKeys(records.map(rowKey))
+      setSelectedKeys(filteredRecords.map(rowKey))
     }
   }
 
   function toggleUnsent() {
-    setSelectedKeys(records.filter((record) => !record.wasSent).map(rowKey))
+    setSelectedKeys(
+      filteredRecords.filter((record) => !record.wasSent).map(rowKey)
+    )
   }
 
   function toggleSingle(key: string) {
@@ -269,10 +300,12 @@ export function EmployeeChangeReportModal({
   async function handleSend(mode: SendMode, force = false) {
     const payloadRows =
       mode === "selected"
-        ? records.filter((record) => selectedKeys.includes(rowKey(record)))
+        ? filteredRecords.filter((record) =>
+            selectedKeys.includes(rowKey(record))
+          )
         : mode === "unsentOnly"
-          ? records.filter((record) => !record.wasSent)
-          : records
+          ? filteredRecords.filter((record) => !record.wasSent)
+          : filteredRecords
 
     if (payloadRows.length === 0) return
 
@@ -300,6 +333,9 @@ export function EmployeeChangeReportModal({
           month,
           mode,
           audience,
+          typeFilter,
+          subject: emailSubject.trim() || undefined,
+          intro: emailIntro.trim() || undefined,
           records: payloadRows.map((record) => ({
             id: record.id,
           })),
@@ -343,8 +379,8 @@ export function EmployeeChangeReportModal({
             onWheelCapture={(event) => event.stopPropagation()}
           >
             <div className="space-y-4 p-4 sm:px-6">
-              <div className="flex flex-wrap gap-3">
-                <div className="min-w-[180px] flex-1">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div>
                   <Label htmlFor="employee-change-report-month">Měsíc</Label>
                   <input
                     id="employee-change-report-month"
@@ -357,7 +393,7 @@ export function EmployeeChangeReportModal({
                     )}
                   />
                 </div>
-                <div className="min-w-[200px] flex-1">
+                <div>
                   <Label htmlFor="employee-change-report-audience">
                     Příjemci
                   </Label>
@@ -372,18 +408,81 @@ export function EmployeeChangeReportModal({
                       focusRing
                     )}
                   >
-                    <option value="ONBOARDING_GROUP">Skupina nástupů</option>
+                    <option value="ONBOARDING_GROUP">
+                      Vybraná skupina / nástupy
+                    </option>
                     <option value="ALL_EMPLOYEES">Všichni zaměstnanci</option>
+                    <option value="HR_GROUP">Jen HR / interní evidence</option>
                   </select>
                 </div>
+                <div>
+                  <Label htmlFor="employee-change-report-type">Typ změn</Label>
+                  <select
+                    id="employee-change-report-type"
+                    value={typeFilter}
+                    onChange={(event) =>
+                      setTypeFilter(event.target.value as ReportTypeFilter)
+                    }
+                    className={cn(
+                      "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm",
+                      focusRing
+                    )}
+                  >
+                    <option value="ALL">Všechny změny</option>
+                    <option value="NAME">Jen jméno / titul</option>
+                    <option value="POSITION">Jen pozice / odbor</option>
+                    <option value="NAME_AND_POSITION">Jméno i pozice</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div>
+                  <Label htmlFor="employee-change-report-subject">
+                    Předmět e-mailu
+                  </Label>
+                  <input
+                    id="employee-change-report-subject"
+                    value={emailSubject}
+                    onChange={(event) => setEmailSubject(event.target.value)}
+                    className={cn(
+                      "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm",
+                      focusRing
+                    )}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="employee-change-report-intro">
+                    Úvodní text e-mailu
+                  </Label>
+                  <textarea
+                    id="employee-change-report-intro"
+                    value={emailIntro}
+                    onChange={(event) => setEmailIntro(event.target.value)}
+                    rows={3}
+                    className={cn(
+                      "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm",
+                      focusRing
+                    )}
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
+                Odesílá se filtr:{" "}
+                <span className="font-medium text-foreground">
+                  {reportTypeFilterLabel(typeFilter)}
+                </span>
+                . E-mail se zařadí do fronty podobně jako reporty nástupů a
+                odchodů.
               </div>
 
               {sentCount > 0 && (
                 <Alert>
                   <AlertCircle className="size-4" />
                   <AlertDescription>
-                    {sentCount} z {records.length} změn už bylo v měsíčním
-                    reportu odesláno.
+                    {sentCount} z {filteredRecords.length} změn už bylo v
+                    měsíčním reportu odesláno.
                     {selectedSentCount > 0 && (
                       <span className="ml-1 font-semibold">
                         Vybráno {selectedSentCount} již odeslaných.
@@ -400,7 +499,8 @@ export function EmployeeChangeReportModal({
                   onClick={toggleAll}
                   disabled={loading}
                 >
-                  {selectedKeys.length === records.length && records.length > 0
+                  {selectedKeys.length === filteredRecords.length &&
+                  filteredRecords.length > 0
                     ? "Odznačit vše"
                     : "Vybrat vše"}
                 </Button>
@@ -415,7 +515,7 @@ export function EmployeeChangeReportModal({
                 </Button>
 
                 <div className="ml-auto text-sm text-muted-foreground">
-                  Vybráno: {selectedKeys.length} / {records.length}
+                  Vybráno: {selectedKeys.length} / {filteredRecords.length}
                 </div>
               </div>
 
@@ -431,7 +531,7 @@ export function EmployeeChangeReportModal({
                   <div className="p-8 text-center text-muted-foreground">
                     Načítám…
                   </div>
-                ) : records.length === 0 ? (
+                ) : filteredRecords.length === 0 ? (
                   <div className="p-8 text-center text-muted-foreground">
                     Žádné změny v tomto měsíci
                   </div>
@@ -442,8 +542,8 @@ export function EmployeeChangeReportModal({
                         <th className="w-10 p-2">
                           <Checkbox
                             checked={
-                              records.length > 0 &&
-                              selectedKeys.length === records.length
+                              filteredRecords.length > 0 &&
+                              selectedKeys.length === filteredRecords.length
                             }
                             onCheckedChange={toggleAll}
                             aria-label="Vybrat všechny změny"
@@ -463,7 +563,7 @@ export function EmployeeChangeReportModal({
                     </thead>
 
                     <tbody>
-                      {records.map((record) => {
+                      {filteredRecords.map((record) => {
                         const key = rowKey(record)
 
                         return (
@@ -512,8 +612,8 @@ export function EmployeeChangeReportModal({
                             <td className="p-2">
                               <Badge
                                 variant={
-                                  record.status === "APPLIED"
-                                    ? "default"
+                                  record.status === "CANCELLED"
+                                    ? "destructive"
                                     : "outline"
                                 }
                               >

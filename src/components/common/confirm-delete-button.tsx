@@ -29,9 +29,7 @@ type Props = {
   description?: string
   className?: string
   size?: "sm" | "default" | "icon"
-  /** NOVĚ: dovolí změnit vzhled (outline, destructive, …) */
   variant?: ButtonVariant
-  /** NOVĚ: text v tlačítku */
   label?: string
 }
 

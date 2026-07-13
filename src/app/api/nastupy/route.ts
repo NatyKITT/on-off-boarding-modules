@@ -464,7 +464,7 @@ export async function GET() {
         ? await prisma.employeeOffboarding.findMany({
             where: {
               personalNumber: {
-                in: personalNumbers,
+                not: null,
               },
               deletedAt: null,
             },
@@ -482,7 +482,7 @@ export async function GET() {
         ? await prisma.employeeChange.findMany({
             where: {
               personalNumber: {
-                in: personalNumbers,
+                not: null,
               },
               deletedAt: null,
               status: {
@@ -597,7 +597,8 @@ export async function POST(request: NextRequest) {
             notes: data.notes ?? null,
             userEmail: data.userEmail ?? null,
             userName: data.userName ?? null,
-            personalNumber: data.personalNumber ?? null,
+            personalNumber:
+              normalizePersonalNumber(data.personalNumber) || null,
             ...supervisorFields,
             ...mentorFields,
             mentorAssignedFrom,
@@ -605,7 +606,11 @@ export async function POST(request: NextRequest) {
           },
         })
 
-        await markPersonalNumbers(tx, generatedSkipped, data.personalNumber)
+        await markPersonalNumbers(
+          tx,
+          generatedSkipped,
+          normalizePersonalNumber(data.personalNumber) || null
+        )
 
         await tx.onboardingChangeLog.create({
           data: {

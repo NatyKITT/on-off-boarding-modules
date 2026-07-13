@@ -12,7 +12,7 @@ import {
   ChevronRight,
   Edit,
   History as HistoryIcon,
-  Link2,
+  Info,
   Search,
   Trash2,
   User,
@@ -179,8 +179,217 @@ function changed(a?: string | null, b?: string | null) {
   return (a ?? null) !== (b ?? null)
 }
 
-function val(value?: string | null) {
-  return value?.trim() ? value : "–"
+function hasMeaningfulValue(value?: string | null) {
+  return typeof value === "string" && value.trim().length > 0
+}
+
+function displayValue(value?: string | null) {
+  return hasMeaningfulValue(value) ? value!.trim() : "–"
+}
+
+function firstUseful(...values: Array<string | null | undefined>) {
+  for (const value of values) {
+    if (hasMeaningfulValue(value)) return value!.trim()
+  }
+
+  return ""
+}
+
+function finalValue(params: {
+  oldValue?: string | null
+  newValue?: string | null
+  fallback?: string | null
+}) {
+  const { oldValue, newValue, fallback } = params
+
+  if (changed(oldValue, newValue)) {
+    return hasMeaningfulValue(newValue) ? newValue!.trim() : ""
+  }
+
+  return firstUseful(newValue, oldValue, fallback)
+}
+
+function buildEmployeeName(row: ChangeRow) {
+  return fullName(row) || "–"
+}
+
+function buildNewEmployeeName(row: ChangeRow) {
+  const titleBefore = finalValue({
+    oldValue: row.oldTitleBefore,
+    newValue: row.newTitleBefore,
+    fallback: row.titleBefore,
+  })
+  const name = finalValue({
+    oldValue: row.oldName,
+    newValue: row.newName,
+    fallback: row.name,
+  })
+  const surname = finalValue({
+    oldValue: row.oldSurname,
+    newValue: row.newSurname,
+    fallback: row.surname,
+  })
+  const titleAfter = finalValue({
+    oldValue: row.oldTitleAfter,
+    newValue: row.newTitleAfter,
+    fallback: row.titleAfter,
+  })
+
+  return [titleBefore, name, surname, titleAfter]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function hasNameChange(row: ChangeRow) {
+  return row.type === "NAME" || row.type === "NAME_AND_POSITION"
+}
+
+function hasPositionChange(row: ChangeRow) {
+  return row.type === "POSITION" || row.type === "NAME_AND_POSITION"
+}
+
+function relatedRecordsCount(row: ChangeRow) {
+  return (
+    row.linkCandidateCount ??
+    (row.onboardingMatchesCount ?? 0) + (row.offboardingMatchesCount ?? 0)
+  )
+}
+
+function hasRelatedRecords(row: ChangeRow) {
+  return relatedRecordsCount(row) > 0 || Boolean(row.targets?.length)
+}
+
+function relationLabel(row: ChangeRow) {
+  const onboarding = row.onboardingMatchesCount ?? 0
+  const offboarding = row.offboardingMatchesCount ?? 0
+
+  if (onboarding > 0 && offboarding > 0) {
+    return "Propojeno v nástupech i odchodech"
+  }
+
+  if (onboarding > 0) return "Propojeno v nástupech"
+  if (offboarding > 0) return "Propojeno v odchodech"
+  if (row.targets?.length) return "Historická vazba"
+
+  return "Bez vazby"
+}
+
+function InfoLine({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string
+  value?: string | null
+  mono?: boolean
+}) {
+  return (
+    <div className="grid grid-cols-[78px_minmax(0,1fr)] gap-2 text-xs leading-snug">
+      <span className="text-muted-foreground">{label}</span>
+      <span
+        className={
+          mono ? "truncate font-mono font-medium" : "truncate font-medium"
+        }
+        title={displayValue(value)}
+      >
+        {displayValue(value)}
+      </span>
+    </div>
+  )
+}
+
+function EmployeeInfoCell({
+  row,
+  onOpenInfo,
+}: {
+  row: ChangeRow
+  onOpenInfo: () => void
+}) {
+  const hasRelated = hasRelatedRecords(row)
+
+  return (
+    <div className="space-y-2">
+      <div className="rounded-xl border bg-background p-3 shadow-sm">
+        <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Aktuální zařazení
+        </div>
+
+        <div className="space-y-1.5">
+          <InfoLine label="Č. funkce" value={row.oldPositionNum} mono />
+          <InfoLine label="Pozice" value={row.oldPositionName} />
+          <InfoLine label="Odbor" value={row.oldDepartment} />
+          <InfoLine label="Oddělení" value={row.oldUnitName} />
+        </div>
+      </div>
+
+      {hasRelated && (
+        <button
+          type="button"
+          onClick={onOpenInfo}
+          className="inline-flex max-w-full items-center rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800 transition hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300 dark:hover:bg-amber-900/30"
+          title="Zobrazit související záznamy"
+        >
+          <span className="truncate">{relationLabel(row)}</span>
+        </button>
+      )}
+    </div>
+  )
+}
+
+function NewChangeCell({ row }: { row: ChangeRow }) {
+  const showName = hasNameChange(row)
+  const showPosition = hasPositionChange(row)
+  const newName = buildNewEmployeeName(row)
+
+  const newPositionNum = finalValue({
+    oldValue: row.oldPositionNum,
+    newValue: row.newPositionNum,
+  })
+  const newPositionName = finalValue({
+    oldValue: row.oldPositionName,
+    newValue: row.newPositionName,
+  })
+  const newDepartment = finalValue({
+    oldValue: row.oldDepartment,
+    newValue: row.newDepartment,
+  })
+  const newUnitName = finalValue({
+    oldValue: row.oldUnitName,
+    newValue: row.newUnitName,
+  })
+
+  return (
+    <div className="rounded-xl border border-[#00847C]/25 bg-[#00847C]/5 p-3 shadow-sm">
+      <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[#00847C]">
+        Nově od {formatDate(row.effectiveDate)}
+      </div>
+
+      <div className="space-y-3">
+        {showName && (
+          <div>
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Jméno / titul
+            </div>
+            <div className="mt-0.5 break-words text-sm font-semibold text-[#00847C]">
+              {newName || "–"}
+            </div>
+          </div>
+        )}
+
+        {showPosition && (
+          <div className="space-y-1.5">
+            {showName && <div className="h-px bg-[#00847C]/15" />}
+            <InfoLine label="Č. funkce" value={newPositionNum} mono />
+            <InfoLine label="Pozice" value={newPositionName} />
+            <InfoLine label="Odbor" value={newDepartment} />
+            <InfoLine label="Oddělení" value={newUnitName} />
+          </div>
+        )}
+      </div>
+    </div>
+  )
 }
 
 function groupByYearAndMonth(rows: ChangeRow[]) {
@@ -214,22 +423,10 @@ function getLatestYearAndMonth(rows: ChangeRow[]) {
   }
 }
 
-function isLinked(row: ChangeRow) {
-  return row.status === "APPLIED" || Boolean(row.targets?.length)
-}
-
-function linkCandidateCount(row: ChangeRow) {
-  return row.linkCandidateCount ?? 0
-}
-
-function canShowLinkButton(row: ChangeRow) {
-  return row.status === "DRAFT" && !isLinked(row) && linkCandidateCount(row) > 0
-}
-
 function ResponsiveTableShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="w-full max-w-full overflow-x-auto overscroll-x-contain">
-      <div className="min-w-[1480px]">{children}</div>
+      <div className="min-w-[1370px]">{children}</div>
     </div>
   )
 }
@@ -487,41 +684,6 @@ export default function EmployeeChangesPage() {
     }
   }
 
-  async function handleLink() {
-    const row = linkDialog.row
-    if (!row) return
-
-    setLinkDialog((prev) => ({ ...prev, linking: true }))
-
-    try {
-      const res = await fetch(`/api/zmeny/${row.id}/aplikovat`, {
-        method: "POST",
-      })
-      const json = await res.json().catch(() => null)
-
-      if (!res.ok) {
-        throw new Error(json?.message ?? "Propojení se nezdařilo.")
-      }
-
-      setLinkDialog({
-        open: false,
-        row: null,
-        loading: false,
-        linking: false,
-        matches: [],
-      })
-
-      showSuccess("Změna propojena", "Změna byla propojena se záznamy.")
-      await reload()
-    } catch (err) {
-      showError(
-        "Chyba při propojování",
-        err instanceof Error ? err.message : "Propojení se nezdařilo."
-      )
-      setLinkDialog((prev) => ({ ...prev, linking: false }))
-    }
-  }
-
   async function handleDelete() {
     const row = deleteDialog.row
     if (!row) return
@@ -549,21 +711,19 @@ export default function EmployeeChangesPage() {
   }
 
   const ChangeTableRow = ({ row }: { row: ChangeRow }) => {
-    const linked = isLinked(row)
-    const canLink = canShowLinkButton(row)
-
-    const nameChange = row.type === "NAME" || row.type === "NAME_AND_POSITION"
-    const posChange =
-      row.type === "POSITION" || row.type === "NAME_AND_POSITION"
+    const hasRelated = hasRelatedRecords(row)
 
     return (
       <TableRow>
-        <TableCell className="w-[220px] min-w-[220px]">
+        <TableCell className="w-[210px] min-w-[210px] align-top">
           <div className="flex items-start gap-2">
             <User className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0">
-              <div className="truncate py-0.5 text-sm font-medium leading-normal">
-                {fullName(row)}
+              <div
+                className="truncate py-0.5 text-sm font-semibold leading-normal"
+                title={buildEmployeeName(row)}
+              >
+                {buildEmployeeName(row)}
               </div>
               {row.personalNumber && (
                 <div className="font-mono text-xs text-muted-foreground">
@@ -574,165 +734,47 @@ export default function EmployeeChangesPage() {
           </div>
         </TableCell>
 
-        <TableCell className="w-[165px] min-w-[165px]">
-          <Badge variant="outline" className="text-xs">
+        <TableCell className="w-[280px] min-w-[280px] align-top">
+          <EmployeeInfoCell
+            row={row}
+            onOpenInfo={() => void openLinkDialog(row)}
+          />
+        </TableCell>
+
+        <TableCell className="w-[150px] min-w-[150px] align-top">
+          <Badge
+            variant="outline"
+            className="whitespace-normal text-xs leading-snug"
+          >
             {typeLabel(row.type)}
           </Badge>
         </TableCell>
 
-        <TableCell className="w-[120px] min-w-[120px] whitespace-nowrap text-sm">
+        <TableCell className="w-[130px] min-w-[130px] whitespace-nowrap align-top text-sm">
           {formatDate(row.effectiveDate)}
         </TableCell>
 
-        <TableCell className="w-[330px] min-w-[330px]">
-          {nameChange ? (
-            <div className="space-y-1 text-xs">
-              {changed(row.oldTitleBefore, row.newTitleBefore) && (
-                <div>
-                  <span className="text-muted-foreground">Titul před: </span>
-                  <span className="line-through">
-                    {val(row.oldTitleBefore)}
-                  </span>
-                  <span className="mx-1">→</span>
-                  <span className="font-medium text-green-700 dark:text-green-400">
-                    {val(row.newTitleBefore)}
-                  </span>
-                </div>
-              )}
-
-              {changed(row.oldName, row.newName) && (
-                <div>
-                  <span className="text-muted-foreground">Jméno: </span>
-                  <span className="line-through">{val(row.oldName)}</span>
-                  <span className="mx-1">→</span>
-                  <span className="font-medium text-green-700 dark:text-green-400">
-                    {val(row.newName)}
-                  </span>
-                </div>
-              )}
-
-              {changed(row.oldSurname, row.newSurname) && (
-                <div>
-                  <span className="text-muted-foreground">Příjmení: </span>
-                  <span className="line-through">{val(row.oldSurname)}</span>
-                  <span className="mx-1">→</span>
-                  <span className="font-medium text-green-700 dark:text-green-400">
-                    {val(row.newSurname)}
-                  </span>
-                </div>
-              )}
-
-              {changed(row.oldTitleAfter, row.newTitleAfter) && (
-                <div>
-                  <span className="text-muted-foreground">Titul za: </span>
-                  <span className="line-through">{val(row.oldTitleAfter)}</span>
-                  <span className="mx-1">→</span>
-                  <span className="font-medium text-green-700 dark:text-green-400">
-                    {val(row.newTitleAfter)}
-                  </span>
-                </div>
-              )}
-            </div>
-          ) : (
-            <span className="text-xs text-muted-foreground">–</span>
-          )}
+        <TableCell className="w-[360px] min-w-[360px] align-top">
+          <NewChangeCell row={row} />
         </TableCell>
 
-        <TableCell className="w-[420px] min-w-[420px]">
-          {posChange ? (
-            <div className="space-y-1 text-xs">
-              {changed(row.oldPositionName, row.newPositionName) && (
-                <div>
-                  <span className="text-muted-foreground">Pozice: </span>
-                  <span className="line-through">
-                    {val(row.oldPositionName)}
-                  </span>
-                  <span className="mx-1">→</span>
-                  <span className="font-medium text-green-700 dark:text-green-400">
-                    {val(row.newPositionName)}
-                  </span>
-                </div>
-              )}
-
-              {changed(row.oldDepartment, row.newDepartment) && (
-                <div>
-                  <span className="text-muted-foreground">Odbor: </span>
-                  <span className="line-through">{val(row.oldDepartment)}</span>
-                  <span className="mx-1">→</span>
-                  <span className="font-medium text-green-700 dark:text-green-400">
-                    {val(row.newDepartment)}
-                  </span>
-                </div>
-              )}
-
-              {changed(row.oldUnitName, row.newUnitName) && (
-                <div>
-                  <span className="text-muted-foreground">Oddělení: </span>
-                  <span className="line-through">{val(row.oldUnitName)}</span>
-                  <span className="mx-1">→</span>
-                  <span className="font-medium text-green-700 dark:text-green-400">
-                    {val(row.newUnitName)}
-                  </span>
-                </div>
-              )}
-
-              {changed(row.oldPositionNum, row.newPositionNum) && (
-                <div>
-                  <span className="text-muted-foreground">Č. funkce: </span>
-                  <span className="font-mono line-through">
-                    {val(row.oldPositionNum)}
-                  </span>
-                  <span className="mx-1">→</span>
-                  <span className="font-mono font-medium text-green-700 dark:text-green-400">
-                    {val(row.newPositionNum)}
-                  </span>
-                </div>
-              )}
-            </div>
-          ) : (
-            <span className="text-xs text-muted-foreground">–</span>
-          )}
-        </TableCell>
-
-        <TableCell className="w-[210px] min-w-[210px]">
-          {linked ? (
-            <div className="space-y-1">
-              <Badge variant="default" className="text-xs">
-                Propojeno
-              </Badge>
-              {row.appliedAt && (
-                <div className="text-[10px] text-muted-foreground">
-                  {formatDate(row.appliedAt)}
-                </div>
-              )}
-            </div>
-          ) : canLink ? (
-            <div className="space-y-1">
-              <div className="flex items-center gap-1 rounded-sm border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-400">
-                <AlertTriangle className="size-2.5 shrink-0" />
-                <span>Nalezen související nástup/odchod</span>
-              </div>
-              <div className="text-[10px] text-muted-foreground">
-                Změna je aktivní i bez propojení.
-              </div>
-            </div>
-          ) : (
-            <span className="text-xs text-muted-foreground">–</span>
-          )}
-        </TableCell>
-
-        <TableCell className="w-[130px] min-w-[130px]">
+        <TableCell className="w-[135px] min-w-[135px] align-top">
           {row.emailSentAt ? (
-            <div className="flex items-center gap-1 text-xs text-green-700">
-              <CheckCircle className="size-3" />
-              {formatDate(row.emailSentAt)}
+            <div className="flex flex-col gap-0.5 text-xs text-green-700">
+              <span className="inline-flex items-center gap-1 font-medium">
+                <CheckCircle className="size-3" />
+                Odesláno
+              </span>
+              <span className="pl-4 text-[10px] text-muted-foreground">
+                {formatDate(row.emailSentAt)}
+              </span>
             </div>
           ) : (
             <span className="text-xs text-muted-foreground">–</span>
           )}
         </TableCell>
 
-        <TableCell className="w-[270px] min-w-[270px] whitespace-nowrap text-right">
+        <TableCell className="w-[230px] min-w-[230px] whitespace-nowrap text-right align-top">
           <div className="flex justify-end gap-1">
             <HistoryDialog
               id={row.id}
@@ -744,16 +786,16 @@ export default function EmployeeChangesPage() {
               }
             />
 
-            {canLink && (
+            {hasRelated && (
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => void openLinkDialog(row)}
-                title="Propojit se záznamy"
-                className="text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                title="Související evidence"
+                className="text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:hover:bg-amber-950"
               >
-                <Link2 className="size-4" />
-                <span className="ml-1 hidden sm:inline">Propojit</span>
+                <Info className="size-4" />
+                <span className="ml-1 hidden sm:inline">Info</span>
               </Button>
             )}
 
@@ -987,28 +1029,25 @@ export default function EmployeeChangesPage() {
                                       >
                                         <TableHeader>
                                           <TableRow>
-                                            <TableHead className="w-[220px] min-w-[220px]">
+                                            <TableHead className="w-[210px] min-w-[210px]">
                                               Zaměstnanec
                                             </TableHead>
-                                            <TableHead className="w-[165px] min-w-[165px]">
-                                              Typ
+                                            <TableHead className="w-[280px] min-w-[280px]">
+                                              Další info
                                             </TableHead>
-                                            <TableHead className="w-[120px] min-w-[120px]">
-                                              Účinnost
-                                            </TableHead>
-                                            <TableHead className="w-[330px] min-w-[330px]">
-                                              Změna jména
-                                            </TableHead>
-                                            <TableHead className="w-[420px] min-w-[420px]">
-                                              Změna pozice
-                                            </TableHead>
-                                            <TableHead className="w-[210px] min-w-[210px]">
-                                              Vazba
+                                            <TableHead className="w-[150px] min-w-[150px]">
+                                              Typ změny
                                             </TableHead>
                                             <TableHead className="w-[130px] min-w-[130px]">
-                                              Report
+                                              Účinnost změny
                                             </TableHead>
-                                            <TableHead className="w-[270px] min-w-[270px] text-right">
+                                            <TableHead className="w-[360px] min-w-[360px]">
+                                              Nová změna
+                                            </TableHead>
+                                            <TableHead className="w-[135px] min-w-[135px]">
+                                              Odeslání reportu
+                                            </TableHead>
+                                            <TableHead className="w-[230px] min-w-[230px] text-right">
                                               Akce
                                             </TableHead>
                                           </TableRow>
@@ -1093,10 +1132,10 @@ export default function EmployeeChangesPage() {
           <DialogHeader>
             <div className="flex items-center gap-3">
               <div className="flex size-10 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/20">
-                <Link2 className="size-5 text-amber-700 dark:text-amber-400" />
+                <Info className="size-5 text-amber-700 dark:text-amber-400" />
               </div>
               <div>
-                <DialogTitle>Propojit změnu se záznamy</DialogTitle>
+                <DialogTitle>Související evidence</DialogTitle>
                 <DialogDescription>
                   {linkDialog.row && (
                     <>
@@ -1127,8 +1166,9 @@ export default function EmployeeChangesPage() {
           ) : (
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
-                Nalezeny tyto záznamy. Propojením se aktualizují data
-                zaměstnance v nástupech nebo odchodech.
+                Záznamy se dohledaly automaticky podle osobního čísla. Změna se
+                do nástupů ani odchodů nepropisuje; jde pouze o informační
+                evidenci.
               </p>
               <div className="max-h-48 space-y-2 overflow-y-auto rounded-lg border p-2">
                 {linkDialog.matches.map((match) => (
@@ -1171,30 +1211,8 @@ export default function EmployeeChangesPage() {
                   matches: [],
                 })
               }
-              disabled={linkDialog.linking}
             >
               Zavřít
-            </Button>
-            <Button
-              onClick={() => void handleLink()}
-              disabled={
-                linkDialog.linking ||
-                linkDialog.loading ||
-                linkDialog.matches.length === 0
-              }
-              className="bg-[#00847C] text-white hover:bg-[#0B6D73]"
-            >
-              {linkDialog.linking ? (
-                <>
-                  <span className="mr-2 size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                  Propojuji…
-                </>
-              ) : (
-                <>
-                  <Link2 className="mr-2 size-4" />
-                  Propojit
-                </>
-              )}
             </Button>
           </DialogFooter>
         </DialogContent>

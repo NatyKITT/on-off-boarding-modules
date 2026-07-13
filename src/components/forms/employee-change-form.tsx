@@ -150,7 +150,7 @@ function getDefaultValues(
   initial: Record<string, unknown> | null | undefined,
   isEdit: boolean
 ): FormValues {
-  const initialType = isChangeType(initial?.type) ? initial.type : "POSITION"
+  const initialType = isChangeType(initial?.type) ? initial.type : "NAME"
   const effectiveDate = toInitialString(initial, "effectiveDate")
 
   return {
@@ -192,8 +192,8 @@ function getDefaultValues(
 
 const schema = z
   .object({
-    changeName: z.boolean().default(false),
-    changePosition: z.boolean().default(true),
+    changeName: z.boolean().default(true),
+    changePosition: z.boolean().default(false),
     effectiveDate: z.string().min(1, "Datum účinnosti je povinné."),
     manualEmployee: z.boolean().default(false),
 
@@ -465,6 +465,28 @@ export function EmployeeChangeForm({
     name: "newPositionNum",
   })
 
+  const currentPositionNum = useWatch({
+    control: form.control,
+    name: "oldPositionNum",
+  })
+
+  const employeeTitleBefore = useWatch({
+    control: form.control,
+    name: "titleBefore",
+  })
+  const employeeName = useWatch({
+    control: form.control,
+    name: "name",
+  })
+  const employeeSurname = useWatch({
+    control: form.control,
+    name: "surname",
+  })
+  const employeeTitleAfter = useWatch({
+    control: form.control,
+    name: "titleAfter",
+  })
+
   const isSubmitting = form.formState.isSubmitting
 
   function setManualEmployeeMode(nextValue: boolean) {
@@ -475,23 +497,144 @@ export function EmployeeChangeForm({
     })
   }
 
-  function copySelectedEmployeeToOldAndNewValues(employee: EmployeeItem) {
-    const titleBefore = employee.titleBefore ?? ""
-    const name = employee.name ?? ""
-    const surname = employee.surname ?? ""
-    const titleAfter = employee.titleAfter ?? ""
+  useEffect(() => {
+    if (isEdit) return
+
+    setNameOriginalValues({
+      titleBefore: employeeTitleBefore,
+      name: employeeName,
+      surname: employeeSurname,
+      titleAfter: employeeTitleAfter,
+      prefillNewValues: true,
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    employeeTitleBefore,
+    employeeName,
+    employeeSurname,
+    employeeTitleAfter,
+    isEdit,
+  ])
+
+  function setNameOriginalValues(params: {
+    titleBefore?: string | null
+    name?: string | null
+    surname?: string | null
+    titleAfter?: string | null
+    prefillNewValues?: boolean
+  }) {
+    const titleBefore = params.titleBefore ?? ""
+    const name = params.name ?? ""
+    const surname = params.surname ?? ""
+    const titleAfter = params.titleAfter ?? ""
 
     form.setValue("oldTitleBefore", titleBefore, { shouldDirty: true })
     form.setValue("oldName", name, { shouldDirty: true })
     form.setValue("oldSurname", surname, { shouldDirty: true })
     form.setValue("oldTitleAfter", titleAfter, { shouldDirty: true })
 
-    form.setValue("newTitleBefore", titleBefore, { shouldDirty: true })
-    form.setValue("newName", name, { shouldDirty: true })
-    form.setValue("newSurname", surname, { shouldDirty: true })
-    form.setValue("newTitleAfter", titleAfter, { shouldDirty: true })
+    if (params.prefillNewValues) {
+      if (!form.getValues("newTitleBefore")) {
+        form.setValue("newTitleBefore", titleBefore, { shouldDirty: true })
+      }
+      if (!form.getValues("newName")) {
+        form.setValue("newName", name, { shouldDirty: true })
+      }
+      if (!form.getValues("newSurname")) {
+        form.setValue("newSurname", surname, { shouldDirty: true })
+      }
+      if (!form.getValues("newTitleAfter")) {
+        form.setValue("newTitleAfter", titleAfter, { shouldDirty: true })
+      }
+    }
+  }
 
-    form.clearErrors("personalNumber")
+  function setCurrentPositionValues(params: {
+    positionNum?: string | null
+    positionName?: string | null
+    department?: string | null
+    unitName?: string | null
+  }) {
+    form.setValue("oldPositionNum", params.positionNum ?? "", {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
+    form.setValue("oldPositionName", params.positionName ?? "", {
+      shouldDirty: true,
+    })
+    form.setValue("oldDepartment", params.department ?? "", {
+      shouldDirty: true,
+    })
+    form.setValue("oldUnitName", params.unitName ?? "", {
+      shouldDirty: true,
+    })
+  }
+
+  function getEmployeeString(employee: EmployeeItem, ...keys: string[]) {
+    const source = employee as unknown as Record<string, unknown>
+
+    for (const key of keys) {
+      const value = source[key]
+      if (typeof value === "string" || typeof value === "number") {
+        const text = String(value)
+        if (text.trim()) return text
+      }
+    }
+
+    return ""
+  }
+
+  function copySelectedEmployeeToOldAndNewValues(employee: EmployeeItem) {
+    const titleBefore = employee.titleBefore ?? ""
+    const name = employee.name ?? ""
+    const surname = employee.surname ?? ""
+    const titleAfter = employee.titleAfter ?? ""
+
+    setNameOriginalValues({
+      titleBefore,
+      name,
+      surname,
+      titleAfter,
+      prefillNewValues: true,
+    })
+
+    setCurrentPositionValues({
+      positionNum: getEmployeeString(
+        employee,
+        "positionNum",
+        "position_num",
+        "num"
+      ),
+      positionName: getEmployeeString(
+        employee,
+        "positionName",
+        "position_name",
+        "position"
+      ),
+      department: getEmployeeString(employee, "department", "dept_name"),
+      unitName: getEmployeeString(employee, "unitName", "unit_name"),
+    })
+
+    form.clearErrors([
+      "personalNumber",
+      "oldTitleBefore",
+      "oldName",
+      "oldSurname",
+      "oldTitleAfter",
+      "oldPositionNum",
+      "oldPositionName",
+      "oldDepartment",
+      "oldUnitName",
+    ])
+  }
+
+  function selectCurrentPosition(position: Position) {
+    setCurrentPositionValues({
+      positionNum: position.num,
+      positionName: position.name ?? "",
+      department: position.dept_name ?? "",
+      unitName: position.unit_name ?? "",
+    })
   }
 
   function selectNewPosition(position: Position) {
@@ -514,139 +657,18 @@ export function EmployeeChangeForm({
     await onSuccess?.(changeId)
   }
 
-  async function checkForLinkedRecords(changeId: number, value: string | null) {
-    if (!value?.trim()) {
-      await finishSuccessfully(changeId)
-      return
-    }
+  async function handleAcknowledgeLinkedRecords() {
+    const changeId = linkModal.changeId ?? undefined
 
     setLinkModal({
-      open: true,
-      changeId,
+      open: false,
+      changeId: null,
       matches: [],
-      loading: true,
+      loading: false,
       linking: false,
     })
 
-    try {
-      const response = await fetch(`/api/zmeny/${changeId}/dopad`, {
-        cache: "no-store",
-      })
-
-      const json = await response.json().catch(() => null)
-
-      if (!response.ok || json?.status !== "success") {
-        setLinkModal({
-          open: false,
-          changeId: null,
-          matches: [],
-          loading: false,
-          linking: false,
-        })
-        await finishSuccessfully(changeId)
-        return
-      }
-
-      const data = json.data as {
-        onboardingMatches: Array<{
-          id: number
-          name: string
-          surname: string
-          positionName?: string
-          department?: string
-          actualStart?: string
-          plannedStart?: string
-        }>
-        offboardingMatches: Array<{
-          id: number
-          name: string
-          surname: string
-          positionName?: string
-          department?: string
-          actualEnd?: string
-          plannedEnd?: string
-        }>
-      }
-
-      const matches: LinkedMatch[] = [
-        ...data.onboardingMatches.map((match) => ({
-          ...match,
-          date: match.actualStart ?? match.plannedStart ?? null,
-          kind: "onboarding" as const,
-        })),
-        ...data.offboardingMatches.map((match) => ({
-          ...match,
-          date: match.actualEnd ?? match.plannedEnd ?? null,
-          kind: "offboarding" as const,
-        })),
-      ]
-
-      if (matches.length === 0) {
-        setLinkModal({
-          open: false,
-          changeId: null,
-          matches: [],
-          loading: false,
-          linking: false,
-        })
-        await finishSuccessfully(changeId)
-        return
-      }
-
-      setLinkModal({
-        open: true,
-        changeId,
-        matches,
-        loading: false,
-        linking: false,
-      })
-    } catch {
-      setLinkModal({
-        open: false,
-        changeId: null,
-        matches: [],
-        loading: false,
-        linking: false,
-      })
-      await finishSuccessfully(changeId)
-    }
-  }
-
-  async function handleLink() {
-    const changeId = linkModal.changeId
-
-    if (!changeId) return
-
-    setLinkModal((previous) => ({ ...previous, linking: true }))
-
-    try {
-      const response = await fetch(`/api/zmeny/${changeId}/aplikovat`, {
-        method: "POST",
-      })
-
-      const json = await response.json().catch(() => null)
-
-      if (!response.ok) {
-        throw new Error(json?.message ?? "Propojení se nezdařilo.")
-      }
-
-      setLinkModal({
-        open: false,
-        changeId: null,
-        matches: [],
-        loading: false,
-        linking: false,
-      })
-
-      await finishSuccessfully(changeId)
-    } catch (error) {
-      setErrorModal({
-        open: true,
-        message:
-          error instanceof Error ? error.message : "Propojení se nezdařilo.",
-      })
-      setLinkModal((previous) => ({ ...previous, linking: false }))
-    }
+    await finishSuccessfully(changeId)
   }
 
   async function handleSkipLink() {
@@ -675,44 +697,34 @@ export function EmployeeChangeForm({
         titleAfter: emptyToNull(values.titleAfter),
         personalNumber: emptyToNull(values.personalNumber),
 
-        oldTitleBefore: values.changeName
-          ? emptyToNull(values.oldTitleBefore)
-          : null,
+        oldTitleBefore: emptyToNull(
+          values.oldTitleBefore || values.titleBefore
+        ),
         newTitleBefore: values.changeName
           ? emptyToNull(values.newTitleBefore)
           : null,
-        oldName: values.changeName ? emptyToNull(values.oldName) : null,
+        oldName: emptyToNull(values.oldName || values.name),
         newName: values.changeName ? emptyToNull(values.newName) : null,
-        oldSurname: values.changeName ? emptyToNull(values.oldSurname) : null,
+        oldSurname: emptyToNull(values.oldSurname || values.surname),
         newSurname: values.changeName ? emptyToNull(values.newSurname) : null,
-        oldTitleAfter: values.changeName
-          ? emptyToNull(values.oldTitleAfter)
-          : null,
+        oldTitleAfter: emptyToNull(values.oldTitleAfter || values.titleAfter),
         newTitleAfter: values.changeName
           ? emptyToNull(values.newTitleAfter)
           : null,
 
-        oldDepartment: values.changePosition
-          ? emptyToNull(values.oldDepartment)
-          : null,
+        oldDepartment: emptyToNull(values.oldDepartment),
         newDepartment: values.changePosition
           ? emptyToNull(values.newDepartment)
           : null,
-        oldUnitName: values.changePosition
-          ? emptyToNull(values.oldUnitName)
-          : null,
+        oldUnitName: emptyToNull(values.oldUnitName),
         newUnitName: values.changePosition
           ? emptyToNull(values.newUnitName)
           : null,
-        oldPositionName: values.changePosition
-          ? emptyToNull(values.oldPositionName)
-          : null,
+        oldPositionName: emptyToNull(values.oldPositionName),
         newPositionName: values.changePosition
           ? emptyToNull(values.newPositionName)
           : null,
-        oldPositionNum: values.changePosition
-          ? emptyToNull(values.oldPositionNum)
-          : null,
+        oldPositionNum: emptyToNull(values.oldPositionNum),
         newPositionNum: values.changePosition
           ? emptyToNull(values.newPositionNum)
           : null,
@@ -744,12 +756,7 @@ export function EmployeeChangeForm({
         return
       }
 
-      if (isEdit) {
-        await finishSuccessfully(savedId)
-        return
-      }
-
-      await checkForLinkedRecords(savedId, values.personalNumber)
+      await finishSuccessfully(savedId)
     } catch (error) {
       setErrorModal({
         open: true,
@@ -927,8 +934,8 @@ export function EmployeeChangeForm({
                         />
                       </FormControl>
                       <FormDescription>
-                        Podle osobního čísla se změna propojí se záznamy v
-                        nástupech a odchodech.
+                        Podle osobního čísla se změna zobrazí jako informační
+                        vazba v nástupech a odchodech. Data se tím nepřepisují.
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -991,6 +998,62 @@ export function EmployeeChangeForm({
                     )}
                   />
                 ))}
+              </div>
+
+              <div className="rounded-lg border bg-muted/10 p-4">
+                <div className="flex flex-col gap-1">
+                  <FormLabel>Aktuální pozice a zařazení zaměstnance</FormLabel>
+                  <FormDescription>
+                    Tyto údaje se použijí jako evidovaný stav zaměstnance v
+                    přehledu změn. Vyplní se z EOS, nebo je můžete doplnit
+                    ručně.
+                  </FormDescription>
+                </div>
+
+                {(manualEmployee || isEdit) && (
+                  <div className="mt-3">
+                    <PositionCombobox
+                      positions={sortedPositions}
+                      value={currentPositionNum}
+                      onSelect={selectCurrentPosition}
+                      placeholder="Vyberte aktuální pozici podle čísla, názvu nebo odboru…"
+                    />
+                  </div>
+                )}
+
+                <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                  {(
+                    [
+                      ["oldPositionNum", "Číslo funkce", true],
+                      ["oldPositionName", "Pozice", false],
+                      ["oldDepartment", "Odbor", false],
+                      ["oldUnitName", "Oddělení", false],
+                    ] as [keyof FormValues, string, boolean][]
+                  ).map(([fieldName, label, isMono]) => (
+                    <FormField
+                      key={fieldName}
+                      name={fieldName}
+                      control={form.control}
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{label}</FormLabel>
+                          <FormControl>
+                            <Input
+                              {...field}
+                              value={String(field.value ?? "")}
+                              readOnly={!manualEmployee && !isEdit}
+                              className={cn(
+                                isMono ? "font-mono" : "",
+                                !manualEmployee && !isEdit ? "bg-muted" : "",
+                                focusRing
+                              )}
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+                  ))}
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -1068,41 +1131,7 @@ export function EmployeeChangeForm({
               </CardHeader>
 
               <CardContent className="space-y-6">
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  {(
-                    [
-                      ["oldPositionNum", "Původní číslo funkce", true],
-                      ["oldPositionName", "Původní pozice", false],
-                      ["oldDepartment", "Původní odbor", false],
-                      ["oldUnitName", "Původní oddělení", false],
-                    ] as [keyof FormValues, string, boolean][]
-                  ).map(([fieldName, label, isMono]) => (
-                    <FormField
-                      key={fieldName}
-                      name={fieldName}
-                      control={form.control}
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{label}</FormLabel>
-                          <FormControl>
-                            <Input
-                              {...field}
-                              value={String(field.value ?? "")}
-                              readOnly={!manualEmployee && !isEdit}
-                              className={cn(
-                                isMono ? "font-mono" : "",
-                                !manualEmployee && !isEdit ? "bg-muted" : "",
-                                focusRing
-                              )}
-                            />
-                          </FormControl>
-                        </FormItem>
-                      )}
-                    />
-                  ))}
-                </div>
-
-                <div className="rounded-lg border p-4">
+                <div className="rounded-lg border bg-teal-50/40 p-4 dark:bg-teal-950/10">
                   <FormLabel>Vybrat novou pozici</FormLabel>
 
                   <div className="mt-2">
@@ -1116,7 +1145,8 @@ export function EmployeeChangeForm({
 
                   <p className="mt-2 text-xs text-muted-foreground">
                     Po výběru se doplní nové číslo funkce, pozice, odbor a
-                    oddělení.
+                    oddělení. Pokud pozice není v seznamu, můžete nové hodnoty
+                    doplnit ručně níže.
                   </p>
                 </div>
 
@@ -1245,8 +1275,8 @@ export function EmployeeChangeForm({
           ) : linkModal.matches.length > 0 ? (
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground">
-                Chcete tuto změnu propojit s nalezenými záznamy? Propojení
-                aktualizuje data zaměstnance v nástupech nebo odchodech.
+                Změna se do nástupů ani odchodů nepropíše. Tyto záznamy pouze
+                dostanou informační ikonku podle stejného osobního čísla.
               </p>
 
               <div className="max-h-48 space-y-2 overflow-y-auto rounded-lg border p-2">
@@ -1287,29 +1317,16 @@ export function EmployeeChangeForm({
               onClick={() => void handleSkipLink()}
               disabled={linkModal.linking}
             >
-              Nepropojovat
+              Zavřít bez kontroly
             </Button>
 
             <Button
-              onClick={() => void handleLink()}
-              disabled={
-                linkModal.linking ||
-                linkModal.loading ||
-                linkModal.matches.length === 0
-              }
+              onClick={() => void handleAcknowledgeLinkedRecords()}
+              disabled={linkModal.loading || linkModal.matches.length === 0}
               className="bg-[#00847C] text-white hover:bg-[#0B6D73]"
             >
-              {linkModal.linking ? (
-                <>
-                  <span className="mr-2 size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                  Propojuji…
-                </>
-              ) : (
-                <>
-                  <Link2 className="mr-2 size-4" />
-                  Propojit
-                </>
-              )}
+              <Link2 className="mr-2 size-4" />
+              Rozumím, zobrazit jen informaci
             </Button>
           </DialogFooter>
         </DialogContent>

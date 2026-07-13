@@ -4,12 +4,15 @@ import { auth } from "@/auth"
 import { prisma } from "@/lib/db"
 
 export const dynamic = "force-dynamic"
+export const fetchCache = "force-no-store"
+export const revalidate = 0
 
 export async function POST(
   _: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const session = await auth()
+
   if (!session?.user) {
     return NextResponse.json(
       { status: "error", message: "Nejste přihlášeni." },
@@ -18,6 +21,7 @@ export async function POST(
   }
 
   const id = Number(params.id)
+
   if (!Number.isFinite(id)) {
     return NextResponse.json(
       { status: "error", message: "Neplatné ID." },
@@ -27,7 +31,12 @@ export async function POST(
 
   const record = await prisma.employeeChange.findUnique({
     where: { id },
-    select: { id: true, name: true, surname: true, deletedAt: true },
+    select: {
+      id: true,
+      name: true,
+      surname: true,
+      deletedAt: true,
+    },
   })
 
   if (!record) {
@@ -36,6 +45,7 @@ export async function POST(
       { status: 404 }
     )
   }
+
   if (!record.deletedAt) {
     return NextResponse.json(
       { status: "error", message: "Záznam není smazán." },
@@ -45,12 +55,20 @@ export async function POST(
 
   await prisma.employeeChange.update({
     where: { id },
-    data: { deletedAt: null, deletedBy: null, deleteReason: null },
+    data: {
+      deletedAt: null,
+      deletedBy: null,
+      deleteReason: null,
+      updatedAt: new Date(),
+    },
   })
 
   return NextResponse.json({
     status: "success",
     message: "Záznam byl úspěšně obnoven.",
-    data: { id: record.id, name: `${record.name} ${record.surname}` },
+    data: {
+      id: record.id,
+      name: `${record.name} ${record.surname}`,
+    },
   })
 }

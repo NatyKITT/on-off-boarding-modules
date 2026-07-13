@@ -4,12 +4,27 @@ import { auth } from "@/auth"
 import { prisma } from "@/lib/db"
 
 export const dynamic = "force-dynamic"
+export const fetchCache = "force-no-store"
+export const revalidate = 0
+
+type HistoryEvent = {
+  id: number
+  employeeId: number
+  userId: string
+  displayUser: string
+  action: string
+  field: string | null
+  oldValue: string | null
+  newValue: string | null
+  createdAt: string
+}
 
 export async function GET(
   _: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const session = await auth()
+
   if (!session?.user) {
     return NextResponse.json(
       { status: "error", message: "Nejste přihlášeni." },
@@ -18,6 +33,7 @@ export async function GET(
   }
 
   const id = Number(params.id)
+
   if (!Number.isFinite(id)) {
     return NextResponse.json(
       { status: "error", message: "Neplatné ID." },
@@ -32,25 +48,16 @@ export async function GET(
         id: true,
         name: true,
         surname: true,
+        personalNumber: true,
+        type: true,
+        status: true,
+        effectiveDate: true,
         createdAt: true,
         updatedAt: true,
         deletedAt: true,
         deletedBy: true,
-        appliedAt: true,
-        appliedBy: true,
         emailSentAt: true,
         emailSentBy: true,
-        status: true,
-        targets: {
-          select: {
-            id: true,
-            targetType: true,
-            targetId: true,
-            appliedAt: true,
-            appliedBy: true,
-          },
-          orderBy: { appliedAt: "asc" },
-        },
         EmailHistory: {
           select: {
             id: true,
@@ -74,18 +81,7 @@ export async function GET(
       )
     }
 
-    const events: Array<{
-      id: number
-      employeeId: number
-      userId: string
-      displayUser: string
-      action: string
-      field: string | null
-      oldValue: string | null
-      newValue: string | null
-      createdAt: string
-    }> = []
-
+    const events: HistoryEvent[] = []
     let syntheticId = 1
 
     events.push({
@@ -96,30 +92,32 @@ export async function GET(
       action: "CREATE",
       field: "initial_creation",
       oldValue: null,
-      newValue: JSON.stringify({ name: `${record.name} ${record.surname}` }),
+      newValue: JSON.stringify({
+        name: `${record.name} ${record.surname}`,
+        personalNumber: record.personalNumber,
+        type: record.type,
+        effectiveDate: record.effectiveDate.toISOString(),
+      }),
       createdAt: record.createdAt.toISOString(),
     })
 
-    for (const target of record.targets) {
-      const userDisplay = await resolveUserDisplay(target.appliedBy)
+    if (record.updatedAt.getTime() !== record.createdAt.getTime()) {
       events.push({
         id: syntheticId++,
         employeeId: id,
-        userId: target.appliedBy,
-        displayUser: userDisplay,
-        action: "OFFICIAL_CHANGE_APPLIED",
-        field: "targets",
+        userId: "system",
+        displayUser: "Systém",
+        action: "UPDATE",
+        field: "updated_at",
         oldValue: null,
-        newValue: JSON.stringify({
-          targetType: target.targetType,
-          targetId: target.targetId,
-        }),
-        createdAt: target.appliedAt.toISOString(),
+        newValue: record.updatedAt.toISOString(),
+        createdAt: record.updatedAt.toISOString(),
       })
     }
 
     for (const email of record.EmailHistory) {
       const userDisplay = await resolveUserDisplay(email.createdBy)
+
       events.push({
         id: syntheticId++,
         employeeId: id,
@@ -132,6 +130,7 @@ export async function GET(
           type: email.emailType,
           subject: email.subject,
           status: email.status,
+          recipients: email.recipients,
         }),
         createdAt: (email.sentAt ?? email.createdAt).toISOString(),
       })
@@ -139,6 +138,7 @@ export async function GET(
 
     if (record.deletedAt) {
       const userDisplay = await resolveUserDisplay(record.deletedBy)
+
       events.push({
         id: syntheticId++,
         employeeId: id,
@@ -162,11 +162,13 @@ export async function GET(
       data: events,
       summary: {
         total: events.length,
-        actionTypes: Array.from(new Set(events.map((e) => e.action))),
+        actionTypes: Array.from(new Set(events.map((event) => event.action))),
+        infoOnly: true,
       },
     })
   } catch (err) {
     console.error("GET /api/zmeny/[id]/history error:", err)
+
     return NextResponse.json(
       { status: "error", message: "Nepodařilo se načíst historii." },
       { status: 500 }
@@ -176,13 +178,16 @@ export async function GET(
 
 async function resolveUserDisplay(userId?: string | null): Promise<string> {
   if (!userId) return "Systém"
+
   try {
     const user = await prisma.user.findFirst({
       where: { OR: [{ id: userId }, { email: userId }] },
       select: { name: true, surname: true, email: true },
     })
+
     if (user?.name && user?.surname) return `${user.name} ${user.surname}`
     if (user?.email) return user.email
   } catch {}
+
   return userId
 }

@@ -16,6 +16,7 @@ import {
   Edit,
   FileText,
   History as HistoryIcon,
+  Info,
   RotateCcw,
   Trash2,
   User,
@@ -63,6 +64,34 @@ import {
 import { DeletedRecordsDialog } from "@/components/history/deleted-records-dialog"
 import { HistoryDialog } from "@/components/history/history-dialog"
 
+type EmployeeChangeInfo = {
+  id: number
+  type: "POSITION" | "NAME" | "NAME_AND_POSITION"
+  status?: "DRAFT" | "APPLIED" | "CANCELLED" | string | null
+  effectiveDate?: string | null
+  personalNumber?: string | null
+
+  oldTitleBefore?: string | null
+  newTitleBefore?: string | null
+  oldName?: string | null
+  newName?: string | null
+  oldSurname?: string | null
+  newSurname?: string | null
+  oldTitleAfter?: string | null
+  newTitleAfter?: string | null
+
+  oldDepartment?: string | null
+  newDepartment?: string | null
+  oldUnitName?: string | null
+  newUnitName?: string | null
+  oldPositionName?: string | null
+  newPositionName?: string | null
+  oldPositionNum?: string | null
+  newPositionNum?: string | null
+
+  notes?: string | null
+}
+
 type LinkedOnboardingInfo = {
   id: number
   plannedStart: string | null
@@ -97,6 +126,233 @@ type Departure = {
   status?: "NEW" | "IN_PROGRESS" | "COMPLETED"
 
   linkedOnboarding?: LinkedOnboardingInfo | null
+}
+
+function normalizeEmployeeChanges(payload: unknown): EmployeeChangeInfo[] {
+  const rows = Array.isArray(payload)
+    ? payload
+    : payload &&
+        typeof payload === "object" &&
+        Array.isArray((payload as { data?: unknown }).data)
+      ? (payload as { data: unknown[] }).data
+      : []
+
+  return rows.filter(
+    (row): row is EmployeeChangeInfo =>
+      Boolean(row) &&
+      typeof row === "object" &&
+      typeof (row as { id?: unknown }).id === "number"
+  )
+}
+
+function groupChangesByPersonalNumber(rows: EmployeeChangeInfo[]) {
+  const map = new Map<string, EmployeeChangeInfo[]>()
+
+  for (const row of rows) {
+    const personalNumber = row.personalNumber?.trim()
+    if (!personalNumber || row.status === "CANCELLED") continue
+
+    const current = map.get(personalNumber) ?? []
+    current.push(row)
+    map.set(personalNumber, current)
+  }
+
+  return map
+}
+
+function changeTypeLabel(type?: EmployeeChangeInfo["type"] | null) {
+  if (type === "NAME") return "Změna jména"
+  if (type === "POSITION") return "Změna pozice"
+  if (type === "NAME_AND_POSITION") return "Změna jména i pozice"
+
+  return "Zaměstnanecká změna"
+}
+
+function formatOptionalDate(value?: string | null) {
+  if (!value) return "–"
+
+  const date = new Date(value)
+
+  return Number.isNaN(date.getTime()) ? "–" : format(date, "d.M.yyyy")
+}
+
+function displayValue(value?: string | null) {
+  return value?.trim() ? value : "–"
+}
+
+function hasChanged(oldValue?: string | null, newValue?: string | null) {
+  return (oldValue ?? null) !== (newValue ?? null)
+}
+
+function renderChangeLine(
+  label: string,
+  oldValue?: string | null,
+  newValue?: string | null
+) {
+  const hasAnyValue = Boolean(oldValue?.trim() || newValue?.trim())
+
+  if (!hasAnyValue && !hasChanged(oldValue, newValue)) return null
+
+  return (
+    <div className="rounded-lg border bg-background p-3 text-xs shadow-sm">
+      <div className="mb-2 font-semibold text-foreground">{label}</div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="rounded-md bg-muted/60 px-3 py-2">
+          <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Původní hodnota
+          </div>
+          <div className="break-words text-sm text-muted-foreground">
+            {displayValue(oldValue)}
+          </div>
+        </div>
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900/60 dark:bg-amber-950/30">
+          <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+            Nová hodnota
+          </div>
+          <div className="break-words text-sm font-semibold text-amber-900 dark:text-amber-100">
+            {displayValue(newValue)}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function formatDayCount(days: number) {
+  const absolute = Math.abs(days)
+
+  if (absolute === 1) return "1 den"
+  if (absolute >= 2 && absolute <= 4) return `${absolute} dny`
+
+  return `${absolute} dní`
+}
+
+function relativeDateLabel(value?: string | null) {
+  if (!value) return "–"
+
+  const target = new Date(`${value.slice(0, 10)}T00:00:00`)
+  if (Number.isNaN(target.getTime())) return "–"
+
+  const today = new Date()
+  const todayOnly = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate()
+  )
+  const targetOnly = new Date(
+    target.getFullYear(),
+    target.getMonth(),
+    target.getDate()
+  )
+  const diff = Math.round(
+    (targetOnly.getTime() - todayOnly.getTime()) / (1000 * 60 * 60 * 24)
+  )
+
+  if (diff === 0) return "dnes"
+  if (diff > 0) return `za ${formatDayCount(diff)}`
+
+  return `před ${formatDayCount(diff)}`
+}
+
+function EmployeeChangeInfoButton({
+  changes,
+  employeeName,
+}: {
+  changes: EmployeeChangeInfo[]
+  employeeName: string
+}) {
+  if (changes.length === 0) return null
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button
+          size="sm"
+          variant="outline"
+          title="Zobrazit související zaměstnanecké změny"
+          className="inline-flex items-center justify-center gap-1 border-amber-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-900/20"
+        >
+          <Info className="size-4" />
+          <span className="sr-only">Související změny</span>
+        </Button>
+      </DialogTrigger>
+
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <div className="flex items-center gap-3">
+            <div className="flex size-10 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/20">
+              <Info className="size-5 text-amber-700 dark:text-amber-400" />
+            </div>
+            <div>
+              <DialogTitle>Související zaměstnanecké změny</DialogTitle>
+              <DialogDescription>
+                {employeeName} · pouze informační náhled, údaje v nástupech ani
+                odchodech se tím nepřepisují.
+              </DialogDescription>
+            </div>
+          </div>
+        </DialogHeader>
+
+        <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-1">
+          {changes.map((change) => (
+            <div key={change.id} className="rounded-lg border bg-muted/30 p-3">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <Badge variant="outline">{changeTypeLabel(change.type)}</Badge>
+                <span className="text-xs text-muted-foreground">
+                  Účinnost: {formatOptionalDate(change.effectiveDate)}
+                </span>
+              </div>
+
+              <div className="space-y-1">
+                {renderChangeLine(
+                  "Titul před",
+                  change.oldTitleBefore,
+                  change.newTitleBefore
+                )}
+                {renderChangeLine("Jméno", change.oldName, change.newName)}
+                {renderChangeLine(
+                  "Příjmení",
+                  change.oldSurname,
+                  change.newSurname
+                )}
+                {renderChangeLine(
+                  "Titul za",
+                  change.oldTitleAfter,
+                  change.newTitleAfter
+                )}
+                {renderChangeLine(
+                  "Pozice",
+                  change.oldPositionName,
+                  change.newPositionName
+                )}
+                {renderChangeLine(
+                  "Odbor",
+                  change.oldDepartment,
+                  change.newDepartment
+                )}
+                {renderChangeLine(
+                  "Oddělení",
+                  change.oldUnitName,
+                  change.newUnitName
+                )}
+                {renderChangeLine(
+                  "Č. funkce",
+                  change.oldPositionNum,
+                  change.newPositionNum
+                )}
+              </div>
+
+              {change.notes?.trim() ? (
+                <div className="mt-2 rounded bg-background px-2 py-1 text-xs text-muted-foreground">
+                  Poznámka: {change.notes}
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 function departureToInitial(d: Departure): Partial<FormValues> {
@@ -273,6 +529,7 @@ interface DepartureTableRowProps {
   onDelete: () => void
   onReload: () => Promise<void>
   onOpenExitChecklist: () => void
+  relatedChanges: EmployeeChangeInfo[]
 }
 
 const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
@@ -286,6 +543,7 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
   onRevert,
   onReload,
   onOpenExitChecklist,
+  relatedChanges,
 }) => {
   const fullName = [
     departure.titleBefore,
@@ -348,20 +606,29 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
         </div>
       </TableCell>
 
-      <TableCell className="w-[180px]">
-        <DepartureProgressBar
-          targetDate={
-            variant === "planned"
-              ? departure.plannedEnd
-              : (departure.actualEnd as string)
-          }
-          variant={variant}
-          label={
-            variant === "planned"
-              ? "Do plánovaného odchodu"
-              : "Od skutečného odchodu"
-          }
-        />
+      <TableCell className="w-[230px]">
+        <div className="space-y-1.5">
+          <DepartureProgressBar
+            targetDate={
+              variant === "planned"
+                ? departure.plannedEnd
+                : (departure.actualEnd as string)
+            }
+            variant={variant}
+            label=""
+          />
+          <div className="text-[11px] font-medium text-foreground">
+            {variant === "planned" ? "Plánovaný konec" : "Skutečný odchod"}:{" "}
+            {formatOptionalDate(
+              variant === "planned" ? departure.plannedEnd : departure.actualEnd
+            )}{" "}
+            (
+            {relativeDateLabel(
+              variant === "planned" ? departure.plannedEnd : departure.actualEnd
+            )}
+            )
+          </div>
+        </div>
       </TableCell>
 
       <TableCell className="w-[180px]">
@@ -380,6 +647,11 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
 
       <TableCell className="w-[420px] whitespace-nowrap text-right">
         <div className="flex justify-end gap-1">
+          <EmployeeChangeInfoButton
+            changes={relatedChanges}
+            employeeName={fullName}
+          />
+
           <HistoryDialog
             id={departure.id}
             kind="offboarding"
@@ -472,6 +744,9 @@ export default function OffboardingPage() {
   const [planned, setPlanned] = useState<Departure[]>([])
   const [actual, setActual] = useState<Departure[]>([])
   const [positions, setPositions] = useState<Position[]>([])
+  const [employeeChanges, setEmployeeChanges] = useState<EmployeeChangeInfo[]>(
+    []
+  )
   const [loading, setLoading] = useState(true)
   const [openNewPlanned, setOpenNewPlanned] = useState(false)
   const [openNewActual, setOpenNewActual] = useState(false)
@@ -557,12 +832,14 @@ export default function OffboardingPage() {
 
     setLoading(true)
     try {
-      const [posRes, offRes] = await Promise.all([
+      const [posRes, offRes, changesRes] = await Promise.all([
         fetch("/api/systemizace", { cache: "no-store" }),
         fetch("/api/odchody", { cache: "no-store" }),
+        fetch("/api/zmeny", { cache: "no-store" }),
       ])
       const posJson = await posRes.json().catch(() => null)
       const offJson = await offRes.json().catch(() => null)
+      const changesJson = await changesRes.json().catch(() => null)
 
       setPositions(normalizePositions(posJson))
 
@@ -574,11 +851,18 @@ export default function OffboardingPage() {
         setPlanned([])
         setActual([])
       }
+
+      if (changesRes.ok) {
+        setEmployeeChanges(normalizeEmployeeChanges(changesJson))
+      } else {
+        setEmployeeChanges([])
+      }
     } catch (error) {
       console.error("Error loading data:", error)
       showError("Chyba při načítání", "Nepodařilo se načíst data")
       setPlanned([])
       setActual([])
+      setEmployeeChanges([])
     } finally {
       setLoading(false)
     }
@@ -640,6 +924,11 @@ export default function OffboardingPage() {
       window.removeEventListener("offboarding:created", handler)
     }
   }, [reload])
+
+  const employeeChangesByPersonalNumber = useMemo(
+    () => groupChangesByPersonalNumber(employeeChanges),
+    [employeeChanges]
+  )
 
   const plannedGrouped = useMemo(
     () => groupByYearAndMonth(planned, "plannedEnd"),
@@ -1030,7 +1319,7 @@ export default function OffboardingPage() {
                                                 <TableHead className="w-[140px]">
                                                   Plánovaný odchod
                                                 </TableHead>
-                                                <TableHead className="w-[180px]">
+                                                <TableHead className="w-[230px]">
                                                   Průběh
                                                 </TableHead>
                                                 <TableHead className="w-[180px]">
@@ -1070,6 +1359,13 @@ export default function OffboardingPage() {
                                                   onReload={reload}
                                                   onOpenExitChecklist={() =>
                                                     setOpenExitChecklistId(e.id)
+                                                  }
+                                                  relatedChanges={
+                                                    e.personalNumber?.trim()
+                                                      ? (employeeChangesByPersonalNumber.get(
+                                                          e.personalNumber.trim()
+                                                        ) ?? [])
+                                                      : []
                                                   }
                                                 />
                                               ))}
@@ -1252,7 +1548,7 @@ export default function OffboardingPage() {
                                                 <TableHead className="w-[140px]">
                                                   Skutečný odchod
                                                 </TableHead>
-                                                <TableHead className="w-[180px]">
+                                                <TableHead className="w-[230px]">
                                                   Průběh
                                                 </TableHead>
                                                 <TableHead className="w-[180px]">
@@ -1294,6 +1590,13 @@ export default function OffboardingPage() {
                                                   onReload={reload}
                                                   onOpenExitChecklist={() =>
                                                     setOpenExitChecklistId(e.id)
+                                                  }
+                                                  relatedChanges={
+                                                    e.personalNumber?.trim()
+                                                      ? (employeeChangesByPersonalNumber.get(
+                                                          e.personalNumber.trim()
+                                                        ) ?? [])
+                                                      : []
                                                   }
                                                 />
                                               ))}

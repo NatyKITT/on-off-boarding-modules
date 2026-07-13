@@ -1,16 +1,18 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
-import { EmployeeChangeStatus, EmployeeChangeTargetType } from "@prisma/client"
 
 import { prisma } from "@/lib/db"
 
 export const dynamic = "force-dynamic"
+export const fetchCache = "force-no-store"
+export const revalidate = 0
 
 export async function POST(
   _: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const session = await auth()
+
   if (!session?.user) {
     return NextResponse.json(
       { status: "error", message: "Nejste přihlášeni." },
@@ -19,6 +21,7 @@ export async function POST(
   }
 
   const id = Number(params.id)
+
   if (!Number.isFinite(id)) {
     return NextResponse.json(
       { status: "error", message: "Neplatné ID." },
@@ -26,14 +29,16 @@ export async function POST(
     )
   }
 
-  const userKey =
-    (session.user as { id?: string; email?: string }).id ??
-    session.user.email ??
-    "unknown"
-
   try {
-    const change = await prisma.employeeChange.findUnique({
-      where: { id, deletedAt: null },
+    const change = await prisma.employeeChange.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        personalNumber: true,
+      },
     })
 
     if (!change) {
@@ -43,168 +48,62 @@ export async function POST(
       )
     }
 
-    if (change.status === EmployeeChangeStatus.APPLIED) {
-      return NextResponse.json(
-        { status: "error", message: "Změna je již propojena." },
-        { status: 409 }
-      )
-    }
+    const personalNumber = change.personalNumber?.trim() || null
 
-    if (!change.personalNumber?.trim()) {
-      return NextResponse.json(
-        {
-          status: "error",
-          message: "Změna nemá osobní číslo — nelze propojit.",
-        },
-        { status: 400 }
-      )
-    }
-
-    const pn = change.personalNumber.trim()
-    const isNameChange =
-      change.type === "NAME" || change.type === "NAME_AND_POSITION"
-    const isPosChange =
-      change.type === "POSITION" || change.type === "NAME_AND_POSITION"
-
-    const [onboardings, offboardings] = await Promise.all([
-      prisma.employeeOnboarding.findMany({
-        where: { personalNumber: pn, deletedAt: null },
-      }),
-      prisma.employeeOffboarding.findMany({
-        where: { personalNumber: pn, deletedAt: null },
-      }),
-    ])
-
-    if (onboardings.length === 0 && offboardings.length === 0) {
-      return NextResponse.json(
-        {
-          status: "error",
-          message: "Žádné záznamy se shodným osobním číslem nebyly nalezeny.",
-        },
-        { status: 404 }
-      )
-    }
-
-    const nameUpdate = isNameChange
-      ? {
-          ...(change.newTitleBefore !== null
-            ? { titleBefore: change.newTitleBefore }
-            : {}),
-          ...(change.newName !== null ? { name: change.newName } : {}),
-          ...(change.newSurname !== null ? { surname: change.newSurname } : {}),
-          ...(change.newTitleAfter !== null
-            ? { titleAfter: change.newTitleAfter }
-            : {}),
-        }
-      : {}
-
-    const posUpdate = isPosChange
-      ? {
-          ...(change.newPositionName !== null
-            ? { positionName: change.newPositionName }
-            : {}),
-          ...(change.newPositionNum !== null
-            ? { positionNum: change.newPositionNum }
-            : {}),
-          ...(change.newDepartment !== null
-            ? { department: change.newDepartment }
-            : {}),
-          ...(change.newUnitName !== null
-            ? { unitName: change.newUnitName }
-            : {}),
-        }
-      : {}
-
-    const updateData = { ...nameUpdate, ...posUpdate }
-
-    await prisma.$transaction(async (tx) => {
-      for (const onb of onboardings) {
-        const oldValues = {
-          name: onb.name,
-          surname: onb.surname,
-          titleBefore: onb.titleBefore,
-          titleAfter: onb.titleAfter,
-          positionName: onb.positionName,
-          positionNum: onb.positionNum,
-          department: onb.department,
-          unitName: onb.unitName,
-        }
-
-        if (Object.keys(updateData).length > 0) {
-          await tx.employeeOnboarding.update({
-            where: { id: onb.id },
-            data: { ...updateData, updatedAt: new Date() },
-          })
-        }
-
-        await tx.employeeChangeTarget.create({
-          data: {
-            changeId: id,
-            targetType: EmployeeChangeTargetType.ONBOARDING,
-            targetId: onb.id,
-            oldValues: oldValues,
-            newValues: updateData,
-            appliedAt: new Date(),
-            appliedBy: userKey,
-          },
-        })
-      }
-
-      for (const off of offboardings) {
-        const oldValues = {
-          name: off.name,
-          surname: off.surname,
-          titleBefore: off.titleBefore,
-          titleAfter: off.titleAfter,
-          positionName: off.positionName,
-          positionNum: off.positionNum,
-          department: off.department,
-          unitName: off.unitName,
-        }
-
-        if (Object.keys(updateData).length > 0) {
-          await tx.employeeOffboarding.update({
-            where: { id: off.id },
-            data: { ...updateData, updatedAt: new Date() },
-          })
-        }
-
-        await tx.employeeChangeTarget.create({
-          data: {
-            changeId: id,
-            targetType: EmployeeChangeTargetType.OFFBOARDING,
-            targetId: off.id,
-            oldValues: oldValues,
-            newValues: updateData,
-            appliedAt: new Date(),
-            appliedBy: userKey,
-          },
-        })
-      }
-
-      await tx.employeeChange.update({
-        where: { id },
+    if (!personalNumber) {
+      return NextResponse.json({
+        status: "success",
+        message:
+          "Změna byla uložena pouze jako informace. Nemá osobní číslo, proto k ní nelze dohledat nástupy ani odchody.",
         data: {
-          status: EmployeeChangeStatus.APPLIED,
-          appliedAt: new Date(),
-          appliedBy: userKey,
-          updatedAt: new Date(),
+          changeId: id,
+          personalNumber: null,
+          appliedToOnboarding: 0,
+          appliedToOffboarding: 0,
+          infoOnly: true,
         },
       })
-    })
+    }
+
+    const [onboardingMatchesCount, offboardingMatchesCount] = await Promise.all(
+      [
+        prisma.employeeOnboarding.count({
+          where: {
+            deletedAt: null,
+            personalNumber,
+          },
+        }),
+        prisma.employeeOffboarding.count({
+          where: {
+            deletedAt: null,
+            personalNumber,
+          },
+        }),
+      ]
+    )
 
     return NextResponse.json({
       status: "success",
-      message: "Změna byla úspěšně propojena se záznamy.",
+      message:
+        "Změna byla ponechána pouze jako informační vazba. Nástupy ani odchody nebyly přepsány.",
       data: {
-        appliedToOnboarding: onboardings.length,
-        appliedToOffboarding: offboardings.length,
+        changeId: id,
+        personalNumber,
+        appliedToOnboarding: 0,
+        appliedToOffboarding: 0,
+        onboardingMatchesCount,
+        offboardingMatchesCount,
+        infoOnly: true,
       },
     })
   } catch (err) {
-    console.error("POST /api/zmeny/[id]/aplikovat error:", err)
+    console.error("POST /api/zmeny/[id]/aplikovat info-only error:", err)
+
     return NextResponse.json(
-      { status: "error", message: "Chyba při propojování změny." },
+      {
+        status: "error",
+        message: "Chyba při načítání informační vazby změny.",
+      },
       { status: 500 }
     )
   }

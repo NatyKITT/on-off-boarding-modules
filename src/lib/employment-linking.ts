@@ -257,7 +257,7 @@ function buildChangeSummary(change: MinimalEmployeeChangeLink) {
       (hasValue(change.oldTitleBefore) || hasValue(change.newTitleBefore))
     ) {
       parts.push(
-        `titul před ${displayValue(change.oldTitleBefore)} → ${displayValue(
+        `titul před: původně ${displayValue(change.oldTitleBefore)}, nově ${displayValue(
           change.newTitleBefore
         )}`
       )
@@ -268,7 +268,7 @@ function buildChangeSummary(change: MinimalEmployeeChangeLink) {
       hasValue(change.newName)
     ) {
       parts.push(
-        `jméno ${displayValue(change.oldName)} → ${displayValue(
+        `jméno: původně ${displayValue(change.oldName)}, nově ${displayValue(
           change.newName
         )}`
       )
@@ -279,7 +279,7 @@ function buildChangeSummary(change: MinimalEmployeeChangeLink) {
       hasValue(change.newSurname)
     ) {
       parts.push(
-        `příjmení ${displayValue(change.oldSurname)} → ${displayValue(
+        `příjmení: původně ${displayValue(change.oldSurname)}, nově ${displayValue(
           change.newSurname
         )}`
       )
@@ -290,7 +290,7 @@ function buildChangeSummary(change: MinimalEmployeeChangeLink) {
       (hasValue(change.oldTitleAfter) || hasValue(change.newTitleAfter))
     ) {
       parts.push(
-        `titul za ${displayValue(change.oldTitleAfter)} → ${displayValue(
+        `titul za: původně ${displayValue(change.oldTitleAfter)}, nově ${displayValue(
           change.newTitleAfter
         )}`
       )
@@ -303,7 +303,7 @@ function buildChangeSummary(change: MinimalEmployeeChangeLink) {
       (hasValue(change.oldDepartment) || hasValue(change.newDepartment))
     ) {
       parts.push(
-        `odbor ${displayValue(change.oldDepartment)} → ${displayValue(
+        `odbor: původně ${displayValue(change.oldDepartment)}, nově ${displayValue(
           change.newDepartment
         )}`
       )
@@ -314,7 +314,7 @@ function buildChangeSummary(change: MinimalEmployeeChangeLink) {
       (hasValue(change.oldUnitName) || hasValue(change.newUnitName))
     ) {
       parts.push(
-        `oddělení ${displayValue(change.oldUnitName)} → ${displayValue(
+        `oddělení: původně ${displayValue(change.oldUnitName)}, nově ${displayValue(
           change.newUnitName
         )}`
       )
@@ -325,7 +325,7 @@ function buildChangeSummary(change: MinimalEmployeeChangeLink) {
       (hasValue(change.oldPositionName) || hasValue(change.newPositionName))
     ) {
       parts.push(
-        `pozice ${displayValue(change.oldPositionName)} → ${displayValue(
+        `pozice: původně ${displayValue(change.oldPositionName)}, nově ${displayValue(
           change.newPositionName
         )}`
       )
@@ -336,7 +336,7 @@ function buildChangeSummary(change: MinimalEmployeeChangeLink) {
       (hasValue(change.oldPositionNum) || hasValue(change.newPositionNum))
     ) {
       parts.push(
-        `č. funkce ${displayValue(change.oldPositionNum)} → ${displayValue(
+        `č. funkce: původně ${displayValue(change.oldPositionNum)}, nově ${displayValue(
           change.newPositionNum
         )}`
       )

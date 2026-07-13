@@ -4,12 +4,19 @@ import { auth } from "@/auth"
 import { prisma } from "@/lib/db"
 
 export const dynamic = "force-dynamic"
+export const fetchCache = "force-no-store"
+export const revalidate = 0
+
+function normalizePersonalNumber(value: string | null | undefined) {
+  return value?.trim() ?? ""
+}
 
 export async function GET(
   _: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const session = await auth()
+
   if (!session?.user) {
     return NextResponse.json(
       { status: "error", message: "Nejste přihlášeni." },
@@ -18,6 +25,7 @@ export async function GET(
   }
 
   const id = Number(params.id)
+
   if (!Number.isFinite(id)) {
     return NextResponse.json(
       { status: "error", message: "Neplatné ID." },
@@ -26,9 +34,15 @@ export async function GET(
   }
 
   try {
-    const change = await prisma.employeeChange.findUnique({
-      where: { id, deletedAt: null },
-      select: { id: true, personalNumber: true },
+    const change = await prisma.employeeChange.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        personalNumber: true,
+      },
     })
 
     if (!change) {
@@ -38,7 +52,9 @@ export async function GET(
       )
     }
 
-    if (!change.personalNumber?.trim()) {
+    const personalNumber = normalizePersonalNumber(change.personalNumber)
+
+    if (!personalNumber) {
       return NextResponse.json({
         status: "success",
         data: {
@@ -51,32 +67,48 @@ export async function GET(
       })
     }
 
-    const pn = change.personalNumber.trim()
-
     const [onboardingMatches, offboardingMatches] = await Promise.all([
       prisma.employeeOnboarding.findMany({
-        where: { personalNumber: pn, deletedAt: null },
+        where: {
+          personalNumber,
+          deletedAt: null,
+        },
         select: {
           id: true,
           name: true,
           surname: true,
+          titleBefore: true,
+          titleAfter: true,
+          personalNumber: true,
+          positionNum: true,
           positionName: true,
           department: true,
+          unitName: true,
           plannedStart: true,
           actualStart: true,
         },
+        orderBy: [{ plannedStart: "desc" }, { id: "desc" }],
       }),
       prisma.employeeOffboarding.findMany({
-        where: { personalNumber: pn, deletedAt: null },
+        where: {
+          personalNumber,
+          deletedAt: null,
+        },
         select: {
           id: true,
           name: true,
           surname: true,
+          titleBefore: true,
+          titleAfter: true,
+          personalNumber: true,
+          positionNum: true,
           positionName: true,
           department: true,
+          unitName: true,
           plannedEnd: true,
           actualEnd: true,
         },
+        orderBy: [{ plannedEnd: "desc" }, { id: "desc" }],
       }),
     ])
 
@@ -86,25 +118,27 @@ export async function GET(
       status: "success",
       data: {
         changeId: id,
-        personalNumber: pn,
-        onboardingMatches: onboardingMatches.map((m) => ({
-          ...m,
-          plannedStart: m.plannedStart?.toISOString() ?? null,
-          actualStart: m.actualStart?.toISOString() ?? null,
+        personalNumber,
+        onboardingMatches: onboardingMatches.map((match) => ({
+          ...match,
+          plannedStart: match.plannedStart?.toISOString() ?? null,
+          actualStart: match.actualStart?.toISOString() ?? null,
         })),
-        offboardingMatches: offboardingMatches.map((m) => ({
-          ...m,
-          plannedEnd: m.plannedEnd?.toISOString() ?? null,
-          actualEnd: m.actualEnd?.toISOString() ?? null,
+        offboardingMatches: offboardingMatches.map((match) => ({
+          ...match,
+          plannedEnd: match.plannedEnd?.toISOString() ?? null,
+          actualEnd: match.actualEnd?.toISOString() ?? null,
         })),
         message:
           total > 0
-            ? `Nalezeno ${total} záznam${total === 1 ? "" : total < 5 ? "y" : "ů"} se shodným osobním číslem.`
+            ? `Nalezeno ${total} souvisejících záznamů se shodným osobním číslem.`
             : "Žádné záznamy se shodným osobním číslem nebyly nalezeny.",
+        infoOnly: true,
       },
     })
   } catch (err) {
     console.error("GET /api/zmeny/[id]/dopad error:", err)
+
     return NextResponse.json(
       { status: "error", message: "Nepodařilo se načíst dopad." },
       { status: 500 }

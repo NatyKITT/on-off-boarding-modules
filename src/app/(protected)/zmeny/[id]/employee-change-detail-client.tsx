@@ -1,21 +1,24 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { format } from "date-fns"
 import { cs } from "date-fns/locale"
 import {
   AlertTriangle,
   ArrowLeft,
+  CalendarDays,
   CheckCircle2,
   Edit,
-  Link2,
+  Info,
   Trash2,
+  User,
   XCircle,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -26,14 +29,6 @@ import {
 } from "@/components/ui/dialog"
 import { Separator } from "@/components/ui/separator"
 import { HistoryDialog } from "@/components/history/history-dialog"
-
-type Target = {
-  id: number
-  targetType: string
-  targetId: number
-  appliedAt: string
-  appliedBy: string
-}
 
 type ChangeData = {
   id: number
@@ -71,11 +66,18 @@ type ChangeData = {
   appliedAt: string | null
   createdAt: string
   updatedAt: string
-  targets: Target[]
+  deletedAt?: string | null
 
   onboardingMatchesCount?: number
   offboardingMatchesCount?: number
   linkCandidateCount?: number
+  infoOnly?: boolean
+}
+
+type ChangeItem = {
+  label: string
+  oldValue: string | null
+  newValue: string | null
 }
 
 function fmtDate(value?: string | null) {
@@ -88,7 +90,7 @@ function fmtDate(value?: string | null) {
     : format(date, "d.M.yyyy", { locale: cs })
 }
 
-function typeLabel(type: string) {
+function typeLabel(type: ChangeData["type"]) {
   if (type === "NAME") return "Změna jména / titulů"
   if (type === "POSITION") return "Změna pozice / odboru"
 
@@ -103,47 +105,89 @@ function audienceLabel(audience: string | null) {
   return "–"
 }
 
-function targetTypeLabel(type: string) {
-  return type === "ONBOARDING" ? "Nástup" : "Odchod"
+function value(value?: string | null) {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : "–"
 }
 
-function changed(a?: string | null, b?: string | null) {
-  return (a ?? null) !== (b ?? null)
+function changed(oldValue?: string | null, newValue?: string | null) {
+  return value(oldValue) !== value(newValue)
 }
 
-function linkCandidateCount(data: ChangeData) {
-  return data.linkCandidateCount ?? 0
+function onlyChanged(items: ChangeItem[]) {
+  return items.filter((item) => changed(item.oldValue, item.newValue))
 }
 
-function ChangeRow({
-  label,
-  oldValue,
-  newValue,
+function ChangeComparisonCard({
+  title,
+  description,
+  items,
 }: {
-  label: string
-  oldValue?: string | null
-  newValue?: string | null
+  title: string
+  description: string
+  items: ChangeItem[]
 }) {
-  const hasChange = changed(oldValue, newValue)
+  const changedItems = onlyChanged(items)
 
-  if (!oldValue && !newValue) return null
+  if (changedItems.length === 0) {
+    return (
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">{title}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+            U této oblasti nejsou vyplněné žádné rozdílné hodnoty.
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
 
   return (
-    <div className="grid grid-cols-[140px_1fr_1fr] gap-2 border-b border-muted py-1.5 text-sm last:border-0">
-      <span className="pt-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-      </span>
-      <span className={hasChange ? "text-muted-foreground line-through" : ""}>
-        {oldValue || "–"}
-      </span>
-      <span
-        className={
-          hasChange ? "font-medium text-green-700 dark:text-green-400" : ""
-        }
-      >
-        {newValue || "–"}
-      </span>
-    </div>
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">{title}</CardTitle>
+        <p className="text-sm text-muted-foreground">{description}</p>
+      </CardHeader>
+
+      <CardContent className="space-y-3">
+        <div className="hidden grid-cols-[180px_1fr_1fr] gap-3 rounded-md bg-muted/60 px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground md:grid">
+          <span>Pole</span>
+          <span>Původní hodnota</span>
+          <span>Nová hodnota</span>
+        </div>
+
+        <div className="space-y-2">
+          {changedItems.map((item) => (
+            <div
+              key={item.label}
+              className="grid gap-2 rounded-lg border p-3 text-sm md:grid-cols-[180px_1fr_1fr] md:items-center"
+            >
+              <div className="font-medium text-muted-foreground">
+                {item.label}
+              </div>
+
+              <div className="rounded-md bg-red-50 px-3 py-2 text-red-900 dark:bg-red-950/30 dark:text-red-200">
+                <div className="mb-1 text-[10px] font-medium uppercase tracking-wide md:hidden">
+                  Původní hodnota
+                </div>
+                <span className="line-through decoration-red-500/70">
+                  {value(item.oldValue)}
+                </span>
+              </div>
+
+              <div className="rounded-md bg-green-50 px-3 py-2 font-medium text-green-900 dark:bg-green-950/30 dark:text-green-200">
+                <div className="mb-1 text-[10px] font-medium uppercase tracking-wide md:hidden">
+                  Nová hodnota
+                </div>
+                {value(item.newValue)}
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -160,13 +204,69 @@ export function EmployeeChangeDetailClient({ data }: { data: ChangeData }) {
   const fullName = [data.titleBefore, data.name, data.surname, data.titleAfter]
     .filter(Boolean)
     .join(" ")
+    .replace(/\s+/g, " ")
     .trim()
 
   const isNameChange = data.type === "NAME" || data.type === "NAME_AND_POSITION"
   const isPositionChange =
     data.type === "POSITION" || data.type === "NAME_AND_POSITION"
-  const hasLinkedTargets = data.targets.length > 0 || data.status === "APPLIED"
-  const hasLinkCandidates = !hasLinkedTargets && linkCandidateCount(data) > 0
+
+  const onboardingMatchesCount = data.onboardingMatchesCount ?? 0
+  const offboardingMatchesCount = data.offboardingMatchesCount ?? 0
+  const linkCandidateCount =
+    data.linkCandidateCount ?? onboardingMatchesCount + offboardingMatchesCount
+
+  const nameItems = useMemo<ChangeItem[]>(
+    () => [
+      {
+        label: "Titul před jménem",
+        oldValue: data.oldTitleBefore,
+        newValue: data.newTitleBefore,
+      },
+      {
+        label: "Jméno",
+        oldValue: data.oldName,
+        newValue: data.newName,
+      },
+      {
+        label: "Příjmení",
+        oldValue: data.oldSurname,
+        newValue: data.newSurname,
+      },
+      {
+        label: "Titul za jménem",
+        oldValue: data.oldTitleAfter,
+        newValue: data.newTitleAfter,
+      },
+    ],
+    [data]
+  )
+
+  const positionItems = useMemo<ChangeItem[]>(
+    () => [
+      {
+        label: "Číslo funkce",
+        oldValue: data.oldPositionNum,
+        newValue: data.newPositionNum,
+      },
+      {
+        label: "Pozice",
+        oldValue: data.oldPositionName,
+        newValue: data.newPositionName,
+      },
+      {
+        label: "Odbor",
+        oldValue: data.oldDepartment,
+        newValue: data.newDepartment,
+      },
+      {
+        label: "Oddělení",
+        oldValue: data.oldUnitName,
+        newValue: data.newUnitName,
+      },
+    ],
+    [data]
+  )
 
   async function handleDelete() {
     setDeleting(true)
@@ -196,11 +296,11 @@ export function EmployeeChangeDetailClient({ data }: { data: ChangeData }) {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 px-4 py-6">
+    <div className="mx-auto max-w-5xl space-y-6 px-4 py-6">
       <div className="flex items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <h1 className="mb-1 text-2xl font-bold">Detail změny</h1>
-          <p className="text-muted-foreground">{fullName}</p>
+          <p className="break-words text-muted-foreground">{fullName}</p>
           {data.personalNumber && (
             <p className="font-mono text-sm text-muted-foreground">
               #{data.personalNumber}
@@ -218,43 +318,100 @@ export function EmployeeChangeDetailClient({ data }: { data: ChangeData }) {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 rounded-lg border p-4 text-sm md:grid-cols-2">
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <span className="font-medium text-muted-foreground">Typ:</span>
-            <Badge variant="outline">{typeLabel(data.type)}</Badge>
-          </div>
-
-          <div>
-            <span className="font-medium text-muted-foreground">
-              Datum účinnosti:{" "}
-            </span>
-            {fmtDate(data.effectiveDate)}
-          </div>
-
-          <div>
-            <span className="font-medium text-muted-foreground">Skupina: </span>
-            {audienceLabel(data.audience)}
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          {hasLinkedTargets && (
-            <div className="flex items-center gap-1 text-green-700 dark:text-green-400">
-              <Link2 className="size-4" />
-              <span>Propojeno {fmtDate(data.appliedAt)}</span>
+      <div className="grid gap-3 md:grid-cols-3">
+        <Card>
+          <CardContent className="flex items-start gap-3 p-4">
+            <User className="mt-0.5 size-5 text-muted-foreground" />
+            <div className="space-y-1 text-sm">
+              <p className="font-medium">Typ změny</p>
+              <Badge variant="outline">{typeLabel(data.type)}</Badge>
             </div>
-          )}
+          </CardContent>
+        </Card>
 
-          {hasLinkCandidates && (
-            <div className="flex items-center gap-1 text-amber-700 dark:text-amber-400">
-              <AlertTriangle className="size-4" />
-              <span>Nalezen související nástup/odchod</span>
+        <Card>
+          <CardContent className="flex items-start gap-3 p-4">
+            <CalendarDays className="mt-0.5 size-5 text-muted-foreground" />
+            <div className="space-y-1 text-sm">
+              <p className="font-medium">Účinnost</p>
+              <p className="text-muted-foreground">
+                {fmtDate(data.effectiveDate)}
+              </p>
             </div>
-          )}
+          </CardContent>
+        </Card>
 
+        <Card>
+          <CardContent className="flex items-start gap-3 p-4">
+            <Info className="mt-0.5 size-5 text-muted-foreground" />
+            <div className="space-y-1 text-sm">
+              <p className="font-medium">Evidence</p>
+              <p className="text-muted-foreground">
+                {audienceLabel(data.audience)}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="border-amber-200 bg-amber-50 dark:border-amber-900/60 dark:bg-amber-950/30">
+        <CardContent className="flex items-start gap-3 p-4 text-sm">
+          <Info className="mt-0.5 size-5 shrink-0 text-amber-700 dark:text-amber-300" />
+          <div>
+            <p className="font-semibold text-amber-950 dark:text-amber-100">
+              Změna je pouze informační vazba
+            </p>
+            <p className="mt-1 text-amber-900 dark:text-amber-200">
+              Nástupy ani odchody se touto změnou nepřepisují. Záznamy se jen
+              dohledávají podle osobního čísla a u člověka se zobrazí informační
+              ikonka.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Badge variant="outline" className="bg-background/60">
+                Nástupy: {onboardingMatchesCount}
+              </Badge>
+              <Badge variant="outline" className="bg-background/60">
+                Odchody: {offboardingMatchesCount}
+              </Badge>
+              <Badge variant="outline" className="bg-background/60">
+                Celkem vazeb: {linkCandidateCount}
+              </Badge>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {isNameChange && (
+        <ChangeComparisonCard
+          title="Změny jména a titulů"
+          description="Zobrazené jsou jen hodnoty, které se opravdu liší."
+          items={nameItems}
+        />
+      )}
+
+      {isPositionChange && (
+        <ChangeComparisonCard
+          title="Změny pozice, funkce a organizačního zařazení"
+          description="Zobrazené jsou jen hodnoty, které se opravdu liší."
+          items={positionItems}
+        />
+      )}
+
+      {data.notes && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Poznámka</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            {data.notes}
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardContent className="grid gap-3 p-4 text-sm md:grid-cols-2">
           {data.emailSentAt && (
-            <div className="flex items-center gap-1 text-green-700 dark:text-green-400">
+            <div className="flex items-center gap-2 text-green-700 dark:text-green-400">
               <CheckCircle2 className="size-4" />
               <span>Report odeslán {fmtDate(data.emailSentAt)}</span>
             </div>
@@ -273,139 +430,8 @@ export function EmployeeChangeDetailClient({ data }: { data: ChangeData }) {
             </span>
             {fmtDate(data.createdAt)}
           </div>
-        </div>
-      </div>
-
-      {hasLinkCandidates && (
-        <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm dark:border-amber-900/60 dark:bg-amber-950/30">
-          <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-600" />
-          <div>
-            <p className="font-semibold text-amber-900 dark:text-amber-100">
-              Změna má související záznam
-            </p>
-            <p className="mt-1 text-amber-800 dark:text-amber-200">
-              Podle osobního čísla byl nalezen nástup nebo odchod. Propojení je
-              volitelné — změna je aktivní a do měsíčního reportu spadá i bez
-              propojení.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {data.targets.length > 0 && (
-        <div className="space-y-2">
-          <h2 className="text-lg font-semibold">Propojené záznamy</h2>
-          <div className="space-y-2">
-            {data.targets.map((target) => (
-              <div
-                key={target.id}
-                className="flex items-center justify-between rounded-lg border p-3 text-sm"
-              >
-                <div className="flex items-center gap-3">
-                  <Badge variant="outline">
-                    {targetTypeLabel(target.targetType)}
-                  </Badge>
-                  <span className="text-muted-foreground">
-                    ID {target.targetId}
-                  </span>
-                  <span className="text-muted-foreground">
-                    Propojeno {fmtDate(target.appliedAt)}
-                  </span>
-                </div>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    router.push(
-                      target.targetType === "ONBOARDING"
-                        ? `/nastupy/${target.targetId}`
-                        : `/odchody/${target.targetId}`
-                    )
-                  }
-                >
-                  Otevřít
-                </Button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {isNameChange && (
-        <div className="space-y-2">
-          <h2 className="text-lg font-semibold">Změny jména / titulů</h2>
-          <div className="rounded-lg border p-4">
-            <div className="grid grid-cols-[140px_1fr_1fr] gap-2 pb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <span>Pole</span>
-              <span>Původní hodnota</span>
-              <span>Nová hodnota</span>
-            </div>
-
-            <ChangeRow
-              label="Titul před"
-              oldValue={data.oldTitleBefore}
-              newValue={data.newTitleBefore}
-            />
-            <ChangeRow
-              label="Jméno"
-              oldValue={data.oldName}
-              newValue={data.newName}
-            />
-            <ChangeRow
-              label="Příjmení"
-              oldValue={data.oldSurname}
-              newValue={data.newSurname}
-            />
-            <ChangeRow
-              label="Titul za"
-              oldValue={data.oldTitleAfter}
-              newValue={data.newTitleAfter}
-            />
-          </div>
-        </div>
-      )}
-
-      {isPositionChange && (
-        <div className="space-y-2">
-          <h2 className="text-lg font-semibold">Změny pozice / odboru</h2>
-          <div className="rounded-lg border p-4">
-            <div className="grid grid-cols-[140px_1fr_1fr] gap-2 pb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <span>Pole</span>
-              <span>Původní hodnota</span>
-              <span>Nová hodnota</span>
-            </div>
-
-            <ChangeRow
-              label="Č. funkce"
-              oldValue={data.oldPositionNum}
-              newValue={data.newPositionNum}
-            />
-            <ChangeRow
-              label="Pozice"
-              oldValue={data.oldPositionName}
-              newValue={data.newPositionName}
-            />
-            <ChangeRow
-              label="Odbor"
-              oldValue={data.oldDepartment}
-              newValue={data.newDepartment}
-            />
-            <ChangeRow
-              label="Oddělení"
-              oldValue={data.oldUnitName}
-              newValue={data.newUnitName}
-            />
-          </div>
-        </div>
-      )}
-
-      {data.notes && (
-        <div className="rounded-lg border bg-muted/30 p-4 text-sm">
-          <span className="font-medium">Poznámka: </span>
-          {data.notes}
-        </div>
-      )}
+        </CardContent>
+      </Card>
 
       <Separator />
 
