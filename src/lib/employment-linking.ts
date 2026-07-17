@@ -9,6 +9,10 @@ export type MinimalOffboardingLink = {
   personalNumber: string | null
   plannedEnd: DateLike
   actualEnd: DateLike
+  probationStopDecision?: "STOP" | "KEEP" | null
+  probationStopDecisionAt?: DateLike
+  probationStopDecisionBy?: string | null
+  probationStopNote?: string | null
 }
 
 export type MinimalOnboardingLink = {
@@ -53,6 +57,10 @@ export type LinkedOffboardingInfo = {
   exitDate: string | null
   isActualExit: boolean
   leftDuringProbation: boolean
+  probationStopDecision: "STOP" | "KEEP" | null
+  probationStopDecisionAt: string | null
+  probationStopDecisionBy: string | null
+  probationStopNote: string | null
   probationShouldBeStopped: boolean
   rowMuted: boolean
   label: string
@@ -399,9 +407,27 @@ export function buildLinkedOffboardingInfo(params: {
     probationEnd && exitDate && isSameOrBefore(exitDate, probationEnd)
   )
 
-  const probationShouldBeStopped = leftDuringProbation
+  const probationStopDecision = offboarding.probationStopDecision ?? null
+  const probationShouldBeStopped =
+    leftDuringProbation && probationStopDecision === "STOP"
 
   if (leftDuringProbation) {
+    const exitKind = isActualExit ? "skutečný" : "plánovaný"
+
+    const label =
+      probationStopDecision === "STOP"
+        ? "Odešel ve zkušebce – hodnocení zastaveno"
+        : probationStopDecision === "KEEP"
+          ? "Odešel ve zkušebce – hodnocení pokračuje"
+          : "Odešel ve zkušebce – čeká na rozhodnutí HR"
+
+    const description =
+      probationStopDecision === "STOP"
+        ? `Zaměstnanec má ${exitKind} odchod ${formatDateCz(exitDate)} v průběhu zkušební doby. HR potvrdila zastavení hodnocení zkušební doby, formulář ani e-maily se dále neposílají.`
+        : probationStopDecision === "KEEP"
+          ? `Zaměstnanec má ${exitKind} odchod ${formatDateCz(exitDate)} v průběhu zkušební doby. HR se při zakládání odchodu rozhodla hodnocení zkušební doby nezastavovat, formulář i e-maily běží dál.`
+          : `Zaměstnanec má ${exitKind} odchod ${formatDateCz(exitDate)} v průběhu zkušební doby. Na záznamu odchodu čeká rozhodnutí HR, zda hodnocení zkušební doby zastavit.`
+
     return {
       id: offboarding.id,
       plannedEnd: toIso(offboarding.plannedEnd),
@@ -409,18 +435,14 @@ export function buildLinkedOffboardingInfo(params: {
       exitDate: toIso(exitDate),
       isActualExit,
       leftDuringProbation,
+      probationStopDecision,
+      probationStopDecisionAt: toIso(offboarding.probationStopDecisionAt),
+      probationStopDecisionBy: offboarding.probationStopDecisionBy ?? null,
+      probationStopNote: offboarding.probationStopNote ?? null,
       probationShouldBeStopped,
       rowMuted: true,
-      label: isActualExit
-        ? "Odešel ve zkušebce"
-        : "Plánovaný odchod ve zkušebce",
-      description: isActualExit
-        ? `Zaměstnanec má skutečný odchod ${formatDateCz(
-          exitDate
-        )}. Zkušební doba se dále nevyhodnocuje.`
-        : `Zaměstnanec má plánovaný odchod ${formatDateCz(
-          exitDate
-        )} ještě v průběhu zkušební doby.`,
+      label,
+      description,
     }
   }
 
@@ -431,6 +453,10 @@ export function buildLinkedOffboardingInfo(params: {
     exitDate: toIso(exitDate),
     isActualExit,
     leftDuringProbation: false,
+    probationStopDecision,
+    probationStopDecisionAt: toIso(offboarding.probationStopDecisionAt),
+    probationStopDecisionBy: offboarding.probationStopDecisionBy ?? null,
+    probationStopNote: offboarding.probationStopNote ?? null,
     probationShouldBeStopped: false,
     rowMuted: isActualExit,
     label: isActualExit ? "Zaměstnanec odešel" : "Má plánovaný odchod",
@@ -525,6 +551,7 @@ export function shouldSkipProbationEvaluation(params: {
   const { probationEnd, linkedOffboarding } = params
 
   if (!probationEnd || !linkedOffboarding) return false
+  if (linkedOffboarding.probationStopDecision !== "STOP") return false
 
   const exitDate = linkedOffboarding.actualEnd ?? linkedOffboarding.plannedEnd
 

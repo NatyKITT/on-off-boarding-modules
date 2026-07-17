@@ -314,6 +314,13 @@ async function queueDeadlineReminders(args: {
       continue
     }
 
+    if (request.status === "CANCELLED") {
+      args.notifications.push(
+        `${reminderKind.toLowerCase()}_skipped_probation_stopped:${employee.id}`
+      )
+      continue
+    }
+
     if (request.isLocked) {
       args.notifications.push(
         `${reminderKind.toLowerCase()}_skipped_locked:${employee.id}`
@@ -575,6 +582,13 @@ export async function ensureProbationCronJobs(req: NextRequest) {
 
     if (request.completedAt || request.status === "COMPLETED") {
       notifications.push(`21_days_before_end_skipped_completed:${employee.id}`)
+      continue
+    }
+
+    if (request.status === "CANCELLED") {
+      notifications.push(
+        `21_days_before_end_skipped_probation_stopped:${employee.id}`
+      )
       continue
     }
 

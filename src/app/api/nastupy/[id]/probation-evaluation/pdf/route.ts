@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server"
 
 import {
+  buildEarlyExitNote,
   buildResolvedProbationApiResponse,
   getNumericId,
   getOrEnsureProbationDetail,
@@ -55,7 +56,18 @@ export async function GET(
       currentUser: authResult.user,
     })
 
-    const pdfBuffer = await renderProbationEvaluationPdfBuffer(payload)
+    const earlyExitNote = await buildEarlyExitNote({
+      personalNumber: payload.onboarding.personalNumber,
+      probationEnd: payload.onboarding.probationEnd,
+    })
+
+    const pdfBuffer = await renderProbationEvaluationPdfBuffer({
+      ...payload,
+      onboarding: {
+        ...payload.onboarding,
+        earlyExitNote,
+      },
+    })
     const filename = sanitizeFilename(
       payload.onboarding.fullName || String(onboardingId)
     )

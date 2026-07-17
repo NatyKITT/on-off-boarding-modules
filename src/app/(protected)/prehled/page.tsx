@@ -1,6 +1,13 @@
 "use client"
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import {
   addMinutes,
   format as dfFormat,
@@ -17,6 +24,8 @@ import { Calendar, dateFnsLocalizer, type View } from "react-big-calendar"
 import MiniCalendar from "react-calendar"
 
 import { type Position } from "@/types/position"
+
+import { useIsReadonly } from "@/hooks/use-current-role"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -155,7 +164,9 @@ const WORK_END_HOUR = 18
 const SLOT_LEN_MIN = 30
 
 const MOBILE_WIDTH = 640
-const TABLET_WIDTH = 860
+// O 1px pod Tailwindovým `md` (768px), ať JS tier a natvrdo psané md:/lg:/xl:
+// třídy ve stránce přepínají na stejné šířce a neprotiřečí si mezi 768-860px.
+const TABLET_WIDTH = 767
 const LAPTOP_WIDTH = 1700
 const GROUP_AFTER = 2
 
@@ -163,6 +174,12 @@ const START_GRADIENT = `linear-gradient(90deg, ${COLORS.plannedStart} 0%, ${COLO
 const END_GRADIENT = `linear-gradient(90deg, ${COLORS.plannedEnd} 0%, ${COLORS.plannedEnd} 30%, ${COLORS.actualEnd} 70%, ${COLORS.actualEnd} 100%)`
 
 type ScreenTier = "mobile" | "tablet" | "laptop" | "desktop"
+
+// Na serveru useLayoutEffect nic nedělá (a hlásí varování) - na klientovi ale
+// běží před prvním vykreslením obrazovky, takže se předejde bliknutí špatného
+// tieru (laptop/desktop) hned po načtení, i na mobilu.
+const useIsomorphicLayoutEffect =
+  typeof window !== "undefined" ? useLayoutEffect : useEffect
 
 const isSameDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() &&
@@ -433,6 +450,7 @@ function shouldClusterLabelShowTime(args: {
 }
 
 export default function DashboardPage(): JSX.Element {
+  const isReadonly = useIsReadonly()
   const [currentDate, setCurrentDate] = useState<Date>(new Date())
   const [bigView, setBigView] = useState<View>("month")
   const [miniActiveStart, setMiniActiveStart] = useState<Date>(
@@ -445,7 +463,7 @@ export default function DashboardPage(): JSX.Element {
   const [windowWidth, setWindowWidth] = useState(0)
   const [isDesktopMonthWide, setIsDesktopMonthWide] = useState(false)
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     if (typeof window === "undefined") return
     const mobileQuery = window.matchMedia(`(max-width: ${MOBILE_WIDTH}px)`)
     const tabletQuery = window.matchMedia(`(max-width: ${TABLET_WIDTH}px)`)
@@ -469,7 +487,7 @@ export default function DashboardPage(): JSX.Element {
     }
   }, [])
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     if (typeof window === "undefined") return
     const update = () => setWindowWidth(window.innerWidth)
     update()
@@ -485,8 +503,10 @@ export default function DashboardPage(): JSX.Element {
   }, [isMobile, isTablet, windowWidth])
 
   const [positions, setPositions] = useState<Position[]>([])
+  const [loadingPositions, setLoadingPositions] = useState(false)
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [, setLoading] = useState(true)
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
 
   const [miniSelected, setMiniSelected] = useState<Date | null>(null)
 
@@ -547,18 +567,30 @@ export default function DashboardPage(): JSX.Element {
   const [clusterItems, setClusterItems] = useState<CalendarEvent[] | null>(null)
   const [clusterSlotLabel, setClusterSlotLabel] = useState("")
 
+  const loadPositions = useCallback(async () => {
+    if (positions.length > 0) return
+
+    setLoadingPositions(true)
+    try {
+      const res = await fetch("/api/systemizace", { cache: "no-store" })
+      const json = await res.json().catch(() => null)
+      setPositions(Array.isArray(json?.data) ? json.data : [])
+    } catch (error) {
+      console.error("Error loading positions:", error)
+    } finally {
+      setLoadingPositions(false)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [positions.length])
+
   useEffect(() => {
     ;(async () => {
       setLoading(true)
       try {
-        const [posRes, onbRes, offRes] = await Promise.all([
-          fetch("/api/systemizace", { cache: "no-store" }),
+        const [onbRes, offRes] = await Promise.all([
           fetch("/api/nastupy", { cache: "no-store" }),
           fetch("/api/odchody", { cache: "no-store" }),
         ])
-
-        const posJson = await posRes.json()
-        setPositions(Array.isArray(posJson.data) ? posJson.data : [])
 
         const onbJson: { status: string; data?: OnbRow[] } = await onbRes.json()
         const offJson: { status: string; data?: OffRow[] } = await offRes.json()
@@ -653,9 +685,20 @@ export default function DashboardPage(): JSX.Element {
         console.error("Chyba při načítání přehledu:", e)
       } finally {
         setLoading(false)
+        setHasLoadedOnce(true)
       }
     })()
   }, [])
+
+  useEffect(() => {
+    if (
+      openNewOnbPlanned ||
+      openNewOnbActual ||
+      (openEdit && editType === "onb")
+    ) {
+      void loadPositions()
+    }
+  }, [openNewOnbPlanned, openNewOnbActual, openEdit, editType, loadPositions])
 
   useEffect(() => {
     const onPointerDown = (ev: PointerEvent) => {
@@ -988,10 +1031,10 @@ export default function DashboardPage(): JSX.Element {
           : dfFormat(date, "LLLL yyyy", { locale: cs }),
 
       dayHeaderFormat: (date: Date) => {
-        if (tier === "mobile") return dfFormat(date, "d", { locale: cs })
+        if (tier === "mobile") return dfFormat(date, "d.M.", { locale: cs })
         if (tier === "tablet")
-          return dfFormat(date, "EEEEEE d.", { locale: cs })
-        return dfFormat(date, "EEEE d.", { locale: cs })
+          return dfFormat(date, "EEEEEE d.M.", { locale: cs })
+        return dfFormat(date, "EEEE d. M.", { locale: cs })
       },
 
       dayRangeHeaderFormat: ({ start, end }: { start: Date; end: Date }) =>
@@ -1001,7 +1044,7 @@ export default function DashboardPage(): JSX.Element {
       weekdayFormat: (date: Date) =>
         dfFormat(date, isMobile ? "EE" : "EEEE", { locale: cs }),
       dayFormat: (date: Date) =>
-        dfFormat(date, isMobile ? "d" : "EEEE d.", { locale: cs }),
+        dfFormat(date, isMobile ? "d.M." : "EEEE d. M.", { locale: cs }),
       eventTimeRangeFormat: () => "",
       agendaTimeRangeFormat: () => "",
       timeGutterFormat: (date: Date) =>
@@ -1488,74 +1531,83 @@ export default function DashboardPage(): JSX.Element {
         className="min-w-0 max-w-full flex-1 rounded-2xl bg-white p-2 shadow-lg ring-1 ring-black/5 dark:bg-neutral-900 sm:p-3 lg:p-4"
       >
         <div className={`w-full ${calendarHeight}`}>
-          <Calendar<CalendarEvent>
-            localizer={localizer}
-            events={displayEvents}
-            startAccessor="start"
-            endAccessor="end"
-            titleAccessor="title"
-            selectable="ignoreEvents"
-            longPressThreshold={10}
-            onSelectSlot={handleSelectSlot}
-            onSelectEvent={(e) => void onSelectEvent(e)}
-            date={currentDate}
-            view={bigView}
-            onNavigate={handleBigNavigate}
-            onView={handleBigView}
-            messages={messages}
-            formats={formats}
-            views={["month", "week", "day"]}
-            step={30}
-            timeslots={2}
-            min={minTime}
-            max={maxTime}
-            scrollToTime={minTime}
-            components={{ event: EventCell }}
-            tooltipAccessor={null}
-            dayLayoutAlgorithm="no-overlap"
-            eventPropGetter={(event) => {
-              const bg = buildEventBg(event)
-              const gradient = isGradient(bg)
+          {!hasLoadedOnce ? (
+            <div className="flex size-full items-center justify-center rounded-xl bg-muted/20">
+              <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
+              <span className="ml-2 text-muted-foreground">
+                Načítám přehled...
+              </span>
+            </div>
+          ) : (
+            <Calendar<CalendarEvent>
+              localizer={localizer}
+              events={displayEvents}
+              startAccessor="start"
+              endAccessor="end"
+              titleAccessor="title"
+              selectable="ignoreEvents"
+              longPressThreshold={10}
+              onSelectSlot={handleSelectSlot}
+              onSelectEvent={(e) => void onSelectEvent(e)}
+              date={currentDate}
+              view={bigView}
+              onNavigate={handleBigNavigate}
+              onView={handleBigView}
+              messages={messages}
+              formats={formats}
+              views={["month", "week", "day"]}
+              step={30}
+              timeslots={2}
+              min={minTime}
+              max={maxTime}
+              scrollToTime={minTime}
+              components={{ event: EventCell }}
+              tooltipAccessor={null}
+              dayLayoutAlgorithm="no-overlap"
+              eventPropGetter={(event) => {
+                const bg = buildEventBg(event)
+                const gradient = isGradient(bg)
 
-              return {
-                style: {
-                  backgroundColor: gradient ? undefined : bg,
-                  backgroundImage: gradient ? bg : undefined,
-                  color: "white",
-                  borderRadius: tier === "mobile" ? 6 : 10,
-                  border: "none",
-                  padding:
-                    tier === "mobile"
-                      ? "1px 3px"
-                      : tier === "tablet"
-                        ? "2px 4px"
-                        : bigView === "month"
-                          ? "4px 6px"
-                          : "6px 8px",
-                  boxShadow: "0 1px 2px rgba(0,0,0,0.12)",
-                  whiteSpace: "normal",
-                  wordBreak: "break-word",
-                  overflowWrap: "anywhere",
-                  lineHeight: 1.15,
-                  fontSize:
-                    tier === "mobile" ? 10 : bigView === "month" ? 11 : 12,
-                  fontWeight: 800,
-                  textShadow: "0 1px 1px rgba(0,0,0,0.22)",
-                  overflow: "hidden",
-                  height: "auto",
-                  minHeight:
-                    tier === "mobile"
-                      ? "16px"
-                      : tier === "tablet"
-                        ? "20px"
-                        : bigView === "month"
-                          ? "24px"
-                          : "28px",
-                },
-              }
-            }}
-            style={{ height: "100%" }}
-          />
+                return {
+                  style: {
+                    backgroundColor: gradient ? undefined : bg,
+                    backgroundImage: gradient ? bg : undefined,
+                    color: "white",
+                    borderRadius: tier === "mobile" ? 6 : 10,
+                    border: "none",
+                    padding:
+                      tier === "mobile"
+                        ? "1px 3px"
+                        : tier === "tablet"
+                          ? "2px 4px"
+                          : bigView === "month"
+                            ? "4px 6px"
+                            : "6px 8px",
+                    boxShadow: "0 1px 2px rgba(0,0,0,0.12)",
+                    whiteSpace: "normal",
+                    wordBreak: "break-word",
+                    overflowWrap: "anywhere",
+                    lineHeight: 1.15,
+                    fontSize:
+                      tier === "mobile" ? 10 : bigView === "month" ? 11 : 12,
+                    fontWeight: 800,
+                    textShadow: "0 1px 1px rgba(0,0,0,0.22)",
+                    overflow: "hidden",
+                    height: "auto",
+                    minHeight:
+                      tier === "mobile"
+                        ? "16px"
+                        : tier === "tablet"
+                          ? "20px"
+                          : bigView === "month"
+                            ? "24px"
+                            : "28px",
+                  },
+                }
+              }}
+              style={{ height: "100%" }}
+            />
+          )}
         </div>
       </section>
       <style jsx global>{`
@@ -1958,20 +2010,29 @@ export default function DashboardPage(): JSX.Element {
             </span>
           </DialogDescription>
           <div className={tier === "mobile" ? "p-4" : "p-6"}>
-            <OnboardingFormUnified
-              positions={positions}
-              mode="create-planned"
-              initial={{
-                plannedStart: toISO(slotDate) || undefined,
-                startTime: slotDate
-                  ? dfFormat(withDefaultWorkTime(slotDate), "HH:mm")
-                  : "08:00",
-              }}
-              onSuccess={async () => {
-                setOpenNewOnbPlanned(false)
-                await reloadAll()
-              }}
-            />
+            {loadingPositions ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
+                <span className="ml-2 text-muted-foreground">
+                  Načítám pozice...
+                </span>
+              </div>
+            ) : (
+              <OnboardingFormUnified
+                positions={positions}
+                mode="create-planned"
+                initial={{
+                  plannedStart: toISO(slotDate) || undefined,
+                  startTime: slotDate
+                    ? dfFormat(withDefaultWorkTime(slotDate), "HH:mm")
+                    : "08:00",
+                }}
+                onSuccess={async () => {
+                  setOpenNewOnbPlanned(false)
+                  await reloadAll()
+                }}
+              />
+            )}
           </div>
         </DialogContent>
       </Dialog>
@@ -1991,20 +2052,29 @@ export default function DashboardPage(): JSX.Element {
             </span>
           </DialogDescription>
           <div className={tier === "mobile" ? "p-4" : "p-6"}>
-            <OnboardingFormUnified
-              positions={positions}
-              mode="create-actual"
-              initial={{
-                actualStart: toISO(slotDate) || undefined,
-                startTime: slotDate
-                  ? dfFormat(withDefaultWorkTime(slotDate), "HH:mm")
-                  : "08:00",
-              }}
-              onSuccess={async () => {
-                setOpenNewOnbActual(false)
-                await reloadAll()
-              }}
-            />
+            {loadingPositions ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
+                <span className="ml-2 text-muted-foreground">
+                  Načítám pozice...
+                </span>
+              </div>
+            ) : (
+              <OnboardingFormUnified
+                positions={positions}
+                mode="create-actual"
+                initial={{
+                  actualStart: toISO(slotDate) || undefined,
+                  startTime: slotDate
+                    ? dfFormat(withDefaultWorkTime(slotDate), "HH:mm")
+                    : "08:00",
+                }}
+                onSuccess={async () => {
+                  setOpenNewOnbActual(false)
+                  await reloadAll()
+                }}
+              />
+            )}
           </div>
         </DialogContent>
       </Dialog>
@@ -2261,7 +2331,7 @@ export default function DashboardPage(): JSX.Element {
                     <Button
                       size={tier === "mobile" ? "sm" : "default"}
                       onClick={() => void confirmOnboarding()}
-                      disabled={!onbActualStart}
+                      disabled={!onbActualStart || isReadonly}
                     >
                       Potvrdit nástup
                     </Button>
@@ -2419,7 +2489,7 @@ export default function DashboardPage(): JSX.Element {
                     <Button
                       size={tier === "mobile" ? "sm" : "default"}
                       onClick={() => void confirmOffboarding()}
-                      disabled={!offActualEnd}
+                      disabled={!offActualEnd || isReadonly}
                     >
                       Potvrdit odchod
                     </Button>
@@ -2462,20 +2532,29 @@ export default function DashboardPage(): JSX.Element {
             {editId != null && editInitial && (
               <>
                 {editType === "onb" ? (
-                  <OnboardingFormUnified
-                    key={`edit-onb-${editId}-${editContext}`}
-                    positions={positions}
-                    id={editId}
-                    mode="edit"
-                    editContext={editContext}
-                    initial={mapOnbInitial(editInitial as Partial<OnbRow>)}
-                    onSuccess={async () => {
-                      setOpenEdit(false)
-                      setEditId(null)
-                      setEditInitial(null)
-                      await reloadAll()
-                    }}
-                  />
+                  loadingPositions ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
+                      <span className="ml-2 text-muted-foreground">
+                        Načítám pozice...
+                      </span>
+                    </div>
+                  ) : (
+                    <OnboardingFormUnified
+                      key={`edit-onb-${editId}-${editContext}`}
+                      positions={positions}
+                      id={editId}
+                      mode="edit"
+                      editContext={editContext}
+                      initial={mapOnbInitial(editInitial as Partial<OnbRow>)}
+                      onSuccess={async () => {
+                        setOpenEdit(false)
+                        setEditId(null)
+                        setEditInitial(null)
+                        await reloadAll()
+                      }}
+                    />
+                  )
                 ) : (
                   <OffboardingFormUnified
                     key={`edit-off-${editId}-${editContext}`}

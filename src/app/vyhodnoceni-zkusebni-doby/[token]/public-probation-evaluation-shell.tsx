@@ -405,6 +405,21 @@ export function PublicProbationEvaluationShell({ token, employeeName }: Props) {
           </div>
         )}
 
+        {unavailable && !loading && !error && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <p className="font-medium">
+              {data?.request?.status === "CANCELLED"
+                ? "Hodnocení zkušební doby bylo zastaveno."
+                : "Platnost formuláře vypršela."}
+            </p>
+            <p className="mt-1 text-amber-800">
+              {data?.request?.status === "CANCELLED"
+                ? "Zaměstnanec v průběhu zkušební doby ukončil pracovní poměr, personální oddělení proto vyhodnocení zastavilo. Formulář už není potřeba vyplňovat."
+                : "Odkaz na vyhodnocení zkušební doby již není platný. V případě potřeby se obraťte na personální oddělení."}
+            </p>
+          </div>
+        )}
+
         {loading && (
           <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
             <Loader2 className="size-6 animate-spin" />

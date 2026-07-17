@@ -5,6 +5,8 @@ import { format } from "date-fns"
 import { cs } from "date-fns/locale"
 import { AlertCircle, Calendar, RotateCcw, Trash2, User } from "lucide-react"
 
+import { useIsReadonly } from "@/hooks/use-current-role"
+
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
@@ -51,6 +53,7 @@ export function DeletedRecordsDialog({
   successEvent,
   onRestore,
 }: DeletedRecordsDialogProps) {
+  const isReadonly = useIsReadonly()
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [deleted, setDeleted] = useState<DeletedRecord[]>([])
@@ -109,12 +112,34 @@ export function DeletedRecordsDialog({
           : kind === "offboarding"
             ? "odchody"
             : "zmeny"
-      const res = await fetch(`/api/${endpoint}/${record.id}/restore`, {
+
+      let res = await fetch(`/api/${endpoint}/${record.id}/restore`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       })
 
-      const json = await res.json()
+      let json = await res.json()
+
+      if (res.ok && json?.status === "confirm_required") {
+        const confirmed = window.confirm(
+          "Tento odchod znovu pozastaví zkušební dobu propojeného nástupu. Pokračovat v obnovení?"
+        )
+
+        if (!confirmed) {
+          setRestoring(null)
+          return
+        }
+
+        res = await fetch(
+          `/api/${endpoint}/${record.id}/restore?confirmPause=true`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+
+        json = await res.json()
+      }
 
       if (!res.ok) {
         throw new Error(json?.message || "Obnovení se nezdařilo")
@@ -266,7 +291,7 @@ export function DeletedRecordsDialog({
                       size="sm"
                       variant="outline"
                       onClick={() => void handleRestore(record)}
-                      disabled={restoring === record.id}
+                      disabled={restoring === record.id || isReadonly}
                       className="shrink-0"
                     >
                       {restoring === record.id ? (

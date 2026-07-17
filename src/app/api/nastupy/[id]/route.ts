@@ -3,15 +3,16 @@ import { auth } from "@/auth"
 import { Prisma } from "@prisma/client"
 import { z, ZodError } from "zod"
 
+import { env } from "@/env.mjs"
+
 import { prisma } from "@/lib/db"
-import { getHrRecipientsFromEnv } from "@/lib/email"
 import {
   buildLinkedEmployeeChangeInfos,
-  buildLinkedOnboardingInfo,
+  buildLinkedOffboardingInfo,
   normalizePersonalNumber,
-  pickMostRelevantOnboarding,
+  pickMostRelevantOffboarding,
 } from "@/lib/employment-linking"
-import { canReadOffboarding, canWriteOffboarding } from "@/lib/rbac"
+import { canReadOnboarding, canWriteOnboarding } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
@@ -23,11 +24,16 @@ type RouteParams = {
   }
 }
 
-type OffboardingRecord = NonNullable<
-  Awaited<ReturnType<typeof prisma.employeeOffboarding.findFirst>>
+type OnboardingRecord = NonNullable<
+  Awaited<ReturnType<typeof prisma.employeeOnboarding.findFirst>>
 >
 
-type UpdateData = Prisma.EmployeeOffboardingUncheckedUpdateInput
+type UpdateData = Prisma.EmployeeOnboardingUncheckedUpdateInput
+
+type RawOnboardingBody = {
+  generatedSkippedPersonalNumbers?: unknown
+  [key: string]: unknown
+}
 
 const emptyToUndefined = (v: unknown) =>
   v === null
@@ -44,11 +50,34 @@ const nullableDate = z.preprocess(
   z.union([z.null(), z.coerce.date()]).optional()
 )
 
+const probationExtensionTypeSchema = z.enum([
+  "sick_leave",
+  "vacation",
+  "family_care",
+  "maternity_parental",
+  "other_obstacle",
+  "unexcused_absence",
+])
+
+const probationExtensionSchema = z.object({
+  id: z.string(),
+  type: probationExtensionTypeSchema,
+  from: z.string(),
+  to: z.string(),
+  days: z.number().int().nonnegative(),
+  note: z.string().optional(),
+})
+
 const updateSchema = z.object({
   titleBefore: z.union([z.string(), z.null()]).optional(),
   name: z.string().optional(),
   surname: z.string().optional(),
   titleAfter: z.union([z.string(), z.null()]).optional(),
+  email: z
+    .preprocess(emptyToUndefined, z.string().email())
+    .optional()
+    .nullable(),
+  phone: z.union([z.string(), z.null()]).optional(),
 
   userEmail: z
     .preprocess(emptyToUndefined, z.string().email())
@@ -62,13 +91,30 @@ const updateSchema = z.object({
   department: z.string().optional(),
   unitName: z.string().optional(),
 
-  plannedEnd: nullableDate,
-  actualEnd: nullableDate,
-  noticeEnd: nullableDate,
-  noticePeriodEnd: nullableDate,
+  startTime: z.union([z.string(), z.null()]).optional(),
+  plannedStart: nullableDate,
+  actualStart: nullableDate,
 
-  noticeMonths: z.preprocess(emptyToUndefined, z.coerce.number()).optional(),
+  probationEnd: nullableDate,
   hasCustomDates: z.boolean().optional(),
+  probationExtensions: z.array(probationExtensionSchema).optional(),
+  probationExtensionSummary: z.union([z.string(), z.null()]).optional(),
+
+  supervisorManualOverride: z.boolean().optional(),
+  supervisorName: z.union([z.string(), z.null()]).optional(),
+  supervisorEmail: z
+    .preprocess(emptyToUndefined, z.string().email())
+    .optional()
+    .nullable(),
+  supervisorPosition: z.union([z.string(), z.null()]).optional(),
+  supervisorDepartment: z.union([z.string(), z.null()]).optional(),
+  supervisorUnitName: z.union([z.string(), z.null()]).optional(),
+
+  mentorName: z.union([z.string(), z.null()]).optional(),
+  mentorEmail: z
+    .preprocess(emptyToUndefined, z.string().email())
+    .optional()
+    .nullable(),
 
   notes: z.union([z.string(), z.null()]).optional(),
   status: z.enum(["NEW", "IN_PROGRESS", "COMPLETED"]).optional(),
@@ -78,6 +124,162 @@ function toStr(value: unknown): string {
   if (value instanceof Date) return value.toISOString()
   if (value === null || value === undefined) return ""
   return String(value)
+}
+
+function buildFullName(parts: Array<string | null | undefined>): string | null {
+  const full = parts.filter(Boolean).join(" ").replace(/\s+/g, " ").trim()
+
+  return full || null
+}
+
+function parseEmailList(value?: string): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function getHrNotificationRecipients(): string[] {
+  return parseEmailList(env.HR_NOTIFICATION_EMAILS)
+}
+
+function parseGeneratedSkippedPersonalNumbers(
+  raw: RawOnboardingBody
+): string[] {
+  return Array.isArray(raw.generatedSkippedPersonalNumbers)
+    ? raw.generatedSkippedPersonalNumbers
+        .filter(
+          (value: unknown): value is string =>
+            typeof value === "string" &&
+            value.trim() !== "" &&
+            /^\d+$/.test(value.trim())
+        )
+        .map((value) => value.trim())
+    : []
+}
+
+async function markPersonalNumbers(
+  tx: Prisma.TransactionClient,
+  generatedSkipped: string[],
+  usedPersonalNumber?: string | null
+) {
+  if (generatedSkipped.length > 0) {
+    await Promise.all(
+      generatedSkipped.map((number) =>
+        tx.personalNumberGap.upsert({
+          where: { number },
+          update: { status: "SKIPPED" },
+          create: { number, status: "SKIPPED" },
+        })
+      )
+    )
+  }
+
+  const used = usedPersonalNumber?.trim()
+
+  if (used) {
+    await tx.personalNumberGap.updateMany({
+      where: { number: used, status: "SKIPPED" },
+      data: { status: "USED", usedAt: new Date() },
+    })
+  }
+}
+
+async function resolveCancelledByName(
+  cancelledBy: string | null
+): Promise<string | null> {
+  if (!cancelledBy) return null
+
+  if (cancelledBy.startsWith("cm") && cancelledBy.length > 20) {
+    try {
+      const user = await prisma.user.findUnique({
+        where: { id: cancelledBy },
+        select: { name: true, surname: true, email: true },
+      })
+
+      if (user?.name && user?.surname) return `${user.name} ${user.surname}`
+      if (user?.email) return user.email
+    } catch (error) {
+      console.error("Error resolving cancelledBy user:", error)
+    }
+  }
+
+  return cancelledBy
+}
+
+async function resolveDecisionActorName(
+  value: string | null
+): Promise<string | null> {
+  if (!value) return null
+
+  try {
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [{ id: value }, { email: value }],
+      },
+      select: { name: true, surname: true, email: true },
+    })
+
+    if (user?.name && user?.surname) return `${user.name} ${user.surname}`
+    if (user?.email) return user.email
+  } catch (error) {
+    console.error("Error resolving probationStopDecisionBy user:", error)
+  }
+
+  return value
+}
+
+async function getLinkedOffboardingForOnboarding(
+  personalNumber: string | null | undefined,
+  probationEnd: Date | null | undefined
+) {
+  const normalizedPersonalNumber = normalizePersonalNumber(personalNumber)
+
+  if (!normalizedPersonalNumber) {
+    return buildLinkedOffboardingInfo({
+      offboarding: null,
+      probationEnd,
+    })
+  }
+
+  const linkedOffboardings = await prisma.employeeOffboarding.findMany({
+    where: {
+      personalNumber: {
+        not: null,
+      },
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+      personalNumber: true,
+      plannedEnd: true,
+      actualEnd: true,
+      probationStopDecision: true,
+      probationStopDecisionAt: true,
+      probationStopDecisionBy: true,
+      probationStopNote: true,
+    },
+  })
+
+  const matchingOffboardings = linkedOffboardings.filter(
+    (offboarding) =>
+      normalizePersonalNumber(offboarding.personalNumber) ===
+      normalizedPersonalNumber
+  )
+
+  const linkedOffboardingInfo = buildLinkedOffboardingInfo({
+    offboarding: pickMostRelevantOffboarding(matchingOffboardings),
+    probationEnd,
+  })
+
+  if (linkedOffboardingInfo?.probationStopDecisionBy) {
+    linkedOffboardingInfo.probationStopDecisionBy =
+      await resolveDecisionActorName(
+        linkedOffboardingInfo.probationStopDecisionBy
+      )
+  }
+
+  return linkedOffboardingInfo
 }
 
 async function getLinkedChangesForPersonalNumber(
@@ -109,68 +311,56 @@ async function getLinkedChangesForPersonalNumber(
   )
 }
 
-async function getLinkedOnboardingForOffboarding(
-  personalNumber: string | null | undefined,
-  exitDate: Date | null | undefined
-) {
-  const normalizedPersonalNumber = normalizePersonalNumber(personalNumber)
-
-  if (!normalizedPersonalNumber) {
-    return buildLinkedOnboardingInfo({
-      onboarding: null,
-      exitDate,
-    })
-  }
-
-  const linkedOnboardings = await prisma.employeeOnboarding.findMany({
-    where: {
-      personalNumber: {
-        not: null,
-      },
-      deletedAt: null,
-    },
-    select: {
-      id: true,
-      personalNumber: true,
-      plannedStart: true,
-      actualStart: true,
-      probationEnd: true,
-      positionName: true,
-    },
-  })
-
-  const matchingOnboardings = linkedOnboardings.filter(
-    (onboarding) =>
-      normalizePersonalNumber(onboarding.personalNumber) ===
-      normalizedPersonalNumber
-  )
-
-  return buildLinkedOnboardingInfo({
-    onboarding: pickMostRelevantOnboarding(matchingOnboardings),
-    exitDate,
-  })
-}
-
-async function serializeOffboardingRecord(record: OffboardingRecord) {
-  const linkedOnboarding = await getLinkedOnboardingForOffboarding(
+async function serializeOnboardingRecord(record: OnboardingRecord) {
+  const linkedOffboarding = await getLinkedOffboardingForOnboarding(
     record.personalNumber,
-    record.actualEnd ?? record.plannedEnd
+    record.probationEnd
   )
 
   const linkedChanges = await getLinkedChangesForPersonalNumber(
     record.personalNumber
   )
 
+  const cancelledByName = await resolveCancelledByName(record.cancelledBy)
+
   return {
     ...record,
-    plannedEnd: record.plannedEnd?.toISOString() ?? null,
-    actualEnd: record.actualEnd?.toISOString() ?? null,
-    noticeEnd: record.noticeEnd?.toISOString() ?? null,
-    noticeMonths: record.noticeMonths ?? 2,
+    plannedStart: record.plannedStart?.toISOString() ?? null,
+    actualStart: record.actualStart?.toISOString() ?? null,
+    probationEnd: record.probationEnd?.toISOString() ?? null,
     hasCustomDates: record.hasCustomDates ?? false,
+    probationExtensions: Array.isArray(record.probationExtensions)
+      ? record.probationExtensions
+      : [],
+    probationExtensionSummary: record.probationExtensionSummary ?? null,
+    mentorAssignedFrom: record.mentorAssignedFrom?.toISOString() ?? null,
+    mentorAssignedTo: record.mentorAssignedTo?.toISOString() ?? null,
+    mentorNotificationSentAt:
+      record.mentorNotificationSentAt?.toISOString() ?? null,
+    cancelledAt: record.cancelledAt?.toISOString() ?? null,
+    cancelledBy: cancelledByName,
+    cancelReason: record.cancelReason ?? null,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
-    linkedOnboarding,
+    deletedAt: record.deletedAt?.toISOString() ?? null,
+    supervisorName: buildFullName([
+      record.supervisorTitleBefore,
+      record.supervisorName,
+      record.supervisorSurname,
+      record.supervisorTitleAfter,
+    ]),
+    supervisorEmail: record.supervisorEmail ?? null,
+    supervisorPosition: record.supervisorPosition ?? null,
+    supervisorDepartment: record.supervisorDepartment ?? null,
+    supervisorUnitName: record.supervisorUnitName ?? null,
+    mentorName: buildFullName([
+      record.mentorTitleBefore,
+      record.mentorName,
+      record.mentorSurname,
+      record.mentorTitleAfter,
+    ]),
+    mentorEmail: record.mentorEmail ?? null,
+    linkedOffboarding,
     linkedChanges,
   }
 }
@@ -187,9 +377,9 @@ export async function GET(_: NextRequest, { params }: RouteParams) {
 
   const role = session.user.role ?? "USER"
 
-  if (!canReadOffboarding(role)) {
+  if (!canReadOnboarding(role)) {
     return NextResponse.json(
-      { status: "error", message: "Nemáte oprávnění číst záznam odchodu." },
+      { status: "error", message: "Nemáte oprávnění číst záznam nástupu." },
       { status: 403 }
     )
   }
@@ -204,7 +394,7 @@ export async function GET(_: NextRequest, { params }: RouteParams) {
   }
 
   try {
-    const record = await prisma.employeeOffboarding.findFirst({
+    const record = await prisma.employeeOnboarding.findFirst({
       where: {
         id,
         deletedAt: null,
@@ -220,10 +410,10 @@ export async function GET(_: NextRequest, { params }: RouteParams) {
 
     return NextResponse.json({
       status: "success",
-      data: await serializeOffboardingRecord(record),
+      data: await serializeOnboardingRecord(record),
     })
   } catch (error) {
-    console.error("GET /odchody/[id] error:", error)
+    console.error("GET /nastupy/[id] error:", error)
 
     return NextResponse.json(
       { status: "error", message: "Nepodařilo se načíst záznam." },
@@ -244,11 +434,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
   const role = session.user.role ?? "USER"
 
-  if (!canWriteOffboarding(role)) {
+  if (!canWriteOnboarding(role)) {
     return NextResponse.json(
       {
         status: "error",
-        message: "Nemáte oprávnění upravovat záznam odchodu.",
+        message: "Nemáte oprávnění upravovat záznam nástupu.",
       },
       { status: 403 }
     )
@@ -264,15 +454,16 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   }
 
   try {
-    const raw = await request.json()
+    const raw: RawOnboardingBody = await request.json()
     const data = updateSchema.parse(raw)
+    const generatedSkipped = parseGeneratedSkippedPersonalNumbers(raw)
 
     const userKey =
       (session.user as { id?: string; email?: string }).id ??
       session.user.email ??
       "unknown"
 
-    const before = await prisma.employeeOffboarding.findFirst({
+    const before = await prisma.employeeOnboarding.findFirst({
       where: {
         id,
         deletedAt: null,
@@ -295,37 +486,25 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         if (value === undefined) continue
 
         switch (key) {
-          case "noticePeriodEnd": {
-            updateData.noticeEnd = value as Date | null
-            break
-          }
-
-          case "noticeEnd": {
-            if (!("noticePeriodEnd" in data)) {
-              updateData.noticeEnd = value as Date | null
-            }
-            break
-          }
-
-          case "plannedEnd": {
+          case "plannedStart": {
             if (value !== null) {
-              updateData.plannedEnd = value as Date
+              updateData.plannedStart = value as Date
             }
             break
           }
 
-          case "actualEnd": {
-            updateData.actualEnd = value as Date | null
-            break
-          }
-
-          case "noticeMonths": {
-            updateData.noticeMonths = value as number
+          case "actualStart": {
+            updateData.actualStart = value as Date | null
             break
           }
 
           case "hasCustomDates": {
             updateData.hasCustomDates = Boolean(value)
+            break
+          }
+
+          case "probationExtensions": {
+            updateData.probationExtensions = value as Prisma.InputJsonValue
             break
           }
 
@@ -347,18 +526,26 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       }
 
       const completingNow =
-        updateData.actualEnd !== undefined &&
-        before.actualEnd === null &&
-        updateData.actualEnd !== null
+        updateData.actualStart !== undefined &&
+        before.actualStart === null &&
+        updateData.actualStart !== null
 
       if (completingNow) {
         updateData.status = "COMPLETED"
       }
 
-      const updatedRecord = await tx.employeeOffboarding.update({
+      const updatedRecord = await tx.employeeOnboarding.update({
         where: { id },
         data: updateData,
       })
+
+      await markPersonalNumbers(
+        tx,
+        generatedSkipped,
+        typeof updateData.personalNumber === "string"
+          ? updateData.personalNumber
+          : null
+      )
 
       const beforeRec = before as unknown as Record<string, unknown>
       const updateRec = updateData as unknown as Record<string, unknown>
@@ -371,6 +558,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
       for (const [key, newValue] of Object.entries(updateRec)) {
         if (key === "updatedAt") continue
+        if (key === "probationExtensions") continue
 
         const oldValue = beforeRec[key]
         const oldStr = toStr(oldValue)
@@ -386,7 +574,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       }
 
       for (const change of changes) {
-        await tx.offboardingChangeLog.create({
+        await tx.onboardingChangeLog.create({
           data: {
             employeeId: id,
             userId: userKey,
@@ -399,7 +587,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       }
 
       if (completingNow) {
-        await tx.offboardingChangeLog.create({
+        await tx.onboardingChangeLog.create({
           data: {
             employeeId: id,
             userId: userKey,
@@ -417,7 +605,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({
       status: "success",
       message: "Záznam byl úspěšně aktualizován.",
-      data: await serializeOffboardingRecord(updated),
+      data: await serializeOnboardingRecord(updated),
     })
   } catch (err) {
     if (err instanceof ZodError) {
@@ -431,7 +619,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    console.error("PATCH /odchody/[id] error:", err)
+    console.error("PATCH /nastupy/[id] error:", err)
 
     return NextResponse.json(
       { status: "error", message: "Chyba při aktualizaci záznamu." },
@@ -452,9 +640,9 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
 
   const role = session.user.role ?? "USER"
 
-  if (!canWriteOffboarding(role)) {
+  if (!canWriteOnboarding(role)) {
     return NextResponse.json(
-      { status: "error", message: "Nemáte oprávnění mazat záznam odchodu." },
+      { status: "error", message: "Nemáte oprávnění mazat záznam nástupu." },
       { status: 403 }
     )
   }
@@ -468,7 +656,7 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
     )
   }
 
-  const before = await prisma.employeeOffboarding.findFirst({
+  const before = await prisma.employeeOnboarding.findFirst({
     where: {
       id,
       deletedAt: null,
@@ -477,7 +665,7 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
       id: true,
       name: true,
       surname: true,
-      actualEnd: true,
+      actualStart: true,
       deletedAt: true,
     },
   })
@@ -502,10 +690,10 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
     "unknown"
 
   const now = new Date()
-  const hrRecipients = getHrRecipientsFromEnv()
+  const hrRecipients = getHrNotificationRecipients()
 
   await prisma.$transaction(async (tx) => {
-    await tx.employeeOffboarding.update({
+    await tx.employeeOnboarding.update({
       where: { id },
       data: {
         deletedAt: now,
@@ -514,7 +702,7 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
       },
     })
 
-    await tx.offboardingChangeLog.create({
+    await tx.onboardingChangeLog.create({
       data: {
         employeeId: before.id,
         userId: userKey,
@@ -531,12 +719,12 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
           data: {
             type: "SYSTEM_NOTIFICATION",
             payload: {
-              type: "employee_offboarding_deleted",
+              type: "employee_onboarding_deleted",
               employeeId: before.id,
               employeeName: `${before.name} ${before.surname}`,
               deletedBy: userKey,
               recipients: hrRecipients,
-              subject: `Smazán záznam odchodu - ${before.name} ${before.surname}`,
+              subject: `Smazán záznam nástupu - ${before.name} ${before.surname}`,
             },
             priority: 5,
             createdBy: userKey,

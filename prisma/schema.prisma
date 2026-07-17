@@ -201,6 +201,11 @@ enum EmployeeChangeTargetType {
   OFFBOARDING
 }
 
+enum ProbationStopDecision {
+  STOP
+  KEEP
+}
+
 model User {
   id                String    @id @default(cuid())
   titleBefore       String?
@@ -339,7 +344,8 @@ model EmployeeOnboarding {
 
   @@index([plannedStart])
   @@index([actualStart])
-  @@index([deletedAt])
+  @@index([deletedAt, plannedStart])
+  @@index([personalNumber])
   @@index([probationEnd])
   @@index([mentorId])
   @@index([mentorGid])
@@ -390,6 +396,11 @@ model EmployeeOffboarding {
   noticeEnd      DateTime?
   hasCustomDates Boolean           @default(false)
 
+  probationStopDecision   ProbationStopDecision?
+  probationStopDecisionAt DateTime?
+  probationStopDecisionBy String?
+  probationStopNote       String?                @db.Text
+
   lastNoticeReminder  DateTime?
   noticeRemindersSent Int       @default(0)
 
@@ -400,7 +411,8 @@ model EmployeeOffboarding {
 
   @@index([plannedEnd])
   @@index([actualEnd])
-  @@index([deletedAt])
+  @@index([deletedAt, plannedEnd])
+  @@index([personalNumber])
   @@index([noticeEnd])
 }
 

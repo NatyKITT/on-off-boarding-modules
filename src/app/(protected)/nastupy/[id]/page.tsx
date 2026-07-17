@@ -6,6 +6,7 @@ import { format } from "date-fns"
 import { cs } from "date-fns/locale"
 import { AlertTriangle } from "lucide-react"
 
+import { useIsReadonly } from "@/hooks/use-current-role"
 import { useToast } from "@/hooks/use-toast"
 
 import { Badge } from "@/components/ui/badge"
@@ -24,6 +25,10 @@ type LinkedOffboardingInfo = {
   exitDate: string | null
   isActualExit: boolean
   leftDuringProbation: boolean
+  probationStopDecision: "STOP" | "KEEP" | null
+  probationStopDecisionAt: string | null
+  probationStopDecisionBy: string | null
+  probationStopNote: string | null
   probationShouldBeStopped: boolean
   rowMuted: boolean
   label: string
@@ -88,10 +93,26 @@ function formatDate(value?: string | null) {
 export default function OnboardingDetailPage({ params }: PageProps) {
   const router = useRouter()
   const { toast } = useToast()
+  const isReadonly = useIsReadonly()
 
   const [data, setData] = useState<OnboardingDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [deleting, setDeleting] = useState(false)
+  const [decisionBusy, setDecisionBusy] = useState(false)
+
+  async function loadDetail() {
+    const res = await fetch(`/api/nastupy/${params.id}`, {
+      cache: "no-store",
+    })
+
+    if (!res.ok) {
+      throw new Error("Záznam se nepodařilo načíst.")
+    }
+
+    const json = (await res.json()) as { data: OnboardingDetail }
+
+    return json.data
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -100,18 +121,10 @@ export default function OnboardingDetailPage({ params }: PageProps) {
       try {
         setLoading(true)
 
-        const res = await fetch(`/api/nastupy/${params.id}`, {
-          cache: "no-store",
-        })
-
-        if (!res.ok) {
-          throw new Error("Záznam se nepodařilo načíst.")
-        }
-
-        const json = (await res.json()) as { data: OnboardingDetail }
+        const record = await loadDetail()
 
         if (!cancelled) {
-          setData(json.data)
+          setData(record)
         }
       } catch (error) {
         if (!cancelled) {
@@ -135,7 +148,66 @@ export default function OnboardingDetailPage({ params }: PageProps) {
     return () => {
       cancelled = true
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id, router, toast])
+
+  async function handleProbationDecisionChange(decision: "STOP" | "KEEP") {
+    if (!data?.linkedOffboarding) return
+
+    const isReactivating = decision === "KEEP"
+
+    const confirmMessage = isReactivating
+      ? "Zkušební doba se znovu aktivuje a hodnocení poběží dál (cron může znovu posílat výzvy k vyplnění). Konec zkušební doby zůstává beze změny. Pokračovat?"
+      : "Zkušební doba se pozastaví - cron nebude posílat žádné další výzvy k vyhodnocení a formulář se uzavře. Pokračovat?"
+
+    if (!window.confirm(confirmMessage)) return
+
+    const note = isReactivating
+      ? null
+      : window.prompt("Poznámka k zastavení zkušební doby (nepovinné):", "")
+
+    try {
+      setDecisionBusy(true)
+
+      const res = await fetch(`/api/odchody/${data.linkedOffboarding.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          probationStopDecision: decision,
+          ...(note !== null ? { probationStopNote: note } : {}),
+        }),
+      })
+
+      const json = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        throw new Error(json?.message ?? "Změna rozhodnutí se nezdařila.")
+      }
+
+      toast({
+        title: isReactivating
+          ? "Zkušební doba znovu aktivována"
+          : "Zkušební doba pozastavena",
+        description: isReactivating
+          ? "Hodnocení zkušební doby pokračuje v běžném cyklu."
+          : "Hodnocení zkušební doby je pozastavené, cron nebude posílat další výzvy.",
+      })
+
+      const refreshed = await loadDetail()
+      setData(refreshed)
+    } catch (error) {
+      toast({
+        title: "Chyba",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Změna rozhodnutí se nezdařila.",
+        variant: "destructive",
+      })
+    } finally {
+      setDecisionBusy(false)
+    }
+  }
 
   async function handleDelete() {
     if (!data) return
@@ -294,6 +366,71 @@ export default function OnboardingDetailPage({ params }: PageProps) {
                 </p>
               )}
 
+              {data.linkedOffboarding.leftDuringProbation && (
+                <div className="rounded-md border border-amber-300/60 bg-amber-100/50 px-3 py-2 text-xs dark:border-amber-800/60 dark:bg-amber-900/20">
+                  <div>
+                    <strong>Rozhodnutí o zkušební době:</strong>{" "}
+                    {data.linkedOffboarding.probationStopDecision === "STOP"
+                      ? "Pozastavena"
+                      : data.linkedOffboarding.probationStopDecision === "KEEP"
+                        ? "Pokračuje (HR potvrdila nezastavovat)"
+                        : "Čeká na rozhodnutí HR"}
+                  </div>
+
+                  {data.linkedOffboarding.probationStopDecisionBy && (
+                    <div>
+                      Rozhodl(a): {data.linkedOffboarding.probationStopDecisionBy}
+                      {data.linkedOffboarding.probationStopDecisionAt
+                        ? ` (${formatDate(data.linkedOffboarding.probationStopDecisionAt)})`
+                        : ""}
+                    </div>
+                  )}
+
+                  {data.linkedOffboarding.probationStopNote && (
+                    <div>Poznámka: {data.linkedOffboarding.probationStopNote}</div>
+                  )}
+                </div>
+              )}
+
+              {data.linkedOffboarding.leftDuringProbation && (
+                <div className="flex flex-wrap gap-2">
+                  {data.linkedOffboarding.probationStopDecision === "STOP" ? (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={decisionBusy || isReadonly}
+                        onClick={() =>
+                          void handleProbationDecisionChange("KEEP")
+                        }
+                      >
+                        Znovu aktivovat zkušební dobu
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          router.push(`/nastupy/${params.id}/editovat`)
+                        }
+                      >
+                        Otevřít úpravu nástupu (prodloužit zkušební dobu)
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={decisionBusy || isReadonly}
+                      onClick={() =>
+                        void handleProbationDecisionChange("STOP")
+                      }
+                    >
+                      Pozastavit zkušební dobu
+                    </Button>
+                  )}
+                </div>
+              )}
+
               <Button
                 variant="outline"
                 size="sm"
@@ -322,7 +459,7 @@ export default function OnboardingDetailPage({ params }: PageProps) {
         <Button
           variant="destructive"
           onClick={() => void handleDelete()}
-          disabled={deleting}
+          disabled={deleting || isReadonly}
         >
           {deleting ? "Mažu..." : "Smazat"}
         </Button>

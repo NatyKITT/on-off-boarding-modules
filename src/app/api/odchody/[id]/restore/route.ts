@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
+import {
+  buildLinkedOnboardingInfo,
+  normalizePersonalNumber,
+  pickMostRelevantOnboarding,
+} from "@/lib/employment-linking"
+import { syncLinkedProbationAfterOffboardingDecision } from "@/lib/probation-evaluation-request"
 import { canWriteOffboarding } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
@@ -39,8 +45,45 @@ function getHrNotificationRecipients(): string[] {
   )
 }
 
+async function getLinkedOnboardingForOffboarding(
+  personalNumber: string | null | undefined,
+  exitDate: Date | null | undefined
+) {
+  const normalizedPersonalNumber = normalizePersonalNumber(personalNumber)
+
+  if (!normalizedPersonalNumber) return null
+
+  const linkedOnboardings = await prisma.employeeOnboarding.findMany({
+    where: {
+      personalNumber: {
+        not: null,
+      },
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+      personalNumber: true,
+      plannedStart: true,
+      actualStart: true,
+      probationEnd: true,
+      positionName: true,
+    },
+  })
+
+  const matching = linkedOnboardings.filter(
+    (onboarding) =>
+      normalizePersonalNumber(onboarding.personalNumber) ===
+      normalizedPersonalNumber
+  )
+
+  return buildLinkedOnboardingInfo({
+    onboarding: pickMostRelevantOnboarding(matching),
+    exitDate,
+  })
+}
+
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const session = await auth()
@@ -72,6 +115,13 @@ export async function POST(
   }
 
   const createdBy = getUserKey(session.user as MaybeUser)
+  const actorName =
+    (session.user as { name?: string | null }).name?.trim() ||
+    session.user.email ||
+    createdBy
+
+  const confirmPause =
+    new URL(req.url).searchParams.get("confirmPause") === "true"
 
   try {
     const employee = await prisma.employeeOffboarding.findUnique({
@@ -81,6 +131,9 @@ export async function POST(
         name: true,
         surname: true,
         personalNumber: true,
+        plannedEnd: true,
+        actualEnd: true,
+        probationStopDecision: true,
         deletedAt: true,
         deletedBy: true,
         deleteReason: true,
@@ -99,6 +152,27 @@ export async function POST(
         { status: "error", message: "Záznam není smazán." },
         { status: 409 }
       )
+    }
+
+    // Obnovení odchodu se STOP rozhodnutím může znovu pozastavit zkušebku
+    // navázaného nástupu - na to se HR musí nejdřív zeptat.
+    let linkedOnboardingForPause: Awaited<
+      ReturnType<typeof getLinkedOnboardingForOffboarding>
+    > = null
+
+    if (employee.probationStopDecision === "STOP") {
+      linkedOnboardingForPause = await getLinkedOnboardingForOffboarding(
+        employee.personalNumber,
+        employee.actualEnd ?? employee.plannedEnd
+      )
+    }
+
+    if (linkedOnboardingForPause?.exitDuringProbation && !confirmPause) {
+      return NextResponse.json({
+        status: "confirm_required",
+        confirmKind: "probation_pause_on_restore",
+        linkedOnboarding: linkedOnboardingForPause,
+      })
     }
 
     if (employee.personalNumber) {
@@ -162,6 +236,14 @@ export async function POST(
           }),
         },
       })
+
+      if (linkedOnboardingForPause) {
+        await syncLinkedProbationAfterOffboardingDecision(tx, {
+          onboardingId: linkedOnboardingForPause.id,
+          actorId: createdBy,
+          actorName,
+        })
+      }
 
       if (hrRecipients.length > 0) {
         await tx.mailQueue.create({

@@ -21,6 +21,7 @@ import {
   UserRound,
 } from "lucide-react"
 
+import { useIsReadonly } from "@/hooks/use-current-role"
 import { useToast } from "@/hooks/use-toast"
 
 import {
@@ -273,7 +274,7 @@ function statusLabel(status: ProbationStatus) {
     case "COMPLETED":
       return "Vyplněno"
     case "CANCELLED":
-      return "Zrušeno"
+      return "Zastaveno (odchod ve zkušebce)"
     case "EXPIRED":
       return "Vypršel link"
     default:
@@ -493,6 +494,7 @@ export function ProbationEvaluationSection({
   onSent,
 }: Props) {
   const { toast } = useToast()
+  const isReadonly = useIsReadonly()
   const hasLoadedRef = React.useRef(false)
 
   const [request, setRequest] =
@@ -1438,7 +1440,7 @@ export function ProbationEvaluationSection({
                   size="sm"
                   variant="outline"
                   onClick={() => openSendDialog("send")}
-                  disabled={!canSend || sending}
+                  disabled={!canSend || sending || isReadonly}
                   className="gap-2"
                 >
                   {sending ? (
@@ -1453,7 +1455,7 @@ export function ProbationEvaluationSection({
                   size="sm"
                   variant="outline"
                   onClick={() => openSendDialog("remind")}
-                  disabled={!canRemind || reminding}
+                  disabled={!canRemind || reminding || isReadonly}
                   className="gap-2"
                 >
                   {reminding ? (
@@ -1479,7 +1481,7 @@ export function ProbationEvaluationSection({
                   size="sm"
                   variant="outline"
                   onClick={() => setSendPdfOpen(true)}
-                  disabled={!canSendPdf || sendingPdf}
+                  disabled={!canSendPdf || sendingPdf || isReadonly}
                   className="gap-2"
                 >
                   <Mail className="size-4" />
@@ -1490,7 +1492,7 @@ export function ProbationEvaluationSection({
                   size="sm"
                   variant={request.isLocked ? "default" : "outline"}
                   onClick={() => void handleToggleLock()}
-                  disabled={locking}
+                  disabled={locking || isReadonly}
                   className="gap-2"
                 >
                   {request.isLocked ? (
@@ -1516,7 +1518,7 @@ export function ProbationEvaluationSection({
                   size="sm"
                   variant="ghost"
                   onClick={() => setConfirmReset(true)}
-                  disabled={!canReset || resetting}
+                  disabled={!canReset || resetting || isReadonly}
                   className="gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
                 >
                   {resetting ? (

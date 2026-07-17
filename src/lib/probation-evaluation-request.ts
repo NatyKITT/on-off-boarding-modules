@@ -10,6 +10,12 @@ import type {
 } from "@prisma/client"
 import { addDays } from "date-fns"
 
+import {
+  normalizePersonalNumber,
+  pickMostRelevantOffboarding,
+  shouldSkipProbationEvaluation,
+} from "@/lib/employment-linking"
+
 const managerialKeywords = [
   "vedení",
   "ředitel",
@@ -224,12 +230,6 @@ function isUniqueConstraintError(error: unknown) {
   )
 }
 
-function isFinalRequestStatus(status: ProbationEvaluationRequestStatus) {
-  return (
-    status === "COMPLETED" || status === "CANCELLED" || status === "EXPIRED"
-  )
-}
-
 export async function addProbationEvent(
   tx: Prisma.TransactionClient,
   args: {
@@ -273,6 +273,12 @@ export async function ensureProbationEvaluationRequest(
     onboardingId: number
     createdBy?: string | null
     createdByName?: string | null
+    // Atribuce pro CANCELLED/reaktivační event - vyplní se JEN když ensure
+    // volá přímo akce člověka (STOP/KEEP rozhodnutí na odchodu). Lazy sync
+    // (cron, zobrazení stránky) tyto parametry nepředává a použije se
+    // obecný "system-link" popisek.
+    decisionActorId?: string | null
+    decisionActorName?: string | null
   }
 ) {
   const onboarding = await tx.employeeOnboarding.findFirst({
@@ -282,6 +288,7 @@ export async function ensureProbationEvaluationRequest(
     },
     select: {
       id: true,
+      personalNumber: true,
       positionType: true,
       positionName: true,
       plannedStart: true,
@@ -303,6 +310,33 @@ export async function ensureProbationEvaluationRequest(
   // TS narrow přes nested funkce neudrží, proto si po null-checku uložíme non-null alias.
   const onboardingData = onboarding
 
+  const normalizedPersonalNumber = normalizePersonalNumber(
+    onboardingData.personalNumber
+  )
+
+  const linkedOffboarding = normalizedPersonalNumber
+    ? pickMostRelevantOffboarding(
+        await tx.employeeOffboarding.findMany({
+          where: {
+            personalNumber: normalizedPersonalNumber,
+            deletedAt: null,
+          },
+          select: {
+            id: true,
+            personalNumber: true,
+            plannedEnd: true,
+            actualEnd: true,
+            probationStopDecision: true,
+          },
+        })
+      )
+    : null
+
+  const stoppedByOffboarding = shouldSkipProbationEvaluation({
+    probationEnd: onboardingData.probationEnd,
+    linkedOffboarding,
+  })
+
   const formType = getProbationFormType({
     positionType: onboardingData.positionType,
     positionName: onboardingData.positionName,
@@ -317,8 +351,18 @@ export async function ensureProbationEvaluationRequest(
   function getNextStatus(
     existing: ExistingProbationRequestForEnsure
   ): ProbationEvaluationRequestStatus {
-    if (isFinalRequestStatus(existing.status)) {
-      return existing.status
+    // COMPLETED je jediný stav, který se má chránit i po vypršení tokenu -
+    // jednou vyplněné a podepsané hodnocení zůstává platné jako záznam.
+    if (existing.status === "COMPLETED") {
+      return "COMPLETED"
+    }
+
+    if (existing.tokenExpiresAt && existing.tokenExpiresAt.getTime() < Date.now()) {
+      return "EXPIRED"
+    }
+
+    if (stoppedByOffboarding) {
+      return "CANCELLED"
     }
 
     if (existing.sentAt) {
@@ -329,13 +373,15 @@ export async function ensureProbationEvaluationRequest(
   }
 
   async function updateExisting(existing: ExistingProbationRequestForEnsure) {
-    return tx.probationEvaluationRequest.update({
+    const nextStatus = getNextStatus(existing)
+
+    const updated = await tx.probationEvaluationRequest.update({
       where: {
         id: existing.id,
       },
       data: {
         formType,
-        status: getNextStatus(existing),
+        status: nextStatus,
         probationEnd: onboardingData.probationEnd ?? existing.probationEnd,
 
         // Onboarding je hlavní zdroj jména/e-mailu vedoucího.
@@ -348,6 +394,49 @@ export async function ensureProbationEvaluationRequest(
           getProbationTokenExpiresAt(onboardingData.probationEnd),
       },
     })
+
+    if (nextStatus === "CANCELLED" && existing.status !== "CANCELLED") {
+      await addProbationEvent(tx, {
+        requestId: updated.id,
+        action: "CANCELLED",
+        by: args.decisionActorId ?? "system-link",
+        byName: args.decisionActorName ?? "Automatické propojení s odchodem",
+        message: `Hodnocení zkušební doby bylo zastaveno – propojený odchod (ID ${linkedOffboarding?.id}) spadá do zkušební doby a HR potvrdila zastavení hodnocení.`,
+        meta: {
+          linkedOffboardingId: linkedOffboarding?.id ?? null,
+        },
+      })
+    }
+
+    if (existing.status === "CANCELLED" && nextStatus !== "CANCELLED") {
+      await addProbationEvent(tx, {
+        requestId: updated.id,
+        action: "UPDATED",
+        by: args.decisionActorId ?? "system-link",
+        byName: args.decisionActorName ?? "Automatické propojení s odchodem",
+        message:
+          "Hodnocení zkušební doby bylo znovu aktivováno – propojený odchod už zkušební dobu nepozastavuje.",
+        meta: {
+          revisionAction: "probation_reactivated",
+          previousStatus: "CANCELLED",
+          nextStatus,
+          linkedOffboardingId: linkedOffboarding?.id ?? null,
+        },
+      })
+    }
+
+    if (nextStatus === "EXPIRED" && existing.status !== "EXPIRED") {
+      await addProbationEvent(tx, {
+        requestId: updated.id,
+        action: "EXPIRED",
+        by: "system-link",
+        byName: "Automatická kontrola platnosti odkazu",
+        message:
+          "Platnost odkazu na formulář vyhodnocení zkušební doby vypršela.",
+      })
+    }
+
+    return updated
   }
 
   const existing = await tx.probationEvaluationRequest.findUnique({
@@ -375,13 +464,26 @@ export async function ensureProbationEvaluationRequest(
   }
 
   try {
+    const initialTokenExpiresAt = getProbationTokenExpiresAt(
+      onboardingData.probationEnd
+    )
+
+    const initialStatus: ProbationEvaluationRequestStatus =
+      initialTokenExpiresAt.getTime() < Date.now()
+        ? "EXPIRED"
+        : stoppedByOffboarding
+          ? "CANCELLED"
+          : supervisorEmail
+            ? "READY"
+            : "DRAFT"
+
     const request = await tx.probationEvaluationRequest.create({
       data: {
         onboardingId: onboardingData.id,
         formType,
-        status: supervisorEmail ? "READY" : "DRAFT",
+        status: initialStatus,
         token: createProbationToken(),
-        tokenExpiresAt: getProbationTokenExpiresAt(onboardingData.probationEnd),
+        tokenExpiresAt: initialTokenExpiresAt,
         probationEnd: onboardingData.probationEnd ?? null,
         supervisorName: supervisorName || null,
         supervisorEmail,
@@ -406,6 +508,19 @@ export async function ensureProbationEvaluationRequest(
         supervisorEmail,
       },
     })
+
+    if (initialStatus === "CANCELLED") {
+      await addProbationEvent(tx, {
+        requestId: request.id,
+        action: "CANCELLED",
+        by: args.decisionActorId ?? "system-link",
+        byName: args.decisionActorName ?? "Automatické propojení s odchodem",
+        message: `Hodnocení zkušební doby bylo rovnou zastaveno – propojený odchod (ID ${linkedOffboarding?.id}) spadá do zkušební doby a HR potvrdila zastavení hodnocení.`,
+        meta: {
+          linkedOffboardingId: linkedOffboarding?.id ?? null,
+        },
+      })
+    }
 
     return {
       request,
@@ -442,6 +557,49 @@ export async function ensureProbationEvaluationRequest(
       created: false,
     }
   }
+}
+
+/**
+ * Přepočítá navázané ProbationEvaluationRequest po tom, co se na odchodu
+ * změnilo probationStopDecision (nové STOP/KEEP rozhodnutí, revert, smazání
+ * nebo obnova odchodu). Zapíše i zrcadlový OnboardingChangeLog záznam, ať je
+ * změna stavu vidět v běžné historii nástupu, ne jen v eventech hodnocení.
+ */
+export async function syncLinkedProbationAfterOffboardingDecision(
+  tx: Prisma.TransactionClient,
+  args: {
+    onboardingId: number
+    actorId: string
+    actorName: string
+  }
+) {
+  const existingRequest = await tx.probationEvaluationRequest.findUnique({
+    where: { onboardingId: args.onboardingId },
+    select: { status: true },
+  })
+
+  const ensured = await ensureProbationEvaluationRequest(tx, {
+    onboardingId: args.onboardingId,
+    createdBy: args.actorId,
+    createdByName: args.actorName,
+    decisionActorId: args.actorId,
+    decisionActorName: args.actorName,
+  })
+
+  if (!existingRequest || existingRequest.status !== ensured.request.status) {
+    await tx.onboardingChangeLog.create({
+      data: {
+        employeeId: args.onboardingId,
+        userId: args.actorId,
+        action: "STATUS_CHANGED",
+        field: "probationEvaluationStatus",
+        oldValue: existingRequest?.status ?? null,
+        newValue: ensured.request.status,
+      },
+    })
+  }
+
+  return ensured
 }
 
 type SerializableProbationEvent = {

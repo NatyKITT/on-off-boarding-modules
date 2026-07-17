@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
+import { canReadEmployeeChanges } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
@@ -29,6 +30,13 @@ export async function GET(
     return NextResponse.json(
       { status: "error", message: "Nejste přihlášeni." },
       { status: 401 }
+    )
+  }
+
+  if (!canReadEmployeeChanges(session.user.role)) {
+    return NextResponse.json(
+      { status: "error", message: "Nemáte oprávnění číst historii změny." },
+      { status: 403 }
     )
   }
 

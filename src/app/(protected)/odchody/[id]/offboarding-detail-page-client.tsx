@@ -7,6 +7,8 @@ import { format } from "date-fns"
 import { cs } from "date-fns/locale"
 import { AlertTriangle, ArrowLeft, CheckCircle, XCircle } from "lucide-react"
 
+import { useIsReadonly } from "@/hooks/use-current-role"
+
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
@@ -51,6 +53,11 @@ type OffboardingDetail = {
   userEmail?: string | null
   personalNumber?: string | null
   notes?: string | null
+
+  probationStopDecision?: "STOP" | "KEEP" | null
+  probationStopDecisionAt?: string | null
+  probationStopDecisionBy?: string | null
+  probationStopNote?: string | null
 
   linkedOnboarding?: LinkedOnboardingInfo | null
 }
@@ -157,6 +164,7 @@ type Props = {
 
 export function OffboardingDetailPageClient({ data }: Props) {
   const router = useRouter()
+  const isReadonly = useIsReadonly()
   const [isDeleting, setIsDeleting] = useState(false)
 
   const [successModal, setSuccessModal] = useState({
@@ -191,12 +199,35 @@ export function OffboardingDetailPageClient({ data }: Props) {
     try {
       setIsDeleting(true)
 
-      const res = await fetch(`/api/odchody/${data.id}`, {
+      let res = await fetch(`/api/odchody/${data.id}`, {
         method: "DELETE",
       })
 
+      let json = await res.json().catch(() => null)
+
+      if (res.ok && json?.status === "confirm_required") {
+        const linkedName = json.linkedOnboarding?.positionName
+          ? ` (${json.linkedOnboarding.positionName})`
+          : ""
+
+        const confirmedReactivate = window.confirm(
+          `Tento odchod aktuálně pozastavuje zkušební dobu propojeného nástupu${linkedName}. ` +
+            "Smazáním záznamu se zkušební doba znovu aktivuje a cron k ní může znovu začít posílat výzvy. Pokračovat ve smazání?"
+        )
+
+        if (!confirmedReactivate) {
+          setIsDeleting(false)
+          return
+        }
+
+        res = await fetch(`/api/odchody/${data.id}?confirmReactivate=true`, {
+          method: "DELETE",
+        })
+
+        json = await res.json().catch(() => null)
+      }
+
       if (!res.ok) {
-        const json = await res.json().catch(() => null)
         throw new Error(json?.message ?? "Chyba při mazání.")
       }
 
@@ -321,10 +352,40 @@ export function OffboardingDetailPageClient({ data }: Props) {
               </div>
 
               {data.linkedOnboarding.exitDuringProbation && (
-                <p className="font-medium">
-                  Odchod spadá do zkušební doby. V navázaném nástupu se má
-                  zastavit vyhodnocování zkušební doby.
-                </p>
+                <>
+                  <p className="font-medium">
+                    Odchod spadá do zkušební doby. V navázaném nástupu se má
+                    zastavit vyhodnocování zkušební doby.
+                  </p>
+
+                  <div className="rounded-md border border-amber-300/60 bg-amber-100/50 px-3 py-2 text-xs dark:border-amber-800/60 dark:bg-amber-900/20">
+                    <div>
+                      <strong>Rozhodnutí o zkušební době:</strong>{" "}
+                      {data.probationStopDecision === "STOP"
+                        ? "Pozastavena"
+                        : data.probationStopDecision === "KEEP"
+                          ? "Pokračuje (HR potvrdila nezastavovat)"
+                          : "Čeká na rozhodnutí HR"}
+                    </div>
+
+                    {data.probationStopDecisionBy && (
+                      <div>
+                        Rozhodl(a): {data.probationStopDecisionBy}
+                        {data.probationStopDecisionAt
+                          ? ` (${formatDate(data.probationStopDecisionAt)})`
+                          : ""}
+                      </div>
+                    )}
+
+                    {data.probationStopNote && (
+                      <div>Poznámka: {data.probationStopNote}</div>
+                    )}
+
+                    <div className="mt-1 text-[11px] italic text-amber-900/70 dark:text-amber-100/70">
+                      Změnu rozhodnutí proveďte na detailu navázaného nástupu.
+                    </div>
+                  </div>
+                </>
               )}
 
               <Link href={`/nastupy/${data.linkedOnboarding.id}`}>
@@ -354,7 +415,7 @@ export function OffboardingDetailPageClient({ data }: Props) {
           <Button
             variant="destructive"
             onClick={() => void handleDelete()}
-            disabled={isDeleting}
+            disabled={isDeleting || isReadonly}
           >
             {isDeleting ? "Mažu..." : "Smazat"}
           </Button>

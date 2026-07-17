@@ -9,6 +9,11 @@ import { z } from "zod"
 
 import { prisma } from "@/lib/db"
 import { sendProbationEvaluationPdfEmail } from "@/lib/email"
+import {
+  buildLinkedOffboardingInfo,
+  normalizePersonalNumber,
+  pickMostRelevantOffboarding,
+} from "@/lib/employment-linking"
 import { getEmployees, type Employee } from "@/lib/eos-employees"
 import { renderProbationEvaluationPdfBuffer } from "@/lib/probation-evaluation-pdf"
 import {
@@ -1398,6 +1403,99 @@ export async function saveProbationEvaluation(args: {
   }
 }
 
+async function resolveDecisionActorName(
+  value: string | null | undefined
+): Promise<string | null> {
+  if (!value) return null
+
+  try {
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [{ id: value }, { email: value }],
+      },
+      select: { name: true, surname: true, email: true },
+    })
+
+    if (user?.name && user?.surname) return `${user.name} ${user.surname}`
+    if (user?.email) return user.email
+  } catch {
+    // ignore - vrátíme surovou hodnotu níž
+  }
+
+  return value
+}
+
+export async function buildEarlyExitNote(params: {
+  personalNumber?: string | null
+  probationEnd?: string | null
+}): Promise<string | null> {
+  const normalizedPersonalNumber = normalizePersonalNumber(
+    params.personalNumber
+  )
+
+  if (!normalizedPersonalNumber) return null
+
+  const offboardings = await prisma.employeeOffboarding.findMany({
+    where: {
+      personalNumber: normalizedPersonalNumber,
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+      personalNumber: true,
+      plannedEnd: true,
+      actualEnd: true,
+      probationStopDecision: true,
+      probationStopDecisionBy: true,
+      probationStopNote: true,
+    },
+  })
+
+  const mostRelevant = pickMostRelevantOffboarding(offboardings)
+
+  const linkedOffboarding = buildLinkedOffboardingInfo({
+    offboarding: mostRelevant,
+    probationEnd: params.probationEnd,
+  })
+
+  if (!linkedOffboarding?.leftDuringProbation) return null
+
+  const exitDateLabel = linkedOffboarding.exitDate
+    ? new Date(linkedOffboarding.exitDate).toLocaleDateString("cs-CZ")
+    : "neuvedeného data"
+
+  const exitKind = linkedOffboarding.isActualExit ? "skutečný" : "plánovaný"
+  const baseInfo = `Zaměstnanec ukončil pracovní poměr v průběhu zkušební doby (${exitKind} odchod k ${exitDateLabel}).`
+
+  if (linkedOffboarding.probationStopDecision === "STOP") {
+    const decidedByName = await resolveDecisionActorName(
+      mostRelevant?.probationStopDecisionBy
+    )
+    const noteText = mostRelevant?.probationStopNote?.trim()
+
+    return [
+      `${baseInfo} Hodnocení zkušební doby bylo zastaveno${
+        decidedByName ? ` (rozhodl(a): ${decidedByName})` : ""
+      }.`,
+      noteText ? `Poznámka: ${noteText}` : null,
+    ]
+      .filter(Boolean)
+      .join(" ")
+  }
+
+  if (linkedOffboarding.probationStopDecision === "KEEP") {
+    const decidedByName = await resolveDecisionActorName(
+      mostRelevant?.probationStopDecisionBy
+    )
+
+    return `${baseInfo} HR rozhodla hodnocení zkušební doby nezastavovat${
+      decidedByName ? ` (rozhodl(a): ${decidedByName})` : ""
+    } – formulář zůstává v platnosti.`
+  }
+
+  return `${baseInfo} Toto hodnocení bylo vyplněno před ukončením poměru a je uchováno pro záznam.`
+}
+
 export async function sendCompletedProbationPdfToHr(args: {
   request: ProbationDetail | PublicProbationDetail
   user: CurrentUser
@@ -1439,7 +1537,18 @@ export async function sendCompletedProbationPdfToHr(args: {
     currentUser: args.user,
   })
 
-  const pdfBuffer = await renderProbationEvaluationPdfBuffer(payload)
+  const earlyExitNote = await buildEarlyExitNote({
+    personalNumber: payload.onboarding.personalNumber,
+    probationEnd: payload.onboarding.probationEnd,
+  })
+
+  const pdfBuffer = await renderProbationEvaluationPdfBuffer({
+    ...payload,
+    onboarding: {
+      ...payload.onboarding,
+      earlyExitNote,
+    },
+  })
   const employeeName = buildFullName(args.request.onboarding)
   const personalNumber =
     args.request.onboarding.personalNumber ?? String(args.request.onboardingId)

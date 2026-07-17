@@ -2,14 +2,12 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
+import { normalizePersonalNumber } from "@/lib/employment-linking"
+import { canReadEmployeeChanges } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
 export const revalidate = 0
-
-function normalizePersonalNumber(value: string | null | undefined) {
-  return value?.trim() ?? ""
-}
 
 export async function GET(
   _: NextRequest,
@@ -21,6 +19,13 @@ export async function GET(
     return NextResponse.json(
       { status: "error", message: "Nejste přihlášeni." },
       { status: 401 }
+    )
+  }
+
+  if (!canReadEmployeeChanges(session.user.role)) {
+    return NextResponse.json(
+      { status: "error", message: "Nemáte oprávnění číst vazby změny." },
+      { status: 403 }
     )
   }
 

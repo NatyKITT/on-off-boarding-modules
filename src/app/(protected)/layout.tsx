@@ -36,12 +36,12 @@ export default async function Dashboard({ children }: ProtectedLayoutProps) {
       <DashboardSidebar links={filteredLinks} />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-50 flex h-14 bg-background px-4 lg:h-[60px] xl:px-8">
+        <header className="sticky top-0 z-50 flex h-14 bg-background px-4 lg:h-16 xl:px-8">
           <MaxWidthWrapper className="flex max-w-7xl items-center gap-x-3 px-0">
             <MobileSheetSidebar links={filteredLinks} />
 
             <div className="w-full min-w-0 flex-1">
-              <SearchCommand links={filteredLinks} />
+              <SearchCommand />
             </div>
 
             <ModeToggle />
@@ -49,7 +49,7 @@ export default async function Dashboard({ children }: ProtectedLayoutProps) {
           </MaxWidthWrapper>
         </header>
 
-        <main className="flex min-h-0 min-w-0 flex-1 p-4 xl:px-8">
+        <main className="flex min-h-0 min-w-0 flex-1 p-4 pt-6 xl:px-8 xl:pt-8">
           <MaxWidthWrapper className="flex h-full min-h-0 max-w-7xl flex-col gap-4 px-0 lg:gap-6">
             {children}
           </MaxWidthWrapper>

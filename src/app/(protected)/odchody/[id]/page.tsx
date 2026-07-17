@@ -46,6 +46,11 @@ type OffboardingDetail = {
   personalNumber?: string | null
   notes?: string | null
 
+  probationStopDecision?: "STOP" | "KEEP" | null
+  probationStopDecisionAt?: string | null
+  probationStopDecisionBy?: string | null
+  probationStopNote?: string | null
+
   linkedOnboarding?: LinkedOnboardingInfo | null
 }
 
@@ -102,6 +107,11 @@ export default async function OffboardingDetailPage({ params }: PageProps) {
       userEmail: true,
       personalNumber: true,
       notes: true,
+
+      probationStopDecision: true,
+      probationStopDecisionAt: true,
+      probationStopDecisionBy: true,
+      probationStopNote: true,
     },
   })
 
@@ -148,11 +158,34 @@ export default async function OffboardingDetailPage({ params }: PageProps) {
     exitDate: record.actualEnd ?? record.plannedEnd,
   })
 
+  let probationStopDecisionByName = record.probationStopDecisionBy
+
+  if (probationStopDecisionByName) {
+    const decisionUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { id: probationStopDecisionByName },
+          { email: probationStopDecisionByName },
+        ],
+      },
+      select: { name: true, surname: true, email: true },
+    })
+
+    if (decisionUser?.name && decisionUser?.surname) {
+      probationStopDecisionByName = `${decisionUser.name} ${decisionUser.surname}`
+    } else if (decisionUser?.email) {
+      probationStopDecisionByName = decisionUser.email
+    }
+  }
+
   const data: OffboardingDetail = {
     ...record,
     plannedEnd: record.plannedEnd.toISOString(),
     actualEnd: record.actualEnd?.toISOString() ?? null,
     noticeEnd: record.noticeEnd?.toISOString() ?? null,
+    probationStopDecisionAt:
+      record.probationStopDecisionAt?.toISOString() ?? null,
+    probationStopDecisionBy: probationStopDecisionByName,
     linkedOnboarding,
   }
 

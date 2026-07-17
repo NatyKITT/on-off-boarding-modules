@@ -37,8 +37,6 @@ const bodySchema = z.object({
     )
     .min(1),
   mode: z.enum(["selected", "all", "unsentOnly"]),
-  recipients: z.array(z.string().email()).optional(),
-  subject: z.string().optional(),
 })
 
 function getUserKey(user: { id?: string | null; email?: string | null }) {
@@ -49,20 +47,13 @@ function getReportType(audience: ReportAudience) {
   return `${REPORT_TYPE_PREFIX}_${audience.toLowerCase()}`
 }
 
-async function getReportRecipients(
-  audience: ReportAudience,
-  extraRecipients?: string[]
-) {
-  const baseRecipients =
+async function getReportRecipients(audience: ReportAudience) {
+  const recipients =
     audience === EmployeeChangeAudience.ONBOARDING_GROUP
       ? await recipientsFor("planned")
       : await recipientsFor("all")
 
-  return Array.from(
-    new Set(
-      [...(baseRecipients ?? []), ...(extraRecipients ?? [])].filter(Boolean)
-    )
-  )
+  return Array.from(new Set(recipients.filter(Boolean)))
 }
 
 function toEmailRecord(change: {
@@ -155,7 +146,7 @@ export async function POST(request: Request) {
     )
   }
 
-  const { month, audience, records, mode, recipients, subject } = parsed.data
+  const { month, audience, records, mode } = parsed.data
 
   const [year, monthNumber] = month.split("-").map(Number)
 
@@ -233,7 +224,7 @@ export async function POST(request: Request) {
       )
     }
 
-    const reportRecipients = await getReportRecipients(audience, recipients)
+    const reportRecipients = await getReportRecipients(audience)
 
     if (!reportRecipients.length) {
       return NextResponse.json({ error: "Žádní příjemci" }, { status: 400 })
@@ -241,12 +232,10 @@ export async function POST(request: Request) {
 
     const createdBy = getUserKey(session.user)
 
-    const finalSubject =
-      subject ||
-      buildEmployeeChangeReportSubject({
-        month,
-        audience: audience as EmployeeChangeReportAudience,
-      })
+    const finalSubject = buildEmployeeChangeReportSubject({
+      month,
+      audience: audience as EmployeeChangeReportAudience,
+    })
 
     const emailRecords = changes.map(toEmailRecord)
 

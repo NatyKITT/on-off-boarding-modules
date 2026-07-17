@@ -38,7 +38,14 @@ type SystemizaceResponse = {
 const SYSTEMIZACE_URL =
   "https://systemizace.praha6.cz/api/1.0/position/list?detail=1"
 
-export async function getPositions(): Promise<Position[]> {
+// Systemizace se nemění každou chvíli - krátká cache v paměti procesu
+// ušetří opakované volání pomalého externího systému při každém otevření
+// formuláře. Žádný vliv na auth/cache chování samotné route (ta pořád běží
+// per-request), jen se přeskočí zbytečný externí HTTP dotaz.
+const POSITIONS_CACHE_TTL_MS = 5 * 60 * 1000
+let positionsCache: { data: Position[]; expiresAt: number } | null = null
+
+async function fetchPositions(): Promise<Position[]> {
   const res = await fetch(SYSTEMIZACE_URL, {
     headers: {
       Accept: "application/json",
@@ -80,4 +87,16 @@ export async function getPositions(): Promise<Position[]> {
         supervisorEmail: undefined,
       })
     )
+}
+
+export async function getPositions(): Promise<Position[]> {
+  if (positionsCache && positionsCache.expiresAt > Date.now()) {
+    return positionsCache.data
+  }
+
+  const data = await fetchPositions()
+
+  positionsCache = { data, expiresAt: Date.now() + POSITIONS_CACHE_TTL_MS }
+
+  return data
 }

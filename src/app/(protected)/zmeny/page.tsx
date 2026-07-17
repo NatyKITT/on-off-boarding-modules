@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { format } from "date-fns"
 import { cs } from "date-fns/locale"
 import {
@@ -13,13 +14,21 @@ import {
   Edit,
   History as HistoryIcon,
   Info,
-  Search,
   Trash2,
   User,
   XCircle,
 } from "lucide-react"
 
 import { type Position } from "@/types/position"
+
+import { useIsReadonly } from "@/hooks/use-current-role"
+import { useDismissableHighlight } from "@/hooks/use-dismissable-highlight"
+import { useFacetedFilter } from "@/hooks/use-faceted-filter"
+import { useTextFilter } from "@/hooks/use-text-filter"
+import {
+  buildDistinctOptions,
+  filterAvailableOptions,
+} from "@/lib/filter-options"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -38,7 +47,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
 import {
   Table,
   TableBody,
@@ -47,6 +55,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { ActiveFilterChips } from "@/components/common/active-filter-chips"
+import { ListPageSkeleton } from "@/components/common/list-page-skeleton"
+import { MonthFilter } from "@/components/common/month-filter"
+import {
+  MultiSelectFilter,
+  type MultiSelectOption,
+} from "@/components/common/multi-select-filter"
+import { SearchInput } from "@/components/common/search-input"
 import { EmployeeChangeReportLauncher } from "@/components/emails/employee-change-report-launcher"
 import { EmployeeChangeForm } from "@/components/forms/employee-change-form"
 import { DeletedRecordsDialog } from "@/components/history/deleted-records-dialog"
@@ -54,7 +70,6 @@ import { HistoryDialog } from "@/components/history/history-dialog"
 
 type ChangeType = "POSITION" | "NAME" | "NAME_AND_POSITION"
 type ChangeStatus = "DRAFT" | "APPLIED" | "CANCELLED"
-type ChangeTypeFilter = "all" | "NAME" | "POSITION" | "NAME_AND_POSITION"
 
 type ChangeRow = {
   id: number
@@ -174,6 +189,24 @@ function typeLabel(type: ChangeType) {
 
   return "Změna jména i pozice"
 }
+
+type ChangeFacetKey =
+  | "department"
+  | "unitName"
+  | "position"
+  | "changeType"
+  | "emailSent"
+
+const CHANGE_TYPE_OPTIONS: MultiSelectOption[] = [
+  { value: "NAME", label: "Změna jména" },
+  { value: "POSITION", label: "Změna pozice" },
+  { value: "NAME_AND_POSITION", label: "Změna jména i pozice" },
+]
+
+const EMAIL_SENT_OPTIONS: MultiSelectOption[] = [
+  { value: "SENT", label: "Odesláno" },
+  { value: "NOT_SENT", label: "Neodesláno" },
+]
 
 function changed(a?: string | null, b?: string | null) {
   return (a ?? null) !== (b ?? null)
@@ -300,40 +333,19 @@ function InfoLine({
   )
 }
 
-function EmployeeInfoCell({
-  row,
-  onOpenInfo,
-}: {
-  row: ChangeRow
-  onOpenInfo: () => void
-}) {
-  const hasRelated = hasRelatedRecords(row)
-
+function EmployeeInfoCell({ row }: { row: ChangeRow }) {
   return (
-    <div className="space-y-2">
-      <div className="rounded-xl border bg-background p-3 shadow-sm">
-        <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Aktuální zařazení
-        </div>
-
-        <div className="space-y-1.5">
-          <InfoLine label="Č. funkce" value={row.oldPositionNum} mono />
-          <InfoLine label="Pozice" value={row.oldPositionName} />
-          <InfoLine label="Odbor" value={row.oldDepartment} />
-          <InfoLine label="Oddělení" value={row.oldUnitName} />
-        </div>
+    <div className="rounded-xl border bg-background p-3 shadow-sm">
+      <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        Aktuální zařazení
       </div>
 
-      {hasRelated && (
-        <button
-          type="button"
-          onClick={onOpenInfo}
-          className="inline-flex max-w-full items-center rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800 transition hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300 dark:hover:bg-amber-900/30"
-          title="Zobrazit související záznamy"
-        >
-          <span className="truncate">{relationLabel(row)}</span>
-        </button>
-      )}
+      <div className="space-y-1.5">
+        <InfoLine label="Č. funkce" value={row.oldPositionNum} mono />
+        <InfoLine label="Pozice" value={row.oldPositionName} />
+        <InfoLine label="Odbor" value={row.oldDepartment} />
+        <InfoLine label="Oddělení" value={row.oldUnitName} />
+      </div>
     </div>
   )
 }
@@ -423,6 +435,15 @@ function getLatestYearAndMonth(rows: ChangeRow[]) {
   }
 }
 
+function getAllYearsAndMonths(
+  grouped: Record<string, Record<string, ChangeRow[]>>
+): { years: string[]; months: string[] } {
+  const years = Object.keys(grouped)
+  const months = years.flatMap((year) => Object.keys(grouped[year]))
+
+  return { years, months }
+}
+
 function ResponsiveTableShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="w-full max-w-full overflow-x-auto overscroll-x-contain">
@@ -432,17 +453,22 @@ function ResponsiveTableShell({ children }: { children: React.ReactNode }) {
 }
 
 export default function EmployeeChangesPage() {
+  const sp = useSearchParams()
+  const qpHighlightId = sp.get("highlight")
+  const isReadonly = useIsReadonly()
+
+  const [highlightedRowId, setHighlightedRowId] = useState<number | null>(null)
+
   const [rows, setRows] = useState<ChangeRow[]>([])
   const [positions, setPositions] = useState<Position[]>([])
   const [loading, setLoading] = useState(true)
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
   const [loadingPositions, setLoadingPositions] = useState(false)
 
   const [openNew, setOpenNew] = useState(false)
   const [openEdit, setOpenEdit] = useState(false)
   const [editRow, setEditRow] = useState<ChangeRow | null>(null)
 
-  const [typeFilter, setTypeFilter] = useState<ChangeTypeFilter>("all")
-  const [query, setQuery] = useState("")
   const [monthFilter, setMonthFilter] = useState("")
 
   const [expandedYears, setExpandedYears] = useState<string[]>([])
@@ -509,6 +535,7 @@ export default function EmployeeChangesPage() {
       setRows([])
     } finally {
       setLoading(false)
+      setHasLoadedOnce(true)
     }
   }, [showError])
 
@@ -532,74 +559,190 @@ export default function EmployeeChangesPage() {
     void reload()
   }, [reload])
 
-  useEffect(() => {
-    const latest = getLatestYearAndMonth(rows)
-
-    setExpandedYears(latest?.year ? [latest.year] : [])
-    setExpandedMonths(latest?.month ? [latest.month] : [])
-  }, [rows])
-
-  const counts = useMemo(
-    () => ({
-      all: rows.filter((row) => row.status !== "CANCELLED").length,
-      name: rows.filter(
-        (row) => row.status !== "CANCELLED" && row.type === "NAME"
-      ).length,
-      position: rows.filter(
-        (row) => row.status !== "CANCELLED" && row.type === "POSITION"
-      ).length,
-      both: rows.filter(
-        (row) => row.status !== "CANCELLED" && row.type === "NAME_AND_POSITION"
-      ).length,
-    }),
+  const activeRows = useMemo(
+    () => rows.filter((row) => row.status !== "CANCELLED"),
     [rows]
   )
 
-  const filteredRows = useMemo(() => {
-    const needle = query.trim().toLowerCase()
+  const getSearchableText = React.useCallback(
+    (row: ChangeRow) => [
+      fullName(row),
+      row.personalNumber,
+      row.oldTitleBefore,
+      row.newTitleBefore,
+      row.oldName,
+      row.newName,
+      row.oldSurname,
+      row.newSurname,
+      row.oldTitleAfter,
+      row.newTitleAfter,
+      row.oldDepartment,
+      row.newDepartment,
+      row.oldUnitName,
+      row.newUnitName,
+      row.oldPositionName,
+      row.newPositionName,
+      row.oldPositionNum,
+      row.newPositionNum,
+      row.notes,
+    ],
+    []
+  )
 
-    return rows.filter((row) => {
-      if (row.status === "CANCELLED") return false
-      if (typeFilter !== "all" && row.type !== typeFilter) return false
+  const { query, setQuery, filterRows } = useTextFilter(getSearchableText)
 
-      if (monthFilter && row.effectiveDate?.slice(0, 7) !== monthFilter) {
-        return false
-      }
+  const dateFilteredRows = useMemo(() => {
+    if (!monthFilter) return activeRows
 
-      if (!needle) return true
+    return activeRows.filter(
+      (row) => row.effectiveDate?.slice(0, 7) === monthFilter
+    )
+  }, [activeRows, monthFilter])
 
-      return [
-        fullName(row),
-        row.personalNumber,
-        row.oldTitleBefore,
-        row.newTitleBefore,
-        row.oldName,
-        row.newName,
-        row.oldSurname,
-        row.newSurname,
-        row.oldTitleAfter,
-        row.newTitleAfter,
-        row.oldDepartment,
-        row.newDepartment,
-        row.oldUnitName,
-        row.newUnitName,
-        row.oldPositionName,
-        row.newPositionName,
-        row.oldPositionNum,
-        row.newPositionNum,
-        row.notes,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(needle)
-    })
-  }, [monthFilter, query, rows, typeFilter])
+  const searchedRows = useMemo(
+    () => filterRows(dateFilteredRows),
+    [dateFilteredRows, filterRows]
+  )
+
+  const changeFacets = useMemo(
+    () => ({
+      department: (row: ChangeRow) => [row.oldDepartment, row.newDepartment],
+      unitName: (row: ChangeRow) => [row.oldUnitName, row.newUnitName],
+      position: (row: ChangeRow) => [row.oldPositionName, row.newPositionName],
+      changeType: (row: ChangeRow) => [row.type],
+      emailSent: (row: ChangeRow) => [row.emailSentAt ? "SENT" : "NOT_SENT"],
+    }),
+    []
+  )
+
+  const {
+    filters: facetFilters,
+    setFacetValues: setFacetFilter,
+    clearAll: clearAllFacetFilters,
+    filteredRows,
+    availableValues,
+  } = useFacetedFilter<ChangeRow, ChangeFacetKey>(searchedRows, changeFacets)
+
+  const departmentOptionsAll = useMemo(
+    () =>
+      buildDistinctOptions(
+        activeRows.flatMap((row) => [row.oldDepartment, row.newDepartment])
+      ),
+    [activeRows]
+  )
+  const departmentOptions = useMemo(
+    () =>
+      filterAvailableOptions(departmentOptionsAll, availableValues.department),
+    [departmentOptionsAll, availableValues.department]
+  )
+
+  const unitOptionsAll = useMemo(
+    () =>
+      buildDistinctOptions(
+        activeRows.flatMap((row) => [row.oldUnitName, row.newUnitName])
+      ),
+    [activeRows]
+  )
+  const unitOptions = useMemo(
+    () => filterAvailableOptions(unitOptionsAll, availableValues.unitName),
+    [unitOptionsAll, availableValues.unitName]
+  )
+
+  const positionOptionsAll = useMemo(
+    () =>
+      buildDistinctOptions(
+        activeRows.flatMap((row) => [row.oldPositionName, row.newPositionName])
+      ),
+    [activeRows]
+  )
+  const positionOptions = useMemo(
+    () => filterAvailableOptions(positionOptionsAll, availableValues.position),
+    [positionOptionsAll, availableValues.position]
+  )
+
+  const changeTypeOptions = useMemo(
+    () =>
+      filterAvailableOptions(CHANGE_TYPE_OPTIONS, availableValues.changeType),
+    [availableValues.changeType]
+  )
+
+  const emailSentOptions = useMemo(
+    () => filterAvailableOptions(EMAIL_SENT_OPTIONS, availableValues.emailSent),
+    [availableValues.emailSent]
+  )
 
   const grouped = useMemo(
     () => groupByYearAndMonth(filteredRows),
     [filteredRows]
   )
+
+  const isAnyFilterActive =
+    query.trim() !== "" ||
+    monthFilter !== "" ||
+    facetFilters.department.length > 0 ||
+    facetFilters.unitName.length > 0 ||
+    facetFilters.position.length > 0 ||
+    facetFilters.changeType.length > 0 ||
+    facetFilters.emailSent.length > 0
+
+  useEffect(() => {
+    if (isAnyFilterActive) {
+      const { years, months } = getAllYearsAndMonths(grouped)
+      setExpandedYears(years)
+      setExpandedMonths(months)
+      return
+    }
+
+    const latest = getLatestYearAndMonth(filteredRows)
+
+    setExpandedYears(latest?.year ? [latest.year] : [])
+    setExpandedMonths(latest?.month ? [latest.month] : [])
+  }, [filteredRows, grouped, isAnyFilterActive])
+
+  const appliedHighlightRef = React.useRef<string | null>(null)
+
+  // Coming from the global search must only navigate/reveal a record — it
+  // must never touch the page's own filters (search box, facets, month).
+  useEffect(() => {
+    if (!qpHighlightId) return
+    if (appliedHighlightRef.current === qpHighlightId) return
+
+    const id = Number(qpHighlightId)
+    const row = rows.find((r) => r.id === id)
+    if (!row) return
+
+    appliedHighlightRef.current = qpHighlightId
+
+    if (row.effectiveDate) {
+      const year = row.effectiveDate.slice(0, 4)
+      const month = row.effectiveDate.slice(0, 7)
+
+      setExpandedYears((prev) => (prev.includes(year) ? prev : [...prev, year]))
+      setExpandedMonths((prev) =>
+        prev.includes(month) ? prev : [...prev, month]
+      )
+    }
+
+    setHighlightedRowId(id)
+  }, [qpHighlightId, rows])
+
+  useEffect(() => {
+    if (!highlightedRowId) return
+
+    const timeout = setTimeout(() => {
+      document
+        .getElementById(`change-row-${highlightedRowId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" })
+    }, 200)
+
+    return () => clearTimeout(timeout)
+  }, [highlightedRowId])
+
+  const clearHighlightedRow = React.useCallback(
+    () => setHighlightedRowId(null),
+    []
+  )
+  useDismissableHighlight(highlightedRowId, clearHighlightedRow)
 
   function toggleYear(year: string) {
     setExpandedYears((prev) =>
@@ -712,9 +855,17 @@ export default function EmployeeChangesPage() {
 
   const ChangeTableRow = ({ row }: { row: ChangeRow }) => {
     const hasRelated = hasRelatedRecords(row)
+    const isHighlighted = row.id === highlightedRowId
 
     return (
-      <TableRow>
+      <TableRow
+        id={`change-row-${row.id}`}
+        className={
+          isHighlighted
+            ? "bg-amber-50 ring-2 ring-inset ring-amber-400 dark:bg-amber-950/30"
+            : undefined
+        }
+      >
         <TableCell className="w-[210px] min-w-[210px] align-top">
           <div className="flex items-start gap-2">
             <User className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
@@ -735,19 +886,29 @@ export default function EmployeeChangesPage() {
         </TableCell>
 
         <TableCell className="w-[280px] min-w-[280px] align-top">
-          <EmployeeInfoCell
-            row={row}
-            onOpenInfo={() => void openLinkDialog(row)}
-          />
+          <EmployeeInfoCell row={row} />
         </TableCell>
 
         <TableCell className="w-[150px] min-w-[150px] align-top">
-          <Badge
-            variant="outline"
-            className="whitespace-normal text-xs leading-snug"
-          >
-            {typeLabel(row.type)}
-          </Badge>
+          <div className="flex flex-col items-start gap-1.5">
+            <Badge
+              variant="outline"
+              className="whitespace-normal text-xs leading-snug"
+            >
+              {typeLabel(row.type)}
+            </Badge>
+
+            {hasRelated && (
+              <button
+                type="button"
+                onClick={() => void openLinkDialog(row)}
+                className="inline-flex max-w-full items-center rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800 transition hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300 dark:hover:bg-amber-900/30"
+                title="Zobrazit související záznamy"
+              >
+                <span className="truncate">{relationLabel(row)}</span>
+              </button>
+            )}
+          </div>
         </TableCell>
 
         <TableCell className="w-[130px] min-w-[130px] whitespace-nowrap align-top text-sm">
@@ -837,250 +998,372 @@ export default function EmployeeChangesPage() {
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 p-2">
-        <span className="mr-1 text-sm font-medium text-muted-foreground">
-          Typ změny:
-        </span>
-        {(
-          [
-            ["NAME", "Změna jména", counts.name],
-            ["POSITION", "Změny pozice", counts.position],
-            ["NAME_AND_POSITION", "Změny jména i pozice", counts.both],
-            ["all", "Veškeré změny", counts.all],
-          ] as [ChangeTypeFilter, string, number][]
-        ).map(([value, label, count]) => (
-          <Button
-            key={value}
-            type="button"
-            size="sm"
-            variant={typeFilter === value ? "default" : "outline"}
-            onClick={() => setTypeFilter(value)}
-            className={
-              typeFilter === value
-                ? "bg-[#00847C] text-white hover:bg-[#0B6D73]"
-                : ""
-            }
-          >
-            {label}
-            <Badge
-              variant={typeFilter === value ? "secondary" : "outline"}
-              className="ml-2"
-            >
-              {count}
-            </Badge>
-          </Button>
-        ))}
-      </div>
+      {!hasLoadedOnce ? (
+        <ListPageSkeleton />
+      ) : (
+        <>
+          <div className="flex flex-col gap-2 rounded-lg border bg-muted/20 p-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <SearchInput
+                value={query}
+                onChange={setQuery}
+                placeholder="Hledat podle jména, osobního čísla, odboru, pozice…"
+              />
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex min-w-[260px] flex-1 flex-wrap items-center gap-2">
-          <div className="relative min-w-[240px] flex-1">
-            <Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" />
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Hledat podle jména, osobního čísla, odboru, pozice…"
-              className="pl-9"
+              <MultiSelectFilter
+                label="Odbor"
+                options={departmentOptions}
+                selected={facetFilters.department}
+                onChange={(values) => setFacetFilter("department", values)}
+                searchPlaceholder="Hledat odbor…"
+                emptyText="Žádný odbor nenalezen."
+              />
+              <MultiSelectFilter
+                label="Oddělení"
+                options={unitOptions}
+                selected={facetFilters.unitName}
+                onChange={(values) => setFacetFilter("unitName", values)}
+                searchPlaceholder="Hledat oddělení…"
+                emptyText="Žádné oddělení nenalezeno."
+              />
+              <MultiSelectFilter
+                label="Pozice"
+                options={positionOptions}
+                selected={facetFilters.position}
+                onChange={(values) => setFacetFilter("position", values)}
+                searchPlaceholder="Hledat pozici…"
+                emptyText="Žádná pozice nenalezena."
+              />
+              <MultiSelectFilter
+                label="Typ změny"
+                options={changeTypeOptions}
+                selected={facetFilters.changeType}
+                onChange={(values) => setFacetFilter("changeType", values)}
+                searchPlaceholder="Hledat typ změny…"
+                emptyText="Žádný typ nenalezen."
+              />
+              <MultiSelectFilter
+                label="Odeslání reportu"
+                options={emailSentOptions}
+                selected={facetFilters.emailSent}
+                onChange={(values) => setFacetFilter("emailSent", values)}
+                searchPlaceholder="Hledat stav odeslání…"
+                emptyText="Žádný stav nenalezen."
+              />
+
+              <MonthFilter
+                label="Datum účinnosti změny"
+                value={monthFilter}
+                onChange={setMonthFilter}
+              />
+            </div>
+
+            <ActiveFilterChips
+              groups={[
+                {
+                  key: "department",
+                  label: "Odbor",
+                  values: facetFilters.department.map((value) => ({
+                    value,
+                    label: value,
+                  })),
+                  onRemove: (value) =>
+                    setFacetFilter(
+                      "department",
+                      facetFilters.department.filter((v) => v !== value)
+                    ),
+                },
+                {
+                  key: "unitName",
+                  label: "Oddělení",
+                  values: facetFilters.unitName.map((value) => ({
+                    value,
+                    label: value,
+                  })),
+                  onRemove: (value) =>
+                    setFacetFilter(
+                      "unitName",
+                      facetFilters.unitName.filter((v) => v !== value)
+                    ),
+                },
+                {
+                  key: "position",
+                  label: "Pozice",
+                  values: facetFilters.position.map((value) => ({
+                    value,
+                    label: value,
+                  })),
+                  onRemove: (value) =>
+                    setFacetFilter(
+                      "position",
+                      facetFilters.position.filter((v) => v !== value)
+                    ),
+                },
+                {
+                  key: "changeType",
+                  label: "Typ změny",
+                  values: facetFilters.changeType.map((value) => ({
+                    value,
+                    label:
+                      CHANGE_TYPE_OPTIONS.find((o) => o.value === value)
+                        ?.label ?? value,
+                  })),
+                  onRemove: (value) =>
+                    setFacetFilter(
+                      "changeType",
+                      facetFilters.changeType.filter((v) => v !== value)
+                    ),
+                },
+                {
+                  key: "emailSent",
+                  label: "Odeslání reportu",
+                  values: facetFilters.emailSent.map((value) => ({
+                    value,
+                    label:
+                      EMAIL_SENT_OPTIONS.find((o) => o.value === value)
+                        ?.label ?? value,
+                  })),
+                  onRemove: (value) =>
+                    setFacetFilter(
+                      "emailSent",
+                      facetFilters.emailSent.filter((v) => v !== value)
+                    ),
+                },
+              ]}
+              onClearAll={clearAllFacetFilters}
             />
           </div>
 
-          <Input
-            type="month"
-            value={monthFilter}
-            onChange={(event) => setMonthFilter(event.target.value)}
-            className="w-auto"
-          />
-        </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <Dialog
+              modal={false}
+              open={openNew}
+              onOpenChange={(open) => {
+                setOpenNew(open)
+                if (open && positions.length === 0) void loadPositions()
+              }}
+            >
+              <DialogTrigger asChild>
+                <Button className="inline-flex w-full items-center justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] sm:w-auto">
+                  Přidat novou změnu
+                </Button>
+              </DialogTrigger>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Dialog
-            modal={false}
-            open={openNew}
-            onOpenChange={(open) => {
-              setOpenNew(open)
-              if (open && positions.length === 0) void loadPositions()
-            }}
-          >
-            <DialogTrigger asChild>
-              <Button className="bg-[#00847C] text-white hover:bg-[#0B6D73]">
-                Přidat novou změnu
-              </Button>
-            </DialogTrigger>
+              <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
+                <DialogTitle className="px-6 pt-6">
+                  Přidat novou změnu
+                </DialogTitle>
 
-            <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
-              <DialogTitle className="px-6 pt-6">
-                Přidat novou změnu
-              </DialogTitle>
+                <div className="p-6">
+                  {loadingPositions ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
+                      <span className="ml-2 text-muted-foreground">
+                        Načítám pozice...
+                      </span>
+                    </div>
+                  ) : (
+                    <EmployeeChangeForm
+                      positions={positions}
+                      mode="create"
+                      onSuccess={async () => {
+                        setOpenNew(false)
+                        await reload()
+                      }}
+                    />
+                  )}
+                </div>
+              </DialogContent>
+            </Dialog>
 
-              <div className="p-6">
-                {loadingPositions ? (
-                  <div className="flex items-center justify-center py-8">
-                    <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
-                    <span className="ml-2 text-muted-foreground">
-                      Načítám pozice...
-                    </span>
-                  </div>
-                ) : (
-                  <EmployeeChangeForm
-                    positions={positions}
-                    mode="create"
-                    onSuccess={async () => {
-                      setOpenNew(false)
-                      await reload()
-                    }}
-                  />
-                )}
+            <div className="w-full sm:w-auto [&_button]:w-full sm:[&_button]:w-auto">
+              <DeletedRecordsDialog
+                kind="employee-change"
+                title="Smazané změny"
+                triggerLabel="Smazané záznamy"
+                successEvent="employee-change:deleted"
+                onRestore={() => void reload()}
+              />
+            </div>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+            {loading ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
+                <span className="ml-2 text-muted-foreground">
+                  Načítám změny...
+                </span>
               </div>
-            </DialogContent>
-          </Dialog>
+            ) : Object.keys(grouped).length === 0 ? (
+              <Card>
+                <CardContent className="flex flex-col items-center justify-center py-12">
+                  <CalendarDays className="mb-4 size-12 text-muted-foreground" />
+                  <p className="text-lg font-medium text-muted-foreground">
+                    Žádné změny k zobrazení
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Přidejte první záznam pomocí tlačítka výše
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="min-w-0 space-y-5 pb-2">
+                {Object.keys(grouped)
+                  .sort((a, b) => b.localeCompare(a))
+                  .map((year) => {
+                    const yearData = grouped[year]
+                    const yearCount = Object.values(yearData).reduce(
+                      (sum, monthRows) => sum + monthRows.length,
+                      0
+                    )
+                    const isYearExpanded = expandedYears.includes(year)
+                    const yearMonthKeys = Object.keys(yearData)
+                    const allMonthsExpanded = yearMonthKeys.every((month) =>
+                      expandedMonths.includes(month)
+                    )
 
-          <DeletedRecordsDialog
-            kind="employee-change"
-            title="Smazané změny"
-            triggerLabel="Smazané záznamy"
-            successEvent="employee-change:deleted"
-            onRestore={() => void reload()}
-          />
-        </div>
-      </div>
+                    return (
+                      <Collapsible key={year} open={isYearExpanded}>
+                        <div className="flex w-full min-w-0 items-center gap-2 rounded-lg bg-slate-100 p-3 transition-colors hover:bg-slate-200 dark:bg-slate-900/40 dark:hover:bg-slate-900/60">
+                          <CollapsibleTrigger
+                            onClick={() => toggleYear(year)}
+                            className="flex min-w-0 flex-1 items-center gap-2"
+                          >
+                            {isYearExpanded ? (
+                              <ChevronDown className="size-4" />
+                            ) : (
+                              <ChevronRight className="size-4" />
+                            )}
+                            <CalendarDays className="size-4 text-slate-700 dark:text-slate-300" />
+                            <span className="text-lg font-semibold">
+                              {year}
+                            </span>
+                          </CollapsibleTrigger>
 
-      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-        {loading ? (
-          <div className="flex items-center justify-center py-8">
-            <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
-            <span className="ml-2 text-muted-foreground">Načítám změny...</span>
+                          <Badge variant="outline">{yearCount}</Badge>
+
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setExpandedMonths((prev) =>
+                                allMonthsExpanded
+                                  ? prev.filter(
+                                      (month) => !yearMonthKeys.includes(month)
+                                    )
+                                  : Array.from(
+                                      new Set([...prev, ...yearMonthKeys])
+                                    )
+                              )
+
+                              if (!allMonthsExpanded) {
+                                setExpandedYears((prev) =>
+                                  prev.includes(year) ? prev : [...prev, year]
+                                )
+                              }
+                            }}
+                          >
+                            {allMonthsExpanded ? "Sbalit vše" : "Zobrazit vše"}
+                          </Button>
+                        </div>
+
+                        <CollapsibleContent className="mt-3 space-y-4">
+                          {Object.keys(yearData)
+                            .sort((a, b) => b.localeCompare(a))
+                            .map((month) => {
+                              const monthData = yearData[month]
+                              const isMonthExpanded =
+                                expandedMonths.includes(month)
+
+                              return (
+                                <Collapsible key={month} open={isMonthExpanded}>
+                                  <CollapsibleTrigger
+                                    onClick={() => toggleMonth(month)}
+                                    className="flex w-full min-w-0 items-center gap-2 rounded-lg bg-violet-50 p-2 transition-colors hover:bg-violet-100 dark:bg-violet-900/20 dark:hover:bg-violet-900/30"
+                                  >
+                                    {isMonthExpanded ? (
+                                      <ChevronDown className="size-4" />
+                                    ) : (
+                                      <ChevronRight className="size-4" />
+                                    )}
+                                    <CalendarDays className="size-4 text-violet-600" />
+                                    <span className="font-medium">
+                                      {formatMonth(month)}
+                                    </span>
+                                    <Badge
+                                      variant="outline"
+                                      className="ml-auto"
+                                    >
+                                      {monthData.length}
+                                    </Badge>
+                                  </CollapsibleTrigger>
+
+                                  <CollapsibleContent className="mt-2">
+                                    <Card className="max-w-full">
+                                      <CardContent className="p-0">
+                                        <ResponsiveTableShell>
+                                          <Table
+                                            disableWrapperScroll
+                                            className="w-full"
+                                          >
+                                            <TableHeader>
+                                              <TableRow>
+                                                <TableHead className="w-[210px] min-w-[210px]">
+                                                  Zaměstnanec
+                                                </TableHead>
+                                                <TableHead className="w-[280px] min-w-[280px]">
+                                                  Další info
+                                                </TableHead>
+                                                <TableHead className="w-[150px] min-w-[150px]">
+                                                  Typ změny
+                                                </TableHead>
+                                                <TableHead className="w-[130px] min-w-[130px]">
+                                                  Účinnost změny
+                                                </TableHead>
+                                                <TableHead className="w-[360px] min-w-[360px]">
+                                                  Nová změna
+                                                </TableHead>
+                                                <TableHead className="w-[135px] min-w-[135px]">
+                                                  Odeslání reportu
+                                                </TableHead>
+                                                <TableHead className="w-[230px] min-w-[230px] text-right">
+                                                  Akce
+                                                </TableHead>
+                                              </TableRow>
+                                            </TableHeader>
+
+                                            <TableBody>
+                                              {monthData.map((row) => (
+                                                <ChangeTableRow
+                                                  key={row.id}
+                                                  row={row}
+                                                />
+                                              ))}
+                                            </TableBody>
+                                          </Table>
+                                        </ResponsiveTableShell>
+                                      </CardContent>
+                                    </Card>
+                                  </CollapsibleContent>
+                                </Collapsible>
+                              )
+                            })}
+                        </CollapsibleContent>
+                      </Collapsible>
+                    )
+                  })}
+              </div>
+            )}
+            <div className="flex justify-end pt-4">
+              <div className="flex items-center gap-2">
+                <EmployeeChangeReportLauncher />
+              </div>
+            </div>
           </div>
-        ) : Object.keys(grouped).length === 0 ? (
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12">
-              <CalendarDays className="mb-4 size-12 text-muted-foreground" />
-              <p className="text-lg font-medium text-muted-foreground">
-                Žádné změny k zobrazení
-              </p>
-              <p className="text-sm text-muted-foreground">
-                Přidejte první záznam pomocí tlačítka výše
-              </p>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="min-w-0 space-y-5 pb-2">
-            {Object.keys(grouped)
-              .sort((a, b) => b.localeCompare(a))
-              .map((year) => {
-                const yearData = grouped[year]
-                const yearCount = Object.values(yearData).reduce(
-                  (sum, monthRows) => sum + monthRows.length,
-                  0
-                )
-                const isYearExpanded = expandedYears.includes(year)
-
-                return (
-                  <Collapsible key={year} open={isYearExpanded}>
-                    <CollapsibleTrigger
-                      onClick={() => toggleYear(year)}
-                      className="flex w-full min-w-0 items-center gap-2 rounded-lg bg-slate-100 p-3 transition-colors hover:bg-slate-200 dark:bg-slate-900/40 dark:hover:bg-slate-900/60"
-                    >
-                      {isYearExpanded ? (
-                        <ChevronDown className="size-4" />
-                      ) : (
-                        <ChevronRight className="size-4" />
-                      )}
-                      <CalendarDays className="size-4 text-slate-700 dark:text-slate-300" />
-                      <span className="text-lg font-semibold">{year}</span>
-                      <Badge variant="outline" className="ml-auto">
-                        {yearCount}
-                      </Badge>
-                    </CollapsibleTrigger>
-
-                    <CollapsibleContent className="mt-3 space-y-4">
-                      {Object.keys(yearData)
-                        .sort((a, b) => b.localeCompare(a))
-                        .map((month) => {
-                          const monthData = yearData[month]
-                          const isMonthExpanded = expandedMonths.includes(month)
-
-                          return (
-                            <Collapsible key={month} open={isMonthExpanded}>
-                              <CollapsibleTrigger
-                                onClick={() => toggleMonth(month)}
-                                className="flex w-full min-w-0 items-center gap-2 rounded-lg bg-violet-50 p-2 transition-colors hover:bg-violet-100 dark:bg-violet-900/20 dark:hover:bg-violet-900/30"
-                              >
-                                {isMonthExpanded ? (
-                                  <ChevronDown className="size-4" />
-                                ) : (
-                                  <ChevronRight className="size-4" />
-                                )}
-                                <CalendarDays className="size-4 text-violet-600" />
-                                <span className="font-medium">
-                                  {formatMonth(month)}
-                                </span>
-                                <Badge variant="outline" className="ml-auto">
-                                  {monthData.length}
-                                </Badge>
-                              </CollapsibleTrigger>
-
-                              <CollapsibleContent className="mt-2">
-                                <Card className="max-w-full">
-                                  <CardContent className="p-0">
-                                    <ResponsiveTableShell>
-                                      <Table
-                                        disableWrapperScroll
-                                        className="w-full"
-                                      >
-                                        <TableHeader>
-                                          <TableRow>
-                                            <TableHead className="w-[210px] min-w-[210px]">
-                                              Zaměstnanec
-                                            </TableHead>
-                                            <TableHead className="w-[280px] min-w-[280px]">
-                                              Další info
-                                            </TableHead>
-                                            <TableHead className="w-[150px] min-w-[150px]">
-                                              Typ změny
-                                            </TableHead>
-                                            <TableHead className="w-[130px] min-w-[130px]">
-                                              Účinnost změny
-                                            </TableHead>
-                                            <TableHead className="w-[360px] min-w-[360px]">
-                                              Nová změna
-                                            </TableHead>
-                                            <TableHead className="w-[135px] min-w-[135px]">
-                                              Odeslání reportu
-                                            </TableHead>
-                                            <TableHead className="w-[230px] min-w-[230px] text-right">
-                                              Akce
-                                            </TableHead>
-                                          </TableRow>
-                                        </TableHeader>
-
-                                        <TableBody>
-                                          {monthData.map((row) => (
-                                            <ChangeTableRow
-                                              key={row.id}
-                                              row={row}
-                                            />
-                                          ))}
-                                        </TableBody>
-                                      </Table>
-                                    </ResponsiveTableShell>
-                                  </CardContent>
-                                </Card>
-                              </CollapsibleContent>
-                            </Collapsible>
-                          )
-                        })}
-                    </CollapsibleContent>
-                  </Collapsible>
-                )
-              })}
-          </div>
-        )}
-        <div className="flex justify-end pt-4">
-          <div className="flex items-center gap-2">
-            <EmployeeChangeReportLauncher />
-          </div>
-        </div>
-      </div>
+        </>
+      )}
 
       <Dialog
         modal={false}
@@ -1255,7 +1538,7 @@ export default function EmployeeChangesPage() {
             <Button
               variant="destructive"
               onClick={() => void handleDelete()}
-              disabled={deleteDialog.loading}
+              disabled={deleteDialog.loading || isReadonly}
               className="flex items-center gap-2"
             >
               {deleteDialog.loading && (

@@ -16,6 +16,8 @@ import {
   XCircle,
 } from "lucide-react"
 
+import { useIsReadonly } from "@/hooks/use-current-role"
+
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -193,6 +195,7 @@ function ChangeComparisonCard({
 
 export function EmployeeChangeDetailClient({ data }: { data: ChangeData }) {
   const router = useRouter()
+  const isReadonly = useIsReadonly()
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -488,7 +491,7 @@ export function EmployeeChangeDetailClient({ data }: { data: ChangeData }) {
             <Button
               variant="destructive"
               onClick={() => void handleDelete()}
-              disabled={deleting}
+              disabled={deleting || isReadonly}
               className="flex items-center gap-2"
             >
               {deleting && (

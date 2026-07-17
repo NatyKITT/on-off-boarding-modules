@@ -11,6 +11,11 @@ import {
   normalizePersonalNumber,
   pickMostRelevantOnboarding,
 } from "@/lib/employment-linking"
+import {
+  getUserKey,
+  getUserLabel,
+  syncLinkedProbationAfterOffboardingDecision,
+} from "@/lib/probation-evaluation-request"
 import { canReadOffboarding, canWriteOffboarding } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
@@ -72,6 +77,9 @@ const updateSchema = z.object({
 
   notes: z.union([z.string(), z.null()]).optional(),
   status: z.enum(["NEW", "IN_PROGRESS", "COMPLETED"]).optional(),
+
+  probationStopDecision: z.enum(["STOP", "KEEP"]).nullable().optional(),
+  probationStopNote: z.union([z.string(), z.null()]).optional(),
 })
 
 function toStr(value: unknown): string {
@@ -251,10 +259,14 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     const raw = await request.json()
     const data = updateSchema.parse(raw)
 
-    const userKey =
-      (session.user as { id?: string; email?: string }).id ??
-      session.user.email ??
-      "unknown"
+    const userKey = getUserKey({
+      id: (session.user as { id?: string }).id,
+      email: session.user.email,
+    })
+    const userName = getUserLabel({
+      name: session.user.name,
+      email: session.user.email,
+    })
 
     const before = await prisma.employeeOffboarding.findFirst({
       where: {
@@ -315,6 +327,14 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
           case "status": {
             updateData.status = value as "NEW" | "IN_PROGRESS" | "COMPLETED"
+            break
+          }
+
+          case "probationStopDecision": {
+            const decision = value as "STOP" | "KEEP" | null
+            updateData.probationStopDecision = decision
+            updateData.probationStopDecisionAt = decision ? new Date() : null
+            updateData.probationStopDecisionBy = decision ? userKey : null
             break
           }
 
@@ -389,6 +409,24 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         })
       }
 
+      if (
+        data.probationStopDecision !== undefined &&
+        data.probationStopDecision !== before.probationStopDecision
+      ) {
+        const linkedOnboarding = await getLinkedOnboardingForOffboarding(
+          updatedRecord.personalNumber,
+          updatedRecord.actualEnd ?? updatedRecord.plannedEnd
+        )
+
+        if (linkedOnboarding) {
+          await syncLinkedProbationAfterOffboardingDecision(tx, {
+            onboardingId: linkedOnboarding.id,
+            actorId: userKey,
+            actorName: userName,
+          })
+        }
+      }
+
       return updatedRecord
     })
 
@@ -418,7 +456,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   }
 }
 
-export async function DELETE(_: NextRequest, { params }: RouteParams) {
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
   const session = await auth()
 
   if (!session?.user) {
@@ -446,6 +484,9 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
     )
   }
 
+  const confirmReactivate =
+    new URL(request.url).searchParams.get("confirmReactivate") === "true"
+
   const before = await prisma.employeeOffboarding.findFirst({
     where: {
       id,
@@ -456,6 +497,9 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
       name: true,
       surname: true,
       actualEnd: true,
+      plannedEnd: true,
+      personalNumber: true,
+      probationStopDecision: true,
       deletedAt: true,
     },
   })
@@ -474,10 +518,39 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
     )
   }
 
-  const userKey =
-    (session.user as { id?: string; email?: string }).id ??
-    session.user.email ??
-    "unknown"
+  const userKey = getUserKey({
+    id: (session.user as { id?: string }).id,
+    email: session.user.email,
+  })
+  const userName = getUserLabel({
+    name: session.user.name,
+    email: session.user.email,
+  })
+
+  // Když tento odchod aktivně pozastavuje zkušebku navázaného nástupu, smazání
+  // odchodu tu vazbu odstraní a zkušebka se má znovu rozjet - na to se HR musí
+  // nejdřív zeptat, ať se to nestane jako vedlejší efekt jednoho kliknutí.
+  let linkedOnboardingForReactivation: Awaited<
+    ReturnType<typeof getLinkedOnboardingForOffboarding>
+  > = null
+
+  if (before.probationStopDecision === "STOP") {
+    linkedOnboardingForReactivation = await getLinkedOnboardingForOffboarding(
+      before.personalNumber,
+      before.actualEnd ?? before.plannedEnd
+    )
+  }
+
+  if (
+    linkedOnboardingForReactivation?.exitDuringProbation &&
+    !confirmReactivate
+  ) {
+    return NextResponse.json({
+      status: "confirm_required",
+      confirmKind: "probation_reactivate_on_delete",
+      linkedOnboarding: linkedOnboardingForReactivation,
+    })
+  }
 
   const now = new Date()
   const hrRecipients = getHrRecipientsFromEnv()
@@ -502,6 +575,14 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
         newValue: now.toISOString(),
       },
     })
+
+    if (linkedOnboardingForReactivation) {
+      await syncLinkedProbationAfterOffboardingDecision(tx, {
+        onboardingId: linkedOnboardingForReactivation.id,
+        actorId: userKey,
+        actorName: userName,
+      })
+    }
 
     if (hrRecipients.length > 0) {
       try {

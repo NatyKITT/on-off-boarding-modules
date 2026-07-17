@@ -8,6 +8,7 @@ import {
 import { z, ZodError } from "zod"
 
 import { prisma } from "@/lib/db"
+import { canReadEmployeeChanges, canWriteEmployeeChanges } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
@@ -175,6 +176,13 @@ export async function GET(_: NextRequest, { params }: RouteParams) {
     )
   }
 
+  if (!canReadEmployeeChanges(session.user.role)) {
+    return NextResponse.json(
+      { status: "error", message: "Nemáte oprávnění číst záznam změny." },
+      { status: 403 }
+    )
+  }
+
   const id = Number(params.id)
 
   if (!Number.isFinite(id)) {
@@ -233,6 +241,13 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json(
       { status: "error", message: "Nejste přihlášeni." },
       { status: 401 }
+    )
+  }
+
+  if (!canWriteEmployeeChanges(session.user.role)) {
+    return NextResponse.json(
+      { status: "error", message: "Nemáte oprávnění upravovat záznam změny." },
+      { status: 403 }
     )
   }
 
@@ -322,6 +337,13 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
     return NextResponse.json(
       { status: "error", message: "Musíte být přihlášeni." },
       { status: 401 }
+    )
+  }
+
+  if (!canWriteEmployeeChanges(session.user.role)) {
+    return NextResponse.json(
+      { status: "error", message: "Nemáte oprávnění mazat záznam změny." },
+      { status: 403 }
     )
   }
 

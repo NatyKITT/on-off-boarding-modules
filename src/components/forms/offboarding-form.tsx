@@ -8,7 +8,16 @@ import { AlertCircle, Calendar, Trash2, User } from "lucide-react"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 
+import { useIsReadonly } from "@/hooks/use-current-role"
+
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -27,6 +36,15 @@ import { Textarea } from "@/components/ui/textarea"
 import { EmployeeCombobox } from "@/components/common/employee-combobox"
 
 type Mode = "create-planned" | "create-actual" | "edit"
+
+type LinkedOnboardingSummary = {
+  id: number
+  positionName: string | null
+  probationEnd: string | null
+  exitDuringProbation: boolean
+  label: string
+  description: string
+}
 
 export type FormValues = {
   titleBefore?: string
@@ -128,6 +146,7 @@ export function OffboardingFormUnified({
   excludePersonalNumbers = [],
   onSuccess,
 }: Props) {
+  const isReadonly = useIsReadonly()
   const effectiveMode: Mode = useMemo(
     () => mode ?? defaultCreateMode ?? "create-planned",
     [mode, defaultCreateMode]
@@ -159,6 +178,11 @@ export function OffboardingFormUnified({
   const [openError, setOpenError] = useState(false)
   const [successName, setSuccessName] = useState("")
   const [errorMsg, setErrorMsg] = useState("")
+  const [probationConfirm, setProbationConfirm] = useState<{
+    linkedOnboarding: LinkedOnboardingSummary
+    values: FormValues
+  } | null>(null)
+  const [probationConfirmBusy, setProbationConfirmBusy] = useState(false)
   const firstDateRef = useRef<HTMLInputElement | null>(null)
   useEffect(() => {
     firstDateRef.current?.focus()
@@ -256,10 +280,21 @@ export function OffboardingFormUnified({
     mode: "onChange",
   })
 
+  // `defaults` mění referenci i tehdy, když volající předává `initial` jako
+  // nový objekt na každý render (aniž by se editovaný záznam skutečně změnil).
+  // Reset formuláře smí přepsat rozepsané hodnoty jen při skutečné změně
+  // editovaného záznamu/režimu, ne při každém re-renderu rodiče.
+  const resetKeyRef = useRef<string | null>(null)
+
   useEffect(() => {
+    const resetKey = `${id ?? "new"}:${effectiveMode}`
+    if (resetKeyRef.current === resetKey) return
+    resetKeyRef.current = resetKey
+
     form.reset(defaults)
     lastEditedRef.current = null
-  }, [defaults, form])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, effectiveMode, form])
 
   const isSubmitting = form.formState.isSubmitting
   const watchPersonal = form.watch("personalNumber")
@@ -348,71 +383,118 @@ export function OffboardingFormUnified({
     }
   }, [manualDates, endField, form])
 
+  async function submitOffboarding(
+    values: FormValues,
+    probationStopDecision?: "STOP" | "KEEP"
+  ) {
+    let noticeMonths = 2
+    if (values.noticeFiled && (values.plannedEnd || values.actualEnd)) {
+      const noticeDate = new Date(values.noticeFiled)
+      const endDate = new Date(values.actualEnd || values.plannedEnd || "")
+      if (!isNaN(noticeDate.getTime()) && !isNaN(endDate.getTime())) {
+        const daysDiff = Math.round(
+          (endDate.getTime() - noticeDate.getTime()) / 86400000
+        )
+        const monthsDiff = Math.round(daysDiff / 30.44)
+        noticeMonths = Math.max(1, monthsDiff)
+      }
+    }
+
+    const body = {
+      ...values,
+      personalNumber: ensure(
+        values.personalNumber,
+        nextTempPersonalNumber(excludePersonalNumbers)
+      ),
+      positionNum: ensure(values.positionNum, "0"),
+      positionName: ensure(values.positionName, "-"),
+      department: ensure(values.department, "-"),
+      unitName: ensure(values.unitName, "-"),
+
+      titleBefore: undefIfEmpty(values.titleBefore),
+      titleAfter: undefIfEmpty(values.titleAfter),
+      userEmail: undefIfEmpty(values.userEmail),
+      plannedEnd: undefIfEmpty(values.plannedEnd),
+      actualEnd: undefIfEmpty(values.actualEnd),
+      notes: undefIfEmpty(values.notes),
+
+      status: values.status ?? (isActualMode ? "COMPLETED" : "NEW"),
+      noticeEnd: values.noticeFiled || undefined,
+      noticeMonths,
+      hasCustomDates: manualDates,
+
+      ...(probationStopDecision ? { probationStopDecision } : {}),
+    }
+
+    const url = id ? `/api/odchody/${id}` : `/api/odchody`
+    const method = id ? "PATCH" : "POST"
+
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+
+    const json = await res.json().catch(() => null)
+    if (!res.ok) throw new Error(json?.message ?? "Operace se nezdařila.")
+
+    if (json?.status === "confirm_required" && json?.linkedOnboarding) {
+      setProbationConfirm({ linkedOnboarding: json.linkedOnboarding, values })
+      return
+    }
+
+    setSuccessName(`${values.name} ${values.surname}`)
+    await onSuccess?.(json?.data?.id)
+    setOpenSuccess(true)
+  }
+
   async function onSubmit(values: FormValues) {
     try {
-      let noticeMonths = 2
-      if (values.noticeFiled && (values.plannedEnd || values.actualEnd)) {
-        const noticeDate = new Date(values.noticeFiled)
-        const endDate = new Date(values.actualEnd || values.plannedEnd || "")
-        if (!isNaN(noticeDate.getTime()) && !isNaN(endDate.getTime())) {
-          const daysDiff = Math.round(
-            (endDate.getTime() - noticeDate.getTime()) / 86400000
-          )
-          const monthsDiff = Math.round(daysDiff / 30.44)
-          noticeMonths = Math.max(1, monthsDiff)
-        }
-      }
-
-      const body = {
-        ...values,
-        personalNumber: ensure(
-          values.personalNumber,
-          nextTempPersonalNumber(excludePersonalNumbers)
-        ),
-        positionNum: ensure(values.positionNum, "0"),
-        positionName: ensure(values.positionName, "-"),
-        department: ensure(values.department, "-"),
-        unitName: ensure(values.unitName, "-"),
-
-        titleBefore: undefIfEmpty(values.titleBefore),
-        titleAfter: undefIfEmpty(values.titleAfter),
-        userEmail: undefIfEmpty(values.userEmail),
-        plannedEnd: undefIfEmpty(values.plannedEnd),
-        actualEnd: undefIfEmpty(values.actualEnd),
-        notes: undefIfEmpty(values.notes),
-
-        status: values.status ?? (isActualMode ? "COMPLETED" : "NEW"),
-        noticeEnd: values.noticeFiled || undefined,
-        noticeMonths,
-        hasCustomDates: manualDates,
-      }
-
-      const url = id ? `/api/odchody/${id}` : `/api/odchody`
-      const method = id ? "PATCH" : "POST"
-
-      const res = await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      })
-
-      const json = await res.json().catch(() => null)
-      if (!res.ok) throw new Error(json?.message ?? "Operace se nezdařila.")
-
-      setSuccessName(`${values.name} ${values.surname}`)
-      await onSuccess?.(json?.data?.id)
-      setOpenSuccess(true)
+      await submitOffboarding(values)
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Operace se nezdařila.")
       setOpenError(true)
     }
   }
 
+  async function handleProbationDecision(decision: "STOP" | "KEEP") {
+    if (!probationConfirm) return
+    setProbationConfirmBusy(true)
+    try {
+      await submitOffboarding(probationConfirm.values, decision)
+      setProbationConfirm(null)
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Operace se nezdařila.")
+      setOpenError(true)
+    } finally {
+      setProbationConfirmBusy(false)
+    }
+  }
+
   async function onDelete() {
     if (!id) return
     try {
-      const res = await fetch(`/api/odchody/${id}`, { method: "DELETE" })
-      const json = await res.json().catch(() => null)
+      let res = await fetch(`/api/odchody/${id}`, { method: "DELETE" })
+      let json = await res.json().catch(() => null)
+
+      if (res.ok && json?.status === "confirm_required") {
+        const linkedName = json.linkedOnboarding?.positionName
+          ? ` (${json.linkedOnboarding.positionName})`
+          : ""
+
+        const confirmedReactivate = window.confirm(
+          `Tento odchod aktuálně pozastavuje zkušební dobu propojeného nástupu${linkedName}. ` +
+            "Smazáním záznamu se zkušební doba znovu aktivuje a cron k ní může znovu začít posílat výzvy. Pokračovat ve smazání?"
+        )
+
+        if (!confirmedReactivate) return
+
+        res = await fetch(`/api/odchody/${id}?confirmReactivate=true`, {
+          method: "DELETE",
+        })
+        json = await res.json().catch(() => null)
+      }
+
       if (!res.ok) throw new Error(json?.message ?? "Smazání se nezdařilo.")
       setSuccessName(form.getValues("name") + " " + form.getValues("surname"))
       await onSuccess?.()
@@ -423,7 +505,8 @@ export function OffboardingFormUnified({
     }
   }
 
-  const submitDisabled = isSubmitting || (!selectedFromEos && !isEdit)
+  const submitDisabled =
+    isSubmitting || isReadonly || (!selectedFromEos && !isEdit)
   const focusRing =
     "focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/55 focus:ring-offset-2 focus:ring-offset-background " +
     "focus-visible:outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/55 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
@@ -518,34 +601,47 @@ export function OffboardingFormUnified({
                   ["unitName", "Oddělení *"],
                   ["userEmail", "Firemní e-mail"],
                 ] as const
-              ).map(([name, label]) => (
-                <FormField
-                  key={name}
-                  name={name as keyof FormValues}
-                  control={form.control}
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{label}</FormLabel>
-                      <FormControl>
-                        <Input
-                          {...field}
-                          type={name === "userEmail" ? "email" : "text"}
-                          value={
-                            typeof field.value === "string" ? field.value : ""
-                          }
-                          className={`bg-muted ${
-                            name === "positionNum" || name === "personalNumber"
-                              ? "font-mono"
-                              : ""
-                          } ${focusRing}`}
-                          readOnly
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              ))}
+              ).map(([name, label]) => {
+                const isEmailField = name === "userEmail"
+
+                return (
+                  <FormField
+                    key={name}
+                    name={name as keyof FormValues}
+                    control={form.control}
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{label}</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            type={isEmailField ? "email" : "text"}
+                            value={
+                              typeof field.value === "string"
+                                ? field.value
+                                : ""
+                            }
+                            className={`${isEmailField ? "" : "bg-muted"} ${
+                              name === "positionNum" ||
+                              name === "personalNumber"
+                                ? "font-mono"
+                                : ""
+                            } ${focusRing}`}
+                            readOnly={!isEmailField}
+                          />
+                        </FormControl>
+                        {isEmailField && (
+                          <FormDescription>
+                            Načteno z EOS, ale můžete si ho přepsat (např. pro
+                            testování).
+                          </FormDescription>
+                        )}
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )
+              })}
             </div>
           </CardContent>
         </Card>
@@ -712,6 +808,7 @@ export function OffboardingFormUnified({
               variant="destructive"
               className={`inline-flex w-full items-center justify-center gap-2 ${focusRing}`}
               onClick={onDelete}
+              disabled={isReadonly}
             >
               <Trash2 className="size-4" />
               Smazat záznam
@@ -732,6 +829,57 @@ export function OffboardingFormUnified({
             </div>
           </DialogContent>
         </Dialog>
+
+        <AlertDialog
+          open={Boolean(probationConfirm)}
+          onOpenChange={(open) => {
+            if (!open && !probationConfirmBusy) setProbationConfirm(null)
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                Zastavit hodnocení zkušební doby?
+              </AlertDialogTitle>
+            </AlertDialogHeader>
+            <div className="space-y-2 text-sm text-muted-foreground">
+              <p>
+                Osobní číslo je propojené s aktivním nástupem
+                {probationConfirm?.linkedOnboarding.positionName
+                  ? ` (${probationConfirm.linkedOnboarding.positionName})`
+                  : ""}
+                , kde právě běží zkušební doba
+                {probationConfirm?.linkedOnboarding.probationEnd
+                  ? ` do ${format(new Date(probationConfirm.linkedOnboarding.probationEnd), "d.M.yyyy")}`
+                  : ""}
+                .
+              </p>
+              <p>
+                Chcete zastavit hodnocení zkušební doby a nerozesílat
+                vedoucímu žádné další e-maily k vyplnění? Pokud zvolíte
+                „Nechat běžet“, formulář i připomínky poběží dál beze změny.
+              </p>
+            </div>
+            <AlertDialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={probationConfirmBusy || isReadonly}
+                onClick={() => void handleProbationDecision("KEEP")}
+              >
+                Nechat běžet
+              </Button>
+              <Button
+                type="button"
+                className="bg-[#00847C] text-white hover:bg-[#0B6D73]"
+                disabled={probationConfirmBusy || isReadonly}
+                onClick={() => void handleProbationDecision("STOP")}
+              >
+                {probationConfirmBusy ? "Ukládám…" : "Zastavit hodnocení"}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         <Dialog open={openError} onOpenChange={setOpenError}>
           <DialogContent>

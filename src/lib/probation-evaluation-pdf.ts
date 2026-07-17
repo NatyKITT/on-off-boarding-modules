@@ -66,6 +66,7 @@ type ProbationPdfPayload = {
     actualStart?: string | null
     plannedStart?: string | null
     probationEnd?: string | null
+    earlyExitNote?: string | null
   }
 }
 
@@ -591,6 +592,20 @@ export async function renderProbationEvaluationPdfBuffer(
   ]
     .filter(Boolean)
     .join("\n")
+
+  if (payload.onboarding.earlyExitNote) {
+    const noteResult = drawSection({
+      pdf,
+      page: activePage,
+      fonts,
+      y,
+      title: "Poznámka k zaměstnaneckému poměru",
+      text: payload.onboarding.earlyExitNote,
+    })
+
+    activePage = noteResult.page
+    y = noteResult.y
+  }
 
   const sections = [
     {

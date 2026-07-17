@@ -176,26 +176,45 @@ function groupByPersonalNumber<T extends LinkablePersonalNumber>(rows: T[]) {
   return map
 }
 
-async function resolveCancelledByName(
-  cancelledBy: string | null
-): Promise<string | null> {
-  if (!cancelledBy) return null
+function isResolvableUserId(value: string | null | undefined): value is string {
+  return typeof value === "string" && value.startsWith("cm") && value.length > 20
+}
 
-  if (cancelledBy.startsWith("cm") && cancelledBy.length > 20) {
-    try {
-      const user = await prisma.user.findUnique({
-        where: { id: cancelledBy },
-        select: { name: true, surname: true, email: true },
-      })
+/**
+ * Vyřeší zobrazitelné jméno pro "cancelledBy" jedním hromadným dotazem
+ * místo dotazu per záznam (dřív N+1 při výpisu seznamu nástupů).
+ */
+async function resolveCancelledByNames(
+  cancelledByValues: Array<string | null | undefined>
+): Promise<Map<string, string>> {
+  const ids = Array.from(
+    new Set(cancelledByValues.filter(isResolvableUserId))
+  )
 
-      if (user?.name && user?.surname) return `${user.name} ${user.surname}`
-      if (user?.email) return user.email
-    } catch (error) {
-      console.error("Error resolving cancelledBy user:", error)
+  if (ids.length === 0) return new Map()
+
+  try {
+    const users = await prisma.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true, surname: true, email: true },
+    })
+
+    const map = new Map<string, string>()
+
+    for (const user of users) {
+      const label =
+        user.name && user.surname
+          ? `${user.name} ${user.surname}`
+          : (user.email ?? null)
+
+      if (label) map.set(user.id, label)
     }
-  }
 
-  return cancelledBy
+    return map
+  } catch (error) {
+    console.error("Error resolving cancelledBy users:", error)
+    return new Map()
+  }
 }
 
 async function getLinkedOffboardingForOnboarding(
@@ -221,6 +240,7 @@ async function getLinkedOffboardingForOnboarding(
       personalNumber: true,
       plannedEnd: true,
       actualEnd: true,
+      probationStopDecision: true,
     },
   })
 
@@ -251,12 +271,15 @@ async function getLinkedChangesForPersonalNumber(
   return buildLinkedEmployeeChangeInfos(changes)
 }
 
-async function serializeOnboardingRecord(
+function serializeOnboardingRecord(
   record: OnboardingRecord,
   linkedOffboarding: ReturnType<typeof buildLinkedOffboardingInfo> = null,
-  linkedChanges: ReturnType<typeof buildLinkedEmployeeChangeInfos> = []
+  linkedChanges: ReturnType<typeof buildLinkedEmployeeChangeInfos> = [],
+  cancelledByNamesById: Map<string, string> = new Map()
 ) {
-  const cancelledByName = await resolveCancelledByName(record.cancelledBy)
+  const cancelledByName = record.cancelledBy
+    ? (cancelledByNamesById.get(record.cancelledBy) ?? record.cancelledBy)
+    : null
 
   return {
     ...record,
@@ -310,7 +333,16 @@ async function serializeOnboardingRecordWithLinks(record: OnboardingRecord) {
     record.personalNumber
   )
 
-  return serializeOnboardingRecord(record, linkedOffboarding, linkedChanges)
+  const cancelledByNamesById = await resolveCancelledByNames([
+    record.cancelledBy,
+  ])
+
+  return serializeOnboardingRecord(
+    record,
+    linkedOffboarding,
+    linkedChanges,
+    cancelledByNamesById
+  )
 }
 
 async function resolveSupervisor(positionNum: string) {
@@ -473,6 +505,7 @@ export async function GET() {
               personalNumber: true,
               plannedEnd: true,
               actualEnd: true,
+              probationStopDecision: true,
             },
           })
         : []
@@ -498,32 +531,35 @@ export async function GET() {
 
     const changesByPersonalNumber = groupByPersonalNumber(linkedEmployeeChanges)
 
-    const data = await Promise.all(
-      records.map(async (record) => {
-        const personalNumber = normalizePersonalNumber(record.personalNumber)
-
-        const linkedOffboarding = pickMostRelevantOffboarding(
-          personalNumber
-            ? (offboardingsByPersonalNumber.get(personalNumber) ?? [])
-            : []
-        )
-
-        const linkedChanges = buildLinkedEmployeeChangeInfos(
-          personalNumber
-            ? (changesByPersonalNumber.get(personalNumber) ?? [])
-            : []
-        )
-
-        return serializeOnboardingRecord(
-          record,
-          buildLinkedOffboardingInfo({
-            offboarding: linkedOffboarding,
-            probationEnd: record.probationEnd,
-          }),
-          linkedChanges
-        )
-      })
+    const cancelledByNamesById = await resolveCancelledByNames(
+      records.map((record) => record.cancelledBy)
     )
+
+    const data = records.map((record) => {
+      const personalNumber = normalizePersonalNumber(record.personalNumber)
+
+      const linkedOffboarding = pickMostRelevantOffboarding(
+        personalNumber
+          ? (offboardingsByPersonalNumber.get(personalNumber) ?? [])
+          : []
+      )
+
+      const linkedChanges = buildLinkedEmployeeChangeInfos(
+        personalNumber
+          ? (changesByPersonalNumber.get(personalNumber) ?? [])
+          : []
+      )
+
+      return serializeOnboardingRecord(
+        record,
+        buildLinkedOffboardingInfo({
+          offboarding: linkedOffboarding,
+          probationEnd: record.probationEnd,
+        }),
+        linkedChanges,
+        cancelledByNamesById
+      )
+    })
 
     return NextResponse.json({ status: "success", data })
   } catch (error) {

@@ -20,6 +20,7 @@ import { z } from "zod"
 
 import { type Position } from "@/types/position"
 
+import { useIsReadonly } from "@/hooks/use-current-role"
 import { cn } from "@/lib/utils"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -930,6 +931,7 @@ export function OnboardingFormUnified({
   personalNumberMeta,
   validatePersonalNumber,
 }: Props) {
+  const isReadonly = useIsReadonly()
   const effectiveMode: Mode = useMemo(
     () => mode ?? defaultCreateMode ?? "create-planned",
     [mode, defaultCreateMode]
@@ -1182,10 +1184,21 @@ export function OnboardingFormUnified({
     mode: "onChange",
   })
 
+  // `defaults` mění referenci i tehdy, když volající předává `initial` jako
+  // nový objekt na každý render (aniž by se editovaný záznam skutečně změnil).
+  // Reset formuláře smí přepsat rozepsané hodnoty jen při skutečné změně
+  // editovaného záznamu/režimu, ne při každém re-renderu rodiče.
+  const resetKeyRef = useRef<string | null>(null)
+
   useEffect(() => {
+    const resetKey = `${id ?? "new"}:${effectiveMode}`
+    if (resetKeyRef.current === resetKey) return
+    resetKeyRef.current = resetKey
+
     form.reset(defaults)
     setPersonalCheck({ status: "idle" })
-  }, [defaults, form])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, effectiveMode, form])
 
   const isSubmitting = form.formState.isSubmitting
 
@@ -2968,11 +2981,10 @@ export function OnboardingFormUnified({
             <CardContent className="space-y-4">
               <Alert>
                 <AlertDescription>
-                  Od 1. 6. 2025 se zkušební doba ze zákona prodlužuje o pracovní
-                  dny, kdy zaměstnanec během zkušební doby neodpracoval celou
-                  směnu z důvodu překážky v práci, dovolené nebo neomluvené
-                  absence. Výpočet níže počítá pondělí až pátek jako pracovní
-                  dny; u jiného rozvrhu směn datum raději zkontrolujte ručně.
+                  Přidejte období nepřítomnosti (nemoc, dovolená, neomluvená
+                  absence) a konec zkušební doby se o tyto pracovní dny
+                  automaticky prodlouží. Počítají se dny pondělí–pátek; u jiného
+                  rozvrhu směn datum raději zkontrolujte ručně.
                 </AlertDescription>
               </Alert>
 
@@ -3154,7 +3166,7 @@ export function OnboardingFormUnified({
             <Button
               type="submit"
               className={`inline-flex w-full items-center justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] ${focusRing}`}
-              disabled={isSubmitting}
+              disabled={isSubmitting || isReadonly}
             >
               {isSubmitting && (
                 <div className="mr-2 size-4 animate-spin rounded-full border-2 border-background border-t-transparent" />

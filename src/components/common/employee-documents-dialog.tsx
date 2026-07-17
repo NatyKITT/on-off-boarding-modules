@@ -56,6 +56,7 @@ type EmployeeDocumentsDialogProps = {
   probationEvaluationSentAt?: string | Date | null
   probationEvaluationSentBy?: string | null
   onSent?: () => void
+  readOnly?: boolean
 }
 
 type ActiveTab = "onboarding" | "probation"
@@ -155,6 +156,7 @@ type DocumentCardProps = {
   regeneratingId: number | null
   resettingId: number | null
   docToReset: EmploymentDocumentLite | null
+  readOnly: boolean
   onOpen: () => void
   onOpenPdf: () => void
   onToggleLock: () => void
@@ -170,6 +172,7 @@ function DocumentCard({
   regeneratingId,
   resettingId,
   docToReset,
+  readOnly,
   onOpen,
   onOpenPdf,
   onToggleLock,
@@ -264,7 +267,7 @@ function DocumentCard({
           variant={doc.isLocked ? "default" : "outline"}
           className="size-7"
           onClick={onToggleLock}
-          disabled={lockingId === doc.id}
+          disabled={lockingId === doc.id || readOnly}
           title={doc.isLocked ? "Odemknout" : "Zamknout"}
         >
           {doc.isLocked ? (
@@ -279,7 +282,7 @@ function DocumentCard({
           variant="outline"
           className="size-7"
           onClick={onRegenerate}
-          disabled={regeneratingId === doc.id}
+          disabled={regeneratingId === doc.id || readOnly}
           title="Obnovit odkaz"
         >
           {regeneratingId === doc.id ? (
@@ -294,7 +297,7 @@ function DocumentCard({
           variant="ghost"
           className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
           onClick={onReset}
-          disabled={resettingId === doc.id}
+          disabled={resettingId === doc.id || readOnly}
           title="Vymazat data"
         >
           {resettingId === doc.id && docToReset?.id === doc.id ? (
@@ -327,6 +330,7 @@ export function EmployeeDocumentsDialog({
   probationEvaluationSentAt,
   probationEvaluationSentBy,
   onSent,
+  readOnly = false,
 }: EmployeeDocumentsDialogProps) {
   const [open, setOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<ActiveTab>("onboarding")
@@ -898,6 +902,7 @@ export function EmployeeDocumentsDialog({
                       onClick={() => void handleGenerateSelected()}
                       disabled={
                         assigning ||
+                        readOnly ||
                         !createSelection.some(
                           (type) =>
                             !existingTypes.has(type) &&
@@ -937,6 +942,7 @@ export function EmployeeDocumentsDialog({
                           regeneratingId={regeneratingId}
                           resettingId={resettingId}
                           docToReset={docToReset}
+                          readOnly={readOnly}
                           onOpen={() => openDocument(doc)}
                           onOpenPdf={() => openPdf(doc)}
                           onToggleLock={() => void handleToggleLock(doc)}
@@ -1010,6 +1016,7 @@ export function EmployeeDocumentsDialog({
                     onClick={() => void handleSendEmail()}
                     disabled={
                       sending ||
+                      readOnly ||
                       !emailInput ||
                       !emailSelection.some((type) => {
                         const doc = documentsByType.get(type)

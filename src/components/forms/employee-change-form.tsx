@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { format } from "date-fns"
 import { cs } from "date-fns/locale"
@@ -19,6 +19,7 @@ import { useForm, useWatch } from "react-hook-form"
 import { z } from "zod"
 
 import { type Position } from "@/types/position"
+import { useIsReadonly } from "@/hooks/use-current-role"
 
 import { cn } from "@/lib/utils"
 
@@ -385,6 +386,7 @@ export function EmployeeChangeForm({
   initial,
   onSuccess,
 }: Props) {
+  const isReadonly = useIsReadonly()
   const isEdit = mode === "edit" && Boolean(id)
 
   const defaultValues = useMemo(
@@ -421,7 +423,17 @@ export function EmployeeChangeForm({
     message: "",
   })
 
+  // `defaultValues` mění referenci i tehdy, když volající předává `initial`
+  // jako nový objekt na každý render (aniž by se editovaný záznam skutečně
+  // změnil). Reset formuláře smí přepsat rozepsané hodnoty jen při skutečné
+  // změně editovaného záznamu/režimu, ne při každém re-renderu rodiče.
+  const resetKeyRef = useRef<string | null>(null)
+
   useEffect(() => {
+    const resetKey = `${id ?? "new"}:${mode}`
+    if (resetKeyRef.current === resetKey) return
+    resetKeyRef.current = resetKey
+
     form.reset(defaultValues)
     setManualEmployee(defaultValues.manualEmployee)
     setLinkModal({
@@ -435,7 +447,8 @@ export function EmployeeChangeForm({
       open: false,
       message: "",
     })
-  }, [defaultValues, form])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, mode, form])
 
   const sortedPositions = useMemo(
     () =>
@@ -949,15 +962,12 @@ export function EmployeeChangeForm({
                     <FormItem>
                       <FormLabel>Firemní e-mail</FormLabel>
                       <FormControl>
-                        <Input
-                          {...field}
-                          readOnly={!manualEmployee && !isEdit}
-                          className={cn(
-                            !manualEmployee && !isEdit ? "bg-muted" : "",
-                            focusRing
-                          )}
-                        />
+                        <Input {...field} className={focusRing} />
                       </FormControl>
+                      <FormDescription>
+                        Načteno z EOS, ale můžete si ho přepsat (např. pro
+                        testování).
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -1217,7 +1227,7 @@ export function EmployeeChangeForm({
 
           <Button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || isReadonly}
             className={cn(
               "inline-flex w-full items-center justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73]",
               focusRing

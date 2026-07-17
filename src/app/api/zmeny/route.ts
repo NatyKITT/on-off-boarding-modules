@@ -8,6 +8,7 @@ import {
 import { z, ZodError } from "zod"
 
 import { prisma } from "@/lib/db"
+import { canReadEmployeeChanges, canWriteEmployeeChanges } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
@@ -160,6 +161,13 @@ export async function GET() {
     )
   }
 
+  if (!canReadEmployeeChanges(session.user.role)) {
+    return NextResponse.json(
+      { status: "error", message: "Nemáte oprávnění číst seznam změn." },
+      { status: 403 }
+    )
+  }
+
   try {
     const records = await prisma.employeeChange.findMany({
       where: {
@@ -249,6 +257,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { status: "error", message: "Nejste přihlášeni." },
       { status: 401 }
+    )
+  }
+
+  if (!canWriteEmployeeChanges(session.user.role)) {
+    return NextResponse.json(
+      { status: "error", message: "Nemáte oprávnění vytvářet změny." },
+      { status: 403 }
     )
   }
 

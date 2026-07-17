@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
+import { Prisma } from "@prisma/client"
 import { z, ZodError } from "zod"
 
 import { prisma } from "@/lib/db"
@@ -9,6 +10,11 @@ import {
   normalizePersonalNumber,
   pickMostRelevantOnboarding,
 } from "@/lib/employment-linking"
+import {
+  getUserKey,
+  getUserLabel,
+  syncLinkedProbationAfterOffboardingDecision,
+} from "@/lib/probation-evaluation-request"
 import { canReadOffboarding, canWriteOffboarding } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
@@ -44,6 +50,9 @@ const base = z.object({
   noticeEnd: z.preprocess(emptyToUndefined, z.coerce.date()).optional(),
   noticeMonths: z.coerce.number().optional(),
   hasCustomDates: z.boolean().optional(),
+
+  probationStopDecision: z.enum(["STOP", "KEEP"]).optional(),
+  probationStopNote: z.union([z.string(), z.null()]).optional(),
 })
 
 const createPlannedSchema = base.extend({
@@ -161,6 +170,48 @@ async function getLinkedOnboardingForOffboarding(
     onboarding: pickMostRelevantOnboarding(matchingOnboardings),
     exitDate,
   })
+}
+
+async function findActiveProbationOnboarding(
+  personalNumber: string | null | undefined,
+  exitDate: Date | null | undefined
+) {
+  const normalizedPersonalNumber = normalizePersonalNumber(personalNumber)
+
+  if (!normalizedPersonalNumber || !exitDate) return null
+
+  const candidates = await prisma.employeeOnboarding.findMany({
+    where: {
+      personalNumber: {
+        not: null,
+      },
+      deletedAt: null,
+      status: {
+        not: "CANCELLED",
+      },
+    },
+    select: {
+      id: true,
+      personalNumber: true,
+      plannedStart: true,
+      actualStart: true,
+      probationEnd: true,
+      positionName: true,
+    },
+  })
+
+  const matching = candidates.filter(
+    (onboarding) =>
+      normalizePersonalNumber(onboarding.personalNumber) ===
+      normalizedPersonalNumber
+  )
+
+  const info = buildLinkedOnboardingInfo({
+    onboarding: pickMostRelevantOnboarding(matching),
+    exitDate,
+  })
+
+  return info?.exitDuringProbation ? info : null
 }
 
 async function getLinkedChangesForPersonalNumber(
@@ -297,6 +348,34 @@ export async function GET() {
   }
 }
 
+async function recordProbationDecisionSideEffects(
+  tx: Prisma.TransactionClient,
+  args: {
+    offboardingId: number
+    onboardingId: number
+    decision: "STOP" | "KEEP"
+    actorId: string
+    actorName: string
+  }
+) {
+  await tx.offboardingChangeLog.create({
+    data: {
+      employeeId: args.offboardingId,
+      userId: args.actorId,
+      action: "STATUS_CHANGED",
+      field: "probationStopDecision",
+      oldValue: null,
+      newValue: args.decision,
+    },
+  })
+
+  await syncLinkedProbationAfterOffboardingDecision(tx, {
+    onboardingId: args.onboardingId,
+    actorId: args.actorId,
+    actorName: args.actorName,
+  })
+}
+
 export async function POST(request: NextRequest) {
   const session = await auth()
 
@@ -325,31 +404,81 @@ export async function POST(request: NextRequest) {
       const data = createActualSchema.parse(raw)
       const planned = data.plannedEnd ?? data.actualEnd
 
-      const created = await prisma.employeeOffboarding.create({
-        data: {
-          name: data.name,
-          surname: data.surname,
-          titleBefore: data.titleBefore ?? null,
-          titleAfter: data.titleAfter ?? null,
+      const pendingProbation = await findActiveProbationOnboarding(
+        data.personalNumber,
+        data.actualEnd
+      )
 
-          plannedEnd: planned,
-          actualEnd: data.actualEnd,
-          noticeEnd: data.noticeEnd ?? null,
-          noticeMonths: data.noticeMonths ?? 2,
-          hasCustomDates: data.hasCustomDates ?? false,
+      if (pendingProbation && data.probationStopDecision === undefined) {
+        return NextResponse.json({
+          status: "confirm_required",
+          confirmKind: "probation_stop",
+          linkedOnboarding: pendingProbation,
+        })
+      }
 
-          positionNum: data.positionNum,
-          positionName: data.positionName ?? "",
-          department: data.department ?? "",
-          unitName: data.unitName ?? "",
+      const actorId = getUserKey({
+        id: (session.user as { id?: string }).id,
+        email: session.user.email,
+      })
+      const actorName = getUserLabel({
+        name: session.user.name,
+        email: session.user.email,
+      })
 
-          userEmail: data.userEmail ?? null,
-          userName: data.userName ?? null,
-          personalNumber: normalizePersonalNumber(data.personalNumber) || null,
+      const created = await prisma.$transaction(async (tx) => {
+        const record = await tx.employeeOffboarding.create({
+          data: {
+            name: data.name,
+            surname: data.surname,
+            titleBefore: data.titleBefore ?? null,
+            titleAfter: data.titleAfter ?? null,
 
-          notes: data.notes ?? null,
-          status: "COMPLETED",
-        },
+            plannedEnd: planned,
+            actualEnd: data.actualEnd,
+            noticeEnd: data.noticeEnd ?? null,
+            noticeMonths: data.noticeMonths ?? 2,
+            hasCustomDates: data.hasCustomDates ?? false,
+
+            positionNum: data.positionNum,
+            positionName: data.positionName ?? "",
+            department: data.department ?? "",
+            unitName: data.unitName ?? "",
+
+            userEmail: data.userEmail ?? null,
+            userName: data.userName ?? null,
+            personalNumber:
+              normalizePersonalNumber(data.personalNumber) || null,
+
+            notes: data.notes ?? null,
+            status: "COMPLETED",
+
+            probationStopDecision: pendingProbation
+              ? (data.probationStopDecision ?? null)
+              : null,
+            probationStopDecisionAt:
+              pendingProbation && data.probationStopDecision
+                ? new Date()
+                : null,
+            probationStopDecisionBy:
+              pendingProbation && data.probationStopDecision ? actorId : null,
+            probationStopNote: pendingProbation
+              ? (data.probationStopNote ?? null)
+              : null,
+          },
+        })
+
+        if (pendingProbation && data.probationStopDecision) {
+          await recordProbationDecisionSideEffects(tx, {
+            offboardingId: record.id,
+            onboardingId: pendingProbation.id,
+            decision: data.probationStopDecision,
+            actorId,
+            actorName,
+          })
+        }
+
+        return record
       })
 
       const linkedOnboarding = await getLinkedOnboardingForOffboarding(
@@ -373,31 +502,78 @@ export async function POST(request: NextRequest) {
 
     const data = createPlannedSchema.parse(raw)
 
-    const created = await prisma.employeeOffboarding.create({
-      data: {
-        name: data.name,
-        surname: data.surname,
-        titleBefore: data.titleBefore ?? null,
-        titleAfter: data.titleAfter ?? null,
+    const pendingProbation = await findActiveProbationOnboarding(
+      data.personalNumber,
+      data.plannedEnd
+    )
 
-        plannedEnd: data.plannedEnd,
-        actualEnd: data.actualEnd ?? null,
-        noticeEnd: data.noticeEnd ?? null,
-        noticeMonths: data.noticeMonths ?? 2,
-        hasCustomDates: data.hasCustomDates ?? false,
+    if (pendingProbation && data.probationStopDecision === undefined) {
+      return NextResponse.json({
+        status: "confirm_required",
+        confirmKind: "probation_stop",
+        linkedOnboarding: pendingProbation,
+      })
+    }
 
-        positionNum: data.positionNum,
-        positionName: data.positionName ?? "",
-        department: data.department ?? "",
-        unitName: data.unitName ?? "",
+    const actorId = getUserKey({
+      id: (session.user as { id?: string }).id,
+      email: session.user.email,
+    })
+    const actorName = getUserLabel({
+      name: session.user.name,
+      email: session.user.email,
+    })
 
-        userEmail: data.userEmail ?? null,
-        userName: data.userName ?? null,
-        personalNumber: data.personalNumber ?? null,
+    const created = await prisma.$transaction(async (tx) => {
+      const record = await tx.employeeOffboarding.create({
+        data: {
+          name: data.name,
+          surname: data.surname,
+          titleBefore: data.titleBefore ?? null,
+          titleAfter: data.titleAfter ?? null,
 
-        notes: data.notes ?? null,
-        status: "NEW",
-      },
+          plannedEnd: data.plannedEnd,
+          actualEnd: data.actualEnd ?? null,
+          noticeEnd: data.noticeEnd ?? null,
+          noticeMonths: data.noticeMonths ?? 2,
+          hasCustomDates: data.hasCustomDates ?? false,
+
+          positionNum: data.positionNum,
+          positionName: data.positionName ?? "",
+          department: data.department ?? "",
+          unitName: data.unitName ?? "",
+
+          userEmail: data.userEmail ?? null,
+          userName: data.userName ?? null,
+          personalNumber: data.personalNumber ?? null,
+
+          notes: data.notes ?? null,
+          status: "NEW",
+
+          probationStopDecision: pendingProbation
+            ? (data.probationStopDecision ?? null)
+            : null,
+          probationStopDecisionAt:
+            pendingProbation && data.probationStopDecision ? new Date() : null,
+          probationStopDecisionBy:
+            pendingProbation && data.probationStopDecision ? actorId : null,
+          probationStopNote: pendingProbation
+            ? (data.probationStopNote ?? null)
+            : null,
+        },
+      })
+
+      if (pendingProbation && data.probationStopDecision) {
+        await recordProbationDecisionSideEffects(tx, {
+          offboardingId: record.id,
+          onboardingId: pendingProbation.id,
+          decision: data.probationStopDecision,
+          actorId,
+          actorName,
+        })
+      }
+
+      return record
     })
 
     const linkedOnboarding = await getLinkedOnboardingForOffboarding(

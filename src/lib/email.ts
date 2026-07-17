@@ -29,6 +29,14 @@ if (!DEFAULT_FROM) {
   )
 }
 
+const EMAIL_FONT_FAMILY = "'Civil Premium', 'Segoe UI', Arial, sans-serif"
+
+const EMAIL_GLOBAL_FONT_STYLE = `
+        body, table, td, th, div, p, a, span {
+          font-family: ${EMAIL_FONT_FAMILY};
+        }
+      `
+
 export type EmailRecord = {
   id: number
   type: "onboarding" | "offboarding"
@@ -102,6 +110,20 @@ function escapeHtml(value: string | number | null | undefined): string {
     .replace(/'/g, "&#39;")
 }
 
+// Notes/Outlook mají nespolehlivé chování margin na <table>. Místo margin
+// se mezera vkládá jako padding na buňce obalové tabulky.
+function wrapWithBottomSpacing(innerHtml: string, px: number): string {
+  return `
+    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="width:100%;border-collapse:collapse;">
+      <tr>
+        <td style="padding:0 0 ${px}px 0;">
+          ${innerHtml}
+        </td>
+      </tr>
+    </table>
+  `
+}
+
 function renderExitChecklistInfoTable(args: {
   primary: string
   bgLight: string
@@ -136,16 +158,17 @@ function renderExitChecklistInfoTable(args: {
     },
   ]
 
-  return `
+  return wrapWithBottomSpacing(
+    `
     <table border="0" cellpadding="0" cellspacing="0" width="100%"
-      style="margin-bottom:24px;border:1px solid #d9ece7;border-radius:8px;overflow:hidden;border-collapse:separate;">
+      style="border:1px solid #d9ece7;border-radius:8px;overflow:hidden;border-collapse:separate;">
       ${rows
         .map((row, index) => {
           const isHighlighted = index === 0 || row.strong
           const bg = index % 2 === 0 ? args.bgLight : "#ffffff"
 
           return `
-            <tr style="background-color:${bg};">
+            <tr bgcolor="${bg}" style="background-color:${bg};">
               <td style="padding:10px 16px;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:1px;width:160px;">
                 ${escapeHtml(row.label)}
               </td>
@@ -159,7 +182,9 @@ function renderExitChecklistInfoTable(args: {
         })
         .join("")}
     </table>
-  `
+  `,
+    24
+  )
 }
 
 function plannedScopeLabel(hasOnboarding: boolean, hasOffboarding: boolean) {
@@ -267,15 +292,16 @@ export async function renderMonthlyReportHtml(args: {
   ): string => {
     if (!rows.length) return ""
 
-    return `
+    return wrapWithBottomSpacing(
+      `
       <table border="0" cellpadding="0" cellspacing="0" width="100%"
-        style="width:100%; border-collapse: collapse; font-family: 'Civil Premium', 'Segoe UI', Arial, sans-serif; font-size: 13px; margin-bottom: 22px;">
+        style="width:100%; border-collapse: collapse; font-family: ${EMAIL_FONT_FAMILY}; font-size: 13px;">
         <thead>
           <tr bgcolor="${primary}" style="background-color: ${primary}; color: #ffffff;">
-            <th class="thcell" align="left" style="padding: 10px; width: 220px; font-weight: 600; text-transform: uppercase; font-size: 11px;">Zaměstnanec</th>
-            <th class="thcell" align="left" style="padding: 10px; font-weight: 600; text-transform: uppercase; font-size: 11px;">Pozice</th>
-            <th class="thcell" align="left" style="padding: 10px; font-weight: 600; text-transform: uppercase; font-size: 11px;">Odbor</th>
-            <th class="thcell" align="left" style="padding: 10px; width: 120px; font-weight: 600; text-transform: uppercase; font-size: 11px; white-space: nowrap;">${dateHeader}</th>
+            <th align="left" style="padding: 10px; width: 220px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff; word-break: normal; overflow-wrap: normal; white-space: normal;">Zaměstnanec</th>
+            <th align="left" style="padding: 10px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff; word-break: normal; overflow-wrap: normal; white-space: normal;">Pozice</th>
+            <th align="left" style="padding: 10px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff; word-break: normal; overflow-wrap: normal; white-space: normal;">Odbor</th>
+            <th align="left" style="padding: 10px; width: 120px; font-weight: 600; text-transform: uppercase; font-size: 11px; white-space: nowrap; color: #ffffff;">${dateHeader}</th>
           </tr>
         </thead>
         <tbody>
@@ -286,19 +312,19 @@ export async function renderMonthlyReportHtml(args: {
               i % 2 === 0 ? "#ffffff" : "#f9fafb"
             };">
 
-              <td class="cell row-text name-primary" style="padding: 10px; border-bottom: 1px solid #e5e7eb;">
+              <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; color: #111827; font-weight: 600;">
                 ${formatName(r)}
               </td>
 
-              <td class="cell row-text" style="padding: 10px; border-bottom: 1px solid #e5e7eb;">
+              <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; color: #111827;">
                 ${r.position ?? "—"}
               </td>
 
-              <td class="cell row-text" style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: 500;">
+              <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: 500; color: #111827;">
                 ${r.department ?? "—"}
               </td>
 
-              <td class="cell row-text" style="padding: 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; font-variant-numeric: tabular-nums;">
+              <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; font-variant-numeric: tabular-nums; color: #111827;">
                 ${fmtDate(r.date)}
               </td>
             </tr>
@@ -307,7 +333,9 @@ export async function renderMonthlyReportHtml(args: {
             .join("")}
         </tbody>
       </table>
-    `
+    `,
+      22
+    )
   }
 
   const renderTablePlanned = (
@@ -316,39 +344,40 @@ export async function renderMonthlyReportHtml(args: {
   ): string => {
     if (!rows.length) return ""
 
-    return `
+    return wrapWithBottomSpacing(
+      `
     <table border="0" cellpadding="0" cellspacing="0" width="100%"
-      style="width:100%; border-collapse: collapse; font-family: 'Civil Premium', 'Segoe UI', Arial, sans-serif; font-size: 13px; margin-bottom: 22px;">
+      style="width:100%; border-collapse: collapse; font-family: ${EMAIL_FONT_FAMILY}; font-size: 13px;">
       <thead>
         <tr bgcolor="${primary}" style="background-color: ${primary}; color: #ffffff;">
 
-          <th class="thcell" align="left"
-              style="padding: 10px; width: 220px; font-weight: 600; text-transform: uppercase; font-size: 11px;">
+          <th align="left"
+              style="padding: 10px; width: 220px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff;">
             Zaměstnanec
           </th>
 
-          <th class="thcell" align="left"
-              style="padding: 10px; width: 95px; font-weight: 600; text-transform: uppercase; font-size: 11px;">
+          <th align="left"
+              style="padding: 10px; width: 95px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff;">
             Osobní číslo
           </th>
 
-          <th class="thcell" align="left"
-              style="padding: 10px; width: 200px; font-weight: 600; text-transform: uppercase; font-size: 11px;">
+          <th align="left"
+              style="padding: 10px; width: 200px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff;">
             Pozice
           </th>
 
-          <th class="thcell" align="left"
-              style="padding: 10px; width: 190px; font-weight: 600; text-transform: uppercase; font-size: 11px;">
+          <th align="left"
+              style="padding: 10px; width: 190px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff;">
             Odbor
           </th>
 
-          <th class="thcell" align="left"
-              style="padding: 10px; width: 105px; font-weight: 600; text-transform: uppercase; font-size: 11px;">
+          <th align="left"
+              style="padding: 10px; width: 105px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff;">
             Číslo funkce
           </th>
 
-          <th class="thcell" align="left"
-              style="padding: 10px; width: 120px; font-weight: 600; text-transform: uppercase; font-size: 11px;">
+          <th align="left"
+              style="padding: 10px; width: 120px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff;">
             ${dateHeader}
           </th>
         </tr>
@@ -360,33 +389,27 @@ export async function renderMonthlyReportHtml(args: {
           <tr bgcolor="${i % 2 === 0 ? "#ffffff" : "#f9fafb"}"
               style="background-color: ${i % 2 === 0 ? "#ffffff" : "#f9fafb"};">
 
-            <td class="cell row-text name-primary"
-                style="padding: 10px; border-bottom: 1px solid #e5e7eb;">
+            <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; color: #111827; font-weight: 600;">
               ${formatName(r)}
             </td>
 
-            <td class="cell row-text"
-                style="padding: 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap;">
+            <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; color: #111827;">
               ${r.personalNumber ?? "—"}
             </td>
 
-            <td class="cell row-text"
-                style="padding: 10px; border-bottom: 1px solid #e5e7eb;">
+            <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; color: #111827;">
               ${r.position ?? "—"}
             </td>
 
-            <td class="cell row-text"
-                style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: 500;">
+            <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: 500; color: #111827;">
               ${r.department ?? "—"}
             </td>
 
-            <td class="cell row-text"
-                style="padding: 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap;">
+            <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; color: #111827;">
               ${r.positionNum ?? "—"}
             </td>
 
-            <td class="cell row-text"
-                style="padding: 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; font-variant-numeric: tabular-nums;">
+            <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; font-variant-numeric: tabular-nums; color: #111827;">
               ${fmtDate(r.date)}
             </td>
           </tr>
@@ -395,7 +418,9 @@ export async function renderMonthlyReportHtml(args: {
           .join("")}
       </tbody>
     </table>
-  `
+  `,
+      22
+    )
   }
 
   const renderTable =
@@ -428,26 +453,13 @@ export async function renderMonthlyReportHtml(args: {
       <style type="text/css">
         body { margin: 0; padding: 0; }
         table { border-collapse: collapse; }
-
-        .intro-text {
-          font-family: 'Civil Premium', 'Segoe UI', Arial, sans-serif;
-          font-size: 14px;
-          line-height: 1.6;
-          color: #082B2A;
-        }
+        ${EMAIL_GLOBAL_FONT_STYLE}
 
         .card-border { border: 1px solid #d9ece7; }
         .intro-row { border-bottom: 1px solid #d9ece7; }
         .footer-row { border-top: 1px solid #d9ece7; }
 
-        .row-text { color: #111827; }
-        .name-primary { font-weight: 600; }
-
         .content-pad { padding: 26px 22px !important; }
-
-        .thcell { word-break: normal; overflow-wrap: normal; white-space: normal; }
-        .cell { word-break: normal; overflow-wrap: normal; }
-
 
         @media only screen and (min-width: 600px) {
           .card-shadow {
@@ -460,26 +472,11 @@ export async function renderMonthlyReportHtml(args: {
 
         @media only screen and (max-width: 600px) {
           .content-pad { padding: 18px 14px !important; }
-
-          .thcell { padding: 8px !important; font-size: 10px !important; }
-          .cell { padding: 8px !important; font-size: 12px !important; }
-        }
-
-        @media (prefers-color-scheme: dark) {
-          body { background-color: #111827 !important; }
-          .outer-bg { background-color: #111827 !important; }
-
-          .intro-text { color: #F9FAFB !important; }
-          .card-border { border-color: #4b5563 !important; }
-          .intro-row { border-bottom-color: #4b5563 !important; }
-          .footer-row { border-top-color: #4b5563 !important; }
-
-          .row-text { color: #F9FAFB !important; }
         }
       </style>
     </head>
-    <body style="margin: 0; padding: 0; background-color: ${bgLight}; width: 100% !important;">
-      <table class="outer-bg" border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
+    <body style="margin: 0; padding: 0; background-color: ${bgLight}; width: 100% !important; font-family: ${EMAIL_FONT_FAMILY};">
+      <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
         <tr>
           <td align="center" style="padding: 30px 10px;">
             <table
@@ -488,6 +485,7 @@ export async function renderMonthlyReportHtml(args: {
               cellpadding="0"
               cellspacing="0"
               width="860"
+              bgcolor="#ffffff"
               style="
                 max-width: 820px;
                 background-color: #ffffff;
@@ -510,7 +508,7 @@ export async function renderMonthlyReportHtml(args: {
                 >
                   <table border="0" cellpadding="0" cellspacing="0" width="100%">
                     <tr>
-                      <td style="color: #ffffff; font-family: 'Civil Premium', 'Segoe UI', Arial, sans-serif;">
+                      <td style="color: #ffffff; font-family: ${EMAIL_FONT_FAMILY};">
                         <div style="font-size: 13px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 8px; opacity: 0.9;">Personální změny</div>
                         <div style="font-size: 24px; font-weight: bold; line-height: 1.2;">${subtitle} – ${monthLabel}</div>
                       </td>
@@ -523,7 +521,7 @@ export async function renderMonthlyReportHtml(args: {
                 showIntro
                   ? `
                 <tr>
-                  <td class="intro-row intro-text" bgcolor="${bgLight}" style="padding: 15px 30px; border-bottom: 1px solid #d9ece7;">
+                  <td class="intro-row" bgcolor="${bgLight}" style="padding: 15px 30px; border-bottom: 1px solid #d9ece7; font-family: ${EMAIL_FONT_FAMILY}; font-size: 14px; line-height: 1.6; color: #082B2A;">
                     Vážené kolegyně, vážení kolegové, přinášíme vám aktuální informace o vzniku a ukončení pracovních poměrů v měsíci <strong>${monthLabel}</strong>.
                   </td>
                 </tr>
@@ -532,7 +530,7 @@ export async function renderMonthlyReportHtml(args: {
               }
 
               <tr>
-                <td class="content-pad" style="padding: 26px 22px; background-color: #ffffff; font-family: 'Civil Premium', 'Segoe UI', Arial, sans-serif;">
+                <td class="content-pad" bgcolor="#ffffff" style="padding: 26px 22px; background-color: #ffffff; font-family: ${EMAIL_FONT_FAMILY};">
                   ${
                     onboardings.length
                       ? `
@@ -571,7 +569,7 @@ export async function renderMonthlyReportHtml(args: {
                   bgcolor="${bgLight}"
                   style="
                     padding: 18px 26px;
-                    font-family: 'Civil Premium', 'Segoe UI', Arial, sans-serif;
+                    font-family: ${EMAIL_FONT_FAMILY};
                     font-size: 12px;
                     color: #4b5563;
                     line-height: 1.5;
@@ -665,6 +663,117 @@ function formatEmployeeChangeNewName(record: EmployeeChangeEmailRecord) {
     .trim()
 }
 
+function employeeChangeTypeLabel(type: EmployeeChangeEmailRecord["type"]) {
+  if (type === "NAME") return "Změna jména"
+  if (type === "POSITION") return "Změna pozice"
+  return "Změna jména i pozice"
+}
+
+function buildEmployeeChangePositionSummary(
+  record: EmployeeChangeEmailRecord,
+  useNew: boolean
+): string {
+  const positionName = useNew
+    ? (record.newPositionName ?? record.oldPositionName)
+    : record.oldPositionName
+  const positionNum = useNew
+    ? (record.newPositionNum ?? record.oldPositionNum)
+    : record.oldPositionNum
+  const department = useNew
+    ? (record.newDepartment ?? record.oldDepartment)
+    : record.oldDepartment
+  const unitName = useNew
+    ? (record.newUnitName ?? record.oldUnitName)
+    : record.oldUnitName
+
+  return (
+    [
+      positionName || null,
+      positionNum ? `č. ${positionNum}` : null,
+      department || null,
+      unitName || null,
+    ]
+      .filter(Boolean)
+      .join(" · ") || "—"
+  )
+}
+
+type EmployeeChangeGroup = { label: string; oldValue: string; newValue: string }
+
+function buildEmployeeChangeGroups(
+  record: EmployeeChangeEmailRecord
+): EmployeeChangeGroup[] {
+  const groups: EmployeeChangeGroup[] = []
+
+  if (isEmployeeNameChange(record.type)) {
+    const oldFull = formatEmployeeChangeName(record)
+    const newFull = formatEmployeeChangeNewName(record)
+
+    if (oldFull !== newFull) {
+      groups.push({ label: "Jméno", oldValue: oldFull || "—", newValue: newFull || "—" })
+    }
+  }
+
+  if (isEmployeePositionChange(record.type)) {
+    const oldSummary = buildEmployeeChangePositionSummary(record, false)
+    const newSummary = buildEmployeeChangePositionSummary(record, true)
+
+    if (oldSummary !== newSummary) {
+      groups.push({ label: "Pozice", oldValue: oldSummary, newValue: newSummary })
+    }
+  }
+
+  return groups
+}
+
+function renderChangeValueBubble(
+  label: string,
+  value: string,
+  variant: "old" | "new"
+) {
+  const bg = variant === "old" ? "#f3f4f6" : "#E5F5F2"
+  const color = variant === "old" ? "#6b7280" : "#00847C"
+  const fontWeight = variant === "old" ? 400 : 700
+
+  return `
+    <div style="margin-bottom:6px;font-family:${EMAIL_FONT_FAMILY};">
+      <div style="margin-bottom:2px;font-size:10px;font-weight:600;color:${variant === "old" ? "#9ca3af" : "#00847C"};">
+        ${escapeHtml(label)}
+      </div>
+      <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%"
+        style="border-collapse:separate;font-family:${EMAIL_FONT_FAMILY};">
+        <tr>
+          <td bgcolor="${bg}" style="padding:5px 10px;background-color:${bg};border-radius:8px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;font-weight:${fontWeight};color:${color};word-break:break-word;">
+            ${escapeHtml(value)}
+          </td>
+        </tr>
+      </table>
+    </div>
+  `
+}
+
+function renderEmployeeChangeBubbles(record: EmployeeChangeEmailRecord): string {
+  const groups = buildEmployeeChangeGroups(record)
+
+  if (!groups.length) {
+    return `<div style="font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;">Bez detailu změny</div>`
+  }
+
+  return groups
+    .map(
+      (group) => `
+        <div style="margin-bottom:10px;font-family:${EMAIL_FONT_FAMILY};">
+          <div style="margin-bottom:4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#6b7280;">
+            ${escapeHtml(group.label)}
+          </div>
+          ${renderChangeValueBubble("Původní hodnota", group.oldValue, "old")}
+          ${renderChangeValueBubble("Nová hodnota", group.newValue, "new")}
+        </div>
+      `
+    )
+    .join("")
+}
+
 function uniqueEffectiveDates(records: EmployeeChangeEmailRecord[]) {
   const values = records
     .map((record) => fmtDate(record.effectiveDate))
@@ -683,185 +792,68 @@ export function buildEmployeeChangeReportSubject(args: {
   return `Podklady pro personální změny – ${monthLabel}`
 }
 
-function renderChangePositionTableForSelectedGroup(
-  records: EmployeeChangeEmailRecord[]
+function renderEmployeeChangeTable(
+  records: EmployeeChangeEmailRecord[],
+  args: { showPersonalNumberColumn: boolean }
 ) {
-  const rows = records.filter((record) => isEmployeePositionChange(record.type))
+  if (!records.length) return ""
 
-  if (!rows.length) return ""
+  const { showPersonalNumberColumn } = args
 
-  return `
-    <p style="margin:26px 0 8px 0;font-size:15px;font-weight:700;color:#111827;">
-      Změna pozice / odboru
-    </p>
-
+  return wrapWithBottomSpacing(
+    `
     <table border="0" cellpadding="0" cellspacing="0" width="100%"
-      style="width:100%;border-collapse:collapse;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;font-size:13px;margin-bottom:24px;">
+      style="width:100%;border-collapse:collapse;font-family:${EMAIL_FONT_FAMILY};font-size:13px;">
       <thead>
-        <tr style="background-color:#00847C;color:#ffffff;">
-          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Zaměstnanec</th>
-          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Účinnost</th>
-          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Původní odbor</th>
-          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Nový odbor</th>
-          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Osobní číslo</th>
-          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Původní pozice</th>
-          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Nová pozice</th>
-          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Původní č. funkce</th>
-          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Nové č. funkce</th>
+        <tr bgcolor="#00847C" style="background-color:#00847C;color:#ffffff;">
+          <th align="left" style="padding:10px;font-size:11px;text-transform:uppercase;color:#ffffff;">Zaměstnanec</th>
+          <th align="left" style="padding:10px;font-size:11px;text-transform:uppercase;color:#ffffff;">Typ změny</th>
+          ${
+            showPersonalNumberColumn
+              ? `<th align="left" style="padding:10px;font-size:11px;text-transform:uppercase;color:#ffffff;">Osobní číslo</th>`
+              : ""
+          }
+          <th align="left" style="padding:10px;font-size:11px;text-transform:uppercase;color:#ffffff;">Změna</th>
+          <th align="left" style="padding:10px;width:110px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:nowrap;">Účinnost</th>
         </tr>
       </thead>
 
       <tbody>
-        ${rows
+        ${records
           .map(
             (record, index) => `
-              <tr style="background-color:${index % 2 === 0 ? "#ffffff" : "#f9fafb"};">
-                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;font-weight:600;">
+              <tr bgcolor="${index % 2 === 0 ? "#ffffff" : "#f9fafb"}" style="background-color:${index % 2 === 0 ? "#ffffff" : "#f9fafb"};">
+                <td style="padding:10px;border-bottom:1px solid #e5e7eb;vertical-align:top;font-weight:600;color:#111827;">
                   ${escapeHtml(formatEmployeeChangeName(record))}
+                  ${
+                    !showPersonalNumberColumn && record.personalNumber
+                      ? `<div style="margin-top:2px;font-size:11px;font-weight:400;color:#6b7280;">#${escapeHtml(record.personalNumber)}</div>`
+                      : ""
+                  }
                 </td>
-                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;white-space:nowrap;">
+                <td style="padding:10px;border-bottom:1px solid #e5e7eb;vertical-align:top;white-space:nowrap;color:#111827;">
+                  ${escapeHtml(employeeChangeTypeLabel(record.type))}
+                </td>
+                ${
+                  showPersonalNumberColumn
+                    ? `<td style="padding:10px;border-bottom:1px solid #e5e7eb;vertical-align:top;white-space:nowrap;color:#111827;">${escapeHtml(record.personalNumber || "—")}</td>`
+                    : ""
+                }
+                <td style="padding:10px;border-bottom:1px solid #e5e7eb;vertical-align:top;">
+                  ${renderEmployeeChangeBubbles(record)}
+                </td>
+                <td style="padding:10px;border-bottom:1px solid #e5e7eb;vertical-align:top;white-space:nowrap;color:#111827;">
                   ${escapeHtml(fmtDate(record.effectiveDate))}
                 </td>
-                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;">
-                  ${escapeHtml(record.oldDepartment || "—")}
-                </td>
-                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;">
-                  ${escapeHtml(record.newDepartment || "—")}
-                </td>
-                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;white-space:nowrap;">
-                  ${escapeHtml(record.personalNumber || "—")}
-                </td>
-                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;">
-                  ${escapeHtml(record.oldPositionName || "—")}
-                </td>
-                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;">
-                  ${escapeHtml(record.newPositionName || "—")}
-                </td>
-                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;white-space:nowrap;">
-                  ${escapeHtml(record.oldPositionNum || "—")}
-                </td>
-                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;white-space:nowrap;">
-                  ${escapeHtml(record.newPositionNum || "—")}
-                </td>
               </tr>
             `
           )
           .join("")}
       </tbody>
     </table>
-  `
-}
-
-function renderChangePositionTableForAllEmployees(
-  records: EmployeeChangeEmailRecord[]
-) {
-  const rows = records.filter((record) => isEmployeePositionChange(record.type))
-
-  if (!rows.length) return ""
-
-  return `
-    <p style="margin:26px 0 8px 0;font-size:15px;font-weight:700;color:#111827;">
-      Změna pozice / odboru
-    </p>
-
-    <table border="0" cellpadding="0" cellspacing="0" width="100%"
-      style="width:100%;border-collapse:collapse;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;font-size:14px;margin-bottom:24px;">
-      <thead>
-        <tr style="background-color:#08cdb5;color:#000000;">
-          <th align="left" style="padding:9px 8px;font-weight:700;">Zaměstnanec</th>
-          <th align="left" style="padding:9px 8px;font-weight:700;">Odbor</th>
-          <th align="left" style="padding:9px 8px;font-weight:700;">Původní pozice</th>
-          <th align="left" style="padding:9px 8px;font-weight:700;">Nová pozice</th>
-        </tr>
-      </thead>
-
-      <tbody>
-        ${rows
-          .map(
-            (record) => `
-              <tr>
-                <td style="padding:9px 8px;border:1px solid #111827;font-weight:600;">
-                  ${escapeHtml(formatEmployeeChangeName(record))}
-                </td>
-                <td style="padding:9px 8px;border:1px solid #111827;font-weight:600;">
-                  ${escapeHtml(record.newDepartment || record.oldDepartment || "—")}
-                </td>
-                <td style="padding:9px 8px;border:1px solid #111827;font-weight:600;">
-                  ${escapeHtml(record.oldPositionName || "—")}
-                </td>
-                <td style="padding:9px 8px;border:1px solid #111827;font-weight:600;">
-                  ${escapeHtml(record.newPositionName || "—")}
-                </td>
-              </tr>
-            `
-          )
-          .join("")}
-      </tbody>
-    </table>
-  `
-}
-
-function renderChangeNameTable(records: EmployeeChangeEmailRecord[]) {
-  const rows = records.filter((record) => isEmployeeNameChange(record.type))
-
-  if (!rows.length) return ""
-
-  return `
-    <p style="margin:26px 0 8px 0;font-size:15px;font-weight:700;color:#111827;">
-      Změna jména / příjmení / titulu
-    </p>
-
-    <table border="0" cellpadding="0" cellspacing="0" width="100%"
-      style="width:100%;border-collapse:collapse;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;font-size:13px;margin-bottom:24px;">
-      <thead>
-        <tr style="background-color:#00847C;color:#ffffff;">
-          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Zaměstnanec</th>
-          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Účinnost</th>
-          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Nové příjmení</th>
-          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Nové celé jméno</th>
-          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Odbor</th>
-          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Osobní číslo</th>
-          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Pozice</th>
-          <th align="left" style="padding:9px 8px;font-size:11px;text-transform:uppercase;">Číslo funkce</th>
-        </tr>
-      </thead>
-
-      <tbody>
-        ${rows
-          .map(
-            (record, index) => `
-              <tr style="background-color:${index % 2 === 0 ? "#ffffff" : "#f9fafb"};">
-                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;font-weight:600;">
-                  ${escapeHtml(formatEmployeeChangeName(record))}
-                </td>
-                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;white-space:nowrap;">
-                  ${escapeHtml(fmtDate(record.effectiveDate))}
-                </td>
-                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;">
-                  ${escapeHtml(record.newSurname || record.surname || "—")}
-                </td>
-                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;">
-                  ${escapeHtml(formatEmployeeChangeNewName(record) || "—")}
-                </td>
-                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;">
-                  ${escapeHtml(record.newDepartment || record.oldDepartment || "—")}
-                </td>
-                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;white-space:nowrap;">
-                  ${escapeHtml(record.personalNumber || "—")}
-                </td>
-                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;">
-                  ${escapeHtml(record.newPositionName || record.oldPositionName || "—")}
-                </td>
-                <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;white-space:nowrap;">
-                  ${escapeHtml(record.newPositionNum || record.oldPositionNum || "—")}
-                </td>
-              </tr>
-            `
-          )
-          .join("")}
-      </tbody>
-    </table>
-  `
+  `,
+    24
+  )
 }
 
 export async function renderEmployeeChangeReportHtml(args: {
@@ -875,17 +867,14 @@ export async function renderEmployeeChangeReportHtml(args: {
   const primary = "#00847C"
   const bgLight = "#E5F5F2"
 
-  const positionTable =
-    audience === "ONBOARDING_GROUP"
-      ? renderChangePositionTableForSelectedGroup(records)
-      : renderChangePositionTableForAllEmployees(records)
-
-  const nameTable = renderChangeNameTable(records)
+  const tablesHtml = renderEmployeeChangeTable(records, {
+    showPersonalNumberColumn: audience === "ONBOARDING_GROUP",
+  })
 
   const effectiveText =
     dates.length === 1
-      ? `s účinností od ${dates[0]}:`
-      : "s účinností dle data uvedeného u jednotlivých záznamů:"
+      ? `s účinností od ${dates[0]}`
+      : "s účinností dle data uvedeného u jednotlivých záznamů"
 
   return `
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
@@ -894,57 +883,53 @@ export async function renderEmployeeChangeReportHtml(args: {
       <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
       <title>${escapeHtml(buildEmployeeChangeReportSubject({ month, audience }))}</title>
+      <style type="text/css">
+        body { margin: 0; padding: 0; }
+        table { border-collapse: collapse; }
+        ${EMAIL_GLOBAL_FONT_STYLE}
+      </style>
     </head>
 
-    <body style="margin:0;padding:0;background-color:${bgLight};width:100% !important;">
+    <body style="margin:0;padding:0;background-color:${bgLight};width:100% !important;font-family:${EMAIL_FONT_FAMILY};">
       <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
         <tr>
           <td align="center" style="padding:30px 10px;">
             <table border="0" cellpadding="0" cellspacing="0" width="860"
-              style="max-width:860px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;border-collapse:separate;">
-              
+              bgcolor="#ffffff" style="max-width:860px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;border-collapse:separate;">
+
               <tr>
                 <td bgcolor="${primary}" style="padding:24px 30px;background-color:${primary};">
-                  <div style="font-family:'Civil Premium','Segoe UI',Arial,sans-serif;color:#ffffff;font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;">
+                  <div style="font-family:${EMAIL_FONT_FAMILY};color:#ffffff;font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;">
                     Personální změny
                   </div>
-                  <div style="font-family:'Civil Premium','Segoe UI',Arial,sans-serif;color:#ffffff;font-size:23px;font-weight:700;line-height:1.25;">
+                  <div style="font-family:${EMAIL_FONT_FAMILY};color:#ffffff;font-size:23px;font-weight:700;line-height:1.25;">
                     ${escapeHtml(buildEmployeeChangeReportSubject({ month, audience }))}
                   </div>
                 </td>
               </tr>
 
               <tr>
-                <td style="padding:28px 30px;background-color:#ffffff;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;color:#111827;">
+                <td bgcolor="#ffffff" style="padding:28px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};color:#111827;">
                   <p style="margin:0 0 26px 0;font-size:15px;line-height:1.6;">
                     Vážené kolegyně, vážení kolegové,
                   </p>
 
                   <p style="margin:0 0 18px 0;font-size:15px;line-height:1.6;">
-                    tímto vás informuji o následujících změnách:
+                    tímto vás informuji o následujících změnách ${escapeHtml(effectiveText)}:
                   </p>
 
-                  <p style="margin:0 0 18px 0;font-size:15px;line-height:1.6;font-weight:700;">
-                    ${escapeHtml(effectiveText)}
-                  </p>
-
-                  ${positionTable}
-                  ${nameTable}
+                  ${tablesHtml}
 
                   ${
-                    !positionTable && !nameTable
+                    !tablesHtml
                       ? `<p style="margin:24px 0;font-size:14px;color:#6b7280;">Pro vybrané období nejsou evidované žádné změny.</p>`
                       : ""
                   }
-
-                  <p style="margin:36px 0 0 0;font-size:15px;line-height:1.6;">
-                    S pozdravem
-                  </p>
                 </td>
               </tr>
 
               <tr>
-                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;font-size:12px;color:#4b5563;border-top:1px solid #d9ece7;">
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#4b5563;border-top:1px solid #d9ece7;">
                   Tento e-mail byl automaticky vygenerován systémem
                   <strong>On-Off-Boarding Modul ÚMČ Praha&nbsp;6</strong>.<br/>
                   Prosíme, neodpovídejte na tuto zprávu. V případě dotazů kontaktujte personální oddělení.
@@ -994,8 +979,9 @@ export async function sendSignatureInviteEmail({
       <style type="text/css">
         body { margin: 0; padding: 0; }
         table { border-collapse: collapse; }
+        ${EMAIL_GLOBAL_FONT_STYLE}
         .intro-text {
-          font-family: 'Civil Premium', 'Segoe UI', Arial, sans-serif;
+          font-family: ${EMAIL_FONT_FAMILY};
           font-size: 14px;
           line-height: 1.6;
           color: #082B2A;
@@ -1015,7 +1001,7 @@ export async function sendSignatureInviteEmail({
       </style>
     </head>
 
-    <body style="margin:0;padding:0;background-color:${bgLight};width:100% !important;">
+    <body style="margin:0;padding:0;background-color:${bgLight};width:100% !important;font-family:${EMAIL_FONT_FAMILY};">
       <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
         <tr>
           <td align="center" style="padding:30px 10px;">
@@ -1025,7 +1011,7 @@ export async function sendSignatureInviteEmail({
               cellpadding="0"
               cellspacing="0"
               width="600"
-              style="max-width:600px;background-color:#ffffff;border-collapse:separate;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;"
+              bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border-collapse:separate;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;"
             >
               <tr>
                 <td
@@ -1035,7 +1021,7 @@ export async function sendSignatureInviteEmail({
                 >
                   <table border="0" cellpadding="0" cellspacing="0" width="100%">
                     <tr>
-                      <td style="color:#ffffff;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;">
+                      <td style="color:#ffffff;font-family:${EMAIL_FONT_FAMILY};">
                         <div style="font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:0.9;">
                           Výstupní list
                         </div>
@@ -1051,7 +1037,8 @@ export async function sendSignatureInviteEmail({
               <tr>
                 <td
                   class="content-pad"
-                  style="padding:26px 30px;background-color:#ffffff;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;"
+                  bgcolor="#ffffff"
+                  style="padding:26px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};"
                 >
                   <p class="intro-text" style="margin:0 0 16px 0;color:#082B2A;">
                     ${greeting}
@@ -1080,20 +1067,25 @@ export async function sendSignatureInviteEmail({
                     kde můžete doplnit potvrzení a elektronický podpis.
                   </p>
 
-                  <table border="0" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+                  ${wrapWithBottomSpacing(
+                    `
+                  <table border="0" cellpadding="0" cellspacing="0">
                     <tr>
                       <td bgcolor="${primary}" style="border-radius:6px;background-color:${primary};">
                         <a
                           href="${escapeHtml(signUrl)}"
-                          style="display:inline-block;padding:12px 28px;color:#ffffff;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;font-size:15px;font-weight:bold;text-decoration:none;border-radius:6px;"
+                          style="display:inline-block;padding:12px 28px;color:#ffffff;font-family:${EMAIL_FONT_FAMILY};font-size:15px;font-weight:bold;text-decoration:none;border-radius:6px;"
                         >
                           Otevřít výstupní list
                         </a>
                       </td>
                     </tr>
                   </table>
+                  `,
+                    24
+                  )}
 
-                  <p style="margin:0 0 4px 0;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;font-size:12px;color:#6b7280;">
+                  <p style="margin:0 0 4px 0;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;">
                     Pokud tlačítko nefunguje, zkopírujte tento odkaz do prohlížeče:
                   </p>
                   <p style="margin:0;word-break:break-all;">
@@ -1108,7 +1100,7 @@ export async function sendSignatureInviteEmail({
                 <td
                   class="rounded-bottom"
                   bgcolor="${bgLight}"
-                  style="padding:18px 30px;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;font-size:12px;color:#4b5563;line-height:1.5;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;"
+                  style="padding:18px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#4b5563;line-height:1.5;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;"
                 >
                   Tento e-mail byl automaticky vygenerován systémem
                   <strong>On-Off-Boarding Modul ÚMČ Praha&nbsp;6</strong>.<br/>
@@ -1438,16 +1430,17 @@ function renderProbationInfoTable(args: {
     },
   ].filter((row) => Boolean(row.value) && row.value !== "—")
 
-  return `
+  return wrapWithBottomSpacing(
+    `
     <table border="0" cellpadding="0" cellspacing="0" width="100%"
-      style="margin-bottom:24px;border:1px solid #d9ece7;border-radius:8px;overflow:hidden;border-collapse:separate;">
+      style="border:1px solid #d9ece7;border-radius:8px;overflow:hidden;border-collapse:separate;">
       ${rows
         .map((row, index) => {
           const bg = index % 2 === 0 ? args.bgLight : "#ffffff"
           const strong = row.strong === true
 
           return `
-            <tr style="background-color:${bg};">
+            <tr bgcolor="${bg}" style="background-color:${bg};">
               <td style="padding:10px 16px;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:1px;width:170px;">
                 ${escapeHtml(row.label)}
               </td>
@@ -1461,7 +1454,9 @@ function renderProbationInfoTable(args: {
         })
         .join("")}
     </table>
-  `
+  `,
+    24
+  )
 }
 
 export async function sendProbationNotificationEmail({
@@ -1497,14 +1492,19 @@ export async function sendProbationNotificationEmail({
       <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
       <title>${escapeHtml(subject)}</title>
+      <style type="text/css">
+        body { margin: 0; padding: 0; }
+        table { border-collapse: collapse; }
+        ${EMAIL_GLOBAL_FONT_STYLE}
+      </style>
     </head>
 
-    <body style="margin:0;padding:0;background-color:${bgLight};font-family:'Segoe UI',Arial,sans-serif;">
+    <body style="margin:0;padding:0;background-color:${bgLight};font-family:${EMAIL_FONT_FAMILY};">
       <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
         <tr>
           <td align="center" style="padding:30px 10px;">
             <table border="0" cellpadding="0" cellspacing="0" width="600"
-              style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
+              bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
 
               <tr>
                 <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};">
@@ -1518,7 +1518,7 @@ export async function sendProbationNotificationEmail({
               </tr>
 
               <tr>
-                <td style="padding:26px 30px;background-color:#ffffff;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;">
+                <td bgcolor="#ffffff" style="padding:26px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};">
                   <p style="margin:0 0 16px 0;font-size:14px;color:#082B2A;">
                     Dobrý den,
                   </p>
@@ -1546,18 +1546,23 @@ export async function sendProbationNotificationEmail({
                   ${
                     evaluationLink
                       ? `
-                    <table border="0" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+                    ${wrapWithBottomSpacing(
+                      `
+                    <table border="0" cellpadding="0" cellspacing="0">
                       <tr>
                         <td bgcolor="${primary}" style="border-radius:6px;background-color:${primary};">
                           <a
                             href="${escapeHtml(evaluationLink)}"
-                            style="display:inline-block;padding:12px 28px;color:#ffffff;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;font-size:15px;font-weight:bold;text-decoration:none;border-radius:6px;"
+                            style="display:inline-block;padding:12px 28px;color:#ffffff;font-family:${EMAIL_FONT_FAMILY};font-size:15px;font-weight:bold;text-decoration:none;border-radius:6px;"
                           >
                             Otevřít vyhodnocení
                           </a>
                         </td>
                       </tr>
                     </table>
+                    `,
+                      24
+                    )}
 
                     <p style="margin:0 0 4px 0;font-size:12px;color:#6b7280;">
                       Pokud tlačítko nefunguje, zkopírujte tento odkaz do prohlížeče:
@@ -1574,7 +1579,7 @@ export async function sendProbationNotificationEmail({
               </tr>
 
               <tr>
-                <td bgcolor="${bgLight}" style="padding:16px 30px;font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
                   Tento e-mail byl automaticky vygenerován. Prosíme, neodpovídejte na tuto zprávu.
                 </td>
               </tr>
@@ -1737,14 +1742,19 @@ export async function sendProbationEvaluationPdfEmail(
       <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
       <title>${escapeHtml(subject)}</title>
+      <style type="text/css">
+        body { margin: 0; padding: 0; }
+        table { border-collapse: collapse; }
+        ${EMAIL_GLOBAL_FONT_STYLE}
+      </style>
     </head>
 
-    <body style="margin:0;padding:0;background-color:${bgLight};font-family:'Segoe UI',Arial,sans-serif;">
+    <body style="margin:0;padding:0;background-color:${bgLight};font-family:${EMAIL_FONT_FAMILY};">
       <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
         <tr>
           <td align="center" style="padding:30px 10px;">
             <table border="0" cellpadding="0" cellspacing="0" width="600"
-              style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
+              bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
               <tr>
                 <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};">
                   <div style="color:#ffffff;font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:.9;">
@@ -1757,7 +1767,7 @@ export async function sendProbationEvaluationPdfEmail(
               </tr>
 
               <tr>
-                <td style="padding:26px 30px;background-color:#ffffff;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;">
+                <td bgcolor="#ffffff" style="padding:26px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};">
                   <p style="margin:0 0 16px 0;font-size:14px;color:#082B2A;">
                     Dobrý den,
                   </p>
@@ -1794,7 +1804,7 @@ export async function sendProbationEvaluationPdfEmail(
               </tr>
 
               <tr>
-                <td bgcolor="${bgLight}" style="padding:16px 30px;font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
                   Tento e-mail byl automaticky vygenerován. Prosíme, neodpovídejte na tuto zprávu.
                 </td>
               </tr>
@@ -1859,14 +1869,19 @@ export async function sendProbationEvaluationCompletedEmail(
       <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
       <title>${escapeHtml(subject)}</title>
+      <style type="text/css">
+        body { margin: 0; padding: 0; }
+        table { border-collapse: collapse; }
+        ${EMAIL_GLOBAL_FONT_STYLE}
+      </style>
     </head>
 
-    <body style="margin:0;padding:0;background-color:${bgLight};font-family:'Segoe UI',Arial,sans-serif;">
+    <body style="margin:0;padding:0;background-color:${bgLight};font-family:${EMAIL_FONT_FAMILY};">
       <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
         <tr>
           <td align="center" style="padding:30px 10px;">
             <table border="0" cellpadding="0" cellspacing="0" width="600"
-              style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
+              bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
               <tr>
                 <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};">
                   <div style="color:#ffffff;font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:.9;">
@@ -1879,7 +1894,7 @@ export async function sendProbationEvaluationCompletedEmail(
               </tr>
 
               <tr>
-                <td style="padding:26px 30px;background-color:#ffffff;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;">
+                <td bgcolor="#ffffff" style="padding:26px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};">
                   <p style="margin:0 0 16px 0;font-size:14px;color:#082B2A;">
                     Dobrý den,
                   </p>
@@ -1910,7 +1925,7 @@ export async function sendProbationEvaluationCompletedEmail(
               </tr>
 
               <tr>
-                <td bgcolor="${bgLight}" style="padding:16px 30px;font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
                   Tento e-mail byl automaticky vygenerován. Prosíme, neodpovídejte na tuto zprávu.
                 </td>
               </tr>
@@ -2128,14 +2143,19 @@ export async function sendHandoverRecipientEmail({
   <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>${subject}</title>
+  <style type="text/css">
+    body { margin: 0; padding: 0; }
+    table { border-collapse: collapse; }
+    ${EMAIL_GLOBAL_FONT_STYLE}
+  </style>
 </head>
-<body style="margin:0;padding:0;background-color:${bgLight};font-family:'Segoe UI',Arial,sans-serif;">
+<body style="margin:0;padding:0;background-color:${bgLight};font-family:${EMAIL_FONT_FAMILY};">
   <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
     <tr>
       <td align="center" style="padding:30px 10px;">
         <table border="0" cellpadding="0" cellspacing="0" width="600"
-          style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
-          
+          bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
+
           <tr>
             <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};">
               <div style="color:#ffffff;font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:.9;">
@@ -2148,7 +2168,7 @@ export async function sendHandoverRecipientEmail({
           </tr>
 
           <tr>
-            <td style="padding:26px 30px;background-color:#ffffff;">
+            <td bgcolor="#ffffff" style="padding:26px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};">
               <p style="margin:0 0 16px 0;font-size:14px;color:#082B2A;">
                 ${greeting}
               </p>
@@ -2164,9 +2184,11 @@ export async function sendHandoverRecipientEmail({
                 <strong>${reasonText}</strong>.
               </p>
 
+              ${wrapWithBottomSpacing(
+                `
               <table border="0" cellpadding="0" cellspacing="0" width="100%"
-                style="margin-bottom:24px;border:1px solid #d9ece7;border-radius:8px;overflow:hidden;border-collapse:separate;">
-                <tr style="background-color:${bgLight};">
+                style="border:1px solid #d9ece7;border-radius:8px;overflow:hidden;border-collapse:separate;">
+                <tr bgcolor="${bgLight}" style="background-color:${bgLight};">
                   <td style="padding:10px 16px;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:1px;width:150px;">
                     Zaměstnanec
                   </td>
@@ -2175,7 +2197,7 @@ export async function sendHandoverRecipientEmail({
                   </td>
                 </tr>
 
-                <tr>
+                <tr bgcolor="#ffffff" style="background-color:#ffffff;">
                   <td style="padding:10px 16px;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:1px;">
                     Pozice
                   </td>
@@ -2184,7 +2206,7 @@ export async function sendHandoverRecipientEmail({
                   </td>
                 </tr>
 
-                <tr style="background-color:${bgLight};">
+                <tr bgcolor="${bgLight}" style="background-color:${bgLight};">
                   <td style="padding:10px 16px;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:1px;">
                     Odbor
                   </td>
@@ -2193,7 +2215,7 @@ export async function sendHandoverRecipientEmail({
                   </td>
                 </tr>
 
-                <tr>
+                <tr bgcolor="#ffffff" style="background-color:#ffffff;">
                   <td style="padding:10px 16px;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:1px;">
                     Datum odchodu
                   </td>
@@ -2202,6 +2224,9 @@ export async function sendHandoverRecipientEmail({
                   </td>
                 </tr>
               </table>
+              `,
+                24
+              )}
 
               <p style="margin:0 0 12px 0;font-size:14px;color:#374151;line-height:1.6;">
                 Prosíme, ověřte si v rámci svého odboru nebo s příslušným vedoucím,
@@ -2227,7 +2252,7 @@ export async function sendHandoverRecipientEmail({
           </tr>
 
           <tr>
-            <td bgcolor="${bgLight}" style="padding:16px 30px;font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
+            <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
               Tento e-mail byl automaticky vygenerován. Prosíme, neodpovídejte na tuto zprávu.
               V případě dotazů kontaktujte svého vedoucího nebo personální oddělení.
             </td>
@@ -2293,14 +2318,19 @@ export async function sendExitChecklistCompletedEmail({
       <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
       <title>${escapeHtml(subject)}</title>
+      <style type="text/css">
+        body { margin: 0; padding: 0; }
+        table { border-collapse: collapse; }
+        ${EMAIL_GLOBAL_FONT_STYLE}
+      </style>
     </head>
 
-    <body style="margin:0;padding:0;background-color:${bgLight};font-family:'Segoe UI',Arial,sans-serif;">
+    <body style="margin:0;padding:0;background-color:${bgLight};font-family:${EMAIL_FONT_FAMILY};">
       <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
         <tr>
           <td align="center" style="padding:30px 10px;">
             <table border="0" cellpadding="0" cellspacing="0" width="600"
-              style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
+              bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
               <tr>
                 <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};">
                   <div style="color:#ffffff;font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:.9;">
@@ -2313,7 +2343,7 @@ export async function sendExitChecklistCompletedEmail({
               </tr>
 
               <tr>
-                <td style="padding:26px 30px;background-color:#ffffff;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;">
+                <td bgcolor="#ffffff" style="padding:26px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};">
                   <p style="margin:0 0 16px 0;font-size:14px;color:#082B2A;">
                     Dobrý den,
                   </p>
@@ -2342,18 +2372,23 @@ export async function sendExitChecklistCompletedEmail({
                       : [],
                   })}
 
-                  <table border="0" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+                  ${wrapWithBottomSpacing(
+                    `
+                  <table border="0" cellpadding="0" cellspacing="0">
                     <tr>
                       <td bgcolor="${primary}" style="border-radius:6px;background-color:${primary};">
                         <a
                           href="${escapeHtml(checklistUrl)}"
-                          style="display:inline-block;padding:12px 28px;color:#ffffff;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;font-size:15px;font-weight:bold;text-decoration:none;border-radius:6px;"
+                          style="display:inline-block;padding:12px 28px;color:#ffffff;font-family:${EMAIL_FONT_FAMILY};font-size:15px;font-weight:bold;text-decoration:none;border-radius:6px;"
                         >
                           Otevřít výstupní list
                         </a>
                       </td>
                     </tr>
                   </table>
+                  `,
+                    24
+                  )}
 
                   <p style="margin:0;word-break:break-all;">
                     <a href="${escapeHtml(checklistUrl)}" style="font-family:monospace;font-size:12px;color:${primary};">
@@ -2364,7 +2399,7 @@ export async function sendExitChecklistCompletedEmail({
               </tr>
 
               <tr>
-                <td bgcolor="${bgLight}" style="padding:16px 30px;font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
                   Tento e-mail byl automaticky vygenerován. Prosíme, neodpovídejte na tuto zprávu.
                 </td>
               </tr>
@@ -2428,14 +2463,19 @@ export async function sendExitChecklistPdfEmail({
       <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
       <title>${escapeHtml(subject)}</title>
+      <style type="text/css">
+        body { margin: 0; padding: 0; }
+        table { border-collapse: collapse; }
+        ${EMAIL_GLOBAL_FONT_STYLE}
+      </style>
     </head>
 
-    <body style="margin:0;padding:0;background-color:${bgLight};font-family:'Segoe UI',Arial,sans-serif;">
+    <body style="margin:0;padding:0;background-color:${bgLight};font-family:${EMAIL_FONT_FAMILY};">
       <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
         <tr>
           <td align="center" style="padding:30px 10px;">
             <table border="0" cellpadding="0" cellspacing="0" width="600"
-              style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
+              bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
               <tr>
                 <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};">
                   <div style="color:#ffffff;font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:.9;">
@@ -2448,7 +2488,7 @@ export async function sendExitChecklistPdfEmail({
               </tr>
 
               <tr>
-                <td style="padding:26px 30px;background-color:#ffffff;font-family:'Civil Premium','Segoe UI',Arial,sans-serif;">
+                <td bgcolor="#ffffff" style="padding:26px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};">
                   <p style="margin:0 0 16px 0;font-size:14px;color:#082B2A;">
                     ${escapeHtml(greeting)}
                   </p>
@@ -2481,7 +2521,7 @@ export async function sendExitChecklistPdfEmail({
               </tr>
 
               <tr>
-                <td bgcolor="${bgLight}" style="padding:16px 30px;font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
                   Tento e-mail byl automaticky vygenerován. Prosíme, neodpovídejte na tuto zprávu.
                 </td>
               </tr>
@@ -2590,13 +2630,18 @@ export async function sendBehalfSignatureEmail({
   <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>${subject}</title>
+  <style type="text/css">
+    body { margin: 0; padding: 0; }
+    table { border-collapse: collapse; }
+    ${EMAIL_GLOBAL_FONT_STYLE}
+  </style>
 </head>
-<body style="margin:0;padding:0;background-color:${bgLight};font-family:'Segoe UI',Arial,sans-serif;">
+<body style="margin:0;padding:0;background-color:${bgLight};font-family:${EMAIL_FONT_FAMILY};">
   <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
     <tr>
       <td align="center" style="padding:30px 10px;">
         <table border="0" cellpadding="0" cellspacing="0" width="600"
-          style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
+          bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
           <tr>
             <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};">
               <div style="color:#ffffff;font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:.9;">
@@ -2609,7 +2654,7 @@ export async function sendBehalfSignatureEmail({
           </tr>
 
           <tr>
-            <td style="padding:26px 30px;background-color:#ffffff;">
+            <td bgcolor="#ffffff" style="padding:26px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};">
               <p style="margin:0 0 16px 0;font-size:14px;color:#082B2A;">
                 ${greeting}
               </p>
@@ -2621,9 +2666,11 @@ export async function sendBehalfSignatureEmail({
                 <strong>${employeeName}</strong>.
               </p>
 
+              ${wrapWithBottomSpacing(
+                `
               <table border="0" cellpadding="0" cellspacing="0" width="100%"
-                style="margin-bottom:24px;border:1px solid #d9ece7;border-radius:8px;overflow:hidden;border-collapse:separate;">
-                <tr style="background-color:${bgLight};">
+                style="border:1px solid #d9ece7;border-radius:8px;overflow:hidden;border-collapse:separate;">
+                <tr bgcolor="${bgLight}" style="background-color:${bgLight};">
                   <td style="padding:10px 16px;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:1px;width:160px;">
                     Zastupujete za
                   </td>
@@ -2632,7 +2679,7 @@ export async function sendBehalfSignatureEmail({
                   </td>
                 </tr>
 
-                <tr>
+                <tr bgcolor="#ffffff" style="background-color:#ffffff;">
                   <td style="padding:10px 16px;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:1px;">
                     Zaměstnanec
                   </td>
@@ -2641,7 +2688,7 @@ export async function sendBehalfSignatureEmail({
                   </td>
                 </tr>
 
-                <tr style="background-color:#f9fafb;">
+                <tr bgcolor="#f9fafb" style="background-color:#f9fafb;">
                   <td style="padding:10px 16px;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:1px;">
                     Pozice
                   </td>
@@ -2650,7 +2697,7 @@ export async function sendBehalfSignatureEmail({
                   </td>
                 </tr>
 
-                <tr>
+                <tr bgcolor="#ffffff" style="background-color:#ffffff;">
                   <td style="padding:10px 16px;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:1px;">
                     Odbor
                   </td>
@@ -2659,7 +2706,7 @@ export async function sendBehalfSignatureEmail({
                   </td>
                 </tr>
 
-                <tr style="background-color:#f9fafb;">
+                <tr bgcolor="#f9fafb" style="background-color:#f9fafb;">
                   <td style="padding:10px 16px;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:1px;">
                     Datum odchodu
                   </td>
@@ -2668,6 +2715,9 @@ export async function sendBehalfSignatureEmail({
                   </td>
                 </tr>
               </table>
+              `,
+                24
+              )}
 
               <p style="margin:0 0 16px 0;font-size:14px;color:#374151;line-height:1.6;">
                 Pro podpis je potřeba se přihlásit firemním Google účtem
@@ -2675,16 +2725,21 @@ export async function sendBehalfSignatureEmail({
                 Po přihlášení budete přesměrován(a) přímo na výstupní list.
               </p>
 
-              <table border="0" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+              ${wrapWithBottomSpacing(
+                `
+              <table border="0" cellpadding="0" cellspacing="0">
                 <tr>
                   <td bgcolor="${primary}" style="border-radius:6px;background-color:${primary};">
                     <a href="${signUrl}"
-                      style="display:inline-block;padding:12px 28px;color:#ffffff;font-size:15px;font-weight:bold;text-decoration:none;border-radius:6px;">
+                      style="display:inline-block;padding:12px 28px;color:#ffffff;font-family:${EMAIL_FONT_FAMILY};font-size:15px;font-weight:bold;text-decoration:none;border-radius:6px;">
                       Otevřít výstupní list
                     </a>
                   </td>
                 </tr>
               </table>
+              `,
+                24
+              )}
 
               <p style="margin:0 0 4px 0;font-size:12px;color:#6b7280;">
                 Pokud tlačítko nefunguje, zkopírujte tento odkaz do prohlížeče:
@@ -2698,7 +2753,7 @@ export async function sendBehalfSignatureEmail({
           </tr>
 
           <tr>
-            <td bgcolor="${bgLight}" style="padding:16px 30px;font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
+            <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
               Tento e-mail byl automaticky vygenerován. Prosíme, neodpovídejte na tuto zprávu.
               V případě dotazů kontaktujte personální oddělení.
             </td>

@@ -104,63 +104,110 @@ function formatDate(value?: string | null) {
   return fmt(date, "dd.MM.yyyy")
 }
 
-function buildCompactSummary(record: ChangeReportRecord) {
-  const parts: string[] = []
+function fullNameOf(record: {
+  titleBefore?: string | null
+  name?: string | null
+  surname?: string | null
+  titleAfter?: string | null
+}) {
+  return [record.titleBefore, record.name, record.surname, record.titleAfter]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function positionSummaryOf(
+  record: ChangeReportRecord,
+  useNew: boolean
+): string {
+  const positionName = useNew
+    ? (record.newPositionName ?? record.oldPositionName)
+    : record.oldPositionName
+  const positionNum = useNew
+    ? (record.newPositionNum ?? record.oldPositionNum)
+    : record.oldPositionNum
+  const department = useNew
+    ? (record.newDepartment ?? record.oldDepartment)
+    : record.oldDepartment
+  const unitName = useNew
+    ? (record.newUnitName ?? record.oldUnitName)
+    : record.oldUnitName
+
+  return (
+    [
+      positionName || null,
+      positionNum ? `č. ${positionNum}` : null,
+      department || null,
+      unitName || null,
+    ]
+      .filter(Boolean)
+      .join(" · ") || "–"
+  )
+}
+
+type ChangeGroup = { label: string; oldValue: string; newValue: string }
+
+function buildChangeGroups(record: ChangeReportRecord): ChangeGroup[] {
+  const groups: ChangeGroup[] = []
 
   if (record.type === "NAME" || record.type === "NAME_AND_POSITION") {
-    if (record.oldSurname !== record.newSurname && record.newSurname) {
-      parts.push(
-        `Příjmení: původně ${record.oldSurname || "–"}, nově ${record.newSurname}`
-      )
-    }
+    const oldFull = fullNameOf({
+      titleBefore: record.oldTitleBefore,
+      name: record.oldName,
+      surname: record.oldSurname,
+      titleAfter: record.oldTitleAfter,
+    })
+    const newFull = fullNameOf({
+      titleBefore: record.newTitleBefore ?? record.oldTitleBefore,
+      name: record.newName ?? record.oldName,
+      surname: record.newSurname ?? record.oldSurname,
+      titleAfter: record.newTitleAfter ?? record.oldTitleAfter,
+    })
 
-    if (record.oldName !== record.newName && record.newName) {
-      parts.push(
-        `Jméno: původně ${record.oldName || "–"}, nově ${record.newName}`
-      )
-    }
-
-    if (
-      record.oldTitleBefore !== record.newTitleBefore &&
-      record.newTitleBefore
-    ) {
-      parts.push(
-        `Titul před: původně ${record.oldTitleBefore || "–"}, nově ${record.newTitleBefore}`
-      )
-    }
-
-    if (record.oldTitleAfter !== record.newTitleAfter && record.newTitleAfter) {
-      parts.push(
-        `Titul za: původně ${record.oldTitleAfter || "–"}, nově ${record.newTitleAfter}`
-      )
+    if (oldFull !== newFull) {
+      groups.push({ label: "Jméno", oldValue: oldFull || "–", newValue: newFull || "–" })
     }
   }
 
   if (record.type === "POSITION" || record.type === "NAME_AND_POSITION") {
-    if (record.oldPositionName !== record.newPositionName) {
-      parts.push(
-        `Pozice: původně ${record.oldPositionName || "–"}, nově ${
-          record.newPositionName || "–"
-        }`
-      )
-    }
+    const oldSummary = positionSummaryOf(record, false)
+    const newSummary = positionSummaryOf(record, true)
 
-    if (record.oldDepartment !== record.newDepartment) {
-      parts.push(
-        `Odbor: původně ${record.oldDepartment || "–"}, nově ${record.newDepartment || "–"}`
-      )
-    }
-
-    if (record.oldPositionNum !== record.newPositionNum) {
-      parts.push(
-        `Č. funkce: původně ${record.oldPositionNum || "–"}, nově ${
-          record.newPositionNum || "–"
-        }`
-      )
+    if (oldSummary !== newSummary) {
+      groups.push({ label: "Pozice", oldValue: oldSummary, newValue: newSummary })
     }
   }
 
-  return parts.length > 0 ? parts.join("; ") : "Bez detailu změny"
+  return groups
+}
+
+function ChangeGroupBubble({ group }: { group: ChangeGroup }) {
+  return (
+    <div className="space-y-1.5">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {group.label}
+      </div>
+
+      <div className="space-y-0.5">
+        <div className="text-[10px] font-medium text-muted-foreground">
+          Původní hodnota
+        </div>
+        <div className="break-words rounded-lg bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
+          {group.oldValue}
+        </div>
+      </div>
+
+      <div className="space-y-0.5">
+        <div className="text-[10px] font-medium text-[#00847C] dark:text-[#4fd1c5]">
+          Nová hodnota
+        </div>
+        <div className="break-words rounded-lg bg-[#00847C]/10 px-2.5 py-1.5 text-xs font-semibold text-[#00847C] dark:bg-[#00847C]/20 dark:text-[#4fd1c5]">
+          {group.newValue}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export function EmployeeChangeReportModal({
@@ -178,14 +225,10 @@ export function EmployeeChangeReportModal({
   const [selectedKeys, setSelectedKeys] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
-  const [audience, setAudience] = useState<
-    "ONBOARDING_GROUP" | "ALL_EMPLOYEES" | "HR_GROUP"
-  >("ONBOARDING_GROUP")
-  const [typeFilter, setTypeFilter] = useState<ReportTypeFilter>("ALL")
-  const [emailSubject, setEmailSubject] = useState("")
-  const [emailIntro, setEmailIntro] = useState(
-    "Dobrý den, posíláme přehled zaměstnaneckých změn za vybrané období."
+  const [audience, setAudience] = useState<"ONBOARDING_GROUP" | "ALL_EMPLOYEES">(
+    "ONBOARDING_GROUP"
   )
+  const [typeFilter, setTypeFilter] = useState<ReportTypeFilter>("ALL")
 
   const [confirmState, setConfirmState] = useState<{
     open: boolean
@@ -208,10 +251,6 @@ export function EmployeeChangeReportModal({
     () => fmt(new Date(`${month}-01`), "LLLL yyyy", { locale: cs }),
     [month]
   )
-
-  useEffect(() => {
-    setEmailSubject(`Měsíční report zaměstnaneckých změn – ${monthLabel}`)
-  }, [monthLabel])
 
   const filteredRecords = useMemo(() => {
     if (typeFilter === "ALL") return records
@@ -333,9 +372,6 @@ export function EmployeeChangeReportModal({
           month,
           mode,
           audience,
-          typeFilter,
-          subject: emailSubject.trim() || undefined,
-          intro: emailIntro.trim() || undefined,
           records: payloadRows.map((record) => ({
             id: record.id,
           })),
@@ -412,7 +448,6 @@ export function EmployeeChangeReportModal({
                       Vybraná skupina / nástupy
                     </option>
                     <option value="ALL_EMPLOYEES">Všichni zaměstnanci</option>
-                    <option value="HR_GROUP">Jen HR / interní evidence</option>
                   </select>
                 </div>
                 <div>
@@ -436,45 +471,11 @@ export function EmployeeChangeReportModal({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <div>
-                  <Label htmlFor="employee-change-report-subject">
-                    Předmět e-mailu
-                  </Label>
-                  <input
-                    id="employee-change-report-subject"
-                    value={emailSubject}
-                    onChange={(event) => setEmailSubject(event.target.value)}
-                    className={cn(
-                      "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm",
-                      focusRing
-                    )}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="employee-change-report-intro">
-                    Úvodní text e-mailu
-                  </Label>
-                  <textarea
-                    id="employee-change-report-intro"
-                    value={emailIntro}
-                    onChange={(event) => setEmailIntro(event.target.value)}
-                    rows={3}
-                    className={cn(
-                      "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm",
-                      focusRing
-                    )}
-                  />
-                </div>
-              </div>
-
               <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
                 Odesílá se filtr:{" "}
                 <span className="font-medium text-foreground">
                   {reportTypeFilterLabel(typeFilter)}
                 </span>
-                . E-mail se zařadí do fronty podobně jako reporty nástupů a
-                odchodů.
               </div>
 
               {sentCount > 0 && (
@@ -574,7 +575,7 @@ export function EmployeeChangeReportModal({
                               record.wasSent && "bg-muted/10"
                             )}
                           >
-                            <td className="p-2">
+                            <td className="p-2 align-top">
                               <Checkbox
                                 checked={selectedKeys.includes(key)}
                                 onCheckedChange={() => toggleSingle(key)}
@@ -582,7 +583,7 @@ export function EmployeeChangeReportModal({
                               />
                             </td>
 
-                            <td className="p-2">
+                            <td className="p-2 align-top">
                               <div className="font-medium">
                                 {record.employeeName}
                               </div>
@@ -593,23 +594,42 @@ export function EmployeeChangeReportModal({
                               )}
                             </td>
 
-                            <td className="p-2">
+                            <td className="p-2 align-top">
                               <Badge variant="secondary">
                                 {changeTypeLabel(record.type)}
                               </Badge>
                             </td>
 
-                            <td className="whitespace-nowrap p-2">
+                            <td className="whitespace-nowrap p-2 align-top">
                               {formatDate(record.effectiveDate)}
                             </td>
 
-                            <td className="max-w-[360px] p-2">
-                              <span className="line-clamp-2">
-                                {buildCompactSummary(record)}
-                              </span>
+                            <td className="max-w-[320px] p-2 align-top">
+                              {(() => {
+                                const groups = buildChangeGroups(record)
+
+                                if (groups.length === 0) {
+                                  return (
+                                    <span className="text-xs italic text-muted-foreground">
+                                      Bez detailu změny
+                                    </span>
+                                  )
+                                }
+
+                                return (
+                                  <div className="space-y-1.5">
+                                    {groups.map((group) => (
+                                      <ChangeGroupBubble
+                                        key={group.label}
+                                        group={group}
+                                      />
+                                    ))}
+                                  </div>
+                                )
+                              })()}
                             </td>
 
-                            <td className="p-2">
+                            <td className="p-2 align-top">
                               <Badge
                                 variant={
                                   record.status === "CANCELLED"
@@ -621,7 +641,7 @@ export function EmployeeChangeReportModal({
                               </Badge>
                             </td>
 
-                            <td className="p-2">
+                            <td className="p-2 align-top">
                               {record.wasSent ? (
                                 <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
                                   <span className="inline-flex items-center gap-1">
@@ -740,12 +760,12 @@ export function EmployeeChangeReportModal({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <CheckCircle2 className="size-5 text-green-600" />
-              Report změn zařazen k odeslání
+              Report odeslán
             </DialogTitle>
           </DialogHeader>
 
           <p className="text-sm text-muted-foreground">
-            {successState.total} změn bylo zařazeno do měsíčního reportu.
+            {successState.total} změn bylo úspěšně odesláno.
           </p>
 
           <div className="mt-4 flex justify-end">
