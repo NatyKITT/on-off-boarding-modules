@@ -274,7 +274,7 @@ function statusLabel(status: ProbationStatus) {
     case "COMPLETED":
       return "Vyplněno"
     case "CANCELLED":
-      return "Zastaveno (odchod ve zkušebce)"
+      return "Zastaveno (odchod ve zkušební době)"
     case "EXPIRED":
       return "Vypršel link"
     default:

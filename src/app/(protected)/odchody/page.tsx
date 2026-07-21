@@ -28,7 +28,6 @@ import { useDismissableHighlight } from "@/hooks/use-dismissable-highlight"
 import { useFacetedFilter } from "@/hooks/use-faceted-filter"
 import { useTextFilter } from "@/hooks/use-text-filter"
 import {
-  type DayRangeValue,
   EMPTY_DAY_RANGE,
   formatDayCountCs,
   formatHumanDurationBetween,
@@ -36,6 +35,7 @@ import {
   getDaysRemaining,
   isDayRangeActive,
   matchesDayRange,
+  type DayRangeValue,
 } from "@/lib/dates"
 import {
   buildDistinctOptions,
@@ -124,6 +124,7 @@ type LinkedOnboardingInfo = {
   probationEnd: string | null
   positionName: string | null
   exitDuringProbation: boolean
+  isCancelled: boolean
   label: string
   description: string
 }
@@ -149,6 +150,7 @@ type Departure = {
   userName?: string | null
   notes?: string | null
   status?: "NEW" | "IN_PROGRESS" | "COMPLETED"
+  probationStopDecision?: "STOP" | "KEEP" | null
 
   linkedOnboarding?: LinkedOnboardingInfo | null
 }
@@ -193,54 +195,58 @@ function changeTypeLabel(type?: EmployeeChangeInfo["type"] | null) {
   return "Zaměstnanecká změna"
 }
 
+function buildOldFullNameFromChange(change: EmployeeChangeInfo) {
+  return [
+    change.oldTitleBefore,
+    change.oldName,
+    change.oldSurname,
+    change.oldTitleAfter,
+  ]
+    .map((v) => v?.trim())
+    .filter(Boolean)
+    .join(" ")
+}
+
+function buildNewFullNameFromChange(change: EmployeeChangeInfo) {
+  const pick = (oldValue?: string | null, newValue?: string | null) =>
+    (newValue?.trim() || oldValue?.trim() || "").trim()
+
+  return [
+    pick(change.oldTitleBefore, change.newTitleBefore),
+    pick(change.oldName, change.newName),
+    pick(change.oldSurname, change.newSurname),
+    pick(change.oldTitleAfter, change.newTitleAfter),
+  ]
+    .filter(Boolean)
+    .join(" ")
+}
+
+function buildOldPositionLine(change: EmployeeChangeInfo) {
+  return [change.oldPositionName, change.oldDepartment, change.oldUnitName]
+    .map((v) => v?.trim())
+    .filter(Boolean)
+    .join(" · ")
+}
+
+function buildNewPositionLine(change: EmployeeChangeInfo) {
+  const pick = (oldValue?: string | null, newValue?: string | null) =>
+    (newValue?.trim() || oldValue?.trim() || "").trim()
+
+  return [
+    pick(change.oldPositionName, change.newPositionName),
+    pick(change.oldDepartment, change.newDepartment),
+    pick(change.oldUnitName, change.newUnitName),
+  ]
+    .filter(Boolean)
+    .join(" · ")
+}
+
 function formatOptionalDate(value?: string | null) {
   if (!value) return "–"
 
   const date = new Date(value)
 
   return Number.isNaN(date.getTime()) ? "–" : format(date, "d.M.yyyy")
-}
-
-function displayValue(value?: string | null) {
-  return value?.trim() ? value : "–"
-}
-
-function hasChanged(oldValue?: string | null, newValue?: string | null) {
-  return (oldValue ?? null) !== (newValue ?? null)
-}
-
-function renderChangeLine(
-  label: string,
-  oldValue?: string | null,
-  newValue?: string | null
-) {
-  const hasAnyValue = Boolean(oldValue?.trim() || newValue?.trim())
-
-  if (!hasAnyValue && !hasChanged(oldValue, newValue)) return null
-
-  return (
-    <div className="rounded-lg border bg-background p-3 text-xs shadow-sm">
-      <div className="mb-2 font-semibold text-foreground">{label}</div>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <div className="rounded-md bg-muted/60 px-3 py-2">
-          <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Původní hodnota
-          </div>
-          <div className="break-words text-sm text-muted-foreground">
-            {displayValue(oldValue)}
-          </div>
-        </div>
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900/60 dark:bg-amber-950/30">
-          <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
-            Nová hodnota
-          </div>
-          <div className="break-words text-sm font-semibold text-amber-900 dark:text-amber-100">
-            {displayValue(newValue)}
-          </div>
-        </div>
-      </div>
-    </div>
-  )
 }
 
 function formatDepartureProgress(
@@ -281,6 +287,7 @@ const DEPARTURE_STATUS_OPTIONS: MultiSelectOption[] = [
 ]
 
 const DEPARTURE_PROGRESS_OPTIONS: MultiSelectOption[] = [
+  { value: "ACTIVE", label: "Aktivní / běžící" },
   { value: "OVERDUE", label: "Již odešel / po termínu" },
   { value: "TODAY", label: "Dnes (0 dní)" },
   { value: "WITHIN_7", label: "Do 7 dnů" },
@@ -300,8 +307,13 @@ function departureTargetDate(departure: Departure): string | null | undefined {
     : departure.actualEnd
 }
 
-function departureProgressBucket(departure: Departure) {
-  return getDateProgressBucket(departureTargetDate(departure))
+function departureProgressTags(departure: Departure): string[] {
+  const bucket = getDateProgressBucket(departureTargetDate(departure))
+  if (!bucket) return []
+
+  if (bucket === "OVERDUE") return ["OVERDUE"]
+
+  return [bucket, "ACTIVE"]
 }
 
 function EmployeeChangeInfoButton({
@@ -311,6 +323,8 @@ function EmployeeChangeInfoButton({
   changes: EmployeeChangeInfo[]
   employeeName: string
 }) {
+  const router = useRouter()
+
   if (changes.length === 0) return null
 
   return (
@@ -320,10 +334,11 @@ function EmployeeChangeInfoButton({
           size="sm"
           variant="outline"
           title="Zobrazit související zaměstnanecké změny"
-          className="inline-flex items-center justify-center gap-1 border-amber-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-900/20"
+          className="inline-flex items-center justify-center gap-1 whitespace-nowrap border-amber-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-900/20"
         >
           <Info className="size-4" />
-          <span className="sr-only">Související změny</span>
+          <span className="hidden sm:inline">Propojené změny</span>
+          <span className="sr-only sm:hidden">Propojené změny</span>
         </Button>
       </DialogTrigger>
 
@@ -334,7 +349,7 @@ function EmployeeChangeInfoButton({
               <Info className="size-5 text-amber-700 dark:text-amber-400" />
             </div>
             <div>
-              <DialogTitle>Související zaměstnanecké změny</DialogTitle>
+              <DialogTitle>Propojené změny</DialogTitle>
               <DialogDescription>
                 {employeeName} · pouze informační náhled, údaje v nástupech ani
                 odchodech se tím nepřepisují.
@@ -344,61 +359,86 @@ function EmployeeChangeInfoButton({
         </DialogHeader>
 
         <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-1">
-          {changes.map((change) => (
-            <div key={change.id} className="rounded-lg border bg-muted/30 p-3">
-              <div className="mb-2 flex flex-wrap items-center gap-2">
-                <Badge variant="outline">{changeTypeLabel(change.type)}</Badge>
-                <span className="text-xs text-muted-foreground">
-                  Účinnost: {formatOptionalDate(change.effectiveDate)}
-                </span>
-              </div>
+          {changes.map((change) => {
+            const showName =
+              change.type === "NAME" || change.type === "NAME_AND_POSITION"
+            const showPosition =
+              change.type === "POSITION" || change.type === "NAME_AND_POSITION"
 
-              <div className="space-y-1">
-                {renderChangeLine(
-                  "Titul před",
-                  change.oldTitleBefore,
-                  change.newTitleBefore
-                )}
-                {renderChangeLine("Jméno", change.oldName, change.newName)}
-                {renderChangeLine(
-                  "Příjmení",
-                  change.oldSurname,
-                  change.newSurname
-                )}
-                {renderChangeLine(
-                  "Titul za",
-                  change.oldTitleAfter,
-                  change.newTitleAfter
-                )}
-                {renderChangeLine(
-                  "Pozice",
-                  change.oldPositionName,
-                  change.newPositionName
-                )}
-                {renderChangeLine(
-                  "Odbor",
-                  change.oldDepartment,
-                  change.newDepartment
-                )}
-                {renderChangeLine(
-                  "Oddělení",
-                  change.oldUnitName,
-                  change.newUnitName
-                )}
-                {renderChangeLine(
-                  "Č. funkce",
-                  change.oldPositionNum,
-                  change.newPositionNum
-                )}
-              </div>
+            return (
+              <div
+                key={change.id}
+                className="rounded-lg border bg-muted/30 p-3"
+              >
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">
+                      {changeTypeLabel(change.type)}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">
+                      Účinnost: {formatOptionalDate(change.effectiveDate)}
+                    </span>
+                  </div>
 
-              {change.notes?.trim() ? (
-                <div className="mt-2 rounded bg-background px-2 py-1 text-xs text-muted-foreground">
-                  Poznámka: {change.notes}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => router.push(`/zmeny?highlight=${change.id}`)}
+                  >
+                    Otevřít změnu
+                  </Button>
                 </div>
-              ) : null}
-            </div>
-          ))}
+
+                {showName && (
+                  <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <div className="rounded-md bg-background px-3 py-2">
+                      <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Původní jméno
+                      </div>
+                      <div className="break-words text-sm text-muted-foreground">
+                        {buildOldFullNameFromChange(change) || "–"}
+                      </div>
+                    </div>
+                    <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900/60 dark:bg-amber-950/30">
+                      <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+                        Nové jméno
+                      </div>
+                      <div className="break-words text-sm font-semibold text-amber-900 dark:text-amber-100">
+                        {buildNewFullNameFromChange(change) || "–"}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {showPosition && (
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <div className="rounded-md bg-background px-3 py-2">
+                      <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Původní pozice
+                      </div>
+                      <div className="break-words text-sm text-muted-foreground">
+                        {buildOldPositionLine(change) || "–"}
+                      </div>
+                    </div>
+                    <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900/60 dark:bg-amber-950/30">
+                      <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+                        Nová pozice
+                      </div>
+                      <div className="break-words text-sm font-semibold text-amber-900 dark:text-amber-100">
+                        {buildNewPositionLine(change) || "–"}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {change.notes?.trim() ? (
+                  <div className="mt-2 rounded bg-background px-2 py-1 text-xs text-muted-foreground">
+                    Poznámka: {change.notes}
+                  </div>
+                ) : null}
+              </div>
+            )
+          })}
         </div>
       </DialogContent>
     </Dialog>
@@ -703,6 +743,7 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
           <LinkedRecordInfoButton
             employeeName={fullName}
             onboarding={departure.linkedOnboarding}
+            probationStopDecision={departure.probationStopDecision}
           />
 
           <HistoryDialog
@@ -721,8 +762,10 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
               variant="outline"
               onClick={onOpenExitChecklist}
               title="Výstupní list"
+              className="inline-flex items-center justify-center gap-1 whitespace-nowrap"
             >
               <FileText className="size-4" />
+              <span className="hidden sm:inline">Výstupní list</span>
             </Button>
           )}
 
@@ -816,8 +859,9 @@ export default function OffboardingPage() {
   const [deleteDialog, setDeleteDialog] = useState<{
     open: boolean
     departure: Departure | null
+    relatedChanges: EmployeeChangeInfo[]
     loading: boolean
-  }>({ open: false, departure: null, loading: false })
+  }>({ open: false, departure: null, relatedChanges: [], loading: false })
 
   const [expandedPlannedYears, setExpandedPlannedYears] = useState<string[]>([])
   const [expandedPlannedMonths, setExpandedPlannedMonths] = useState<string[]>(
@@ -849,6 +893,8 @@ export default function OffboardingPage() {
   const [highlightedDepartureId, setHighlightedDepartureId] = useState<
     number | null
   >(null)
+  const [highlightedDepartureVariant, setHighlightedDepartureVariant] =
+    useState<"planned" | "actual" | null>(null)
 
   const currentMonth = format(new Date(), "yyyy-MM")
 
@@ -1016,11 +1062,10 @@ export default function OffboardingPage() {
       }
 
       if (hasProgressFilter) {
-        const bucket = departureProgressBucket(departure)
+        const tags = departureProgressTags(departure)
         const presetMatch =
           departurePresets.length > 0 &&
-          bucket != null &&
-          departurePresets.includes(bucket)
+          departurePresets.some((preset) => tags.includes(preset))
         const rangeMatch =
           isDayRangeActive(departureDayRange) &&
           matchesDayRange(getDaysRemaining(targetDate), departureDayRange)
@@ -1132,68 +1177,6 @@ export default function OffboardingPage() {
     }
   }, [displayStatuses])
 
-  const appliedHighlightRef = React.useRef<string | null>(null)
-
-  // Coming from the global search must only navigate/reveal a record — it
-  // must never touch the page's own filters (search box, facets, date).
-  useEffect(() => {
-    if (!qpHighlightId) return
-    if (appliedHighlightRef.current === qpHighlightId) return
-
-    const id = Number(qpHighlightId)
-    const departure = allDepartures.find((d) => d.id === id)
-    if (!departure) return
-
-    appliedHighlightRef.current = qpHighlightId
-
-    const variant = qpHighlightStatus ?? departureStatus(departure)
-    setActiveTab(variant)
-
-    const relevantDate =
-      variant === "planned" ? departure.plannedEnd : departure.actualEnd
-
-    if (relevantDate) {
-      const year = relevantDate.slice(0, 4)
-      const month = relevantDate.slice(0, 7)
-
-      if (variant === "planned") {
-        setExpandedPlannedYears((prev) =>
-          prev.includes(year) ? prev : [...prev, year]
-        )
-        setExpandedPlannedMonths((prev) =>
-          prev.includes(month) ? prev : [...prev, month]
-        )
-      } else {
-        setExpandedActualYears((prev) =>
-          prev.includes(year) ? prev : [...prev, year]
-        )
-        setExpandedActualMonths((prev) =>
-          prev.includes(month) ? prev : [...prev, month]
-        )
-      }
-    }
-
-    setHighlightedDepartureId(id)
-  }, [qpHighlightId, qpHighlightStatus, allDepartures])
-
-  useEffect(() => {
-    if (!highlightedDepartureId) return
-
-    const timeout = setTimeout(() => {
-      document
-        .getElementById(`departure-row-${highlightedDepartureId}`)
-        ?.scrollIntoView({ behavior: "smooth", block: "center" })
-    }, 200)
-
-    return () => clearTimeout(timeout)
-  }, [highlightedDepartureId, isCombinedStatusMode, activeTab])
-
-  const clearHighlightedDeparture = React.useCallback(
-    () => setHighlightedDepartureId(null),
-    []
-  )
-  useDismissableHighlight(highlightedDepartureId, clearHighlightedDeparture)
-
   const departmentOptionsAll = useMemo(
     () => buildDistinctOptions(allDepartures.map((d) => d.department)),
     [allDepartures]
@@ -1263,6 +1246,161 @@ export default function OffboardingPage() {
     setExpandedActualYears(year ? [year] : [])
     setExpandedActualMonths(month ? [month] : [])
   }, [filteredActual, actualGrouped, isAnyFilterActive])
+
+  const appliedHighlightRef = React.useRef<string | null>(null)
+  const previousHighlightIdRef = React.useRef<string | null>(null)
+
+  useEffect(() => {
+    const previous = previousHighlightIdRef.current
+    previousHighlightIdRef.current = qpHighlightId
+
+    if (!previous || qpHighlightId) return
+
+    if (!isAnyFilterActive) {
+      if (highlightedDepartureVariant === "planned") {
+        const { year, month } = getLatestYearAndMonth(planned, "plannedEnd")
+        setExpandedPlannedYears(year ? [year] : [])
+        setExpandedPlannedMonths(month ? [month] : [])
+      } else if (highlightedDepartureVariant === "actual") {
+        const { year, month } = getLatestYearAndMonth(actual, "actualEnd")
+        setExpandedActualYears(year ? [year] : [])
+        setExpandedActualMonths(month ? [month] : [])
+      }
+    }
+
+    appliedHighlightRef.current = null
+    setHighlightedDepartureId(null)
+    setHighlightedDepartureVariant(null)
+  }, [
+    qpHighlightId,
+    isAnyFilterActive,
+    highlightedDepartureVariant,
+    planned,
+    actual,
+  ])
+
+  useEffect(() => {
+    if (!qpHighlightId) return
+
+    const hasLocalFilters =
+      searchQuery.trim() !== "" ||
+      departureDateFilter !== "" ||
+      departurePresets.length > 0 ||
+      isDayRangeActive(departureDayRange) ||
+      facetFilters.department.length > 0 ||
+      facetFilters.unitName.length > 0 ||
+      facetFilters.position.length > 0 ||
+      facetFilters.status.length > 0
+
+    if (hasLocalFilters) {
+      router.replace("/odchody")
+    }
+  }, [
+    qpHighlightId,
+    searchQuery,
+    departureDateFilter,
+    departurePresets,
+    departureDayRange,
+    facetFilters,
+    router,
+  ])
+
+  const expandVariant = React.useCallback(
+    (variant: "planned" | "actual") => {
+      if (variant === "planned") {
+        const { years, months } = getAllYearsAndMonths(
+          groupByYearAndMonth(planned, "plannedEnd")
+        )
+        setExpandedPlannedYears(years)
+        setExpandedPlannedMonths(months)
+      } else {
+        const { years, months } = getAllYearsAndMonths(
+          groupByYearAndMonth(actual, "actualEnd")
+        )
+        setExpandedActualYears(years)
+        setExpandedActualMonths(months)
+      }
+    },
+    [planned, actual]
+  )
+
+  useEffect(() => {
+    if (!qpHighlightId) return
+    if (appliedHighlightRef.current === qpHighlightId) return
+
+    const id = Number(qpHighlightId)
+    const departure = allDepartures.find((d) => d.id === id)
+    if (!departure) return
+
+    appliedHighlightRef.current = qpHighlightId
+
+    setSearchQuery("")
+    clearAllFacetFilters()
+    setDepartureDateFilter("")
+    setDeparturePresets([])
+    setDepartureDayRange(EMPTY_DAY_RANGE)
+
+    const variant = qpHighlightStatus ?? departureStatus(departure)
+    setActiveTab(variant)
+    expandVariant(variant)
+
+    setHighlightedDepartureVariant(variant)
+    setHighlightedDepartureId(id)
+  }, [
+    qpHighlightId,
+    qpHighlightStatus,
+    allDepartures,
+    expandVariant,
+    clearAllFacetFilters,
+    setSearchQuery,
+  ])
+
+  useEffect(() => {
+    if (!highlightedDepartureId) return
+
+    let cancelled = false
+    let attempts = 0
+    const targetId = `departure-row-${highlightedDepartureId}`
+
+    const tryScroll = () => {
+      if (cancelled) return
+
+      const el = document.getElementById(targetId)
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" })
+        return
+      }
+
+      if (highlightedDepartureVariant) {
+        setActiveTab(highlightedDepartureVariant)
+        expandVariant(highlightedDepartureVariant)
+      }
+
+      attempts += 1
+      if (attempts < 40) {
+        setTimeout(() => requestAnimationFrame(tryScroll), 50)
+      }
+    }
+
+    const initial = setTimeout(() => requestAnimationFrame(tryScroll), 50)
+
+    return () => {
+      cancelled = true
+      clearTimeout(initial)
+    }
+  }, [
+    highlightedDepartureId,
+    isCombinedStatusMode,
+    activeTab,
+    highlightedDepartureVariant,
+    expandVariant,
+  ])
+
+  const clearDepartureRing = React.useCallback(
+    () => setHighlightedDepartureId(null),
+    []
+  )
+  useDismissableHighlight(highlightedDepartureId, clearDepartureRing)
 
   const togglePlannedYear = (year: string) => {
     setExpandedPlannedYears((prev) =>
@@ -1401,9 +1539,14 @@ export default function OffboardingPage() {
   async function handleDelete(departure: Departure) {
     if (!canManageOffboarding) return
 
+    const personalNumber = departure.personalNumber?.trim()
+
     setDeleteDialog({
       open: true,
       departure,
+      relatedChanges: personalNumber
+        ? (employeeChangesByPersonalNumber.get(personalNumber) ?? [])
+        : [],
       loading: false,
     })
   }
@@ -1414,16 +1557,36 @@ export default function OffboardingPage() {
 
     setDeleteDialog((prev) => ({ ...prev, loading: true }))
 
+    const willReactivateProbation = Boolean(
+      departure.linkedOnboarding?.exitDuringProbation &&
+        departure.probationStopDecision === "STOP"
+    )
+
     try {
-      const res = await fetch(`/api/odchody/${departure.id}`, {
-        method: "DELETE",
-      })
+      let res = await fetch(
+        `/api/odchody/${departure.id}${willReactivateProbation ? "?confirmReactivate=true" : ""}`,
+        { method: "DELETE" }
+      )
+      let json = await res.json().catch(() => null)
+
+      if (res.ok && json?.status === "confirm_required") {
+        res = await fetch(
+          `/api/odchody/${departure.id}?confirmReactivate=true`,
+          { method: "DELETE" }
+        )
+        json = await res.json().catch(() => null)
+      }
+
       if (!res.ok) {
-        const json = await res.json().catch(() => null)
         throw new Error(json?.message ?? "Smazání se nezdařilo.")
       }
 
-      setDeleteDialog({ open: false, departure: null, loading: false })
+      setDeleteDialog({
+        open: false,
+        departure: null,
+        relatedChanges: [],
+        loading: false,
+      })
       window.dispatchEvent(new Event("offboarding:deleted"))
       showSuccess(
         "Záznam smazán",
@@ -1634,7 +1797,7 @@ export default function OffboardingPage() {
                                               Plánovaný odchod
                                             </TableHead>
                                             <TableHead className="w-[230px]">
-                                              Průběh
+                                              Výpovědní doba
                                             </TableHead>
                                             <TableHead className="w-[180px]">
                                               Kontakt
@@ -1883,7 +2046,7 @@ export default function OffboardingPage() {
                                               Skutečný odchod
                                             </TableHead>
                                             <TableHead className="w-[230px]">
-                                              Průběh
+                                              Výpovědní doba
                                             </TableHead>
                                             <TableHead className="w-[180px]">
                                               Kontakt
@@ -2016,7 +2179,7 @@ export default function OffboardingPage() {
                 emptyText="Žádná pozice nenalezena."
               />
               <RangeFacetFilter
-                label="Průběh odchodu"
+                label="Výpovědní doba"
                 options={DEPARTURE_PROGRESS_OPTIONS}
                 selected={departurePresets}
                 onSelectedChange={setDeparturePresets}
@@ -2089,7 +2252,7 @@ export default function OffboardingPage() {
                 },
                 {
                   key: "progress",
-                  label: "Průběh odchodu",
+                  label: "Výpovědní doba",
                   values: [
                     ...departurePresets.map((value) => ({
                       value,
@@ -2420,9 +2583,40 @@ export default function OffboardingPage() {
             </div>
           </DialogHeader>
 
-          <div className="py-4">
+          <div className="space-y-3 py-4">
             <p className="text-sm text-muted-foreground">
-              Opravdu chcete smazat tento záznam? Tato akce je nevratná.
+              Opravdu chcete smazat tento záznam?
+            </p>
+
+            {deleteDialog.departure?.linkedOnboarding?.exitDuringProbation &&
+              deleteDialog.departure?.probationStopDecision === "STOP" && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+                  <p className="font-medium">
+                    Tento odchod aktuálně pozastavuje zkušební dobu propojeného
+                    nástupu
+                    {deleteDialog.departure.linkedOnboarding.positionName
+                      ? ` (${deleteDialog.departure.linkedOnboarding.positionName})`
+                      : ""}
+                    . Smazáním záznamu se zkušební doba znovu aktivuje.
+                  </p>
+                </div>
+              )}
+
+            {deleteDialog.relatedChanges.length > 0 && (
+              <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground">
+                <p className="font-medium text-foreground">
+                  Propojené změny ({deleteDialog.relatedChanges.length})
+                </p>
+                <p className="mt-0.5">
+                  K tomuto osobnímu číslu existují zaměstnanecké změny – jde jen
+                  o informační vazbu, smazáním odchodu se nijak nezmění.
+                </p>
+              </div>
+            )}
+
+            <p className="text-xs text-muted-foreground">
+              Záznam zůstane uložený a půjde ho kdykoliv obnovit v sekci
+              „Smazané záznamy“.
             </p>
           </div>
 
@@ -2433,6 +2627,7 @@ export default function OffboardingPage() {
                 setDeleteDialog({
                   open: false,
                   departure: null,
+                  relatedChanges: [],
                   loading: false,
                 })
               }

@@ -26,6 +26,7 @@ import MiniCalendar from "react-calendar"
 import { type Position } from "@/types/position"
 
 import { useIsReadonly } from "@/hooks/use-current-role"
+import { useToast } from "@/hooks/use-toast"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -451,6 +452,7 @@ function shouldClusterLabelShowTime(args: {
 
 export default function DashboardPage(): JSX.Element {
   const isReadonly = useIsReadonly()
+  const { toast } = useToast()
   const [currentDate, setCurrentDate] = useState<Date>(new Date())
   const [bigView, setBigView] = useState<View>("month")
   const [miniActiveStart, setMiniActiveStart] = useState<Date>(
@@ -1155,7 +1157,14 @@ export default function DashboardPage(): JSX.Element {
 
       if (ev.entity === "onb") {
         const d = await fetchOnb(ev.numericId)
-        if (!d) return alert("Nepodařilo se načíst záznam.")
+        if (!d) {
+          toast({
+            title: "Chyba",
+            description: "Nepodařilo se načíst záznam.",
+            variant: "destructive",
+          })
+          return
+        }
         if (ev.type === "plannedStart") {
           setConfirmOnbRow(d)
           setOnbActualStart((d.plannedStart ?? "").slice(0, 10))
@@ -1173,7 +1182,14 @@ export default function DashboardPage(): JSX.Element {
         }
       } else if (ev.entity === "off") {
         const d = await fetchOff(ev.numericId)
-        if (!d) return alert("Nepodařilo se načíst záznam.")
+        if (!d) {
+          toast({
+            title: "Chyba",
+            description: "Nepodařilo se načíst záznam.",
+            variant: "destructive",
+          })
+          return
+        }
         if (ev.type === "plannedEnd") {
           setConfirmOffRow(d)
           setOffActualEnd((d.plannedEnd ?? "").slice(0, 10))
@@ -1191,7 +1207,7 @@ export default function DashboardPage(): JSX.Element {
         }
       }
     },
-    [bigView, fetchOnb, fetchOff]
+    [bigView, fetchOnb, fetchOff, toast]
   )
 
   const reloadAll = useCallback(async () => {
@@ -1294,7 +1310,14 @@ export default function DashboardPage(): JSX.Element {
 
   const confirmOnboarding = useCallback(async () => {
     if (!confirmOnbRow) return
-    if (!onbActualStart) return alert("Vyplňte datum skutečného nástupu.")
+    if (!onbActualStart) {
+      toast({
+        title: "Chybí datum",
+        description: "Vyplňte datum skutečného nástupu.",
+        variant: "destructive",
+      })
+      return
+    }
     try {
       const res = await fetch(`/api/nastupy/${confirmOnbRow.id}`, {
         method: "PATCH",
@@ -1317,7 +1340,12 @@ export default function DashboardPage(): JSX.Element {
       setConfirmOnbRow(null)
       await reloadAll()
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Potvrzení nástupu se nezdařilo.")
+      toast({
+        title: "Chyba",
+        description:
+          e instanceof Error ? e.message : "Potvrzení nástupu se nezdařilo.",
+        variant: "destructive",
+      })
     }
   }, [
     confirmOnbRow,
@@ -1327,11 +1355,19 @@ export default function DashboardPage(): JSX.Element {
     onbEvidence,
     onbNotes,
     reloadAll,
+    toast,
   ])
 
   const confirmOffboarding = useCallback(async () => {
     if (!confirmOffRow) return
-    if (!offActualEnd) return alert("Vyplňte datum skutečného odchodu.")
+    if (!offActualEnd) {
+      toast({
+        title: "Chybí datum",
+        description: "Vyplňte datum skutečného odchodu.",
+        variant: "destructive",
+      })
+      return
+    }
     try {
       const res = await fetch(`/api/odchody/${confirmOffRow.id}`, {
         method: "PATCH",
@@ -1354,7 +1390,12 @@ export default function DashboardPage(): JSX.Element {
       setConfirmOffRow(null)
       await reloadAll()
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Potvrzení odchodu se nezdařilo.")
+      toast({
+        title: "Chyba",
+        description:
+          e instanceof Error ? e.message : "Potvrzení odchodu se nezdařilo.",
+        variant: "destructive",
+      })
     }
   }, [
     confirmOffRow,
@@ -1364,6 +1405,7 @@ export default function DashboardPage(): JSX.Element {
     offEvidence,
     offNotes,
     reloadAll,
+    toast,
   ])
 
   const miniTileContent = useCallback(

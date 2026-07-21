@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
+import {
+  buildLinkedOffboardingInfo,
+  normalizePersonalNumber,
+  pickMostRelevantOffboarding,
+} from "@/lib/employment-linking"
+import { syncLinkedProbationAfterOffboardingDecision } from "@/lib/probation-evaluation-request"
 import { canWriteOnboarding } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
@@ -40,8 +46,47 @@ function getHrNotificationRecipients(): string[] {
   )
 }
 
+async function getLinkedOffboardingForOnboarding(
+  personalNumber: string | null | undefined,
+  probationEnd: Date | null | undefined
+) {
+  const normalizedPersonalNumber = normalizePersonalNumber(personalNumber)
+
+  if (!normalizedPersonalNumber) return null
+
+  const linkedOffboardings = await prisma.employeeOffboarding.findMany({
+    where: {
+      personalNumber: {
+        not: null,
+      },
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+      personalNumber: true,
+      plannedEnd: true,
+      actualEnd: true,
+      probationStopDecision: true,
+      probationStopDecisionAt: true,
+      probationStopDecisionBy: true,
+      probationStopNote: true,
+    },
+  })
+
+  const matching = linkedOffboardings.filter(
+    (offboarding) =>
+      normalizePersonalNumber(offboarding.personalNumber) ===
+      normalizedPersonalNumber
+  )
+
+  return buildLinkedOffboardingInfo({
+    offboarding: pickMostRelevantOffboarding(matching),
+    probationEnd,
+  })
+}
+
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const session = await auth()
@@ -73,6 +118,14 @@ export async function POST(
   }
 
   const createdBy = getUserKey(session.user as MaybeUser)
+  const actorName =
+    (session.user as { name?: string | null }).name?.trim() ||
+    session.user.email ||
+    createdBy
+
+  const requestUrl = new URL(req.url)
+  const confirmPause = requestUrl.searchParams.get("confirmPause") === "true"
+  const isPreview = requestUrl.searchParams.get("preview") === "true"
 
   try {
     const employee = await prisma.employeeOnboarding.findUnique({
@@ -82,6 +135,7 @@ export async function POST(
         name: true,
         surname: true,
         personalNumber: true,
+        probationEnd: true,
         deletedAt: true,
         deletedBy: true,
         deleteReason: true,
@@ -100,6 +154,46 @@ export async function POST(
         { status: "error", message: "Záznam není smazán." },
         { status: 409 }
       )
+    }
+
+    const linkedOffboardingForPause = await getLinkedOffboardingForOnboarding(
+      employee.personalNumber,
+      employee.probationEnd
+    )
+    const willPauseOnRestore =
+      linkedOffboardingForPause?.leftDuringProbation &&
+      linkedOffboardingForPause.probationStopDecision === "STOP"
+
+    if (isPreview) {
+      const normalizedPersonalNumber = normalizePersonalNumber(
+        employee.personalNumber
+      )
+      const linkedChangesCount = normalizedPersonalNumber
+        ? await prisma.employeeChange.count({
+            where: {
+              personalNumber: normalizedPersonalNumber,
+              deletedAt: null,
+              status: { not: "CANCELLED" },
+            },
+          })
+        : 0
+
+      return NextResponse.json({
+        status: "success",
+        data: {
+          willPause: Boolean(willPauseOnRestore),
+          linkedOffboarding: linkedOffboardingForPause,
+          linkedChangesCount,
+        },
+      })
+    }
+
+    if (willPauseOnRestore && !confirmPause) {
+      return NextResponse.json({
+        status: "confirm_required",
+        confirmKind: "probation_pause_on_restore",
+        linkedOffboarding: linkedOffboardingForPause,
+      })
     }
 
     if (employee.personalNumber) {
@@ -167,6 +261,14 @@ export async function POST(
           }),
         },
       })
+
+      if (willPauseOnRestore) {
+        await syncLinkedProbationAfterOffboardingDecision(tx, {
+          onboardingId: id,
+          actorId: createdBy,
+          actorName,
+        })
+      }
 
       if (hrRecipients.length > 0) {
         await tx.mailQueue.create({

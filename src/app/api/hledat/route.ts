@@ -116,6 +116,7 @@ export async function GET(request: NextRequest) {
       prisma.employeeChange.findMany({
         where: {
           deletedAt: null,
+          status: { not: "CANCELLED" },
           OR: [
             { name: { contains: q } },
             { surname: { contains: q } },

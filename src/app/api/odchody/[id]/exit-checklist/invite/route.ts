@@ -5,7 +5,11 @@ import { ChecklistResolution, Prisma } from "@prisma/client"
 import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
 
 import { prisma } from "@/lib/db"
-import { sendBehalfSignatureEmail, sendSignatureInviteEmail } from "@/lib/email"
+import {
+  logEmailHistory,
+  sendBehalfSignatureEmail,
+  sendSignatureInviteEmail,
+} from "@/lib/email"
 import { canAdminExitChecklist } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
@@ -194,6 +198,18 @@ export async function POST(
         signUrl,
       })
     }
+
+    await logEmailHistory({
+      offboardingEmployeeId: offboarding.id,
+      emailType: isBehalf
+        ? "EXIT_CHECKLIST_BEHALF_SIGNATURE"
+        : "EXIT_CHECKLIST_SIGNATURE_INVITE",
+      recipients: [inviteeEmail],
+      subject: `Pozvánka k podpisu výstupního listu – ${employeeName}`,
+      content: signUrl,
+      status: "SENT",
+      createdBy: session.user.id ?? session.user.email ?? "unknown",
+    })
   } catch (error) {
     console.error(
       "[exit-checklist/invite] E-mail se nepodařilo odeslat:",

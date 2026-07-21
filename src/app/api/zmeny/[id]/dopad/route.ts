@@ -42,7 +42,6 @@ export async function GET(
     const change = await prisma.employeeChange.findFirst({
       where: {
         id,
-        deletedAt: null,
       },
       select: {
         id: true,
@@ -91,6 +90,7 @@ export async function GET(
           unitName: true,
           plannedStart: true,
           actualStart: true,
+          cancelledAt: true,
         },
         orderBy: [{ plannedStart: "desc" }, { id: "desc" }],
       }),
@@ -128,6 +128,7 @@ export async function GET(
           ...match,
           plannedStart: match.plannedStart?.toISOString() ?? null,
           actualStart: match.actualStart?.toISOString() ?? null,
+          cancelledAt: match.cancelledAt?.toISOString() ?? null,
         })),
         offboardingMatches: offboardingMatches.map((match) => ({
           ...match,

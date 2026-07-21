@@ -639,6 +639,8 @@ model EmploymentDocument {
   accessHash   String                 @unique @default(cuid()) @map("access_hash")
   expiresAt    DateTime?              @map("expires_at")
   completedAt  DateTime?              @map("completed_at")
+  sentAt       DateTime?              @map("sent_at")
+  sentBy       String?                @map("sent_by")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

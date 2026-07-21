@@ -157,6 +157,7 @@ async function getLinkedOnboardingForOffboarding(
       actualStart: true,
       probationEnd: true,
       positionName: true,
+      cancelledAt: true,
     },
   })
 
@@ -286,6 +287,7 @@ export async function GET() {
               actualStart: true,
               probationEnd: true,
               positionName: true,
+              cancelledAt: true,
             },
           })
         : []

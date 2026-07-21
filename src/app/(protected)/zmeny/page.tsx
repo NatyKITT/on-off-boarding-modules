@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useEffect, useMemo, useState } from "react"
-import { useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { format } from "date-fns"
 import { cs } from "date-fns/locale"
 import {
@@ -108,6 +108,7 @@ type ChangeRow = {
   targets?: Array<{ id: number; targetType: string; targetId: number }>
 
   onboardingMatchesCount?: number
+  onboardingCancelledMatchesCount?: number
   offboardingMatchesCount?: number
   linkCandidateCount?: number
 }
@@ -286,7 +287,9 @@ function hasPositionChange(row: ChangeRow) {
 function relatedRecordsCount(row: ChangeRow) {
   return (
     row.linkCandidateCount ??
-    (row.onboardingMatchesCount ?? 0) + (row.offboardingMatchesCount ?? 0)
+    (row.onboardingMatchesCount ?? 0) +
+      (row.onboardingCancelledMatchesCount ?? 0) +
+      (row.offboardingMatchesCount ?? 0)
   )
 }
 
@@ -294,16 +297,20 @@ function hasRelatedRecords(row: ChangeRow) {
   return relatedRecordsCount(row) > 0 || Boolean(row.targets?.length)
 }
 
+function hasCancelledOnboardingMatch(row: ChangeRow) {
+  return (row.onboardingCancelledMatchesCount ?? 0) > 0
+}
+
 function relationLabel(row: ChangeRow) {
   const onboarding = row.onboardingMatchesCount ?? 0
   const offboarding = row.offboardingMatchesCount ?? 0
 
   if (onboarding > 0 && offboarding > 0) {
-    return "Propojeno v nástupech i odchodech"
+    return "Propojené nástupy a odchody"
   }
 
-  if (onboarding > 0) return "Propojeno v nástupech"
-  if (offboarding > 0) return "Propojeno v odchodech"
+  if (onboarding > 0) return "Propojené nástupy"
+  if (offboarding > 0) return "Propojené odchody"
   if (row.targets?.length) return "Historická vazba"
 
   return "Bez vazby"
@@ -454,6 +461,7 @@ function ResponsiveTableShell({ children }: { children: React.ReactNode }) {
 
 export default function EmployeeChangesPage() {
   const sp = useSearchParams()
+  const router = useRouter()
   const qpHighlightId = sp.get("highlight")
   const isReadonly = useIsReadonly()
 
@@ -504,6 +512,8 @@ export default function EmployeeChangesPage() {
       department?: string | null
       date?: string | null
       kind: "onboarding" | "offboarding"
+      isActual: boolean
+      isCancelled: boolean
     }>
   }>({ open: false, row: null, loading: false, linking: false, matches: [] })
 
@@ -700,9 +710,49 @@ export default function EmployeeChangesPage() {
   }, [filteredRows, grouped, isAnyFilterActive])
 
   const appliedHighlightRef = React.useRef<string | null>(null)
+  const previousHighlightIdRef = React.useRef<string | null>(null)
 
-  // Coming from the global search must only navigate/reveal a record — it
-  // must never touch the page's own filters (search box, facets, month).
+  useEffect(() => {
+    const previous = previousHighlightIdRef.current
+    previousHighlightIdRef.current = qpHighlightId
+
+    if (!previous || qpHighlightId) return
+
+    if (!isAnyFilterActive) {
+      const latest = getLatestYearAndMonth(activeRows)
+      setExpandedYears(latest?.year ? [latest.year] : [])
+      setExpandedMonths(latest?.month ? [latest.month] : [])
+    }
+
+    appliedHighlightRef.current = null
+    setHighlightedRowId(null)
+  }, [qpHighlightId, isAnyFilterActive, activeRows])
+
+  useEffect(() => {
+    if (!qpHighlightId) return
+
+    const hasLocalFilters =
+      query.trim() !== "" ||
+      monthFilter !== "" ||
+      facetFilters.department.length > 0 ||
+      facetFilters.unitName.length > 0 ||
+      facetFilters.position.length > 0 ||
+      facetFilters.changeType.length > 0 ||
+      facetFilters.emailSent.length > 0
+
+    if (hasLocalFilters) {
+      router.replace("/zmeny")
+    }
+  }, [qpHighlightId, query, monthFilter, facetFilters, router])
+
+  const expandAllMonths = React.useCallback(() => {
+    const { years, months } = getAllYearsAndMonths(
+      groupByYearAndMonth(activeRows)
+    )
+    setExpandedYears(years)
+    setExpandedMonths(months)
+  }, [activeRows])
+
   useEffect(() => {
     if (!qpHighlightId) return
     if (appliedHighlightRef.current === qpHighlightId) return
@@ -713,36 +763,48 @@ export default function EmployeeChangesPage() {
 
     appliedHighlightRef.current = qpHighlightId
 
-    if (row.effectiveDate) {
-      const year = row.effectiveDate.slice(0, 4)
-      const month = row.effectiveDate.slice(0, 7)
-
-      setExpandedYears((prev) => (prev.includes(year) ? prev : [...prev, year]))
-      setExpandedMonths((prev) =>
-        prev.includes(month) ? prev : [...prev, month]
-      )
-    }
+    setQuery("")
+    clearAllFacetFilters()
+    setMonthFilter("")
+    expandAllMonths()
 
     setHighlightedRowId(id)
-  }, [qpHighlightId, rows])
+  }, [qpHighlightId, rows, expandAllMonths, clearAllFacetFilters, setQuery])
 
   useEffect(() => {
     if (!highlightedRowId) return
 
-    const timeout = setTimeout(() => {
-      document
-        .getElementById(`change-row-${highlightedRowId}`)
-        ?.scrollIntoView({ behavior: "smooth", block: "center" })
-    }, 200)
+    let cancelled = false
+    let attempts = 0
+    const targetId = `change-row-${highlightedRowId}`
 
-    return () => clearTimeout(timeout)
-  }, [highlightedRowId])
+    const tryScroll = () => {
+      if (cancelled) return
 
-  const clearHighlightedRow = React.useCallback(
-    () => setHighlightedRowId(null),
-    []
-  )
-  useDismissableHighlight(highlightedRowId, clearHighlightedRow)
+      const el = document.getElementById(targetId)
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" })
+        return
+      }
+
+      expandAllMonths()
+
+      attempts += 1
+      if (attempts < 40) {
+        setTimeout(() => requestAnimationFrame(tryScroll), 50)
+      }
+    }
+
+    const initial = setTimeout(() => requestAnimationFrame(tryScroll), 50)
+
+    return () => {
+      cancelled = true
+      clearTimeout(initial)
+    }
+  }, [highlightedRowId, expandAllMonths])
+
+  const clearRowRing = React.useCallback(() => setHighlightedRowId(null), [])
+  useDismissableHighlight(highlightedRowId, clearRowRing)
 
   function toggleYear(year: string) {
     setExpandedYears((prev) =>
@@ -796,6 +858,7 @@ export default function EmployeeChangesPage() {
           department?: string
           actualStart?: string
           plannedStart?: string
+          cancelledAt?: string | null
         }>
         offboardingMatches: Array<{
           id: number
@@ -813,11 +876,15 @@ export default function EmployeeChangesPage() {
           ...match,
           date: match.actualStart ?? match.plannedStart ?? null,
           kind: "onboarding" as const,
+          isActual: Boolean(match.actualStart),
+          isCancelled: Boolean(match.cancelledAt),
         })),
         ...data.offboardingMatches.map((match) => ({
           ...match,
           date: match.actualEnd ?? match.plannedEnd ?? null,
           kind: "offboarding" as const,
+          isActual: Boolean(match.actualEnd),
+          isCancelled: false,
         })),
       ]
 
@@ -898,7 +965,9 @@ export default function EmployeeChangesPage() {
               {typeLabel(row.type)}
             </Badge>
 
-            {hasRelated && (
+            {((row.onboardingMatchesCount ?? 0) > 0 ||
+              (row.offboardingMatchesCount ?? 0) > 0 ||
+              Boolean(row.targets?.length)) && (
               <button
                 type="button"
                 onClick={() => void openLinkDialog(row)}
@@ -906,6 +975,17 @@ export default function EmployeeChangesPage() {
                 title="Zobrazit související záznamy"
               >
                 <span className="truncate">{relationLabel(row)}</span>
+              </button>
+            )}
+
+            {hasCancelledOnboardingMatch(row) && (
+              <button
+                type="button"
+                onClick={() => void openLinkDialog(row)}
+                className="inline-flex max-w-full items-center rounded-full border border-slate-300 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/20 dark:text-slate-300 dark:hover:bg-slate-900/30"
+                title="Zobrazit související záznamy"
+              >
+                <span className="truncate">Neuskutečněné nástupy</span>
               </button>
             )}
           </div>
@@ -956,7 +1036,7 @@ export default function EmployeeChangesPage() {
                 className="text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:hover:bg-amber-950"
               >
                 <Info className="size-4" />
-                <span className="ml-1 hidden sm:inline">Info</span>
+                <span className="ml-1 hidden sm:inline">Propojené změny</span>
               </Button>
             )}
 
@@ -1453,29 +1533,57 @@ export default function EmployeeChangesPage() {
                 do nástupů ani odchodů nepropisuje; jde pouze o informační
                 evidenci.
               </p>
-              <div className="max-h-48 space-y-2 overflow-y-auto rounded-lg border p-2">
+              <div className="max-h-64 space-y-2 overflow-y-auto rounded-lg border p-2">
                 {linkDialog.matches.map((match) => (
                   <div
                     key={`${match.kind}-${match.id}`}
-                    className="flex items-start gap-2 rounded-md border bg-muted/30 p-2 text-sm"
+                    className="flex items-start justify-between gap-2 rounded-md border bg-muted/30 p-2 text-sm"
                   >
-                    <Badge variant="outline" className="shrink-0 text-[10px]">
-                      {match.kind === "onboarding" ? "Nástup" : "Odchod"}
-                    </Badge>
-                    <div className="min-w-0">
-                      <div className="font-medium">
-                        {match.name} {match.surname}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {[
-                          match.positionName,
-                          match.department,
-                          match.date ? formatDate(match.date) : null,
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
+                    <div className="flex min-w-0 items-start gap-2">
+                      <Badge variant="outline" className="shrink-0 text-[10px]">
+                        {match.kind === "onboarding" ? "Nástup" : "Odchod"}
+                      </Badge>
+                      <div className="min-w-0">
+                        <div className="font-medium">
+                          {match.name} {match.surname}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {[
+                            match.positionName,
+                            match.department,
+                            match.date ? formatDate(match.date) : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </div>
+                        {match.isCancelled && (
+                          <div className="mt-0.5 text-xs italic text-muted-foreground">
+                            Neuskutečněný nástup
+                          </div>
+                        )}
                       </div>
                     </div>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0"
+                      onClick={() =>
+                        router.push(
+                          match.kind === "onboarding"
+                            ? `/nastupy?highlight=${match.id}&status=${
+                                match.isCancelled
+                                  ? "cancelled"
+                                  : match.isActual
+                                    ? "actual"
+                                    : "planned"
+                              }`
+                            : `/odchody?highlight=${match.id}&status=${match.isActual ? "actual" : "planned"}`
+                        )
+                      }
+                    >
+                      Otevřít
+                    </Button>
                   </div>
                 ))}
               </div>
@@ -1521,10 +1629,30 @@ export default function EmployeeChangesPage() {
               </div>
             </div>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Záznam bude přesunut mezi smazané. Lze obnovit přes &#34;Smazané
-            záznamy&#34;.
-          </p>
+          <div className="space-y-3">
+            {deleteDialog.row && hasRelatedRecords(deleteDialog.row) && (
+              <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground">
+                <p className="font-medium text-foreground">
+                  {(deleteDialog.row.onboardingMatchesCount ?? 0) > 0 ||
+                  (deleteDialog.row.offboardingMatchesCount ?? 0) > 0
+                    ? relationLabel(deleteDialog.row)
+                    : hasCancelledOnboardingMatch(deleteDialog.row)
+                      ? "Neuskutečněné nástupy"
+                      : relationLabel(deleteDialog.row)}
+                </p>
+                <p className="mt-0.5">
+                  Ke stejnému osobnímu číslu existuje záznam v nástupech nebo
+                  odchodech – jde jen o informační vazbu, smazáním změny se
+                  nijak nezmění.
+                </p>
+              </div>
+            )}
+
+            <p className="text-sm text-muted-foreground">
+              Záznam bude přesunut mezi smazané. Lze obnovit přes &#34;Smazané
+              záznamy&#34;.
+            </p>
+          </div>
           <DialogFooter className="gap-2">
             <Button
               variant="outline"

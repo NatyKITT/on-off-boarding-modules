@@ -11,7 +11,10 @@ import { useToast } from "@/hooks/use-toast"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
+import { Textarea } from "@/components/ui/textarea"
 import {
   OnboardingFormUnified,
   type ProbationExtension,
@@ -99,6 +102,12 @@ export default function OnboardingDetailPage({ params }: PageProps) {
   const [loading, setLoading] = useState(true)
   const [deleting, setDeleting] = useState(false)
   const [decisionBusy, setDecisionBusy] = useState(false)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [decisionDialog, setDecisionDialog] = useState<{
+    open: boolean
+    decision: "STOP" | "KEEP" | null
+    note: string
+  }>({ open: false, decision: null, note: "" })
 
   async function loadDetail() {
     const res = await fetch(`/api/nastupy/${params.id}`, {
@@ -151,20 +160,12 @@ export default function OnboardingDetailPage({ params }: PageProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id, router, toast])
 
-  async function handleProbationDecisionChange(decision: "STOP" | "KEEP") {
-    if (!data?.linkedOffboarding) return
+  async function confirmProbationDecisionChange() {
+    if (!data?.linkedOffboarding || !decisionDialog.decision) return
 
+    const decision = decisionDialog.decision
     const isReactivating = decision === "KEEP"
-
-    const confirmMessage = isReactivating
-      ? "Zkušební doba se znovu aktivuje a hodnocení poběží dál (cron může znovu posílat výzvy k vyplnění). Konec zkušební doby zůstává beze změny. Pokračovat?"
-      : "Zkušební doba se pozastaví - cron nebude posílat žádné další výzvy k vyhodnocení a formulář se uzavře. Pokračovat?"
-
-    if (!window.confirm(confirmMessage)) return
-
-    const note = isReactivating
-      ? null
-      : window.prompt("Poznámka k zastavení zkušební doby (nepovinné):", "")
+    const note = isReactivating ? null : decisionDialog.note.trim() || null
 
     try {
       setDecisionBusy(true)
@@ -193,6 +194,7 @@ export default function OnboardingDetailPage({ params }: PageProps) {
           : "Hodnocení zkušební doby je pozastavené, cron nebude posílat další výzvy.",
       })
 
+      setDecisionDialog({ open: false, decision: null, note: "" })
       const refreshed = await loadDetail()
       setData(refreshed)
     } catch (error) {
@@ -209,9 +211,8 @@ export default function OnboardingDetailPage({ params }: PageProps) {
     }
   }
 
-  async function handleDelete() {
+  async function confirmDelete() {
     if (!data) return
-    if (!window.confirm("Opravdu chcete smazat tento záznam?")) return
 
     try {
       setDeleting(true)
@@ -241,6 +242,7 @@ export default function OnboardingDetailPage({ params }: PageProps) {
       })
     } finally {
       setDeleting(false)
+      setDeleteConfirmOpen(false)
     }
   }
 
@@ -379,7 +381,8 @@ export default function OnboardingDetailPage({ params }: PageProps) {
 
                   {data.linkedOffboarding.probationStopDecisionBy && (
                     <div>
-                      Rozhodl(a): {data.linkedOffboarding.probationStopDecisionBy}
+                      Rozhodl(a):{" "}
+                      {data.linkedOffboarding.probationStopDecisionBy}
                       {data.linkedOffboarding.probationStopDecisionAt
                         ? ` (${formatDate(data.linkedOffboarding.probationStopDecisionAt)})`
                         : ""}
@@ -387,7 +390,9 @@ export default function OnboardingDetailPage({ params }: PageProps) {
                   )}
 
                   {data.linkedOffboarding.probationStopNote && (
-                    <div>Poznámka: {data.linkedOffboarding.probationStopNote}</div>
+                    <div>
+                      Poznámka: {data.linkedOffboarding.probationStopNote}
+                    </div>
                   )}
                 </div>
               )}
@@ -401,7 +406,11 @@ export default function OnboardingDetailPage({ params }: PageProps) {
                         variant="outline"
                         disabled={decisionBusy || isReadonly}
                         onClick={() =>
-                          void handleProbationDecisionChange("KEEP")
+                          setDecisionDialog({
+                            open: true,
+                            decision: "KEEP",
+                            note: "",
+                          })
                         }
                       >
                         Znovu aktivovat zkušební dobu
@@ -422,7 +431,11 @@ export default function OnboardingDetailPage({ params }: PageProps) {
                       variant="outline"
                       disabled={decisionBusy || isReadonly}
                       onClick={() =>
-                        void handleProbationDecisionChange("STOP")
+                        setDecisionDialog({
+                          open: true,
+                          decision: "STOP",
+                          note: "",
+                        })
                       }
                     >
                       Pozastavit zkušební dobu
@@ -458,12 +471,127 @@ export default function OnboardingDetailPage({ params }: PageProps) {
         </Button>
         <Button
           variant="destructive"
-          onClick={() => void handleDelete()}
+          onClick={() => setDeleteConfirmOpen(true)}
           disabled={deleting || isReadonly}
         >
           {deleting ? "Mažu..." : "Smazat"}
         </Button>
       </div>
+
+      <Dialog
+        open={deleteConfirmOpen}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteConfirmOpen(false)
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogTitle>Smazat záznam</DialogTitle>
+
+          <div className="space-y-2 py-2 text-sm text-muted-foreground">
+            <p>Opravdu chcete smazat tento záznam?</p>
+
+            {data.linkedOffboarding && (
+              <div className="rounded-lg border bg-muted/40 p-3 text-xs">
+                <p className="font-medium text-foreground">
+                  {data.linkedOffboarding.label}
+                </p>
+                <p className="mt-0.5">{data.linkedOffboarding.description}</p>
+              </div>
+            )}
+
+            <p className="text-xs">
+              Záznam zůstane uložený a půjde ho kdykoliv obnovit v sekci
+              „Smazané záznamy“.
+            </p>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteConfirmOpen(false)}
+              disabled={deleting}
+            >
+              Zrušit
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void confirmDelete()}
+              disabled={deleting}
+              className="flex items-center gap-2"
+            >
+              {deleting && (
+                <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              )}
+              Smazat
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={decisionDialog.open}
+        onOpenChange={(open) => {
+          if (!open && !decisionBusy)
+            setDecisionDialog({ open: false, decision: null, note: "" })
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogTitle>
+            {decisionDialog.decision === "KEEP"
+              ? "Znovu aktivovat zkušební dobu?"
+              : "Pozastavit zkušební dobu?"}
+          </DialogTitle>
+
+          <div className="space-y-3 py-2 text-sm text-muted-foreground">
+            <p>
+              {decisionDialog.decision === "KEEP"
+                ? "Zkušební doba se znovu aktivuje a hodnocení poběží dál (cron může znovu posílat výzvy k vyplnění). Konec zkušební doby zůstává beze změny."
+                : "Zkušební doba se pozastaví – cron nebude posílat žádné další výzvy k vyhodnocení a formulář se uzavře."}
+            </p>
+
+            {decisionDialog.decision === "STOP" && (
+              <div className="space-y-1">
+                <Label htmlFor="probation-stop-note">
+                  Poznámka k zastavení (nepovinné)
+                </Label>
+                <Textarea
+                  id="probation-stop-note"
+                  value={decisionDialog.note}
+                  onChange={(e) =>
+                    setDecisionDialog((prev) => ({
+                      ...prev,
+                      note: e.target.value,
+                    }))
+                  }
+                  rows={3}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() =>
+                setDecisionDialog({ open: false, decision: null, note: "" })
+              }
+              disabled={decisionBusy}
+            >
+              Zrušit
+            </Button>
+            <Button
+              onClick={() => void confirmProbationDecisionChange()}
+              disabled={decisionBusy}
+              className="flex items-center gap-2"
+            >
+              {decisionBusy && (
+                <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              )}
+              Potvrdit
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {!isCompleted && (
         <>

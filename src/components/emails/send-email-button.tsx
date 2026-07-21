@@ -36,12 +36,21 @@ export function SendEmailButton({
 }: SendEmailButtonProps) {
   const [open, setOpen] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
+  const [resultMessage, setResultMessage] = React.useState<{
+    type: "success" | "error"
+    text: string
+  } | null>(null)
 
   const hasEmail = Boolean(email && String(email).trim() !== "")
+
+  React.useEffect(() => {
+    if (open) setResultMessage(null)
+  }, [open])
 
   async function handleSend() {
     try {
       setBusy(true)
+      setResultMessage(null)
       const res = await fetch(
         kind === "onboarding"
           ? `/api/nastupy/${id}/odeslat-email`
@@ -55,10 +64,16 @@ export function SendEmailButton({
       const j = await res.json().catch(() => null)
       if (!res.ok) throw new Error(j?.message ?? "Odeslání se nezdařilo.")
       onDone?.()
-      setOpen(false)
-      alert("E-mail byl zařazen k odeslání.")
+      setResultMessage({
+        type: "success",
+        text: "E-mail byl zařazen k odeslání.",
+      })
+      setTimeout(() => setOpen(false), 1200)
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Odeslání se nezdařilo.")
+      setResultMessage({
+        type: "error",
+        text: e instanceof Error ? e.message : "Odeslání se nezdařilo.",
+      })
     } finally {
       setBusy(false)
     }
@@ -99,6 +114,18 @@ export function SendEmailButton({
               V tomto záznamu chybí e-mail. Aby bylo možné zprávu poslat, doplň
               ho prosím v&nbsp;editaci záznamu.
             </p>
+          </div>
+        )}
+
+        {resultMessage && (
+          <div
+            className={
+              resultMessage.type === "success"
+                ? "rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
+                : "rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300"
+            }
+          >
+            {resultMessage.text}
           </div>
         )}
 

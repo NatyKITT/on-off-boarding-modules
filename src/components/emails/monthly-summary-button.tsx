@@ -75,9 +75,14 @@ export function MonthlySummaryButton({
   const [busy, setBusy] = React.useState(false)
   const [months, setMonths] = React.useState<string[]>([])
   const [selected, setSelected] = React.useState<string | undefined>(undefined)
+  const [resultMessage, setResultMessage] = React.useState<{
+    type: "success" | "error"
+    text: string
+  } | null>(null)
 
   async function openWithFetch() {
     setOpen(true)
+    setResultMessage(null)
     const sent = await fetchSentMonths()
     const candidates = (
       candidateMonths?.length ? candidateMonths : last12Months()
@@ -95,18 +100,14 @@ export function MonthlySummaryButton({
 
   async function handleSubmit() {
     if (!selected) {
-      alert("Není vybrán žádný měsíc.")
+      setResultMessage({ type: "error", text: "Není vybrán žádný měsíc." })
       return
     }
     const [yStr, mStr] = selected.split("-")
     const year = Number(yStr)
     const month = Number(mStr)
 
-    const confirmText =
-      mode === "now"
-        ? `Opravdu odeslat souhrn za ${ymToLabel(selected)} hned?`
-        : `Opravdu naplánovat odeslání souhrnu za ${ymToLabel(selected)} na 3. den v 14:00?`
-    if (!window.confirm(confirmText)) return
+    setResultMessage(null)
 
     try {
       setBusy(true)
@@ -132,14 +133,19 @@ export function MonthlySummaryButton({
         if (!res.ok) throw new Error(j?.message ?? "Naplánování se nezdařilo.")
       }
       onDone?.()
-      setOpen(false)
-      alert(
-        mode === "now"
-          ? "Souhrn zařazen k okamžitému odeslání."
-          : "Souhrn byl naplánován."
-      )
+      setResultMessage({
+        type: "success",
+        text:
+          mode === "now"
+            ? "Souhrn zařazen k okamžitému odeslání."
+            : "Souhrn byl naplánován.",
+      })
+      setTimeout(() => setOpen(false), 1500)
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Akce se nezdařila.")
+      setResultMessage({
+        type: "error",
+        text: e instanceof Error ? e.message : "Akce se nezdařila.",
+      })
     } finally {
       setBusy(false)
     }
@@ -188,6 +194,18 @@ export function MonthlySummaryButton({
                 Momentálně není dostupný žádný měsíc, který by ještě nebyl
                 odeslán.
               </p>
+            )}
+
+            {resultMessage && (
+              <div
+                className={
+                  resultMessage.type === "success"
+                    ? "rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
+                    : "rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300"
+                }
+              >
+                {resultMessage.text}
+              </div>
             )}
           </div>
 

@@ -38,9 +38,16 @@ export function EmailSendDialog({
   const [open, setOpen] = React.useState(false)
   const [sending, setSending] = React.useState(false)
   const [email, setEmail] = React.useState(defaultEmail ?? "")
+  const [resultMessage, setResultMessage] = React.useState<{
+    type: "success" | "error"
+    text: string
+  } | null>(null)
 
   React.useEffect(() => {
-    if (open) setEmail(defaultEmail ?? "")
+    if (open) {
+      setEmail(defaultEmail ?? "")
+      setResultMessage(null)
+    }
   }, [open, defaultEmail])
 
   async function sendRow() {
@@ -50,6 +57,7 @@ export function EmailSendDialog({
       return
     }
     setSending(true)
+    setResultMessage(null)
     try {
       const res = await fetch(
         `/api/${kind === "onboarding" ? "nastupy" : "odchody"}/${id}/odeslat-email`,
@@ -62,10 +70,13 @@ export function EmailSendDialog({
       const j = await res.json().catch(() => null)
       if (!res.ok)
         throw new Error(j?.message ?? "Odeslání e-mailu se nezdařilo.")
-      setOpen(false)
-      alert("E-mail byl odeslán.")
+      setResultMessage({ type: "success", text: "E-mail byl odeslán." })
+      setTimeout(() => setOpen(false), 1200)
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Odeslání e-mailu se nezdařilo.")
+      setResultMessage({
+        type: "error",
+        text: e instanceof Error ? e.message : "Odeslání e-mailu se nezdařilo.",
+      })
     } finally {
       setSending(false)
     }
@@ -74,6 +85,7 @@ export function EmailSendDialog({
   async function sendMonthly() {
     if (!monthYear) return
     setSending(true)
+    setResultMessage(null)
     try {
       const { year, month } = monthYear
       const res = await fetch(
@@ -83,10 +95,16 @@ export function EmailSendDialog({
       const j = await res.json().catch(() => null)
       if (!res.ok)
         throw new Error(j?.message ?? "Odeslání reportu se nezdařilo.")
-      setOpen(false)
-      alert("Měsíční souhrn byl odeslán.")
+      setResultMessage({
+        type: "success",
+        text: "Měsíční souhrn byl odeslán.",
+      })
+      setTimeout(() => setOpen(false), 1200)
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Odeslání reportu se nezdařilo.")
+      setResultMessage({
+        type: "error",
+        text: e instanceof Error ? e.message : "Odeslání reportu se nezdařilo.",
+      })
     } finally {
       setSending(false)
     }
@@ -135,6 +153,17 @@ export function EmailSendDialog({
                 onChange={(e) => setEmail(e.target.value)}
               />
             </div>
+            {resultMessage && (
+              <div
+                className={
+                  resultMessage.type === "success"
+                    ? "rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
+                    : "rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300"
+                }
+              >
+                {resultMessage.text}
+              </div>
+            )}
             <div className="flex justify-end gap-2">
               <Button
                 variant="outline"
@@ -154,6 +183,17 @@ export function EmailSendDialog({
               Opravdu chcete odeslat souhrn skutečných nástupů a odchodů za{" "}
               <strong>{monthlyLabel}</strong>?
             </p>
+            {resultMessage && (
+              <div
+                className={
+                  resultMessage.type === "success"
+                    ? "rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
+                    : "rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300"
+                }
+              >
+                {resultMessage.text}
+              </div>
+            )}
             <div className="flex justify-end gap-2">
               <Button
                 variant="outline"

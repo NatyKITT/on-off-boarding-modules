@@ -80,6 +80,8 @@ type Props = {
 
 const undefIfEmpty = (v?: string | null) =>
   v == null || String(v).trim() === "" ? undefined : v
+const nullIfEmpty = (v?: string | null) =>
+  v == null || String(v).trim() === "" ? null : v
 const ensure = (v?: string | null, fb = "-") => (v ?? "").trim() || fb
 const toYMD = (d: Date) => format(d, "yyyy-MM-dd")
 const todayStr = () => toYMD(new Date())
@@ -165,6 +167,7 @@ export function OffboardingFormUnified({
   const [selectedFromEos, setSelectedFromEos] = useState<boolean>(() =>
     Boolean(isEdit || initial?.personalNumber?.trim())
   )
+  const [manualData, setManualData] = useState<boolean>(false)
   const [manualDates, setManualDates] = useState<boolean>(
     () => inferredManualFlag
   )
@@ -246,7 +249,7 @@ export function OffboardingFormUnified({
   const schema = useMemo(
     () =>
       baseSchema.superRefine((vals, ctx) => {
-        if (!isEdit && !selectedFromEos) {
+        if (!isEdit && !selectedFromEos && !manualData) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             path: ["personalNumber"],
@@ -271,7 +274,7 @@ export function OffboardingFormUnified({
           }
         }
       }),
-    [isEdit, selectedFromEos, isActualMode]
+    [isEdit, selectedFromEos, manualData, isActualMode]
   )
 
   const form = useForm<FormValues>({
@@ -411,12 +414,12 @@ export function OffboardingFormUnified({
       department: ensure(values.department, "-"),
       unitName: ensure(values.unitName, "-"),
 
-      titleBefore: undefIfEmpty(values.titleBefore),
-      titleAfter: undefIfEmpty(values.titleAfter),
-      userEmail: undefIfEmpty(values.userEmail),
+      titleBefore: nullIfEmpty(values.titleBefore),
+      titleAfter: nullIfEmpty(values.titleAfter),
+      userEmail: nullIfEmpty(values.userEmail),
       plannedEnd: undefIfEmpty(values.plannedEnd),
       actualEnd: undefIfEmpty(values.actualEnd),
-      notes: undefIfEmpty(values.notes),
+      notes: nullIfEmpty(values.notes),
 
       status: values.status ?? (isActualMode ? "COMPLETED" : "NEW"),
       noticeEnd: values.noticeFiled || undefined,
@@ -471,24 +474,84 @@ export function OffboardingFormUnified({
     }
   }
 
-  async function onDelete() {
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    open: boolean
+    checked: boolean
+    willReactivateProbation: boolean
+    linkedLabel: string | null
+    linkedChangesCount: number
+    loading: boolean
+  }>({
+    open: false,
+    checked: false,
+    willReactivateProbation: false,
+    linkedLabel: null,
+    linkedChangesCount: 0,
+    loading: false,
+  })
+
+  function closeDeleteConfirm() {
+    setDeleteConfirm({
+      open: false,
+      checked: false,
+      willReactivateProbation: false,
+      linkedLabel: null,
+      linkedChangesCount: 0,
+      loading: false,
+    })
+  }
+
+  async function openDeleteConfirm() {
     if (!id) return
+    setDeleteConfirm({
+      open: true,
+      checked: false,
+      willReactivateProbation: false,
+      linkedLabel: null,
+      linkedChangesCount: 0,
+      loading: true,
+    })
+
     try {
-      let res = await fetch(`/api/odchody/${id}`, { method: "DELETE" })
+      const res = await fetch(`/api/odchody/${id}?preview=true`, {
+        method: "DELETE",
+      })
+      const json = await res.json().catch(() => null)
+
+      if (!res.ok)
+        throw new Error(json?.message ?? "Nepodařilo se ověřit propojení.")
+
+      setDeleteConfirm({
+        open: true,
+        checked: true,
+        willReactivateProbation: Boolean(json?.data?.willReactivateProbation),
+        linkedLabel: json?.data?.linkedOnboarding?.label ?? null,
+        linkedChangesCount: json?.data?.linkedChangesCount ?? 0,
+        loading: false,
+      })
+    } catch {
+      setDeleteConfirm({
+        open: true,
+        checked: true,
+        willReactivateProbation: false,
+        linkedLabel: null,
+        linkedChangesCount: 0,
+        loading: false,
+      })
+    }
+  }
+
+  async function performDelete() {
+    if (!id) return
+    setDeleteConfirm((prev) => ({ ...prev, loading: true }))
+    try {
+      let res = await fetch(
+        `/api/odchody/${id}${deleteConfirm.willReactivateProbation ? "?confirmReactivate=true" : ""}`,
+        { method: "DELETE" }
+      )
       let json = await res.json().catch(() => null)
 
       if (res.ok && json?.status === "confirm_required") {
-        const linkedName = json.linkedOnboarding?.positionName
-          ? ` (${json.linkedOnboarding.positionName})`
-          : ""
-
-        const confirmedReactivate = window.confirm(
-          `Tento odchod aktuálně pozastavuje zkušební dobu propojeného nástupu${linkedName}. ` +
-            "Smazáním záznamu se zkušební doba znovu aktivuje a cron k ní může znovu začít posílat výzvy. Pokračovat ve smazání?"
-        )
-
-        if (!confirmedReactivate) return
-
         res = await fetch(`/api/odchody/${id}?confirmReactivate=true`, {
           method: "DELETE",
         })
@@ -496,17 +559,20 @@ export function OffboardingFormUnified({
       }
 
       if (!res.ok) throw new Error(json?.message ?? "Smazání se nezdařilo.")
+
+      closeDeleteConfirm()
       setSuccessName(form.getValues("name") + " " + form.getValues("surname"))
       await onSuccess?.()
       setOpenSuccess(true)
     } catch (err) {
+      closeDeleteConfirm()
       setErrorMsg(err instanceof Error ? err.message : "Smazání se nezdařilo.")
       setOpenError(true)
     }
   }
 
   const submitDisabled =
-    isSubmitting || isReadonly || (!selectedFromEos && !isEdit)
+    isSubmitting || isReadonly || (!selectedFromEos && !manualData && !isEdit)
   const focusRing =
     "focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/55 focus:ring-offset-2 focus:ring-offset-background " +
     "focus-visible:outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/55 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
@@ -528,50 +594,72 @@ export function OffboardingFormUnified({
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <EmployeeCombobox
-                formFields={{
-                  personalNumber: "personalNumber",
-                  name: "name",
-                  surname: "surname",
-                  titleBefore: "titleBefore",
-                  titleAfter: "titleAfter",
-                  userEmail: "userEmail",
-                  positionNum: "positionNum",
-                  positionName: "positionName",
-                  department: "department",
-                  unitName: "unitName",
-                }}
-                placeholder="Vyberte zaměstnance…"
-                fetchLimit={500}
-                excludePersonalNumbers={excludePersonalNumbers}
-                onSelect={async () => {
-                  if (!form.getValues("personalNumber")?.trim()) {
-                    form.setValue(
-                      "personalNumber",
-                      nextTempPersonalNumber(excludePersonalNumbers),
-                      { shouldDirty: true }
-                    )
-                  }
-                  if (!form.getValues("positionNum")?.trim())
-                    form.setValue("positionNum", "0", { shouldDirty: true })
-                  if (!form.getValues("positionName")?.trim())
-                    form.setValue("positionName", "-", { shouldDirty: true })
-                  if (!form.getValues("department")?.trim())
-                    form.setValue("department", "-", { shouldDirty: true })
-                  if (!form.getValues("unitName")?.trim())
-                    form.setValue("unitName", "-", { shouldDirty: true })
+              {!manualData ? (
+                <>
+                  <EmployeeCombobox
+                    formFields={{
+                      personalNumber: "personalNumber",
+                      name: "name",
+                      surname: "surname",
+                      titleBefore: "titleBefore",
+                      titleAfter: "titleAfter",
+                      userEmail: "userEmail",
+                      positionNum: "positionNum",
+                      positionName: "positionName",
+                      department: "department",
+                      unitName: "unitName",
+                    }}
+                    placeholder="Vyberte zaměstnance…"
+                    fetchLimit={500}
+                    excludePersonalNumbers={excludePersonalNumbers}
+                    confirmBeforeApply
+                    onSelect={async () => {
+                      if (!form.getValues("personalNumber")?.trim()) {
+                        form.setValue(
+                          "personalNumber",
+                          nextTempPersonalNumber(excludePersonalNumbers),
+                          { shouldDirty: true }
+                        )
+                      }
+                      if (!form.getValues("positionNum")?.trim())
+                        form.setValue("positionNum", "0", {
+                          shouldDirty: true,
+                        })
+                      if (!form.getValues("positionName")?.trim())
+                        form.setValue("positionName", "-", {
+                          shouldDirty: true,
+                        })
+                      if (!form.getValues("department")?.trim())
+                        form.setValue("department", "-", {
+                          shouldDirty: true,
+                        })
+                      if (!form.getValues("unitName")?.trim())
+                        form.setValue("unitName", "-", { shouldDirty: true })
 
-                  setSelectedFromEos(true)
-                  form.clearErrors("personalNumber")
-                  await form.trigger()
-                }}
-              />
-              {!selectedFromEos && (
+                      setSelectedFromEos(true)
+                      form.clearErrors("personalNumber")
+                      await form.trigger()
+                    }}
+                  />
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Doporučeno: vyberte zaměstnance z EOS. Údaje se jen načtou
+                    pro potřeby této aplikace, v EOS systému se tím nic nemění.
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Výběr z EOS je vypnutý, protože je zapnuté „Vyplnit vlastní
+                  data“ níže.
+                </p>
+              )}
+
+              {!selectedFromEos && !manualData && (
                 <Alert className="mt-4">
                   <AlertCircle className="size-4" />
                   <AlertDescription>
                     Pro vytvoření záznamu musíte vybrat existujícího zaměstnance
-                    z EOS systému.
+                    z EOS systému, nebo zaškrtnout „Vyplnit vlastní data&rdquo;
+                    a údaje zadat ručně.
                   </AlertDescription>
                 </Alert>
               )}
@@ -580,13 +668,52 @@ export function OffboardingFormUnified({
         )}
 
         <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="manualData"
+                checked={manualData}
+                onCheckedChange={(v) => {
+                  const b = Boolean(v)
+                  setManualData(b)
+                  if (b) form.clearErrors("personalNumber")
+                  void form.trigger()
+                }}
+              />
+              <label htmlFor="manualData" className="text-sm">
+                Vyplnit vlastní data{" "}
+                {isEdit ? "(upravit údaje ručně)" : "(bez výběru z EOS)"}
+              </label>
+            </div>
+            {manualData && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Ručně zadané údaje se nijak nepropíšou zpět do EOS – slouží
+                pouze pro potřeby této aplikace.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <User className="size-5" />
-              Osobní a organizační údaje (z EOS)
+              {manualData
+                ? "Osobní a organizační údaje"
+                : "Osobní a organizační údaje (z EOS)"}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            {!manualData && (
+              <Alert>
+                <AlertCircle className="size-4" />
+                <AlertDescription>
+                  Tato pole jsou uzamčená. Pro jejich úpravu zaškrtněte výše
+                  „Vyplnit vlastní data“.
+                </AlertDescription>
+              </Alert>
+            )}
+
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               {(
                 [
@@ -603,6 +730,10 @@ export function OffboardingFormUnified({
                 ] as const
               ).map(([name, label]) => {
                 const isEmailField = name === "userEmail"
+                const isLocked =
+                  name === "personalNumber"
+                    ? isEdit || !manualData
+                    : !isEmailField && !manualData
 
                 return (
                   <FormField
@@ -617,23 +748,20 @@ export function OffboardingFormUnified({
                             {...field}
                             type={isEmailField ? "email" : "text"}
                             value={
-                              typeof field.value === "string"
-                                ? field.value
-                                : ""
+                              typeof field.value === "string" ? field.value : ""
                             }
-                            className={`${isEmailField ? "" : "bg-muted"} ${
+                            className={`${isLocked ? "bg-muted" : ""} ${
                               name === "positionNum" ||
                               name === "personalNumber"
                                 ? "font-mono"
                                 : ""
                             } ${focusRing}`}
-                            readOnly={!isEmailField}
+                            readOnly={isLocked}
                           />
                         </FormControl>
                         {isEmailField && (
                           <FormDescription>
-                            Načteno z EOS, ale můžete si ho přepsat (např. pro
-                            testování).
+                            Načteno z EOS (lze upravit).
                           </FormDescription>
                         )}
                         <FormMessage />
@@ -807,7 +935,7 @@ export function OffboardingFormUnified({
               type="button"
               variant="destructive"
               className={`inline-flex w-full items-center justify-center gap-2 ${focusRing}`}
-              onClick={onDelete}
+              onClick={() => void openDeleteConfirm()}
               disabled={isReadonly}
             >
               <Trash2 className="size-4" />
@@ -815,6 +943,81 @@ export function OffboardingFormUnified({
             </Button>
           )}
         </div>
+
+        <Dialog
+          open={deleteConfirm.open}
+          onOpenChange={(open) => {
+            if (!open && !deleteConfirm.loading) closeDeleteConfirm()
+          }}
+        >
+          <DialogContent className="max-w-md">
+            <DialogTitle>Smazat záznam</DialogTitle>
+
+            {!deleteConfirm.checked ? (
+              <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+                <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                Ověřuji propojené záznamy…
+              </div>
+            ) : (
+              <div className="space-y-3 py-2 text-sm">
+                <p className="text-muted-foreground">
+                  Opravdu chcete smazat tento záznam?
+                </p>
+
+                {deleteConfirm.willReactivateProbation && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+                    <p className="font-medium">
+                      Tento odchod aktuálně pozastavuje zkušební dobu
+                      propojeného nástupu. Smazáním záznamu se zkušební doba
+                      znovu aktivuje.
+                    </p>
+                    {deleteConfirm.linkedLabel && (
+                      <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                        {deleteConfirm.linkedLabel}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {deleteConfirm.linkedChangesCount > 0 && (
+                  <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground">
+                    Propojeno i s {deleteConfirm.linkedChangesCount}{" "}
+                    {deleteConfirm.linkedChangesCount === 1
+                      ? "zaměstnaneckou změnou"
+                      : "zaměstnaneckými změnami"}{" "}
+                    podle osobního čísla (jen informační vazba).
+                  </div>
+                )}
+
+                <p className="text-xs text-muted-foreground">
+                  Záznam zůstane uložený a půjde ho kdykoliv obnovit v sekci
+                  „Smazané záznamy“.
+                </p>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={closeDeleteConfirm}
+                disabled={deleteConfirm.loading}
+              >
+                Zrušit
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => void performDelete()}
+                disabled={!deleteConfirm.checked || deleteConfirm.loading}
+                className="flex items-center gap-2"
+              >
+                {deleteConfirm.loading && deleteConfirm.checked && (
+                  <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                )}
+                Smazat
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={openSuccess} onOpenChange={setOpenSuccess}>
           <DialogContent>
@@ -855,9 +1058,9 @@ export function OffboardingFormUnified({
                 .
               </p>
               <p>
-                Chcete zastavit hodnocení zkušební doby a nerozesílat
-                vedoucímu žádné další e-maily k vyplnění? Pokud zvolíte
-                „Nechat běžet“, formulář i připomínky poběží dál beze změny.
+                Chcete zastavit hodnocení zkušební doby a nerozesílat vedoucímu
+                žádné další e-maily k vyplnění? Pokud zvolíte „Nechat běžet“,
+                formulář i připomínky poběží dál beze změny.
               </p>
             </div>
             <AlertDialogFooter>

@@ -4,7 +4,7 @@ import { EmploymentDocumentType } from "@prisma/client"
 import { z } from "zod"
 
 import { prisma } from "@/lib/db"
-import { sendMail } from "@/lib/email"
+import { logEmailHistory, sendMail } from "@/lib/email"
 import { buildEmployeeMeta } from "@/lib/employee-meta"
 import { canManageEmploymentDocuments } from "@/lib/rbac"
 import { absoluteUrl } from "@/lib/url"
@@ -214,6 +214,25 @@ export async function POST(req: NextRequest) {
     subject,
     html,
   })
+
+  const sentBy = session.user.name ?? session.user.email ?? "unknown"
+  const sentAt = new Date()
+
+  await Promise.all([
+    logEmailHistory({
+      onboardingEmployeeId: onboardingId,
+      emailType: "MANUAL_EMAIL",
+      recipients: [email],
+      subject,
+      content: html,
+      status: "SENT",
+      createdBy: session.user.id ?? session.user.email ?? "unknown",
+    }),
+    prisma.employmentDocument.updateMany({
+      where: { id: { in: mapped.map((document) => document.id) } },
+      data: { sentAt, sentBy },
+    }),
+  ])
 
   return NextResponse.json({
     ok: true,

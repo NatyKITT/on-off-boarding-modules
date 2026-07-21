@@ -44,6 +44,9 @@ const emptyToUndefined = (v: unknown) =>
 const emptyStringToUndefined = (v: unknown) =>
   typeof v === "string" && v.trim() === "" ? undefined : v
 
+const emptyStringToNull = (v: unknown) =>
+  typeof v === "string" && v.trim() === "" ? null : v
+
 const nullableDate = z.preprocess(
   emptyStringToUndefined,
   z.union([z.null(), z.coerce.date()]).optional()
@@ -56,9 +59,8 @@ const updateSchema = z.object({
   titleAfter: z.union([z.string(), z.null()]).optional(),
 
   userEmail: z
-    .preprocess(emptyToUndefined, z.string().email())
-    .optional()
-    .nullable(),
+    .preprocess(emptyStringToNull, z.string().email().nullable())
+    .optional(),
   userName: z.union([z.string(), z.null()]).optional(),
   personalNumber: z.union([z.string(), z.null()]).optional(),
 
@@ -134,6 +136,7 @@ async function getLinkedOnboardingForOffboarding(
       actualStart: true,
       probationEnd: true,
       positionName: true,
+      cancelledAt: true,
     },
   })
 
@@ -484,8 +487,10 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     )
   }
 
+  const requestUrl = new URL(request.url)
   const confirmReactivate =
-    new URL(request.url).searchParams.get("confirmReactivate") === "true"
+    requestUrl.searchParams.get("confirmReactivate") === "true"
+  const isPreview = requestUrl.searchParams.get("preview") === "true"
 
   const before = await prisma.employeeOffboarding.findFirst({
     where: {
@@ -539,6 +544,38 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       before.personalNumber,
       before.actualEnd ?? before.plannedEnd
     )
+  }
+
+  if (isPreview) {
+    const normalizedPersonalNumber = normalizePersonalNumber(
+      before.personalNumber
+    )
+    const linkedChangesCount = normalizedPersonalNumber
+      ? await prisma.employeeChange.count({
+          where: {
+            personalNumber: normalizedPersonalNumber,
+            deletedAt: null,
+            status: { not: "CANCELLED" },
+          },
+        })
+      : 0
+    const anyLinkedOnboarding =
+      linkedOnboardingForReactivation ??
+      (await getLinkedOnboardingForOffboarding(
+        before.personalNumber,
+        before.actualEnd ?? before.plannedEnd
+      ))
+
+    return NextResponse.json({
+      status: "success",
+      data: {
+        willReactivateProbation: Boolean(
+          linkedOnboardingForReactivation?.exitDuringProbation
+        ),
+        linkedOnboarding: anyLinkedOnboarding,
+        linkedChangesCount,
+      },
+    })
   }
 
   if (

@@ -18,6 +18,7 @@ type LinkedOnboardingInfo = {
   probationEnd: string | null
   positionName: string | null
   exitDuringProbation: boolean
+  isCancelled: boolean
   label: string
   description: string
 }
@@ -138,6 +139,7 @@ export default async function OffboardingDetailPage({ params }: PageProps) {
           actualStart: true,
           probationEnd: true,
           positionName: true,
+          cancelledAt: true,
         },
       })
     : []

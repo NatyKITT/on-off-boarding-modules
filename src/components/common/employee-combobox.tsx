@@ -55,6 +55,7 @@ type Props = {
   fetchLimit?: number
   excludePersonalNumbers?: string[]
   searchMode?: "eager" | "lazy"
+  confirmBeforeApply?: boolean
 }
 
 const toStr = (v: unknown) =>
@@ -82,6 +83,7 @@ export function EmployeeCombobox({
   fetchLimit = 500,
   excludePersonalNumbers = [],
   searchMode = "eager",
+  confirmBeforeApply = false,
 }: Props) {
   const form = useFormContext()
   const [open, setOpen] = useState(false)
@@ -90,6 +92,9 @@ export function EmployeeCombobox({
   const [lazyResults, setLazyResults] = useState<EmployeeItem[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pendingEmployee, setPendingEmployee] = useState<EmployeeItem | null>(
+    null
+  )
   const abortRef = useRef<AbortController | null>(null)
   const commandInputRef = useRef<HTMLInputElement>(null)
 
@@ -367,6 +372,44 @@ export function EmployeeCombobox({
               <X className="size-4" />
             </button>
           )}
+
+          {pendingEmployee && (
+            <div className="absolute inset-x-0 top-full z-10 mt-2 rounded-lg border bg-background p-3 text-sm shadow-md">
+              <p className="mb-2">
+                Načíst údaje z EOS pro{" "}
+                <span className="font-medium">
+                  {[
+                    pendingEmployee.titleBefore,
+                    pendingEmployee.name,
+                    pendingEmployee.surname,
+                    pendingEmployee.titleAfter,
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                </span>{" "}
+                (#{pendingEmployee.personalNumber})?
+              </p>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="rounded-md border px-3 py-1.5 text-xs hover:bg-muted"
+                  onClick={() => setPendingEmployee(null)}
+                >
+                  Zrušit
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md bg-primary px-3 py-1.5 text-xs text-primary-foreground hover:bg-primary/90"
+                  onClick={() => {
+                    void applyEmployee(pendingEmployee)
+                    setPendingEmployee(null)
+                  }}
+                >
+                  Načíst údaje
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </PopoverAnchor>
 
@@ -434,7 +477,16 @@ export function EmployeeCombobox({
                 <CommandItem
                   key={e.id}
                   value={e.personalNumber}
-                  onSelect={() => void applyEmployee(e)}
+                  onSelect={() => {
+                    if (confirmBeforeApply) {
+                      setPendingEmployee(e)
+                      setOpen(false)
+                      setQuery("")
+                      if (searchMode === "lazy") setLazyResults([])
+                      return
+                    }
+                    void applyEmployee(e)
+                  }}
                   className="flex cursor-pointer items-start gap-3 py-3"
                 >
                   <Check

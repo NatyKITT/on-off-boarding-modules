@@ -67,6 +67,7 @@ async function getLinkedOnboardingForOffboarding(
       actualStart: true,
       probationEnd: true,
       positionName: true,
+      cancelledAt: true,
     },
   })
 
@@ -120,8 +121,9 @@ export async function POST(
     session.user.email ||
     createdBy
 
-  const confirmPause =
-    new URL(req.url).searchParams.get("confirmPause") === "true"
+  const requestUrl = new URL(req.url)
+  const confirmPause = requestUrl.searchParams.get("confirmPause") === "true"
+  const isPreview = requestUrl.searchParams.get("preview") === "true"
 
   try {
     const employee = await prisma.employeeOffboarding.findUnique({
@@ -165,6 +167,36 @@ export async function POST(
         employee.personalNumber,
         employee.actualEnd ?? employee.plannedEnd
       )
+    }
+
+    if (isPreview) {
+      const normalizedPersonalNumber = normalizePersonalNumber(
+        employee.personalNumber
+      )
+      const linkedChangesCount = normalizedPersonalNumber
+        ? await prisma.employeeChange.count({
+            where: {
+              personalNumber: normalizedPersonalNumber,
+              deletedAt: null,
+              status: { not: "CANCELLED" },
+            },
+          })
+        : 0
+      const anyLinkedOnboarding =
+        linkedOnboardingForPause ??
+        (await getLinkedOnboardingForOffboarding(
+          employee.personalNumber,
+          employee.actualEnd ?? employee.plannedEnd
+        ))
+
+      return NextResponse.json({
+        status: "success",
+        data: {
+          willPause: Boolean(linkedOnboardingForPause?.exitDuringProbation),
+          linkedOnboarding: anyLinkedOnboarding,
+          linkedChangesCount,
+        },
+      })
     }
 
     if (linkedOnboardingForPause?.exitDuringProbation && !confirmPause) {

@@ -1,5 +1,6 @@
 import { sidebarLinks } from "@/config/dashboard"
 
+import { canReadMonthlyReports, canSendMonthlyReports } from "@/lib/rbac"
 import { requireInternalUser } from "@/lib/session"
 
 import { SearchCommand } from "@/components/dashboard/search-command"
@@ -9,6 +10,7 @@ import {
 } from "@/components/layout/dashboard-sidebar"
 import { ModeToggle } from "@/components/layout/mode-toggle"
 import { UserAccountNav } from "@/components/layout/user-account-nav"
+import { PdfReportLauncher } from "@/components/reports/pdf-report-launcher"
 import MaxWidthWrapper from "@/components/shared/max-width-wrapper"
 
 import "react-big-calendar/lib/css/react-big-calendar.css"
@@ -43,6 +45,10 @@ export default async function Dashboard({ children }: ProtectedLayoutProps) {
             <div className="w-full min-w-0 flex-1">
               <SearchCommand />
             </div>
+
+            {canReadMonthlyReports(user.role) && (
+              <PdfReportLauncher canSend={canSendMonthlyReports(user.role)} />
+            )}
 
             <ModeToggle />
             <UserAccountNav />

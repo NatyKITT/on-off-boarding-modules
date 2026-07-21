@@ -126,10 +126,13 @@ function serializeChange(
   record: EmployeeChangeWithTargets,
   counts?: {
     onboardingMatchesCount: number
+    onboardingCancelledMatchesCount: number
     offboardingMatchesCount: number
   }
 ) {
   const onboardingMatchesCount = counts?.onboardingMatchesCount ?? 0
+  const onboardingCancelledMatchesCount =
+    counts?.onboardingCancelledMatchesCount ?? 0
   const offboardingMatchesCount = counts?.offboardingMatchesCount ?? 0
 
   return {
@@ -146,8 +149,12 @@ function serializeChange(
         appliedAt: target.appliedAt.toISOString(),
       })) ?? [],
     onboardingMatchesCount,
+    onboardingCancelledMatchesCount,
     offboardingMatchesCount,
-    linkCandidateCount: onboardingMatchesCount + offboardingMatchesCount,
+    linkCandidateCount:
+      onboardingMatchesCount +
+      onboardingCancelledMatchesCount +
+      offboardingMatchesCount,
   }
 }
 
@@ -188,6 +195,7 @@ export async function GET() {
 
     const personalNumbers = uniquePersonalNumbers(records)
     const onboardingCountByPersonalNumber = new Map<string, number>()
+    const onboardingCancelledCountByPersonalNumber = new Map<string, number>()
     const offboardingCountByPersonalNumber = new Map<string, number>()
 
     if (personalNumbers.length > 0) {
@@ -201,6 +209,7 @@ export async function GET() {
           },
           select: {
             personalNumber: true,
+            cancelledAt: true,
           },
         }),
         prisma.employeeOffboarding.findMany({
@@ -217,7 +226,12 @@ export async function GET() {
       ])
 
       for (const onboarding of onboardings) {
-        addCount(onboardingCountByPersonalNumber, onboarding.personalNumber)
+        addCount(
+          onboarding.cancelledAt
+            ? onboardingCancelledCountByPersonalNumber
+            : onboardingCountByPersonalNumber,
+          onboarding.personalNumber
+        )
       }
 
       for (const offboarding of offboardings) {
@@ -231,6 +245,8 @@ export async function GET() {
       return serializeChange(record, {
         onboardingMatchesCount:
           onboardingCountByPersonalNumber.get(personalNumber) ?? 0,
+        onboardingCancelledMatchesCount:
+          onboardingCancelledCountByPersonalNumber.get(personalNumber) ?? 0,
         offboardingMatchesCount:
           offboardingCountByPersonalNumber.get(personalNumber) ?? 0,
       })

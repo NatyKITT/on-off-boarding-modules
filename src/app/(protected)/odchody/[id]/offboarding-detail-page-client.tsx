@@ -26,6 +26,7 @@ type LinkedOnboardingInfo = {
   probationEnd: string | null
   positionName: string | null
   exitDuringProbation: boolean
+  isCancelled: boolean
   label: string
   description: string
 }
@@ -165,7 +166,21 @@ type Props = {
 export function OffboardingDetailPageClient({ data }: Props) {
   const router = useRouter()
   const isReadonly = useIsReadonly()
-  const [isDeleting, setIsDeleting] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    open: boolean
+    checked: boolean
+    willReactivateProbation: boolean
+    linkedLabel: string | null
+    linkedChangesCount: number
+    loading: boolean
+  }>({
+    open: false,
+    checked: false,
+    willReactivateProbation: false,
+    linkedLabel: null,
+    linkedChangesCount: 0,
+    loading: false,
+  })
 
   const [successModal, setSuccessModal] = useState({
     open: false,
@@ -192,38 +207,61 @@ export function OffboardingDetailPageClient({ data }: Props) {
     data.titleAfter ?? ""
   }`.trim()
 
-  async function handleDelete() {
-    const confirmed = window.confirm("Opravdu chcete smazat tento záznam?")
-    if (!confirmed) return
+  async function openDeleteConfirm() {
+    setDeleteConfirm({
+      open: true,
+      checked: false,
+      willReactivateProbation: false,
+      linkedLabel: null,
+      linkedChangesCount: 0,
+      loading: true,
+    })
 
     try {
-      setIsDeleting(true)
-
-      let res = await fetch(`/api/odchody/${data.id}`, {
+      const res = await fetch(`/api/odchody/${data.id}?preview=true`, {
         method: "DELETE",
       })
+      const json = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        throw new Error(json?.message ?? "Nepodařilo se ověřit propojení.")
+      }
+
+      setDeleteConfirm({
+        open: true,
+        checked: true,
+        willReactivateProbation: Boolean(json?.data?.willReactivateProbation),
+        linkedLabel: json?.data?.linkedOnboarding?.label ?? null,
+        linkedChangesCount: json?.data?.linkedChangesCount ?? 0,
+        loading: false,
+      })
+    } catch {
+      setDeleteConfirm({
+        open: true,
+        checked: true,
+        willReactivateProbation: false,
+        linkedLabel: null,
+        linkedChangesCount: 0,
+        loading: false,
+      })
+    }
+  }
+
+  async function performDelete() {
+    setDeleteConfirm((prev) => ({ ...prev, loading: true }))
+
+    try {
+      let res = await fetch(
+        `/api/odchody/${data.id}${deleteConfirm.willReactivateProbation ? "?confirmReactivate=true" : ""}`,
+        { method: "DELETE" }
+      )
 
       let json = await res.json().catch(() => null)
 
       if (res.ok && json?.status === "confirm_required") {
-        const linkedName = json.linkedOnboarding?.positionName
-          ? ` (${json.linkedOnboarding.positionName})`
-          : ""
-
-        const confirmedReactivate = window.confirm(
-          `Tento odchod aktuálně pozastavuje zkušební dobu propojeného nástupu${linkedName}. ` +
-            "Smazáním záznamu se zkušební doba znovu aktivuje a cron k ní může znovu začít posílat výzvy. Pokračovat ve smazání?"
-        )
-
-        if (!confirmedReactivate) {
-          setIsDeleting(false)
-          return
-        }
-
         res = await fetch(`/api/odchody/${data.id}?confirmReactivate=true`, {
           method: "DELETE",
         })
-
         json = await res.json().catch(() => null)
       }
 
@@ -231,6 +269,14 @@ export function OffboardingDetailPageClient({ data }: Props) {
         throw new Error(json?.message ?? "Chyba při mazání.")
       }
 
+      setDeleteConfirm({
+        open: false,
+        checked: false,
+        willReactivateProbation: false,
+        linkedLabel: null,
+        linkedChangesCount: 0,
+        loading: false,
+      })
       setSuccessModal({
         open: true,
         title: "Záznam smazán",
@@ -242,14 +288,20 @@ export function OffboardingDetailPageClient({ data }: Props) {
         router.refresh()
       }, 1200)
     } catch (error) {
+      setDeleteConfirm({
+        open: false,
+        checked: false,
+        willReactivateProbation: false,
+        linkedLabel: null,
+        linkedChangesCount: 0,
+        loading: false,
+      })
       setErrorModal({
         open: true,
         title: "Chyba při mazání",
         message:
           error instanceof Error ? error.message : "Smazání se nezdařilo.",
       })
-    } finally {
-      setIsDeleting(false)
     }
   }
 
@@ -316,14 +368,16 @@ export function OffboardingDetailPageClient({ data }: Props) {
 
       {data.linkedOnboarding && (
         <div
-          className="
-            rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm
-            text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30
-            dark:text-amber-100
-          "
+          className={
+            data.linkedOnboarding.isCancelled
+              ? "rounded-lg border bg-muted/40 p-4 text-sm text-muted-foreground"
+              : "rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"
+          }
         >
           <div className="flex items-start gap-3">
-            <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-600 dark:text-amber-400" />
+            {!data.linkedOnboarding.isCancelled && (
+              <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-600 dark:text-amber-400" />
+            )}
 
             <div className="min-w-0 flex-1 space-y-2">
               <div className="font-semibold">{data.linkedOnboarding.label}</div>
@@ -414,13 +468,104 @@ export function OffboardingDetailPageClient({ data }: Props) {
         {!isCompleted && (
           <Button
             variant="destructive"
-            onClick={() => void handleDelete()}
-            disabled={isDeleting || isReadonly}
+            onClick={() => void openDeleteConfirm()}
+            disabled={deleteConfirm.loading || isReadonly}
           >
-            {isDeleting ? "Mažu..." : "Smazat"}
+            Smazat
           </Button>
         )}
       </div>
+
+      <Dialog
+        open={deleteConfirm.open}
+        onOpenChange={(open) => {
+          if (!open && !deleteConfirm.loading)
+            setDeleteConfirm({
+              open: false,
+              checked: false,
+              willReactivateProbation: false,
+              linkedLabel: null,
+              linkedChangesCount: 0,
+              loading: false,
+            })
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogTitle>Smazat záznam</DialogTitle>
+
+          {!deleteConfirm.checked ? (
+            <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+              <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              Ověřuji propojené záznamy…
+            </div>
+          ) : (
+            <div className="space-y-3 py-2 text-sm">
+              <p className="text-muted-foreground">
+                Opravdu chcete smazat tento záznam?
+              </p>
+
+              {deleteConfirm.willReactivateProbation && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+                  <p className="font-medium">
+                    Tento odchod aktuálně pozastavuje zkušební dobu propojeného
+                    nástupu. Smazáním záznamu se zkušební doba znovu aktivuje.
+                  </p>
+                  {deleteConfirm.linkedLabel && (
+                    <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                      {deleteConfirm.linkedLabel}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {deleteConfirm.linkedChangesCount > 0 && (
+                <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground">
+                  Propojeno i s {deleteConfirm.linkedChangesCount}{" "}
+                  {deleteConfirm.linkedChangesCount === 1
+                    ? "zaměstnaneckou změnou"
+                    : "zaměstnaneckými změnami"}{" "}
+                  podle osobního čísla (jen informační vazba).
+                </div>
+              )}
+
+              <p className="text-xs text-muted-foreground">
+                Záznam zůstane uložený a půjde ho kdykoliv obnovit v sekci
+                „Smazané záznamy“.
+              </p>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() =>
+                setDeleteConfirm({
+                  open: false,
+                  checked: false,
+                  willReactivateProbation: false,
+                  linkedLabel: null,
+                  linkedChangesCount: 0,
+                  loading: false,
+                })
+              }
+              disabled={deleteConfirm.loading}
+            >
+              Zrušit
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void performDelete()}
+              disabled={!deleteConfirm.checked || deleteConfirm.loading}
+              className="flex items-center gap-2"
+            >
+              {deleteConfirm.loading && deleteConfirm.checked && (
+                <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              )}
+              Smazat
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {!isCompleted && (
         <>

@@ -22,6 +22,7 @@ export type MinimalOnboardingLink = {
   actualStart: DateLike
   probationEnd: DateLike
   positionName?: string | null
+  cancelledAt?: DateLike
 }
 
 export type MinimalEmployeeChangeLink = {
@@ -74,6 +75,7 @@ export type LinkedOnboardingInfo = {
   probationEnd: string | null
   positionName: string | null
   exitDuringProbation: boolean
+  isCancelled: boolean
   label: string
   description: string
 }
@@ -416,10 +418,10 @@ export function buildLinkedOffboardingInfo(params: {
 
     const label =
       probationStopDecision === "STOP"
-        ? "Odešel ve zkušebce – hodnocení zastaveno"
+        ? "Odešel ve zkušební době – hodnocení zastaveno"
         : probationStopDecision === "KEEP"
-          ? "Odešel ve zkušebce – hodnocení pokračuje"
-          : "Odešel ve zkušebce – čeká na rozhodnutí HR"
+          ? "Odešel ve zkušební době – hodnocení pokračuje"
+          : "Odešel ve zkušební době – čeká na rozhodnutí HR"
 
     const description =
       probationStopDecision === "STOP"
@@ -474,10 +476,13 @@ export function buildLinkedOnboardingInfo(params: {
 
   if (!onboarding) return null
 
+  const isCancelled = Boolean(onboarding.cancelledAt)
+
   const exitDuringProbation = Boolean(
-    onboarding.probationEnd &&
-    exitDate &&
-    isSameOrBefore(exitDate, onboarding.probationEnd)
+    !isCancelled &&
+      onboarding.probationEnd &&
+      exitDate &&
+      isSameOrBefore(exitDate, onboarding.probationEnd)
   )
 
   return {
@@ -487,12 +492,19 @@ export function buildLinkedOnboardingInfo(params: {
     probationEnd: toIso(onboarding.probationEnd),
     positionName: onboarding.positionName ?? null,
     exitDuringProbation,
-    label: exitDuringProbation ? "Odchod ve zkušebce" : "Existuje v nástupech",
-    description: exitDuringProbation
-      ? `Osobní číslo je propojené s nástupem. Odchod spadá do zkušební doby ukončené ${formatDateCz(
-        onboarding.probationEnd
-      )}.`
-      : "Osobní číslo je propojené se záznamem v nástupech.",
+    isCancelled,
+    label: isCancelled
+      ? "Neuskutečněný nástup"
+      : exitDuringProbation
+        ? "Odchod ve zkušební době"
+        : "Existuje v nástupech",
+    description: isCancelled
+      ? "Osobní číslo je evidované u neuskutečněného nástupu (zaměstnanec nenastoupil) – jde jen o informační vazbu."
+      : exitDuringProbation
+        ? `Osobní číslo je propojené s nástupem. Odchod spadá do zkušební doby ukončené ${formatDateCz(
+            onboarding.probationEnd
+          )}.`
+        : "Osobní číslo je propojené se záznamem v nástupech.",
   }
 }
 

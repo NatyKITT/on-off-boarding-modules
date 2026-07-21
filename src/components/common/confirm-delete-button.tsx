@@ -5,6 +5,7 @@ import { type ComponentProps } from "react"
 import { useRouter } from "next/navigation"
 import { Trash2 } from "lucide-react"
 
+import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
 
 import {
@@ -45,6 +46,7 @@ export function ConfirmDeleteButton({
   label = "Smazat",
 }: Props) {
   const router = useRouter()
+  const { toast } = useToast()
   const [open, setOpen] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
 
@@ -63,9 +65,13 @@ export function ConfirmDeleteButton({
         router.refresh()
       }
       setOpen(false)
-      alert("Záznam byl smazán.")
+      toast({ title: "Smazáno", description: "Záznam byl smazán." })
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Mazání se nezdařilo.")
+      toast({
+        title: "Chyba při mazání",
+        description: e instanceof Error ? e.message : "Mazání se nezdařilo.",
+        variant: "destructive",
+      })
     } finally {
       setBusy(false)
     }
