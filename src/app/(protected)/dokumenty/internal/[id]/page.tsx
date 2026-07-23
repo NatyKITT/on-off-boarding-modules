@@ -9,6 +9,10 @@ import {
 
 import { InternalDocumentShell } from "./internal-document-shell"
 
+export const dynamic = "force-dynamic"
+export const fetchCache = "force-no-store"
+export const revalidate = 0
+
 type PageProps = {
   params: { id: string }
 }
@@ -42,6 +46,9 @@ export default async function InternalDocumentPage({ params }: PageProps) {
       data: true,
       createdAt: true,
       completedAt: true,
+      lastEditedBy: true,
+      lastEditedAt: true,
+      lastEditSummary: true,
       onboarding: {
         select: {
           id: true,

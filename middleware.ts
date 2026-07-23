@@ -156,7 +156,9 @@ function isReadonlyAllowedMutatingApi(path: string) {
     path === "/api/user/vyresit" ||
     path.startsWith("/api/odchody/public/") ||
     path.startsWith("/api/nastupy/public/") ||
-    /^\/api\/odchody\/\d+\/exit-checklist(\/.*)?$/.test(path)
+    /^\/api\/odchody\/\d+\/exit-checklist(\/.*)?$/.test(path) ||
+    path === "/api/statistiky/pdf" ||
+    path === "/api/reporty/pdf"
   )
 }
 

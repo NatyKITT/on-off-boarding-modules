@@ -44,6 +44,7 @@ type DbUser = {
   role: Role
   canAccessApp: boolean
   createdAt: string
+  hasSignedIn: boolean
 }
 
 type EnvUser = {
@@ -340,7 +341,9 @@ function DbUsersList({
                     <p className="truncate text-sm font-medium">{fullName}</p>
                   ) : (
                     <p className="text-sm italic text-muted-foreground">
-                      Nepřihlášen/a
+                      {user.hasSignedIn
+                        ? "Bez vyplněného jména"
+                        : "Nepřihlášen/a"}
                     </p>
                   )}
 
@@ -355,16 +358,29 @@ function DbUsersList({
               </div>
 
               <div className="flex items-center justify-between gap-2">
-                <Badge
-                  variant={user.canAccessApp ? "default" : "outline"}
-                  className={
-                    user.canAccessApp
-                      ? "border-green-200 bg-green-100 text-xs text-green-800"
-                      : "text-xs text-muted-foreground"
-                  }
-                >
-                  {user.canAccessApp ? "Aplikace" : "Výstupní listy"}
-                </Badge>
+                <div className="flex flex-wrap items-center gap-1">
+                  <Badge
+                    variant={user.canAccessApp ? "default" : "outline"}
+                    className={
+                      user.canAccessApp
+                        ? "border-green-200 bg-green-100 text-xs text-green-800"
+                        : "text-xs text-muted-foreground"
+                    }
+                  >
+                    {user.canAccessApp ? "Aplikace" : "Výstupní listy"}
+                  </Badge>
+
+                  <Badge
+                    variant="outline"
+                    className={
+                      user.hasSignedIn
+                        ? "border-green-200 bg-green-50 text-xs text-green-800"
+                        : "text-xs text-muted-foreground"
+                    }
+                  >
+                    {user.hasSignedIn ? "Přihlášen/a" : "Nepřihlášen/a"}
+                  </Badge>
+                </div>
 
                 <Select
                   value={user.role}
@@ -426,6 +442,9 @@ function DbUsersList({
                 Přístup
               </th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                Přihlášení
+              </th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
                 Role
               </th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">
@@ -443,7 +462,7 @@ function DbUsersList({
                 <td className="px-4 py-3">
                   {[user.name, user.surname].filter(Boolean).join(" ") || (
                     <span className="italic text-muted-foreground">
-                      Nepřihlášen/a
+                      {user.hasSignedIn ? "Bez vyplněného jména" : "—"}
                     </span>
                   )}
                 </td>
@@ -460,6 +479,18 @@ function DbUsersList({
                   ) : (
                     <Badge variant="outline" className="text-muted-foreground">
                       Výstupní listy
+                    </Badge>
+                  )}
+                </td>
+
+                <td className="px-4 py-3">
+                  {user.hasSignedIn ? (
+                    <Badge className="border-green-200 bg-green-50 text-green-800">
+                      Přihlášen/a
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-muted-foreground">
+                      Nepřihlášen/a
                     </Badge>
                   )}
                 </td>

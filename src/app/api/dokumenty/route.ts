@@ -47,6 +47,8 @@ export async function GET(req: NextRequest) {
       accessHash: true,
       isLocked: true,
       expiresAt: true,
+      lastEditedBy: true,
+      lastEditedAt: true,
     },
     orderBy: { createdAt: "desc" },
   })

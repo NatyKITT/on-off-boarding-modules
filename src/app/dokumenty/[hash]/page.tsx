@@ -1,9 +1,15 @@
-import { AlertCircle } from "lucide-react"
-
 import { prisma } from "@/lib/db"
 import { buildEmployeeMeta } from "@/lib/employee-meta"
 
 import { PublicDocumentShell } from "./public-document-shell"
+import {
+  PublicDocumentInvalid,
+  PublicDocumentThankYou,
+} from "./public-document-status"
+
+export const dynamic = "force-dynamic"
+export const fetchCache = "force-no-store"
+export const revalidate = 0
 
 type PageProps = { params: { hash: string } }
 
@@ -32,19 +38,13 @@ export default async function PublicDocumentPage({ params }: PageProps) {
   })
 
   const isExpired = !!doc?.expiresAt && doc.expiresAt < new Date()
-  const isInvalid = !doc || doc.status !== "DRAFT" || isExpired
 
-  if (isInvalid) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center px-4 text-center">
-        <AlertCircle className="mb-4 size-12 text-red-500" />
-        <h1 className="text-2xl font-bold">Odkaz není platný</h1>
-        <p className="mt-2 max-w-md text-muted-foreground">
-          Dokument buď neexistuje, jeho platnost již vypršela, nebo byl již
-          vyplněn.
-        </p>
-      </div>
-    )
+  if (doc && doc.status !== "DRAFT" && !isExpired) {
+    return <PublicDocumentThankYou />
+  }
+
+  if (!doc || isExpired) {
+    return <PublicDocumentInvalid />
   }
 
   const employeeMeta = doc.onboarding

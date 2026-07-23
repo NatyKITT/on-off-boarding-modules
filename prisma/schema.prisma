@@ -72,6 +72,8 @@ enum MailJobType {
   GENERIC_EMAIL
 
   MENTOR_ASSIGNED
+
+  STATISTICS_REPORT
 }
 
 enum MailJobStatus {
@@ -628,19 +630,22 @@ model SystemSettings {
 }
 
 model EmploymentDocument {
-  id           Int                    @id @default(autoincrement())
-  isLocked     Boolean                @default(false)
-  onboardingId Int
-  onboarding   EmployeeOnboarding     @relation(fields: [onboardingId], references: [id])
-  type         EmploymentDocumentType
-  status       DocumentStatus         @default(DRAFT)
-  data         Json
-  fileUrl      String?
-  accessHash   String                 @unique @default(cuid()) @map("access_hash")
-  expiresAt    DateTime?              @map("expires_at")
-  completedAt  DateTime?              @map("completed_at")
-  sentAt       DateTime?              @map("sent_at")
-  sentBy       String?                @map("sent_by")
+  id              Int                    @id @default(autoincrement())
+  isLocked        Boolean                @default(false)
+  onboardingId    Int
+  onboarding      EmployeeOnboarding     @relation(fields: [onboardingId], references: [id])
+  type            EmploymentDocumentType
+  status          DocumentStatus         @default(DRAFT)
+  data            Json
+  fileUrl         String?
+  accessHash      String                 @unique @default(cuid()) @map("access_hash")
+  expiresAt       DateTime?              @map("expires_at")
+  completedAt     DateTime?              @map("completed_at")
+  sentAt          DateTime?              @map("sent_at")
+  sentBy          String?                @map("sent_by")
+  lastEditedBy    String?                @map("last_edited_by")
+  lastEditedAt    DateTime?              @map("last_edited_at")
+  lastEditSummary String?                @map("last_edit_summary") @db.Text
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -879,4 +884,20 @@ model ProbationEvaluation {
   @@index([formType])
   @@index([status])
   @@index([evaluatedAt])
+}
+
+model StatisticsSavedView {
+  id Int @id @default(autoincrement())
+
+  name        String
+  metric      String
+  dimension   String
+  displayType String
+  filters     Json
+
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("statistics_saved_views")
 }

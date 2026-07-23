@@ -1,6 +1,37 @@
-import { getEmployeeByPositionNum } from "@/lib/eos-employees"
-import { getSuperiorByGid } from "@/lib/eos-superior"
-import { snapshotFromSuperior, toSupervisorFields } from "@/lib/person-snapshot"
+import type { Position } from "@/types/position"
+
+import {
+  getEmployeesByPersonalNumber,
+  type Employee,
+} from "@/lib/eos-employees"
+import { getSuperiorByPersonalNumber } from "@/lib/eos-superior"
+import {
+  snapshotFromEmployee,
+  snapshotFromSuperior,
+  toSupervisorFields,
+} from "@/lib/person-snapshot"
+import { getPositions } from "@/lib/systemizace"
+
+const DEPARTMENT_HEAD_UNIT_NAME = "Vedoucí odboru"
+
+// Číslo pozice se mezi systemizací a EOS neshoduje spolehlivě (např. pozice
+// "000001" je v systemizaci tajemník, ale v EOS má kód "000001" starosta -
+// tajemník tam má úplně jiný kód). Jediný identifikátor, který sedí v obou
+// systémech stejně, je osobní číslo aktuálně přiřazené osoby.
+async function findEosEmployeeForPosition(
+  position: Position
+): Promise<Employee | null> {
+  const personalNumber = position.personPersonalNumber?.trim()
+  if (!personalNumber) return null
+
+  const matches = await getEmployeesByPersonalNumber(personalNumber)
+
+  return (
+    matches.find((e) => e.personalNumber === personalNumber) ??
+    matches[0] ??
+    null
+  )
+}
 
 export async function resolveSupervisorFromPositionNum(positionNum: string) {
   try {
@@ -9,20 +40,60 @@ export async function resolveSupervisorFromPositionNum(positionNum: string) {
       return null
     }
 
-    const employee = await getEmployeeByPositionNum(normalizedPositionNum)
+    const positions = await getPositions()
+    const target = positions.find((p) => p.num === normalizedPositionNum)
 
-    if (!employee?.gid) {
+    if (!target) {
       console.warn(
-        `V EOS nebyla nalezena osoba pro pozici ${normalizedPositionNum}`
+        `Pozice ${normalizedPositionNum} nebyla nalezena v systemizaci`
       )
       return null
     }
 
-    const superior = await getSuperiorByGid(employee.gid)
+    const departmentHeadPosition = positions.find(
+      (p) =>
+        p.lead === "1" &&
+        p.dept_name === target.dept_name &&
+        p.unit_name === DEPARTMENT_HEAD_UNIT_NAME &&
+        p.num !== target.num
+    )
+
+    if (departmentHeadPosition) {
+      const employee = await findEosEmployeeForPosition(departmentHeadPosition)
+
+      if (!employee) {
+        console.warn(
+          `Vedoucí odboru na pozici ${departmentHeadPosition.num} (${departmentHeadPosition.name}) nemá v EOS obsazenou osobu`
+        )
+        return null
+      }
+
+      const snapshot = snapshotFromEmployee(employee, "EOS")
+
+      return {
+        snapshot,
+        fields: toSupervisorFields(snapshot, false),
+      }
+    }
+
+    // Cílová pozice je sama vedoucí odboru (případně tajemník) - systemizace
+    // neobsahuje hierarchii mezi odbory, takže se nadřízený dohledá přes
+    // skutečnou organizační strukturu v EOS (vedoucí odboru -> tajemník ->
+    // starosta), podle osobního čísla aktuální osoby na pozici.
+    const personalNumber = target.personPersonalNumber?.trim()
+
+    if (!personalNumber) {
+      console.warn(
+        `Pozice ${normalizedPositionNum} nemá v systemizaci přiřazené osobní číslo, nelze dohledat nadřízeného`
+      )
+      return null
+    }
+
+    const superior = await getSuperiorByPersonalNumber(personalNumber)
 
     if (!superior) {
       console.warn(
-        `Pro osobu na pozici ${normalizedPositionNum} s GID ${employee.gid} nebyl v EOS nalezen vedoucí`
+        `EOS nevrátil nadřízeného pro pozici ${normalizedPositionNum}`
       )
       return null
     }

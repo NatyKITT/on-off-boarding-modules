@@ -1,5 +1,7 @@
 import { env } from "@/env.mjs"
 
+import { getPositions } from "@/lib/systemizace"
+
 export type EosPerson = {
   id?: string
   gid?: string
@@ -20,6 +22,7 @@ export type EosPerson = {
     name?: string | null
     parent_data?: { name?: string | null } | null
   } | null
+  terminated?: string | null
 }
 
 type EosListResponse = {
@@ -42,6 +45,7 @@ export type Employee = {
   unitName: string
   userName?: string | null
   label: string
+  terminated: string | null
 }
 
 const EOS_API_BASE = env.EOS_API_BASE || "https://eos.pha6.cz"
@@ -104,7 +108,38 @@ function mapPerson(p: EosPerson): Employee {
     unitName,
     userName: guessUserName(email),
     label,
+    terminated: p.terminated?.trim() || null,
   }
+}
+
+// EOS interní kód pozice (role.code) se se skutečným číslem pozice v
+// systemizaci nemusí shodovat (např. tajemník má v EOS jiný kód, než jaký
+// má jeho pozice v systemizaci). Osobní číslo sedí v obou systémech stejně,
+// takže se přes něj číslo pozice opraví na to, které platí v systemizaci.
+async function correctPositionNumbers(
+  employees: Employee[]
+): Promise<Employee[]> {
+  if (employees.length === 0) return employees
+
+  const positions = await getPositions()
+  const positionNumByPersonalNumber = new Map<string, string>()
+
+  for (const position of positions) {
+    const personalNumber = position.personPersonalNumber?.trim()
+    if (personalNumber && !positionNumByPersonalNumber.has(personalNumber)) {
+      positionNumByPersonalNumber.set(personalNumber, position.num)
+    }
+  }
+
+  return employees.map((employee) => {
+    const correctedNum = positionNumByPersonalNumber.get(
+      employee.personalNumber
+    )
+
+    return correctedNum && correctedNum !== employee.positionNum
+      ? { ...employee, positionNum: correctedNum }
+      : employee
+  })
 }
 
 async function fetchPeople(url: URL): Promise<Employee[]> {
@@ -129,7 +164,11 @@ async function fetchPeople(url: URL): Promise<Employee[]> {
       ? json.results
       : []
 
-  return Array.isArray(raw) ? raw.filter(isEosPerson).map(mapPerson) : []
+  const mapped = Array.isArray(raw)
+    ? raw.filter(isEosPerson).map(mapPerson)
+    : []
+
+  return correctPositionNumbers(mapped)
 }
 
 export async function getEmployees(query: string): Promise<Employee[]> {

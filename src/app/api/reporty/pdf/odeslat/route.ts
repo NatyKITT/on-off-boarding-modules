@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server"
 import { auth } from "@/auth"
 import { z } from "zod"
 
-import { logEmailHistory, sendMail } from "@/lib/email"
+import { EMAIL_FOOTER_HTML, logEmailHistory, sendMail } from "@/lib/email"
 import { canSendMonthlyReports } from "@/lib/rbac"
 import {
   buildReportSections,
@@ -88,8 +88,8 @@ export async function POST(request: NextRequest) {
           </div>
         </div>
 
-        <p style="margin: 14px 0 0 0; color: #6b7280; font-size: 12px;">
-          Tento e-mail byl automaticky vygenerován systémem On-Off-Boarding Modul ÚMČ Praha 6.
+        <p style="margin: 14px 0 0 0; color: #6b7280; font-size: 12px; line-height: 1.5;">
+          ${EMAIL_FOOTER_HTML}
         </p>
       </div>
     `

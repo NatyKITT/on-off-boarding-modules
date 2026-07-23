@@ -204,7 +204,7 @@ export const authConfig = {
       return baseUrl
     },
 
-    async jwt({ token, user, profile, trigger }) {
+    async jwt({ token, user, profile }) {
       const email =
         (typeof token.email === "string" && token.email) ||
         (typeof user?.email === "string" && user.email) ||
@@ -230,13 +230,7 @@ export const authConfig = {
         token.name = user.name
       }
 
-      const shouldLoadFromDb =
-        Boolean(user) ||
-        trigger === "update" ||
-        !token.role ||
-        typeof token.canAccessApp === "undefined"
-
-      if (shouldLoadFromDb && userId && token.email) {
+      if (userId && token.email) {
         const dbUser = await syncUserAccess(userId, String(token.email))
 
         if (dbUser) {

@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
 import type { DocumentStatus, EmploymentDocumentType } from "@prisma/client"
 import { format } from "date-fns"
 import { cs } from "date-fns/locale"
@@ -44,7 +43,8 @@ type EmploymentDocumentLite = {
   publicUrl: string | null
   isLocked: boolean
   accessHash: string | null
-  data?: unknown
+  lastEditedBy?: string | null
+  lastEditedAt?: string | null
 }
 
 type EmployeeDocumentsDialogProps = {
@@ -106,17 +106,16 @@ function formatDateTime(value?: string | Date | null) {
   return format(date, "d.M.yyyy H:mm", { locale: cs })
 }
 
-function getDocumentData(value: unknown) {
-  return value && typeof value === "object"
-    ? (value as {
-        submittedAt?: string | null
-        submittedByName?: string | null
-        submittedByEmail?: string | null
-        lastEditedAt?: string | null
-        lastEditedByName?: string | null
-        lastEditedByEmail?: string | null
-      })
-    : {}
+function wasEditedAfterCompletion(
+  completedAt?: string | Date | null,
+  lastEditedAt?: string | Date | null
+) {
+  if (!completedAt || !lastEditedAt) return false
+
+  const completed = new Date(completedAt).getTime()
+  const edited = new Date(lastEditedAt).getTime()
+
+  return edited - completed > 60_000
 }
 
 function TabButton({
@@ -179,12 +178,9 @@ function DocumentCard({
   onRegenerate,
   onReset,
 }: DocumentCardProps) {
-  const data = getDocumentData(doc.data)
-
-  const submittedAt =
-    formatDateTime(data.submittedAt) ?? formatDateTime(doc.completedAt)
-
-  const lastEditedAt = formatDateTime(data.lastEditedAt)
+  const submittedAt = formatDateTime(doc.completedAt)
+  const lastEditedAt = formatDateTime(doc.lastEditedAt)
+  const edited = wasEditedAfterCompletion(doc.completedAt, doc.lastEditedAt)
 
   function stopDialogActionEvent(event: React.SyntheticEvent) {
     event.preventDefault()
@@ -200,20 +196,17 @@ function DocumentCard({
           <div className="space-y-0.5 text-xs text-muted-foreground">
             <div>Vytvořeno: {formatDateTime(doc.createdAt) ?? "—"}</div>
 
-            {submittedAt && <div>Vyplněno: {submittedAt}</div>}
-
-            {(data.submittedByName || data.submittedByEmail) && (
+            {submittedAt && (
               <div>
-                Vyplnil(a):{" "}
-                {data.submittedByName || data.submittedByEmail || "—"}
+                Vyplněno: {submittedAt}
+                {!edited && doc.lastEditedBy ? `, ${doc.lastEditedBy}` : ""}
               </div>
             )}
 
-            {lastEditedAt && (
+            {edited && lastEditedAt && (
               <div>
-                Poslední úprava: {lastEditedAt}
-                {(data.lastEditedByName || data.lastEditedByEmail) &&
-                  ` · ${data.lastEditedByName || data.lastEditedByEmail}`}
+                Naposledy upraveno: {lastEditedAt}
+                {doc.lastEditedBy ? `, ${doc.lastEditedBy}` : ""}
               </div>
             )}
           </div>
@@ -263,6 +256,23 @@ function DocumentCard({
         )}
 
         <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="gap-1.5"
+          onClick={onRegenerate}
+          disabled={regeneratingId === doc.id || readOnly}
+          title="Vymazat vyplněná data a vygenerovat nový odkaz k vyplnění"
+        >
+          {regeneratingId === doc.id ? (
+            <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+          ) : (
+            <RotateCw className="size-3" />
+          )}
+          Nový odkaz
+        </Button>
+
+        <Button
           size="icon"
           variant={doc.isLocked ? "default" : "outline"}
           className="size-7"
@@ -279,26 +289,11 @@ function DocumentCard({
 
         <Button
           size="icon"
-          variant="outline"
-          className="size-7"
-          onClick={onRegenerate}
-          disabled={regeneratingId === doc.id || readOnly}
-          title="Obnovit odkaz"
-        >
-          {regeneratingId === doc.id ? (
-            <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-          ) : (
-            <RotateCw className="size-3" />
-          )}
-        </Button>
-
-        <Button
-          size="icon"
           variant="ghost"
           className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
           onClick={onReset}
           disabled={resettingId === doc.id || readOnly}
-          title="Vymazat data"
+          title="Vymazat data (stejný odkaz zůstane platný)"
         >
           {resettingId === doc.id && docToReset?.id === doc.id ? (
             <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -333,6 +328,7 @@ export function EmployeeDocumentsDialog({
   readOnly = false,
 }: EmployeeDocumentsDialogProps) {
   const [open, setOpen] = useState(false)
+
   const [activeTab, setActiveTab] = useState<ActiveTab>("onboarding")
 
   const [documents, setDocuments] = useState<EmploymentDocumentLite[]>([])
@@ -348,6 +344,11 @@ export function EmployeeDocumentsDialog({
   const [emailSelection, setEmailSelection] = useState<
     EmploymentDocumentType[]
   >([])
+  const [pdfEmailSelection, setPdfEmailSelection] = useState<
+    EmploymentDocumentType[]
+  >([])
+  const [sendingPdf, setSendingPdf] = useState(false)
+  const [pdfSentTypes, setPdfSentTypes] = useState<EmploymentDocumentType[]>([])
   const [sentTypes, setSentTypes] = useState<EmploymentDocumentType[]>([])
   const [needsResendTypes, setNeedsResendTypes] = useState<
     EmploymentDocumentType[]
@@ -362,7 +363,6 @@ export function EmployeeDocumentsDialog({
     useState<EmploymentDocumentLite | null>(null)
 
   const { toast } = useToast()
-  const router = useRouter()
 
   const knownDocuments = useMemo(
     () => documents.filter((doc) => ALL_TYPES.includes(doc.type)),
@@ -372,6 +372,11 @@ export function EmployeeDocumentsDialog({
   const onboardingDocuments = useMemo(
     () => knownDocuments.filter((doc) => ONBOARDING_TYPES.includes(doc.type)),
     [knownDocuments]
+  )
+
+  const completedOnboardingDocuments = useMemo(
+    () => onboardingDocuments.filter((doc) => doc.status !== "DRAFT"),
+    [onboardingDocuments]
   )
 
   const documentsByType = useMemo(() => {
@@ -436,6 +441,7 @@ export function EmployeeDocumentsDialog({
     setEmailInput(email)
     setSentTypes([])
     setNeedsResendTypes([])
+    setPdfSentTypes([])
     setError(null)
 
     void (async () => {
@@ -446,6 +452,13 @@ export function EmployeeDocumentsDialog({
         .map((doc) => doc.type)
 
       setEmailSelection(defaultSelection)
+
+      const defaultPdfSelection = list
+        .filter((doc) => ONBOARDING_TYPES.includes(doc.type))
+        .filter((doc) => doc.status !== "DRAFT")
+        .map((doc) => doc.type)
+
+      setPdfEmailSelection(defaultPdfSelection)
     })()
   }, [open, email, loadDocuments])
 
@@ -629,6 +642,61 @@ export function EmployeeDocumentsDialog({
     }
   }
 
+  async function handleSendPdf() {
+    const selectedIds = completedOnboardingDocuments
+      .filter((doc) => pdfEmailSelection.includes(doc.type))
+      .map((doc) => doc.id)
+
+    if (!selectedIds.length || !emailInput) return
+
+    setSendingPdf(true)
+    setError(null)
+
+    try {
+      const res = await fetch("/api/dokumenty/send-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: emailInput,
+          onboardingId,
+          documentIds: selectedIds,
+        }),
+      })
+
+      if (!res.ok) {
+        const response = await res.json().catch(() => null)
+
+        throw new Error(response?.message ?? "Odeslání PDF se nezdařilo.")
+      }
+
+      setPdfSentTypes(
+        completedOnboardingDocuments
+          .filter((doc) => selectedIds.includes(doc.id))
+          .map((doc) => doc.type)
+      )
+
+      toast({
+        title: "PDF odesláno",
+        description: "Vyplněné dokumenty byly odeslány e-mailem v příloze.",
+      })
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Odeslání PDF se nezdařilo. Zkuste to prosím znovu."
+
+      setError(message)
+
+      toast({
+        title: "Chyba při odesílání PDF",
+        description: message,
+        variant: "destructive",
+      })
+    } finally {
+      setSendingPdf(false)
+    }
+  }
+
   async function handleResetDocumentConfirmed(doc: EmploymentDocumentLite) {
     setResettingId(doc.id)
     setError(null)
@@ -750,8 +818,10 @@ export function EmployeeDocumentsDialog({
   function openDocument(doc: EmploymentDocumentLite) {
     setOpen(false)
 
+    // Plná navigace obchází klientskou router cache Next.js, která by
+    // jinak mohla po vyplnění dokumentu zobrazit starou (prázdnou) verzi.
     window.setTimeout(() => {
-      router.push(`/dokumenty/internal/${doc.id}`)
+      window.location.href = `/dokumenty/internal/${doc.id}`
     }, 80)
   }
 
@@ -853,8 +923,9 @@ export function EmployeeDocumentsDialog({
                         variant="outline"
                         onClick={() => void loadDocuments()}
                         disabled={loading}
+                        title="Znovu načíst aktuální stav dokumentů (např. pokud byly upraveny jinde)"
                       >
-                        Obnovit
+                        Obnovit seznam
                       </Button>
                     </div>
 
@@ -1031,6 +1102,89 @@ export function EmployeeDocumentsDialog({
                     Odeslat e-mail s odkazy
                   </Button>
                 </section>
+
+                {completedOnboardingDocuments.length > 0 && (
+                  <section className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm">
+                    <div className="font-medium">
+                      Odeslat vyplněné PDF e-mailem
+                    </div>
+
+                    <p className="text-xs text-muted-foreground">
+                      Na níže uvedenou adresu bude odeslán e-mail s vyplněnými
+                      dokumenty přiloženými jako PDF.
+                    </p>
+
+                    <Input
+                      type="email"
+                      value={emailInput}
+                      onChange={(event) => setEmailInput(event.target.value)}
+                      placeholder="e-mail příjemce"
+                    />
+
+                    <div className="mt-2 grid gap-2 md:grid-cols-2">
+                      {ONBOARDING_TYPES.map((type) => {
+                        const doc = documentsByType.get(type)
+
+                        if (!doc || doc.status === "DRAFT") return null
+
+                        const checked = pdfEmailSelection.includes(type)
+
+                        return (
+                          <label
+                            key={type}
+                            className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-xs md:text-sm"
+                          >
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={(value) => {
+                                const isChecked = value === true
+
+                                setPdfEmailSelection((previous) =>
+                                  isChecked
+                                    ? [...previous, type]
+                                    : previous.filter((item) => item !== type)
+                                )
+                              }}
+                            />
+
+                            <span className="flex-1">{typeLabel(type)}</span>
+
+                            <span className="text-[10px] text-muted-foreground">
+                              {statusLabel(doc.status)}
+                            </span>
+                          </label>
+                        )
+                      })}
+                    </div>
+
+                    <Button
+                      size="sm"
+                      onClick={() => void handleSendPdf()}
+                      disabled={
+                        sendingPdf ||
+                        readOnly ||
+                        !emailInput ||
+                        !pdfEmailSelection.some((type) =>
+                          completedOnboardingDocuments.some(
+                            (doc) => doc.type === type
+                          )
+                        )
+                      }
+                      className="mt-1 flex items-center gap-2"
+                    >
+                      {sendingPdf && (
+                        <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                      )}
+                      Odeslat PDF e-mailem
+                    </Button>
+
+                    {pdfSentTypes.length > 0 && (
+                      <span className="block text-[10px] text-emerald-600">
+                        PDF odesláno
+                      </span>
+                    )}
+                  </section>
+                )}
               </>
             )}
 
@@ -1094,23 +1248,32 @@ export function EmployeeDocumentsDialog({
         >
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Obnovit odkaz na dokument?</AlertDialogTitle>
+              <AlertDialogTitle>
+                Vymazat data a vygenerovat nový odkaz?
+              </AlertDialogTitle>
               <AlertDialogDescription>
-                Vygeneruje se <strong>nový odkaz</strong>. Starý odkaz přestane
-                fungovat. <strong>Poté je potřeba e-mail odeslat znovu.</strong>
+                <strong>
+                  Veškerá dosud vyplněná data budou nenávratně smazána
+                </strong>{" "}
+                a dokument se vrátí do stavu „Čeká na vyplnění“.
+                <br />
+                Zároveň se vygeneruje <strong>nový odkaz</strong> platný 14 dní.
+                Starý odkaz přestane fungovat.{" "}
+                <strong>Poté je potřeba e-mail odeslat znovu.</strong>
               </AlertDialogDescription>
             </AlertDialogHeader>
 
             <AlertDialogFooter>
               <AlertDialogCancel>Zrušit</AlertDialogCancel>
               <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                 onClick={() => {
                   if (docToRegenerate) {
                     void handleRegenerateConfirmed(docToRegenerate)
                   }
                 }}
               >
-                Obnovit odkaz
+                Vymazat a vygenerovat nový odkaz
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

@@ -2,9 +2,8 @@
 
 import * as React from "react"
 import { useTransition } from "react"
-import Image from "next/image"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { CheckCircle, PlusCircle, XCircle } from "lucide-react"
+import { PlusCircle, XCircle } from "lucide-react"
 import { useFieldArray, useForm } from "react-hook-form"
 
 import {
@@ -14,6 +13,7 @@ import {
 
 import { useToast } from "@/hooks/use-toast"
 import { EmployeeMeta } from "@/lib/employee-meta"
+import { ServerValidationError } from "@/lib/server-validation-error"
 import {
   languageLevelEnum,
   personalQuestionnaireSchema,
@@ -67,6 +67,74 @@ export type PersonalQuestionnaireFormProps =
 
 type EducationEntry = PersonalQuestionnaireSchema["education"][number]
 
+function buildBaseDefaultValues(
+  employeeMeta?: EmployeeMeta
+): Partial<PersonalQuestionnaireSchema> {
+  return {
+    lastName: employeeMeta?.lastName ?? "",
+    firstName: employeeMeta?.firstName ?? "",
+    titleBefore: employeeMeta?.titleBefore ?? "",
+    titleAfter: employeeMeta?.titleAfter ?? "",
+    academicDegrees: "",
+    maidenName: "",
+    otherSurnames: "",
+    birthDate: "",
+    birthNumber: "",
+    birthPlace: "",
+    birthDistrict: "",
+    birthState: "",
+    phone: "",
+    citizenship: "",
+    dataBoxDelivery: undefined,
+    dataBoxId: "",
+    maritalStatus: "SINGLE",
+    foreignPermitFrom: "",
+    foreignPermitTo: "",
+    foreignPermitAuthority: "",
+    permanentStreet: "",
+    permanentHouseNumber: "",
+    permanentCity: "",
+    permanentPostcode: "",
+    correspondenceStreet: "",
+    correspondenceHouseNumber: "",
+    correspondenceCity: "",
+    correspondencePostcode: "",
+    healthInsuranceCompany: "",
+    bankAccountNumber: "",
+    bankName: "",
+    maintenanceInfo: "",
+    isDisabledPerson: undefined,
+    receivesPensionBenefits: undefined,
+    typePensionBenefits: "",
+    disabilityDegree: "NONE",
+    hasCertificateManagement: undefined,
+    hasCertificateSpecial: undefined,
+    certificateSpecialName: "",
+    hasCertificateTraining: undefined,
+    hasCertificateGeneral: undefined,
+    languages: [
+      { name: "Angličtina" },
+      { name: "Němčina" },
+      { name: "Španělština" },
+      { name: "Francouzština" },
+    ] as PersonalQuestionnaireSchema["languages"],
+    education: [
+      {
+        level: "ZAKLADNI",
+        schoolType: "",
+        semesters: "",
+        studyForm: "DENNI",
+        graduationYear: "",
+        examType: "",
+      },
+    ],
+    familyRelations: "",
+    finalRequestPayrollTransfer: undefined,
+    finalReadAndUnderstood: undefined,
+    finalTruthfulnessConfirm: undefined,
+  }
+}
+
 export function PersonalQuestionnaireForm(
   props: PersonalQuestionnaireFormProps
 ) {
@@ -77,74 +145,17 @@ export function PersonalQuestionnaireForm(
   const [resultModal, setResultModal] = React.useState<
     "success" | "error" | null
   >(null)
+  const [errorMessage, setErrorMessage] = React.useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
   const form = useForm<PersonalQuestionnaireSchema>({
     mode: "onChange",
     resolver: zodResolver(personalQuestionnaireSchema),
-    defaultValues: (props.initialData as
-      | PersonalQuestionnaireSchema
-      | undefined) ?? {
-      lastName: "",
-      firstName: "",
-      titleBefore: "",
-      titleAfter: "",
-      academicDegrees: "",
-      maidenName: "",
-      otherSurnames: "",
-      birthDate: "",
-      birthNumber: "",
-      birthPlace: "",
-      birthDistrict: "",
-      birthState: "",
-      phone: "",
-      citizenship: "",
-      dataBoxDelivery: undefined,
-      dataBoxId: "",
-      maritalStatus: "SINGLE",
-      foreignPermitFrom: "",
-      foreignPermitTo: "",
-      foreignPermitAuthority: "",
-      permanentStreet: "",
-      permanentHouseNumber: "",
-      permanentCity: "",
-      permanentPostcode: "",
-      correspondenceStreet: "",
-      correspondenceHouseNumber: "",
-      correspondenceCity: "",
-      correspondencePostcode: "",
-      healthInsuranceCompany: "",
-      bankAccountNumber: "",
-      bankName: "",
-      maintenanceInfo: "",
-      isDisabledPerson: undefined,
-      receivesPensionBenefits: undefined,
-      typePensionBenefits: "",
-      disabilityDegree: "NONE",
-      hasCertificateManagement: undefined,
-      hasCertificateSpecial: undefined,
-      hasCertificateTraining: undefined,
-      hasCertificateGeneral: undefined,
-      languages: [
-        { name: "Angličtina" },
-        { name: "Němčina" },
-        { name: "Španělština" },
-        { name: "Francouzština" },
-      ] as PersonalQuestionnaireSchema["languages"],
-      education: [
-        {
-          level: "ZAKLADNI",
-          schoolType: "",
-          semesters: "",
-          studyForm: "DENNI",
-          graduationYear: "",
-          examType: "",
-        },
-      ],
-      familyRelations: "",
-      finalRequestPayrollTransfer: undefined,
-      finalReadAndUnderstood: undefined,
-      finalTruthfulnessConfirm: undefined,
+    defaultValues: {
+      ...buildBaseDefaultValues(props.employeeMeta),
+      ...(props.initialData as
+        | Partial<PersonalQuestionnaireSchema>
+        | undefined),
     },
   })
 
@@ -154,8 +165,17 @@ export function PersonalQuestionnaireForm(
     control,
     watch,
     setValue,
+    setError,
     formState: { errors },
   } = form
+
+  React.useEffect(() => {
+    const subscription = watch(() => {
+      setResultModal((previous) => (previous === "error" ? null : previous))
+    })
+
+    return () => subscription.unsubscribe()
+  }, [watch])
 
   const maritalStatus = watch("maritalStatus")
   const isDisabledPerson = watch("isDisabledPerson") as boolean | undefined
@@ -202,6 +222,15 @@ export function PersonalQuestionnaireForm(
     name: "education",
   })
 
+  const handleInvalid = () => {
+    toast({
+      title: "Formulář nelze odeslat",
+      description:
+        "Některá povinná pole nejsou vyplněná nebo obsahují chybu. Zkontrolujte prosím červeně označená pole.",
+      variant: "destructive",
+    })
+  }
+
   const handleSubmitForm = (values: PersonalQuestionnaireSchema) => {
     startTransition(async () => {
       setStatus("loading")
@@ -218,26 +247,38 @@ export function PersonalQuestionnaireForm(
           })
 
           if (!res.ok) {
-            const message = await res.text().catch(() => "")
-            throw new Error(message || "Uložení se nezdařilo.")
+            const response = await res.json().catch(() => null)
+            throw new ServerValidationError(
+              response?.message || "Uložení se nezdařilo.",
+              response?.issues ?? []
+            )
           }
 
           setStatus("completed")
-          setResultModal("success")
           props.onSubmitted?.()
         } else {
           await props.onSubmitInternal?.(values)
           setStatus("completed")
-          setResultModal("success")
         }
       } catch (error) {
         console.error(error)
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Dokument se nepodařilo uložit. Zkuste to prosím znovu nebo kontaktujte HR."
         setStatus("filling")
+        setErrorMessage(message)
         setResultModal("error")
+
+        if (error instanceof ServerValidationError) {
+          for (const issue of error.issues) {
+            setError(issue.path.join(".") as never, { message: issue.message })
+          }
+        }
+
         toast({
           title: "Chyba při ukládání",
-          description:
-            "Dokument se nepodařilo uložit. Zkuste to prosím znovu nebo kontaktujte HR.",
+          description: message,
           variant: "destructive",
         })
       }
@@ -247,24 +288,7 @@ export function PersonalQuestionnaireForm(
   return (
     <>
       <Dialog
-        open={resultModal === "success"}
-        onOpenChange={(open) => !open && setResultModal(null)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <CheckCircle className="size-5 text-green-500" />
-              Osobní dotazník uložen
-            </DialogTitle>
-            <DialogDescription>
-              Osobní dotazník byl úspěšně uložen.
-            </DialogDescription>
-          </DialogHeader>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={resultModal === "error"}
+        open={props.mode === "public" && resultModal === "error"}
         onOpenChange={(open) => !open && setResultModal(null)}
       >
         <DialogContent>
@@ -274,28 +298,29 @@ export function PersonalQuestionnaireForm(
               Chyba při ukládání
             </DialogTitle>
             <DialogDescription>
-              Dokument se nepodařilo uložit. Zkuste to prosím znovu nebo
-              kontaktujte své HR oddělení.
+              {errorMessage ??
+                "Dokument se nepodařilo uložit. Zkuste to prosím znovu nebo kontaktujte své HR oddělení."}
             </DialogDescription>
           </DialogHeader>
         </DialogContent>
       </Dialog>
 
       <form
-        onSubmit={handleSubmit(handleSubmitForm)}
+        onSubmit={handleSubmit(handleSubmitForm, handleInvalid)}
         className="mx-auto w-full max-w-5xl space-y-6"
       >
-        <header className="space-y-4 text-sm text-muted-foreground">
-          <div className="flex flex-col items-center gap-3 text-center">
-            <Image
-              src="/assets/images/logo-kitt6.png"
-              alt="Městská část Praha 6"
-              width={100}
-              height={100}
-            />
-            <h1 className="text-xl font-semibold text-foreground">
+        <header className="space-y-4 rounded-lg border border-emerald-200 bg-emerald-50/40 p-4 text-sm text-muted-foreground dark:border-emerald-900 dark:bg-emerald-950/10">
+          <div className="flex flex-col items-center gap-6 text-center">
+            <h1 className="text-2xl font-semibold text-foreground">
               Osobní dotazník
             </h1>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/assets/images/Logo_Praha%206.svg"
+              alt="Městská část Praha 6"
+              width={76}
+              height={86}
+            />
           </div>
 
           <DocumentEmployeeHeader
@@ -335,7 +360,7 @@ export function PersonalQuestionnaireForm(
         </header>
 
         <section className="space-y-4 rounded-md border p-4">
-          <h2 className="text-sm font-medium">Základní údaje</h2>
+          <h2 className="text-base font-medium">Základní údaje</h2>
           <p className="text-xs text-muted-foreground">
             Základní identifikační údaje zaměstnankyně/zaměstnance
           </p>
@@ -380,6 +405,9 @@ export function PersonalQuestionnaireForm(
             </div>
             <div className="space-y-1">
               <Label>Rodné příjmení</Label>
+              <p className="text-xs text-muted-foreground">
+                Vyplňte, pokud se vaše příjmení změnilo (např. sňatkem).
+              </p>
               <Input {...register("maidenName")} disabled={isFormDisabled} />
             </div>
             <div className="space-y-1 md:col-span-2">
@@ -458,15 +486,6 @@ export function PersonalQuestionnaireForm(
                 </p>
               )}
             </div>
-            <div className="space-y-1 md:col-span-2">
-              <Label>Datová schránka (pokud je zřízena)</Label>
-              <Input {...register("dataBoxId")} disabled={isFormDisabled} />
-              {errors.dataBoxId && (
-                <p className="text-xs text-destructive">
-                  {errors.dataBoxId.message as string}
-                </p>
-              )}
-            </div>
           </div>
 
           <div className="space-y-2">
@@ -508,12 +527,34 @@ export function PersonalQuestionnaireForm(
                 {errors.dataBoxDelivery.message as string}
               </p>
             )}
+
+            {dataBoxDelivery === true && (
+              <div className="space-y-1 pt-1">
+                <Label>
+                  ID datové schránky <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  {...register("dataBoxId")}
+                  disabled={isFormDisabled}
+                  placeholder="Uveďte ID vaší datové schránky"
+                />
+                {errors.dataBoxId && (
+                  <p className="text-xs text-destructive">
+                    {errors.dataBoxId.message as string}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="space-y-3">
             <Label>
               Rodinný stav <span className="text-destructive">*</span>
             </Label>
+            <p className="text-xs text-muted-foreground">
+              Vyplňte dle skutečnosti. Pokud nechcete uvádět, ponechte možnost
+              „Neuvádím“.
+            </p>
             <RadioGroup
               value={maritalStatus}
               onValueChange={(value) =>
@@ -559,12 +600,20 @@ export function PersonalQuestionnaireForm(
               </p>
             )}
           </div>
+        </section>
+
+        <section className="space-y-3 rounded-md border p-4">
+          <h2 className="text-base font-medium">
+            Povolení k pobytu (cizí státní příslušníci)
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Vyplňte pouze v případě, že jste cizí státní příslušník/-ice s
+            povolením k pobytu.
+          </p>
 
           <div className="space-y-3">
             <div className="space-y-1">
-              <Label>
-                Povolení k pobytu cizího státního příslušníka vydáno od
-              </Label>
+              <Label>Povolení k pobytu vydáno od</Label>
               <Input
                 type="date"
                 {...register("foreignPermitFrom")}
@@ -577,9 +626,7 @@ export function PersonalQuestionnaireForm(
               )}
             </div>
             <div className="space-y-1">
-              <Label>
-                Povolení k pobytu cizího státního příslušníka vydáno do
-              </Label>
+              <Label>Povolení k pobytu vydáno do</Label>
               <Input
                 type="date"
                 {...register("foreignPermitTo")}
@@ -592,10 +639,7 @@ export function PersonalQuestionnaireForm(
               )}
             </div>
             <div className="space-y-1">
-              <Label>
-                Povolení k pobytu cizího státního příslušníka vydáno kým (název
-                orgánu)
-              </Label>
+              <Label>Povolení k pobytu vydáno kým (název orgánu)</Label>
               <Input
                 {...register("foreignPermitAuthority")}
                 disabled={isFormDisabled}
@@ -610,7 +654,7 @@ export function PersonalQuestionnaireForm(
         </section>
 
         <section className="space-y-4 rounded-md border p-4">
-          <h2 className="text-sm font-medium">Adresa trvalého pobytu</h2>
+          <h2 className="text-base font-medium">Adresa trvalého pobytu</h2>
 
           <div className="grid gap-3 md:grid-cols-2">
             <div className="space-y-1">
@@ -671,13 +715,11 @@ export function PersonalQuestionnaireForm(
         </section>
 
         <section className="space-y-4 rounded-md border p-4">
-          <h2 className="text-sm font-medium">
-            Adresa pro doručování (není třeba vyplňovat, pokud jste požádali o
-            doručování datovou schránkou)
-          </h2>
+          <h2 className="text-base font-medium">Adresa pro doručování</h2>
           <p className="text-xs text-muted-foreground">
-            Tímto oznamujete, že pracovněprávní dokumenty má zaměstnavatel
-            doručovat na Vámi uvedenou poštovní adresu.
+            Vyplňte pouze pokud se liší od trvalé adresy, nebo pokud nemáte
+            datovou schránku. Tímto oznamujete, že pracovněprávní dokumenty má
+            zaměstnavatel doručovat na Vámi uvedenou poštovní adresu.
           </p>
           <p className="text-xs text-muted-foreground">
             Cizí státní příslušník uvede adresu pobytu na území ČR.
@@ -716,7 +758,7 @@ export function PersonalQuestionnaireForm(
         </section>
 
         <section className="space-y-4 rounded-md border p-4">
-          <h2 className="text-sm font-medium">Doplňující údaje</h2>
+          <h2 className="text-base font-medium">Doplňující údaje</h2>
 
           <div className="grid gap-3 md:grid-cols-2">
             <div className="space-y-1 md:col-span-2">
@@ -774,58 +816,58 @@ export function PersonalQuestionnaireForm(
             <Input {...register("maintenanceInfo")} disabled={isFormDisabled} />
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label>
-                Pobíráte dávky důchodového pojištění?{" "}
-                <span className="text-destructive">*</span>
-              </Label>
-              <RadioGroup
-                value={
-                  receivesPensionBenefits === true
-                    ? "yes"
-                    : receivesPensionBenefits === false
-                      ? "no"
-                      : ""
-                }
-                onValueChange={(value) =>
-                  setValue("receivesPensionBenefits", value === "yes", {
-                    shouldValidate: true,
-                  })
-                }
-                className="flex gap-4"
-                disabled={isFormDisabled}
-              >
-                <div className="flex items-center gap-2">
-                  <RadioGroupItem id="pension-yes" value="yes" />
-                  <Label htmlFor="pension-yes">Ano</Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <RadioGroupItem id="pension-no" value="no" />
-                  <Label htmlFor="pension-no">Ne</Label>
-                </div>
-              </RadioGroup>
-              {errors.receivesPensionBenefits && (
-                <p className="text-xs text-destructive">
-                  {errors.receivesPensionBenefits.message as string}
-                </p>
-              )}
-            </div>
+          <div className="space-y-2">
+            <Label>
+              Pobíráte dávky důchodového pojištění?{" "}
+              <span className="text-destructive">*</span>
+            </Label>
+            <RadioGroup
+              value={
+                receivesPensionBenefits === true
+                  ? "yes"
+                  : receivesPensionBenefits === false
+                    ? "no"
+                    : ""
+              }
+              onValueChange={(value) =>
+                setValue("receivesPensionBenefits", value === "yes", {
+                  shouldValidate: true,
+                })
+              }
+              className="flex gap-4"
+              disabled={isFormDisabled}
+            >
+              <div className="flex items-center gap-2">
+                <RadioGroupItem id="pension-yes" value="yes" />
+                <Label htmlFor="pension-yes">Ano</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <RadioGroupItem id="pension-no" value="no" />
+                <Label htmlFor="pension-no">Ne</Label>
+              </div>
+            </RadioGroup>
+            {errors.receivesPensionBenefits && (
+              <p className="text-xs text-destructive">
+                {errors.receivesPensionBenefits.message as string}
+              </p>
+            )}
 
-            <div className="space-y-1">
-              <Label>
-                Druh důchodu (pokud pobíráte dávky důchodového pojištění)
-              </Label>
-              <Input
-                {...register("typePensionBenefits")}
-                disabled={isFormDisabled}
-              />
-              {errors.typePensionBenefits && (
-                <p className="text-xs text-destructive">
-                  {errors.typePensionBenefits.message as string}
-                </p>
-              )}
-            </div>
+            {receivesPensionBenefits === true && (
+              <div className="space-y-1 pt-1">
+                <Label>
+                  Druh důchodu <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  {...register("typePensionBenefits")}
+                  disabled={isFormDisabled}
+                />
+                {errors.typePensionBenefits && (
+                  <p className="text-xs text-destructive">
+                    {errors.typePensionBenefits.message as string}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -909,10 +951,11 @@ export function PersonalQuestionnaireForm(
         </section>
 
         <section className="space-y-3 rounded-md border p-4">
-          <h2 className="text-sm font-medium">Vzdělání</h2>
+          <h2 className="text-base font-medium">Vzdělání</h2>
           <p className="text-xs text-muted-foreground">
             Uveďte prosím alespoň jedno ukončené vzdělání. V případě potřeby
-            přidejte další řádky.
+            přidejte další řádky. U posledního (nejvyššího) vzdělání je nutné
+            vyplnit všechny údaje.
           </p>
 
           <div className="space-y-3 rounded-md bg-muted/20 p-3 text-xs text-muted-foreground">
@@ -992,7 +1035,7 @@ export function PersonalQuestionnaireForm(
           {educationFields.map((field, index) => (
             <div
               key={field.id}
-              className="mt-3 space-y-3 rounded-md border bg-muted/30 p-4"
+              className="mt-3 space-y-3 rounded-md border p-4"
             >
               <div className="space-y-1">
                 <Label>
@@ -1048,12 +1091,22 @@ export function PersonalQuestionnaireForm(
 
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-1">
-                  <Label>Počet tříd (semestrů)</Label>
+                  <Label>
+                    Počet tříd (semestrů){" "}
+                    {index === educationFields.length - 1 && (
+                      <span className="text-destructive">*</span>
+                    )}
+                  </Label>
                   <Input
                     {...register(`education.${index}.semesters` as const)}
                     placeholder="např. 4"
                     disabled={isFormDisabled}
                   />
+                  {errors.education?.[index]?.semesters && (
+                    <p className="text-xs text-destructive">
+                      {errors.education[index]?.semesters?.message as string}
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-1">
@@ -1094,20 +1147,43 @@ export function PersonalQuestionnaireForm(
 
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-1">
-                  <Label>Rok ukončení</Label>
+                  <Label>
+                    Rok ukončení{" "}
+                    {index === educationFields.length - 1 && (
+                      <span className="text-destructive">*</span>
+                    )}
+                  </Label>
                   <Input
                     {...register(`education.${index}.graduationYear` as const)}
                     placeholder="např. 2018"
                     disabled={isFormDisabled}
                   />
+                  {errors.education?.[index]?.graduationYear && (
+                    <p className="text-xs text-destructive">
+                      {
+                        errors.education[index]?.graduationYear
+                          ?.message as string
+                      }
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-1">
-                  <Label>Druh zkoušky</Label>
+                  <Label>
+                    Druh zkoušky{" "}
+                    {index === educationFields.length - 1 && (
+                      <span className="text-destructive">*</span>
+                    )}
+                  </Label>
                   <Input
                     {...register(`education.${index}.examType` as const)}
                     placeholder="maturita, státní zkouška…"
                     disabled={isFormDisabled}
                   />
+                  {errors.education?.[index]?.examType && (
+                    <p className="text-xs text-destructive">
+                      {errors.education[index]?.examType?.message as string}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -1154,10 +1230,11 @@ export function PersonalQuestionnaireForm(
         </section>
 
         <section className="space-y-4 rounded-md border p-4">
-          <h2 className="text-sm font-medium">Znalost cizích jazyků</h2>
+          <h2 className="text-base font-medium">Znalost cizích jazyků</h2>
           <p className="text-xs text-muted-foreground">
-            Dobrovolný údaj. Vyplňte pouze v případě, že chcete uvést znalost
-            cizích jazyků.
+            Dobrovolný údaj. Níže jsou pro usnadnění přednastaveny nejčastější
+            jazyky – u kterých jazyků neuvedete úroveň, se do dotazníku neuloží.
+            Vyberte úroveň jen u jazyků, které skutečně ovládáte.
           </p>
 
           <div className="rounded-md bg-muted/20 p-3 text-xs text-muted-foreground">
@@ -1189,7 +1266,7 @@ export function PersonalQuestionnaireForm(
 
           <div className="space-y-4">
             {languages.map((lang, index) => (
-              <div key={index} className="space-y-2 rounded-md bg-muted/40 p-3">
+              <div key={index} className="space-y-2 rounded-md border p-3">
                 <div className="space-y-1">
                   <Label>Název jazyka</Label>
                   <Input
@@ -1246,7 +1323,7 @@ export function PersonalQuestionnaireForm(
         </section>
 
         <section className="space-y-4 rounded-md border p-4">
-          <h2 className="text-sm font-medium">Osvědčení</h2>
+          <h2 className="text-base font-medium">Osvědčení</h2>
           <p className="text-xs text-muted-foreground">
             Originál osvědčení vezměte prosím s sebou.
           </p>
@@ -1307,17 +1384,36 @@ export function PersonalQuestionnaireForm(
                   {errors[field]?.message as string}
                 </p>
               )}
+              {field === "hasCertificateSpecial" && value === true && (
+                <div className="space-y-1.5 pt-1">
+                  <Label htmlFor="certificateSpecialName">
+                    Vypište typy osvědčení{" "}
+                    <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    id="certificateSpecialName"
+                    {...register("certificateSpecialName")}
+                    disabled={isFormDisabled}
+                    placeholder="Uveďte název osvědčení"
+                  />
+                  {errors.certificateSpecialName && (
+                    <p className="text-xs text-destructive">
+                      {errors.certificateSpecialName.message as string}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </section>
 
         <section className="space-y-4 rounded-md border p-4">
-          <h2 className="text-sm font-medium">Závěrečná informace</h2>
+          <h2 className="text-base font-medium">Závěrečná informace</h2>
 
           <div className="space-y-2">
             <Label>Vaši příbuzní zaměstnaní na ÚMČ Praha 6</Label>
             <p className="text-xs text-muted-foreground">
-              Uveďte název práce/pozice a odbor
+              Napište jméno a uveďte název pozice a odbor.
             </p>
             <p className="text-xs text-muted-foreground">
               <strong>Osoba blízká:</strong> je příbuzný v řadě přímé -
@@ -1380,7 +1476,7 @@ export function PersonalQuestionnaireForm(
         </section>
 
         <section className="space-y-2 rounded-md border p-4 text-sm text-muted-foreground">
-          <h2 className="text-sm font-medium text-foreground">
+          <h2 className="text-base font-medium text-foreground">
             Informace o dalším postupu
           </h2>
           <p>

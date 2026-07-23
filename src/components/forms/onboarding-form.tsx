@@ -8,6 +8,7 @@ import {
   Calendar,
   Check,
   CheckCircle,
+  GraduationCap,
   ListChecks,
   RefreshCcw,
   Search,
@@ -2076,6 +2077,7 @@ export function OnboardingFormUnified({
                       <FormControl>
                         <Input
                           type="email"
+                          autoComplete="off"
                           {...field}
                           placeholder="jmeno.prijmeni@email.cz"
                           className={focusRing}
@@ -2249,265 +2251,262 @@ export function OnboardingFormUnified({
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="border-l-4 border-l-[#00847C]">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Users className="size-5" /> Vedoucí a mentor
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-4 rounded-lg border p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-sm font-semibold">Přímý nadřízený</h3>
-                    <p className="text-sm text-muted-foreground">
-                      Načítá se automaticky podle vybrané pozice, ale lze ho
-                      změnit.
-                    </p>
-                  </div>
-
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={restoreSupervisorFromPosition}
-                    disabled={
-                      !form.getValues("positionNum") || isSupervisorLoading
-                    }
-                  >
-                    <RefreshCcw className="mr-2 size-4" />
-                    Obnovit dle pozice
-                  </Button>
-                </div>
-
-                {isSupervisorLoading && (
-                  <Alert>
-                    <AlertDescription>
-                      Načítám vedoucího podle pozice…
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                {!isSupervisorLoading && supervisorLoadError && (
-                  <Alert>
-                    <AlertDescription>{supervisorLoadError}</AlertDescription>
-                  </Alert>
-                )}
-
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <FormItem className="md:col-span-2">
-                    <FormLabel>Vybrat vedoucího z EOS</FormLabel>
-                    <FormControl>
-                      <PersonLookupCombobox
-                        valueName={form.watch("supervisorName")}
-                        valueEmail={form.watch("supervisorEmail")}
-                        placeholder="Vyhledejte vedoucího v EOS…"
-                        onSelect={async (employee) => {
-                          setSupervisorManuallyChanged(true)
-
-                          form.setValue(
-                            "supervisorName",
-                            buildEmployeeFullName(employee),
-                            {
-                              shouldDirty: true,
-                              shouldTouch: true,
-                              shouldValidate: true,
-                            }
-                          )
-                          form.setValue(
-                            "supervisorEmail",
-                            employee.email ?? "",
-                            {
-                              shouldDirty: true,
-                              shouldTouch: true,
-                              shouldValidate: true,
-                            }
-                          )
-                          form.setValue(
-                            "supervisorPosition",
-                            employee.positionName ?? "",
-                            {
-                              shouldDirty: true,
-                              shouldTouch: true,
-                              shouldValidate: false,
-                            }
-                          )
-                          form.setValue(
-                            "supervisorDepartment",
-                            employee.department ?? "",
-                            {
-                              shouldDirty: true,
-                              shouldTouch: true,
-                              shouldValidate: false,
-                            }
-                          )
-                          form.setValue(
-                            "supervisorUnitName",
-                            employee.unitName ?? "",
-                            {
-                              shouldDirty: true,
-                              shouldTouch: true,
-                              shouldValidate: false,
-                            }
-                          )
-                        }}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      Použijte, pokud má být vedoucí jiný než automaticky
-                      dohledaný.
-                    </FormDescription>
-                  </FormItem>
-
-                  <FormField
-                    name="supervisorName"
-                    control={form.control}
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Jméno vedoucího</FormLabel>
-                        <FormControl>
-                          <Input
-                            {...field}
-                            placeholder="Např. Bc. Jana Nováková"
-                            className={`${focusRing} leading-normal`}
-                            onChange={(e) => {
-                              setSupervisorManuallyChanged(true)
-                              form.setValue("supervisorPosition", "", {
-                                shouldDirty: true,
-                                shouldValidate: false,
-                              })
-                              form.setValue("supervisorDepartment", "", {
-                                shouldDirty: true,
-                                shouldValidate: false,
-                              })
-                              form.setValue("supervisorUnitName", "", {
-                                shouldDirty: true,
-                                shouldValidate: false,
-                              })
-                              field.onChange(e)
-                            }}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    name="supervisorEmail"
-                    control={form.control}
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>E-mail vedoucího</FormLabel>
-                        <FormControl>
-                          <Input
-                            type="email"
-                            {...field}
-                            placeholder="vedouci@praha6.cz"
-                            className={focusRing}
-                            onChange={(e) => {
-                              setSupervisorManuallyChanged(true)
-                              form.setValue("supervisorPosition", "", {
-                                shouldDirty: true,
-                                shouldValidate: false,
-                              })
-                              form.setValue("supervisorDepartment", "", {
-                                shouldDirty: true,
-                                shouldValidate: false,
-                              })
-                              form.setValue("supervisorUnitName", "", {
-                                shouldDirty: true,
-                                shouldValidate: false,
-                              })
-                              field.onChange(e)
-                            }}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-4 rounded-lg border p-4">
+              <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-sm font-semibold">Mentor</h3>
-                  <p className="text-sm text-muted-foreground">
-                    Mentora lze vybrat z EOS nebo doplnit ručně.
+                  <CardTitle className="flex items-center gap-2">
+                    <User className="size-5" /> Vedoucí odboru
+                  </CardTitle>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Načítá se automaticky podle vybrané pozice, ale lze ho
+                    změnit.
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <FormItem className="md:col-span-2">
-                    <FormLabel>Vybrat mentora z EOS</FormLabel>
-                    <FormControl>
-                      <PersonLookupCombobox
-                        valueName={form.watch("mentorName")}
-                        valueEmail={form.watch("mentorEmail")}
-                        placeholder="Vyhledejte mentora v EOS…"
-                        onSelect={async (employee) => {
-                          form.setValue(
-                            "mentorName",
-                            buildEmployeeFullName(employee),
-                            {
-                              shouldDirty: true,
-                              shouldTouch: true,
-                              shouldValidate: true,
-                            }
-                          )
-                          form.setValue("mentorEmail", employee.email ?? "", {
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={restoreSupervisorFromPosition}
+                  disabled={
+                    !form.getValues("positionNum") || isSupervisorLoading
+                  }
+                >
+                  <RefreshCcw className="mr-2 size-4" />
+                  Obnovit dle pozice
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {isSupervisorLoading && (
+                <Alert>
+                  <AlertDescription>
+                    Načítám vedoucího podle pozice…
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {!isSupervisorLoading && supervisorLoadError && (
+                <Alert>
+                  <AlertDescription>{supervisorLoadError}</AlertDescription>
+                </Alert>
+              )}
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <FormItem className="md:col-span-2">
+                  <FormLabel>Vybrat vedoucího odboru z EOS</FormLabel>
+                  <FormControl>
+                    <PersonLookupCombobox
+                      valueName={form.watch("supervisorName")}
+                      valueEmail={form.watch("supervisorEmail")}
+                      placeholder="Vyhledejte vedoucího odboru v EOS…"
+                      onSelect={async (employee) => {
+                        setSupervisorManuallyChanged(true)
+
+                        form.setValue(
+                          "supervisorName",
+                          buildEmployeeFullName(employee),
+                          {
                             shouldDirty: true,
                             shouldTouch: true,
                             shouldValidate: true,
-                          })
-                        }}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      Vyhledávání v databázi zaměstnanců.
-                    </FormDescription>
-                  </FormItem>
+                          }
+                        )
+                        form.setValue("supervisorEmail", employee.email ?? "", {
+                          shouldDirty: true,
+                          shouldTouch: true,
+                          shouldValidate: true,
+                        })
+                        form.setValue(
+                          "supervisorPosition",
+                          employee.positionName ?? "",
+                          {
+                            shouldDirty: true,
+                            shouldTouch: true,
+                            shouldValidate: false,
+                          }
+                        )
+                        form.setValue(
+                          "supervisorDepartment",
+                          employee.department ?? "",
+                          {
+                            shouldDirty: true,
+                            shouldTouch: true,
+                            shouldValidate: false,
+                          }
+                        )
+                        form.setValue(
+                          "supervisorUnitName",
+                          employee.unitName ?? "",
+                          {
+                            shouldDirty: true,
+                            shouldTouch: true,
+                            shouldValidate: false,
+                          }
+                        )
+                      }}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    Použijte, pokud má být vedoucí jiný než automaticky
+                    dohledaný.
+                  </FormDescription>
+                </FormItem>
 
-                  <FormField
-                    name="mentorName"
-                    control={form.control}
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Jméno mentora</FormLabel>
-                        <FormControl>
-                          <Input
-                            {...field}
-                            placeholder="Doplní HR"
-                            className={`${focusRing} leading-normal`}
-                          />
-                        </FormControl>
-                        <FormDescription>Lze upravit ručně.</FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                <FormField
+                  name="supervisorName"
+                  control={form.control}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Jméno vedoucího</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          placeholder="Např. Bc. Jana Nováková"
+                          className={`${focusRing} leading-normal`}
+                          onChange={(e) => {
+                            setSupervisorManuallyChanged(true)
+                            form.setValue("supervisorPosition", "", {
+                              shouldDirty: true,
+                              shouldValidate: false,
+                            })
+                            form.setValue("supervisorDepartment", "", {
+                              shouldDirty: true,
+                              shouldValidate: false,
+                            })
+                            form.setValue("supervisorUnitName", "", {
+                              shouldDirty: true,
+                              shouldValidate: false,
+                            })
+                            field.onChange(e)
+                          }}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
-                  <FormField
-                    name="mentorEmail"
-                    control={form.control}
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>E-mail mentora</FormLabel>
-                        <FormControl>
-                          <Input
-                            type="email"
-                            {...field}
-                            placeholder="mentor@praha6.cz"
-                            className={focusRing}
-                          />
-                        </FormControl>
-                        <FormDescription>Nepovinné.</FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
+                <FormField
+                  name="supervisorEmail"
+                  control={form.control}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>E-mail vedoucího</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="email"
+                          autoComplete="off"
+                          {...field}
+                          placeholder="vedouci@praha6.cz"
+                          className={focusRing}
+                          onChange={(e) => {
+                            setSupervisorManuallyChanged(true)
+                            form.setValue("supervisorPosition", "", {
+                              shouldDirty: true,
+                              shouldValidate: false,
+                            })
+                            form.setValue("supervisorDepartment", "", {
+                              shouldDirty: true,
+                              shouldValidate: false,
+                            })
+                            form.setValue("supervisorUnitName", "", {
+                              shouldDirty: true,
+                              shouldValidate: false,
+                            })
+                            field.onChange(e)
+                          }}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-l-4 border-l-amber-500">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <GraduationCap className="size-5" /> Mentor
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Mentora lze vybrat z EOS nebo doplnit ručně.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <FormItem className="md:col-span-2">
+                  <FormLabel>Vybrat mentora z EOS</FormLabel>
+                  <FormControl>
+                    <PersonLookupCombobox
+                      valueName={form.watch("mentorName")}
+                      valueEmail={form.watch("mentorEmail")}
+                      placeholder="Vyhledejte mentora v EOS…"
+                      onSelect={async (employee) => {
+                        form.setValue(
+                          "mentorName",
+                          buildEmployeeFullName(employee),
+                          {
+                            shouldDirty: true,
+                            shouldTouch: true,
+                            shouldValidate: true,
+                          }
+                        )
+                        form.setValue("mentorEmail", employee.email ?? "", {
+                          shouldDirty: true,
+                          shouldTouch: true,
+                          shouldValidate: true,
+                        })
+                      }}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    Vyhledávání v databázi zaměstnanců.
+                  </FormDescription>
+                </FormItem>
+
+                <FormField
+                  name="mentorName"
+                  control={form.control}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Jméno mentora</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          placeholder="Doplní HR"
+                          className={`${focusRing} leading-normal`}
+                        />
+                      </FormControl>
+                      <FormDescription>Lze upravit ručně.</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  name="mentorEmail"
+                  control={form.control}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>E-mail mentora</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="email"
+                          autoComplete="off"
+                          {...field}
+                          placeholder="mentor@praha6.cz"
+                          className={focusRing}
+                        />
+                      </FormControl>
+                      <FormDescription>Nepovinné.</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
             </CardContent>
           </Card>
@@ -2529,6 +2528,7 @@ export function OnboardingFormUnified({
                       <FormControl>
                         <Input
                           type="email"
+                          autoComplete="off"
                           {...field}
                           placeholder="např. jmeno.prijmeni@praha6.cz"
                           className={focusRing}

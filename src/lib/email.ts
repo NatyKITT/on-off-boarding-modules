@@ -31,6 +31,12 @@ if (!DEFAULT_FROM) {
 
 const EMAIL_FONT_FAMILY = "'Civil Premium', 'Segoe UI', Arial, sans-serif"
 
+export const EMAIL_FOOTER_HTML = `
+  Tento e-mail byl automaticky vygenerován systémem
+  <strong>On-Off-Boarding Modul ÚMČ Praha&nbsp;6</strong>.<br/>
+  Prosíme, neodpovídejte na tuto zprávu. V případě dotazů kontaktujte personální oddělení.
+`
+
 const EMAIL_GLOBAL_FONT_STYLE = `
         body, table, td, th, div, p, a, span {
           font-family: ${EMAIL_FONT_FAMILY};
@@ -580,9 +586,7 @@ export async function renderMonthlyReportHtml(args: {
                   <table border="0" cellpadding="0" cellspacing="0" width="100%">
                     <tr>
                       <td>
-                        Tento e-mail byl automaticky vygenerován systémem
-                        <strong>On-Boarding Modul ÚMČ Praha&nbsp;6</strong>.<br/>
-                        Prosíme neodpovídejte na tuto zprávu. V případě dotazů kontaktujte personální oddělení.
+                        ${EMAIL_FOOTER_HTML}
                       </td>
                     </tr>
                   </table>
@@ -710,7 +714,11 @@ function buildEmployeeChangeGroups(
     const newFull = formatEmployeeChangeNewName(record)
 
     if (oldFull !== newFull) {
-      groups.push({ label: "Jméno", oldValue: oldFull || "—", newValue: newFull || "—" })
+      groups.push({
+        label: "Jméno",
+        oldValue: oldFull || "—",
+        newValue: newFull || "—",
+      })
     }
   }
 
@@ -719,7 +727,11 @@ function buildEmployeeChangeGroups(
     const newSummary = buildEmployeeChangePositionSummary(record, true)
 
     if (oldSummary !== newSummary) {
-      groups.push({ label: "Pozice", oldValue: oldSummary, newValue: newSummary })
+      groups.push({
+        label: "Pozice",
+        oldValue: oldSummary,
+        newValue: newSummary,
+      })
     }
   }
 
@@ -752,7 +764,9 @@ function renderChangeValueBubble(
   `
 }
 
-function renderEmployeeChangeBubbles(record: EmployeeChangeEmailRecord): string {
+function renderEmployeeChangeBubbles(
+  record: EmployeeChangeEmailRecord
+): string {
   const groups = buildEmployeeChangeGroups(record)
 
   if (!groups.length) {
@@ -930,9 +944,7 @@ export async function renderEmployeeChangeReportHtml(args: {
 
               <tr>
                 <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#4b5563;border-top:1px solid #d9ece7;">
-                  Tento e-mail byl automaticky vygenerován systémem
-                  <strong>On-Off-Boarding Modul ÚMČ Praha&nbsp;6</strong>.<br/>
-                  Prosíme, neodpovídejte na tuto zprávu. V případě dotazů kontaktujte personální oddělení.
+                  ${EMAIL_FOOTER_HTML}
                 </td>
               </tr>
             </table>
@@ -1102,9 +1114,7 @@ export async function sendSignatureInviteEmail({
                   bgcolor="${bgLight}"
                   style="padding:18px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#4b5563;line-height:1.5;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;"
                 >
-                  Tento e-mail byl automaticky vygenerován systémem
-                  <strong>On-Off-Boarding Modul ÚMČ Praha&nbsp;6</strong>.<br/>
-                  Prosíme, neodpovídejte na tuto zprávu. V případě dotazů kontaktujte personální oddělení.
+                  ${EMAIL_FOOTER_HTML}
                 </td>
               </tr>
             </table>
@@ -1244,6 +1254,7 @@ export async function logEmailHistory(args: {
 export type SendProbationNotificationEmailParams = {
   to: string[]
   subject: string
+  headerLabel?: string
   intro: string
   employeeName?: string | null
   employeePosition?: string | null
@@ -1462,6 +1473,7 @@ function renderProbationInfoTable(args: {
 export async function sendProbationNotificationEmail({
   to,
   subject,
+  headerLabel,
   intro,
   employeeName,
   employeePosition,
@@ -1508,11 +1520,20 @@ export async function sendProbationNotificationEmail({
 
               <tr>
                 <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};">
-                  <div style="color:#ffffff;font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:.9;">
+                  <div style="color:#ffffff;font-size:12px;text-transform:uppercase;letter-spacing:2px;margin-bottom:4px;opacity:.85;">
                     Zkušební doba
                   </div>
-                  <div style="color:#ffffff;font-size:22px;font-weight:bold;line-height:1.2;">
-                    ${escapeHtml(subject)}
+                  ${
+                    headerLabel
+                      ? `
+                  <div style="color:#ffffff;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:.95;">
+                    ${escapeHtml(headerLabel)}
+                  </div>
+                  `
+                      : ""
+                  }
+                  <div style="color:#ffffff;font-size:22px;font-weight:bold;line-height:1.2;white-space:nowrap;">
+                    Vyhodnocení zkušební doby
                   </div>
                 </td>
               </tr>
@@ -1580,7 +1601,7 @@ export async function sendProbationNotificationEmail({
 
               <tr>
                 <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
-                  Tento e-mail byl automaticky vygenerován. Prosíme, neodpovídejte na tuto zprávu.
+                  ${EMAIL_FOOTER_HTML}
                 </td>
               </tr>
             </table>
@@ -1629,11 +1650,10 @@ export async function sendProbationEvaluationInviteEmail(
     subject:
       args.subject?.trim() ||
       `Vyhodnocení zkušební doby – ${args.employeeName}`,
+    headerLabel: "Pozvánka",
     intro:
       args.intro?.trim() ||
-      `${
-        args.sentByName ? `${args.sentByName} vám zaslal(a)` : "Zasíláme vám"
-      } odkaz k vyplnění formuláře k vyhodnocení zkušební doby.`,
+      "Personální oddělení vám zaslalo odkaz k vyplnění formuláře Vyhodnocení zkušební doby.",
     employeeName: args.employeeName,
     employeePosition: args.employeePosition,
     employeeDepartment: args.employeeDepartment,
@@ -1654,11 +1674,10 @@ export async function sendProbationEvaluationReminderEmail(
     subject:
       args.subject?.trim() ||
       `Připomínka: vyhodnocení zkušební doby – ${args.employeeName}`,
+    headerLabel: "Připomínka",
     intro:
       args.intro?.trim() ||
-      `${
-        args.sentByName ? `${args.sentByName} připomíná` : "Připomínáme"
-      }, že formulář k vyhodnocení zkušební doby zatím není finálně vyplněný.`,
+      "Personální oddělení připomíná, že formulář Vyhodnocení zkušební doby zatím není finálně vyplněný.",
     employeeName: args.employeeName,
     employeePosition: args.employeePosition,
     employeeDepartment: args.employeeDepartment,
@@ -1690,6 +1709,7 @@ export async function sendProbationHrReminderEmail(args: {
     subject:
       args.subject?.trim() ||
       `HR připomínka: nevyplněné vyhodnocení zkušební doby – ${args.employeeName}`,
+    headerLabel: "Připomínka",
     intro:
       args.intro?.trim() ||
       "Formulář k vyhodnocení zkušební doby zatím není finálně vyplněný. Prosíme o kontrolu stavu a případné kontaktování vedoucího.",
@@ -1717,6 +1737,7 @@ export async function sendProbationMissingSupervisorEmail(args: {
   await sendProbationNotificationEmail({
     to: args.to,
     subject: `Chybí vedoucí pro vyhodnocení zkušební doby – ${args.employeeName}`,
+    headerLabel: "Upozornění",
     intro:
       "U zaměstnance chybí vedoucí nebo e-mail vedoucího. Formulář proto nelze automaticky odeslat k vyplnění.",
     employeeName: args.employeeName,
@@ -1757,11 +1778,14 @@ export async function sendProbationEvaluationPdfEmail(
               bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
               <tr>
                 <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};">
-                  <div style="color:#ffffff;font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:.9;">
+                  <div style="color:#ffffff;font-size:12px;text-transform:uppercase;letter-spacing:2px;margin-bottom:4px;opacity:.85;">
                     Zkušební doba
                   </div>
-                  <div style="color:#ffffff;font-size:22px;font-weight:bold;line-height:1.2;">
-                    PDF formuláře v příloze
+                  <div style="color:#ffffff;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:.95;">
+                    PDF příloha
+                  </div>
+                  <div style="color:#ffffff;font-size:22px;font-weight:bold;line-height:1.2;white-space:nowrap;">
+                    Vyhodnocení zkušební doby
                   </div>
                 </td>
               </tr>
@@ -1773,7 +1797,7 @@ export async function sendProbationEvaluationPdfEmail(
                   </p>
 
                   <p style="margin:0 0 18px 0;font-size:14px;color:#374151;line-height:1.6;">
-                    v příloze zasíláme PDF formuláře k vyhodnocení zkušební doby níže uvedeného zaměstnance.
+                    Personální oddělení vám zasílá PDF přílohu formuláře Vyhodnocení zkušební doby níže uvedeného zaměstnance.
                   </p>
 
                   ${renderProbationInfoTable({
@@ -1794,18 +1818,12 @@ export async function sendProbationEvaluationPdfEmail(
                       ? `<p style="margin:0 0 18px 0;padding:12px 14px;border-left:4px solid ${primary};background:#f0fdfa;font-size:14px;color:#374151;line-height:1.6;">${escapeHtml(args.message.trim())}</p>`
                       : ""
                   }
-
-                  ${
-                    args.sentByName?.trim()
-                      ? `<p style="margin:0 0 12px 0;font-size:13px;color:#6b7280;line-height:1.5;">Odeslal(a): ${escapeHtml(args.sentByName.trim())}</p>`
-                      : ""
-                  }
                 </td>
               </tr>
 
               <tr>
                 <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
-                  Tento e-mail byl automaticky vygenerován. Prosíme, neodpovídejte na tuto zprávu.
+                  ${EMAIL_FOOTER_HTML}
                 </td>
               </tr>
             </table>
@@ -1818,7 +1836,7 @@ export async function sendProbationEvaluationPdfEmail(
   const text = [
     "Dobrý den,",
     "",
-    "v příloze zasíláme PDF formuláře k vyhodnocení zkušební doby níže uvedeného zaměstnance.",
+    "Personální oddělení vám zasílá PDF přílohu formuláře Vyhodnocení zkušební doby níže uvedeného zaměstnance.",
     "",
     `Zaměstnanec: ${args.employeeName}`,
     `Pozice: ${args.employeePosition || "—"}`,
@@ -1829,7 +1847,6 @@ export async function sendProbationEvaluationPdfEmail(
     args.evaluatorName ? `Hodnotil(a): ${args.evaluatorName}` : "",
     args.evaluatorEmail ? `E-mail hodnotitele: ${args.evaluatorEmail}` : "",
     args.message ? `Zpráva: ${args.message}` : "",
-    args.sentByName ? `Odeslal(a): ${args.sentByName}` : "",
   ]
     .filter(Boolean)
     .join("\n")
@@ -1884,11 +1901,14 @@ export async function sendProbationEvaluationCompletedEmail(
               bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
               <tr>
                 <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};">
-                  <div style="color:#ffffff;font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:.9;">
+                  <div style="color:#ffffff;font-size:12px;text-transform:uppercase;letter-spacing:2px;margin-bottom:4px;opacity:.85;">
                     Zkušební doba
                   </div>
-                  <div style="color:#ffffff;font-size:22px;font-weight:bold;line-height:1.2;">
-                    Vyhodnocení bylo finálně vyplněno
+                  <div style="color:#ffffff;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:.95;">
+                    Dokončeno
+                  </div>
+                  <div style="color:#ffffff;font-size:22px;font-weight:bold;line-height:1.2;white-space:nowrap;">
+                    Vyhodnocení zkušební doby
                   </div>
                 </td>
               </tr>
@@ -1926,7 +1946,7 @@ export async function sendProbationEvaluationCompletedEmail(
 
               <tr>
                 <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
-                  Tento e-mail byl automaticky vygenerován. Prosíme, neodpovídejte na tuto zprávu.
+                  ${EMAIL_FOOTER_HTML}
                 </td>
               </tr>
             </table>
@@ -2079,6 +2099,7 @@ export async function sendQueuedProbationEmail(args: {
       subject:
         payload.subject ||
         `Informace k vyhodnocení zkušební doby – ${employeeName}`,
+      headerLabel: "Informace",
       intro:
         payload.intro || "Níže zasíláme informaci k vyhodnocení zkušební doby.",
       employeeName,
@@ -2253,8 +2274,7 @@ export async function sendHandoverRecipientEmail({
 
           <tr>
             <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
-              Tento e-mail byl automaticky vygenerován. Prosíme, neodpovídejte na tuto zprávu.
-              V případě dotazů kontaktujte svého vedoucího nebo personální oddělení.
+              ${EMAIL_FOOTER_HTML}
             </td>
           </tr>
         </table>
@@ -2400,7 +2420,7 @@ export async function sendExitChecklistCompletedEmail({
 
               <tr>
                 <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
-                  Tento e-mail byl automaticky vygenerován. Prosíme, neodpovídejte na tuto zprávu.
+                  ${EMAIL_FOOTER_HTML}
                 </td>
               </tr>
             </table>
@@ -2522,7 +2542,7 @@ export async function sendExitChecklistPdfEmail({
 
               <tr>
                 <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
-                  Tento e-mail byl automaticky vygenerován. Prosíme, neodpovídejte na tuto zprávu.
+                  ${EMAIL_FOOTER_HTML}
                 </td>
               </tr>
             </table>
@@ -2754,8 +2774,7 @@ export async function sendBehalfSignatureEmail({
 
           <tr>
             <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
-              Tento e-mail byl automaticky vygenerován. Prosíme, neodpovídejte na tuto zprávu.
-              V případě dotazů kontaktujte personální oddělení.
+              ${EMAIL_FOOTER_HTML}
             </td>
           </tr>
         </table>

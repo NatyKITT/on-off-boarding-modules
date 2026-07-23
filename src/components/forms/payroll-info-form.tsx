@@ -2,13 +2,13 @@
 
 import * as React from "react"
 import { useTransition } from "react"
-import Image from "next/image"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { CheckCircle, XCircle } from "lucide-react"
+import { XCircle } from "lucide-react"
 import { useFieldArray, useForm } from "react-hook-form"
 
 import { useToast } from "@/hooks/use-toast"
 import { EmployeeMeta } from "@/lib/employee-meta"
+import { ServerValidationError } from "@/lib/server-validation-error"
 import {
   payrollInfoSchema,
   type PayrollInfoSchema,
@@ -79,9 +79,36 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
   const [resultModal, setResultModal] = React.useState<
     "success" | "error" | null
   >(null)
+  const [errorMessage, setErrorMessage] = React.useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
   const today = React.useMemo(() => todayIso(), [])
+
+  const baseDefaultValues: Partial<PayrollInfoSchema> = {
+    fullName: props.employeeMeta?.fullName ?? "",
+    maidenName: "",
+    birthPlace: "",
+    birthNumber: "",
+    birthDay: "",
+    birthMonth: "",
+    birthYear: "",
+    maritalStatus: "UNSTATED",
+
+    permanentStreet: "",
+    permanentHouseNumber: "",
+    permanentCity: "",
+    permanentPostcode: "",
+
+    children: [{ childName: "", childBirthDate: "" }],
+
+    healthInsuranceCompany: "",
+
+    bankAccountNumber: "",
+    bankName: "",
+
+    confirmTruthfulness: undefined,
+    signatureDate: today,
+  }
 
   const form = useForm<PayrollInfoSchema, unknown, PayrollInfoSchema>({
     mode: "onChange",
@@ -92,30 +119,9 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
       unknown,
       PayrollInfoSchema
     >,
-    defaultValues: (props.initialData as PayrollInfoSchema | undefined) ?? {
-      fullName: props.employeeMeta?.fullName ?? "",
-      maidenName: "",
-      birthPlace: "",
-      birthNumber: "",
-      birthDay: "",
-      birthMonth: "",
-      birthYear: "",
-      maritalStatus: "UNSTATED",
-
-      permanentStreet: "",
-      permanentHouseNumber: "",
-      permanentCity: "",
-      permanentPostcode: "",
-
-      children: [],
-
-      healthInsuranceCompany: "",
-
-      bankAccountNumber: "",
-      bankName: "",
-
-      confirmTruthfulness: undefined,
-      signatureDate: today,
+    defaultValues: {
+      ...baseDefaultValues,
+      ...(props.initialData as Partial<PayrollInfoSchema> | undefined),
     },
   })
 
@@ -123,10 +129,19 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
     register,
     handleSubmit,
     setValue,
+    setError,
     watch,
     control,
     formState: { errors },
   } = form
+
+  React.useEffect(() => {
+    const subscription = watch(() => {
+      setResultModal((previous) => (previous === "error" ? null : previous))
+    })
+
+    return () => subscription.unsubscribe()
+  }, [watch])
 
   const isCompleted = status === "completed"
   const isDisabled =
@@ -142,6 +157,15 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
     control,
     name: "children",
   })
+
+  const handleInvalid = () => {
+    toast({
+      title: "Formulář nelze odeslat",
+      description:
+        "Některá povinná pole nejsou vyplněná nebo obsahují chybu. Zkontrolujte prosím červeně označená pole.",
+      variant: "destructive",
+    })
+  }
 
   const handleSubmitForm: import("react-hook-form").SubmitHandler<
     PayrollInfoSchema
@@ -164,25 +188,38 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
           })
 
           if (!res.ok) {
-            throw new Error(await res.text())
+            const response = await res.json().catch(() => null)
+            throw new ServerValidationError(
+              response?.message || "Uložení se nezdařilo.",
+              response?.issues ?? []
+            )
           }
 
           setStatus("completed")
-          setResultModal("success")
           props.onSubmitted?.()
         } else {
           await props.onSubmitInternal?.(finalValues)
           setStatus("completed")
-          setResultModal("success")
         }
       } catch (error) {
         console.error(error)
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Dokument se nepodařilo uložit. Zkuste to prosím znovu nebo kontaktujte HR."
         setStatus("filling")
+        setErrorMessage(message)
         setResultModal("error")
+
+        if (error instanceof ServerValidationError) {
+          for (const issue of error.issues) {
+            setError(issue.path.join(".") as never, { message: issue.message })
+          }
+        }
+
         toast({
           title: "Chyba při ukládání",
-          description:
-            "Dokument se nepodařilo uložit. Zkuste to prosím znovu nebo kontaktujte HR.",
+          description: message,
           variant: "destructive",
         })
       }
@@ -192,24 +229,7 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
   return (
     <>
       <Dialog
-        open={resultModal === "success"}
-        onOpenChange={(open) => !open && setResultModal(null)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <CheckCircle className="size-5 text-green-500" />
-              Dokument uložen
-            </DialogTitle>
-            <DialogDescription>
-              Formulář pro mzdovou agendu byl úspěšně uložen.
-            </DialogDescription>
-          </DialogHeader>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={resultModal === "error"}
+        open={props.mode === "public" && resultModal === "error"}
         onOpenChange={(open) => !open && setResultModal(null)}
       >
         <DialogContent>
@@ -219,31 +239,34 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
               Chyba při ukládání
             </DialogTitle>
             <DialogDescription>
-              Dokument se nepodařilo uložit. Zkuste to prosím znovu nebo
-              kontaktujte své HR oddělení.
+              {errorMessage ??
+                "Dokument se nepodařilo uložit. Zkuste to prosím znovu nebo kontaktujte své HR oddělení."}
             </DialogDescription>
           </DialogHeader>
         </DialogContent>
       </Dialog>
 
       <form
-        onSubmit={handleSubmit(handleSubmitForm)}
+        onSubmit={handleSubmit(handleSubmitForm, handleInvalid)}
         className="mx-auto w-full max-w-5xl space-y-6"
       >
-        <header className="space-y-4 text-sm text-muted-foreground">
-          <div className="flex flex-col items-center gap-3 text-center">
-            <Image
-              src="/assets/images/logo-kitt6.png"
+        <header className="space-y-4 rounded-lg border border-emerald-200 bg-emerald-50/40 p-4 text-sm text-muted-foreground dark:border-emerald-900 dark:bg-emerald-950/10">
+          <div className="flex flex-col items-center gap-6 text-center">
+            <div>
+              <h1 className="text-2xl font-semibold text-foreground">
+                Nástup zaměstnance do pracovního poměru
+              </h1>
+              <p className="text-xs">
+                (nezbytné zákonné údaje pro vedení mzdové agendy)
+              </p>
+            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/assets/images/Logo_Praha%206.svg"
               alt="Městská část Praha 6"
-              width={100}
-              height={100}
+              width={76}
+              height={86}
             />
-            <h1 className="text-xl font-semibold text-foreground">
-              Nástup zaměstnance do pracovního poměru
-            </h1>
-            <p className="text-xs">
-              (nezbytné zákonné údaje pro vedení mzdové agendy)
-            </p>
           </div>
 
           <DocumentEmployeeHeader
@@ -283,7 +306,7 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
         </header>
 
         <section className="space-y-4 rounded-md border p-4">
-          <h2 className="text-sm font-medium">Základní údaje zaměstnance</h2>
+          <h2 className="text-base font-medium">Základní údaje zaměstnance</h2>
 
           <div className="space-y-3">
             <div className="space-y-1">
@@ -301,9 +324,10 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
 
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1">
-                <Label>
-                  Rodné příjmení <span className="text-destructive">*</span>
-                </Label>
+                <Label>Rodné příjmení</Label>
+                <p className="text-xs text-muted-foreground">
+                  Vyplňte, pokud se vaše rodné příjmení liší od současného.
+                </p>
                 <Input {...register("maidenName")} disabled={isDisabled} />
                 {errors.maidenName && (
                   <p className="text-xs text-destructive">
@@ -396,6 +420,10 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
               <Label>
                 Rodinný stav <span className="text-destructive">*</span>
               </Label>
+              <p className="text-xs text-muted-foreground">
+                Vyplňte dle skutečnosti. Pokud nechcete uvádět, ponechte možnost
+                „Neuvádím“.
+              </p>
               <Select
                 value={watch("maritalStatus")}
                 onValueChange={(val) =>
@@ -490,12 +518,12 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
             <h3 className="text-sm font-medium">
               Jméno dětí a datum narození (pro účely daňového zvýhodnění)
             </h3>
+            <p className="text-xs text-muted-foreground">
+              Vyplňte, pokud máte děti, na které uplatňujete daňové zvýhodnění.
+            </p>
 
             {childrenArray.fields.map((field, index) => (
-              <div
-                key={field.id}
-                className="space-y-3 rounded-md border bg-muted/30 p-3"
-              >
+              <div key={field.id} className="space-y-3 rounded-md border p-3">
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="space-y-1">
                     <Label>Jméno dítěte {index + 1}</Label>
@@ -565,7 +593,7 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
         </section>
 
         <section className="space-y-4 rounded-md border p-4">
-          <h2 className="text-sm font-medium">Zdravotní pojišťovna</h2>
+          <h2 className="text-base font-medium">Zdravotní pojišťovna</h2>
           <p className="text-xs text-muted-foreground">
             Stvrzuji, že jsem ke dni nástupu do zaměstnání pojištěncem zdravotní
             pojišťovny:
@@ -589,11 +617,11 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
         </section>
 
         <section className="space-y-4 rounded-md border p-4">
-          <h2 className="text-sm font-medium">
+          <h2 className="text-base font-medium">
             Zasílání platu/odměny na bankovní účet
           </h2>
           <p className="text-xs text-muted-foreground">
-            Žádám s účinností od dne nástupu na bankovní účet:
+            Žádám s účinností od dne nástupu zasílat na tento bankovní účet:
           </p>
 
           <div className="grid gap-3 md:grid-cols-2">
@@ -631,7 +659,7 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
         </section>
 
         <section className="space-y-3 rounded-md border p-4">
-          <h2 className="text-sm font-medium">Prohlášení</h2>
+          <h2 className="text-base font-medium">Prohlášení</h2>
           <p className="text-xs text-muted-foreground">
             Stvrzuji svým podpisem, že jsou výše uvedené údaje zcela pravdivé a
             případnou změnu jsem povinen včas osobně oznámit ve mzdové účtárně.

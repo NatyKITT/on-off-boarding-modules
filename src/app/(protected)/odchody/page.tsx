@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { differenceInCalendarDays, format, parseISO } from "date-fns"
+import { format, parseISO, subMonths } from "date-fns"
 import { cs } from "date-fns/locale"
 import {
   AlertTriangle,
@@ -29,8 +29,6 @@ import { useFacetedFilter } from "@/hooks/use-faceted-filter"
 import { useTextFilter } from "@/hooks/use-text-filter"
 import {
   EMPTY_DAY_RANGE,
-  formatDayCountCs,
-  formatHumanDurationBetween,
   getDateProgressBucket,
   getDaysRemaining,
   isDayRangeActive,
@@ -249,33 +247,18 @@ function formatOptionalDate(value?: string | null) {
   return Number.isNaN(date.getTime()) ? "–" : format(date, "d.M.yyyy")
 }
 
-function formatDepartureProgress(
-  targetDate?: string | null
-): { text: string; isPast: boolean } | null {
+// Výpovědní doba nemá v appce vlastní datum začátku - dopočítá se zpětně
+// od data odchodu podle délky výpovědní doby (noticeMonths).
+function computeNoticeStart(
+  targetDate?: string | null,
+  noticeMonths?: number | null
+): Date | null {
   if (!targetDate) return null
 
   const target = new Date(`${targetDate.slice(0, 10)}T00:00:00`)
   if (Number.isNaN(target.getTime())) return null
 
-  const today = new Date()
-  const todayOnly = new Date(
-    today.getFullYear(),
-    today.getMonth(),
-    today.getDate()
-  )
-
-  if (target.getTime() > todayOnly.getTime()) {
-    return {
-      text: `zbývá ${formatHumanDurationBetween(todayOnly, target)}`,
-      isPast: false,
-    }
-  }
-
-  const elapsedDays = differenceInCalendarDays(todayOnly, target)
-
-  return elapsedDays === 0
-    ? { text: "odchod dnes", isPast: false }
-    : { text: `${formatDayCountCs(elapsedDays)} po odchodu`, isPast: true }
+  return subMonths(target, noticeMonths ?? 2)
 }
 
 type DepartureFacetKey = "status" | "department" | "unitName" | "position"
@@ -689,31 +672,32 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
 
       <TableCell className="w-[230px]">
         <div className="space-y-1.5">
-          <DepartureProgressBar
-            targetDate={
+          {(() => {
+            const targetDate =
               variant === "planned"
                 ? departure.plannedEnd
                 : (departure.actualEnd as string)
-            }
-            variant={variant}
-            label=""
-          />
-          {(() => {
-            const progress = formatDepartureProgress(
-              variant === "planned" ? departure.plannedEnd : departure.actualEnd
+            const noticeStart = computeNoticeStart(
+              targetDate,
+              departure.noticeMonths
             )
-            if (!progress) return null
 
             return (
-              <div
-                className={
-                  progress.isPast
-                    ? "text-[11px] font-medium text-muted-foreground"
-                    : "text-[11px] font-semibold text-[#00847C] dark:text-[#4fd1c5]"
-                }
-              >
-                {progress.text}
-              </div>
+              <>
+                <DepartureProgressBar
+                  targetDate={targetDate}
+                  startDate={
+                    noticeStart ? format(noticeStart, "yyyy-MM-dd") : null
+                  }
+                  variant={variant}
+                  label=""
+                />
+                {noticeStart && (
+                  <div className="text-[11px] font-medium text-foreground">
+                    Běží od dne {format(noticeStart, "d.M.yyyy")}
+                  </div>
+                )}
+              </>
             )
           })()}
         </div>

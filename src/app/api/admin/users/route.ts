@@ -70,11 +70,17 @@ export async function GET() {
         role: true,
         canAccessApp: true,
         createdAt: true,
+        _count: { select: { accounts: true } },
       },
       orderBy: { email: "asc" },
     })
 
-    return NextResponse.json({ users })
+    return NextResponse.json({
+      users: users.map(({ _count, ...user }) => ({
+        ...user,
+        hasSignedIn: _count.accounts > 0,
+      })),
+    })
   } catch (error) {
     console.error("Error fetching users:", error)
 

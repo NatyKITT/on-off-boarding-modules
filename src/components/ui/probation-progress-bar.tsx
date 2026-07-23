@@ -1,8 +1,14 @@
 "use client"
 
 import { useMemo } from "react"
-import { differenceInDays, format, isPast } from "date-fns"
+import { differenceInCalendarDays, format, isPast } from "date-fns"
 import { cs } from "date-fns/locale"
+
+import {
+  formatDayCountCs,
+  formatHumanDurationBetween,
+  formatHumanDurationCompact,
+} from "@/lib/dates"
 
 import {
   Tooltip,
@@ -35,8 +41,12 @@ export function ProbationProgressBar({
     const end = new Date(probationEndDate)
     const today = frozenAt ? new Date(frozenAt) : new Date()
 
-    const rawRemaining = Math.ceil(differenceInDays(end, today))
-    const totalDays = Math.ceil(differenceInDays(end, start))
+    // Běžný, neposunutý rozdíl dat (žádné +1 navíc) - "N dní zbývá" počítá
+    // dny od zítřka do konce včetně, přesně jak to ukazuje kalendář. Jediná
+    // výjimka je samotný poslední den zkušební doby (rawRemaining === 0):
+    // ten se pořád počítá jako běžící (1 den), ne jako už ukončený.
+    const rawRemaining = differenceInCalendarDays(end, today)
+    const totalDays = Math.max(differenceInCalendarDays(end, start), 1)
 
     if (variant === "planned" && !isPast(start)) {
       return {
@@ -45,17 +55,27 @@ export function ProbationProgressBar({
         daysRemaining: Math.max(rawRemaining, 0),
         totalDays,
         statusText: "Zkušební doba ještě nezačala",
-        displayText: `${Math.max(rawRemaining, 0)}d`,
+        displayText: formatHumanDurationCompact(today, end),
+        elapsedText: null,
+        remainingText: formatHumanDurationBetween(today, end),
       }
     }
 
+    const isCompleted = rawRemaining < 0
+    const daysRemaining = rawRemaining === 0 ? 1 : Math.max(rawRemaining, 0)
+
     const percentage = Math.max(
       0,
-      Math.min(100, ((totalDays - rawRemaining) / totalDays) * 100)
+      Math.min(100, ((totalDays - daysRemaining) / totalDays) * 100)
     )
 
-    const isCompleted = rawRemaining <= 0 || percentage >= 100
-    const daysRemaining = Math.max(rawRemaining, 0)
+    const compactRemaining =
+      rawRemaining === 0 ? "1d" : formatHumanDurationCompact(today, end)
+    const elapsedText = formatHumanDurationBetween(start, today)
+    const remainingText =
+      rawRemaining === 0
+        ? formatDayCountCs(1)
+        : formatHumanDurationBetween(today, end)
 
     let status: "in-progress" | "ending-soon" | "completed" | "frozen"
     let statusText: string
@@ -64,7 +84,7 @@ export function ProbationProgressBar({
     if (isFrozen && !isCompleted) {
       status = "frozen"
       statusText = `Zastaveno k ${format(new Date(frozenAt!), "d.M.yyyy", { locale: cs })} — zbývalo ${daysRemaining} ${daysRemaining === 1 ? "den" : daysRemaining < 5 ? "dny" : "dní"}`
-      displayText = `${daysRemaining}d`
+      displayText = compactRemaining
     } else if (isCompleted) {
       status = "completed"
       statusText = "Zkušební doba skončila"
@@ -72,11 +92,11 @@ export function ProbationProgressBar({
     } else if (daysRemaining <= 30) {
       status = "ending-soon"
       statusText = `Zbývá ${daysRemaining} ${daysRemaining === 1 ? "den" : daysRemaining < 5 ? "dny" : "dní"}`
-      displayText = `${daysRemaining}d`
+      displayText = compactRemaining
     } else {
       status = "in-progress"
       statusText = `Zbývá ${daysRemaining} ${daysRemaining === 1 ? "den" : daysRemaining < 5 ? "dny" : "dní"}`
-      displayText = `${daysRemaining}d`
+      displayText = compactRemaining
     }
 
     return {
@@ -86,6 +106,8 @@ export function ProbationProgressBar({
       totalDays,
       statusText,
       displayText,
+      elapsedText,
+      remainingText,
     }
   }, [startDate, probationEndDate, variant, frozenAt, isFrozen])
 
@@ -157,14 +179,12 @@ export function ProbationProgressBar({
         </p>
       ) : (
         <>
-          <p className="text-sm">
-            {progress.daysRemaining}{" "}
-            {progress.daysRemaining === 1
-              ? "den"
-              : progress.daysRemaining < 5
-                ? "dny"
-                : "dní"}
-          </p>
+          {progress.elapsedText && (
+            <p className="text-xs text-muted-foreground">
+              Uplynulo: {progress.elapsedText}
+            </p>
+          )}
+          <p className="text-sm">Zbývá: {progress.remainingText}</p>
           <p className="text-xs text-muted-foreground">
             do {format(new Date(probationEndDate), "d.M.yyyy", { locale: cs })}
           </p>

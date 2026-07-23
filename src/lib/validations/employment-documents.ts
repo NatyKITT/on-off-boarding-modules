@@ -153,15 +153,31 @@ const refineDateRange = (
   }
 }
 
+export const experienceTypeEnum = z.enum([
+  "EMPLOYMENT",
+  "OSVC",
+  "DPP",
+  "DPC",
+  "OTHER",
+])
+
 const experienceEntrySchema = z
   .object({
     employer: optionalTrimmedString,
     jobType: optionalTrimmedString,
+    employmentType: experienceTypeEnum.optional(),
     from: optionalDateString,
     to: optionalDateString,
+    ongoing: z.boolean().optional(),
   })
   .superRefine((val, ctx) => {
-    const any = !!val.employer || !!val.jobType || !!val.from || !!val.to
+    const any =
+      !!val.employer ||
+      !!val.jobType ||
+      !!val.employmentType ||
+      !!val.from ||
+      !!val.to ||
+      !!val.ongoing
     if (!any) return
 
     if (!val.employer) {
@@ -178,6 +194,13 @@ const experienceEntrySchema = z
         message: "Uveďte druh práce / činnosti.",
       })
     }
+    if (!val.employmentType) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["employmentType"],
+        message: "Vyberte typ výkonu práce (zaměstnání, OSVČ, DPP, DPČ, jiné).",
+      })
+    }
     if (!val.from) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -186,7 +209,9 @@ const experienceEntrySchema = z
       })
     }
 
-    refineDateRange({ from: val.from, to: val.to }, ctx, ["from"], ["to"])
+    if (!val.ongoing) {
+      refineDateRange({ from: val.from, to: val.to }, ctx, ["from"], ["to"])
+    }
   })
 
 const militaryEntrySchema = z
@@ -194,9 +219,10 @@ const militaryEntrySchema = z
     service: z.enum(["BASIC", "ALTERNATIVE", "CIVIL"]).optional(),
     from: optionalDateString,
     to: optionalDateString,
+    ongoing: z.boolean().optional(),
   })
   .superRefine((val, ctx) => {
-    const any = !!val.service || !!val.from || !!val.to
+    const any = !!val.service || !!val.from || !!val.to || !!val.ongoing
     if (!any) return
 
     if (!val.service) {
@@ -213,15 +239,17 @@ const militaryEntrySchema = z
         message: "Uveďte datum \u201eOd\u201c.",
       })
     }
-    if (!val.to) {
+    if (!val.to && !val.ongoing) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["to"],
-        message: "Uveďte datum \u201eDo\u201c.",
+        message: "Uveďte datum „Do“, nebo zaškrtněte „Stále trvá“.",
       })
     }
 
-    refineDateRange(val, ctx)
+    if (!val.ongoing) {
+      refineDateRange(val, ctx)
+    }
   })
 
 const childCareSchema = z
@@ -469,7 +497,7 @@ export const payrollChildSchema = z
 
 export const payrollInfoSchema = z.object({
   fullName: requiredTrimmedString("Jméno a příjmení je povinné."),
-  maidenName: requiredTrimmedString("Rodné příjmení je povinné."),
+  maidenName: optionalTrimmedString,
   birthPlace: requiredTrimmedString("Místo narození je povinné."),
   birthNumber: optionalTrimmedString,
   birthDay: requiredTrimmedString("Den narození je povinný."),
@@ -662,6 +690,7 @@ export const personalQuestionnaireSchema = z
     hasCertificateSpecial: requiredBoolean(
       "Vyberte prosím Ano/Ne (zvláštní odborná způsobilost)."
     ),
+    certificateSpecialName: optionalTrimmedString,
     hasCertificateManagement: requiredBoolean(
       "Vyberte prosím Ano/Ne (vedoucí úředníci)."
     ),
@@ -713,6 +742,14 @@ export const personalQuestionnaireSchema = z
       })
     }
 
+    if (val.hasCertificateSpecial === true && !val.certificateSpecialName) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["certificateSpecialName"],
+        message: "Uveďte jaké osvědčení jste získal/a.",
+      })
+    }
+
     const anyPermit =
       !!val.foreignPermitFrom ||
       !!val.foreignPermitTo ||
@@ -748,7 +785,38 @@ export const personalQuestionnaireSchema = z
         ["foreignPermitTo"]
       )
     }
+
+    if (val.education.length > 0) {
+      const lastIndex = val.education.length - 1
+      const last = val.education[lastIndex]
+
+      if (!last.semesters) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["education", lastIndex, "semesters"],
+          message: "U posledního vzdělání uveďte počet tříd (semestrů).",
+        })
+      }
+      if (!last.graduationYear) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["education", lastIndex, "graduationYear"],
+          message: "U posledního vzdělání uveďte rok ukončení.",
+        })
+      }
+      if (!last.examType) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["education", lastIndex, "examType"],
+          message: "U posledního vzdělání uveďte druh zkoušky.",
+        })
+      }
+    }
   })
+  .transform((val) => ({
+    ...val,
+    languages: val.languages.filter((lang) => !!lang.level),
+  }))
 
 export type PersonalQuestionnaireSchema = z.infer<
   typeof personalQuestionnaireSchema

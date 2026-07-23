@@ -4,11 +4,24 @@ import { getLastDc2PersonalNumber } from "@/lib/eos-personal"
 import type { PersonalNumberMeta } from "@/components/forms/onboarding-form"
 
 export async function getPersonalNumberMeta(): Promise<PersonalNumberMeta> {
-  const lastUsed = await prisma.employeeOnboarding.findFirst({
+  const rows = await prisma.employeeOnboarding.findMany({
     where: { personalNumber: { not: null } },
-    orderBy: { personalNumber: "desc" },
     select: { personalNumber: true, name: true, surname: true },
   })
+
+  let lastUsed: (typeof rows)[number] | null = null
+  let lastUsedNum = -Infinity
+
+  for (const row of rows) {
+    const raw = row.personalNumber?.trim()
+    if (!raw || !/^\d+$/.test(raw)) continue
+
+    const n = Number(raw)
+    if (n > lastUsedNum) {
+      lastUsedNum = n
+      lastUsed = row
+    }
+  }
 
   const skipped = await prisma.personalNumberGap.findMany({
     where: { status: "SKIPPED" },

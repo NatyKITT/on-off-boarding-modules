@@ -3,9 +3,10 @@
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import type { DocumentStatus, EmploymentDocumentType } from "@prisma/client"
-import { AlertCircle, CheckCircle, Lock } from "lucide-react"
+import { AlertCircle, CheckCircle, Lock, Pencil } from "lucide-react"
 
 import { buildEmployeeMeta } from "@/lib/employee-meta"
+import { ServerValidationError } from "@/lib/server-validation-error"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -37,7 +38,17 @@ type InternalDocument = {
   data: unknown
   createdAt?: Date | string
   completedAt?: Date | string | null
+  lastEditedBy?: string | null
+  lastEditedAt?: Date | string | null
+  lastEditSummary?: string | null
   onboarding?: OnboardingMeta | null
+}
+
+type FieldChange = {
+  field: string
+  label: string
+  oldValue: string
+  newValue: string
 }
 
 type Props = {
@@ -73,6 +84,18 @@ function formatDateTime(value?: Date | string | null) {
   })
 }
 
+function wasEditedAfterCompletion(
+  completedAt?: Date | string | null,
+  lastEditedAt?: Date | string | null
+) {
+  if (!completedAt || !lastEditedAt) return false
+
+  const completed = new Date(completedAt).getTime()
+  const edited = new Date(lastEditedAt).getTime()
+
+  return edited - completed > 60_000
+}
+
 export function InternalDocumentShell({ document, canEdit }: Props) {
   const [doc, setDoc] = useState(document)
   const [saving, setSaving] = useState(false)
@@ -80,7 +103,10 @@ export function InternalDocumentShell({ document, canEdit }: Props) {
   const [resultModal, setResultModal] = useState<"success" | "error" | null>(
     null
   )
+  const [lastChanges, setLastChanges] = useState<FieldChange[]>([])
 
+  const alreadyFilled = doc.status !== "DRAFT"
+  const [editing, setEditing] = useState(!alreadyFilled)
   const router = useRouter()
 
   const employeeMeta = useMemo(() => {
@@ -92,7 +118,17 @@ export function InternalDocumentShell({ document, canEdit }: Props) {
   const titleName = employeeMeta?.fullName?.trim()
   const departmentText = employeeMeta?.department?.trim()
   const positionText = employeeMeta?.position?.trim()
-  const readOnly = doc.isLocked || !canEdit
+  const unitText = employeeMeta?.unitName?.trim()
+  const readOnly = doc.isLocked || !canEdit || !editing
+  const canRequestEdit = alreadyFilled && !editing && !doc.isLocked && canEdit
+  const canCancelEdit = alreadyFilled && editing && !doc.isLocked && canEdit
+  const backToDocumentsUrl = doc.onboarding
+    ? `/nastupy?highlight=${doc.onboarding.id}`
+    : "/nastupy"
+
+  function goBackToDocuments() {
+    router.push(backToDocumentsUrl)
+  }
 
   async function handleSave(data: unknown) {
     if (readOnly) return
@@ -110,26 +146,39 @@ export function InternalDocumentShell({ document, canEdit }: Props) {
       if (!res.ok) {
         const response = await res.json().catch(() => null)
 
-        throw new Error(
+        throw new ServerValidationError(
           response?.message ??
-            "Uložení dokumentu se nezdařilo. Zkuste to prosím znovu."
+            "Uložení dokumentu se nezdařilo. Zkuste to prosím znovu.",
+          response?.issues ?? []
         )
       }
 
       const json = (await res.json()) as {
-        id: number
-        status: DocumentStatus
-        completedAt: string | null
-        type?: EmploymentDocumentType
+        document: {
+          id: number
+          status: DocumentStatus
+          completedAt: string | null
+          type?: EmploymentDocumentType
+          lastEditedBy?: string | null
+          lastEditedAt?: string | null
+          lastEditSummary?: string | null
+        }
+        changes?: FieldChange[]
       }
 
       setDoc((previous) => ({
         ...previous,
         data,
-        status: json.status ?? previous.status,
-        completedAt: json.completedAt ?? previous.completedAt,
+        status: json.document.status ?? previous.status,
+        completedAt: json.document.completedAt ?? previous.completedAt,
+        lastEditedBy: json.document.lastEditedBy ?? previous.lastEditedBy,
+        lastEditedAt: json.document.lastEditedAt ?? previous.lastEditedAt,
+        lastEditSummary:
+          json.document.lastEditSummary ?? previous.lastEditSummary,
       }))
 
+      setLastChanges(json.changes ?? [])
+      setEditing(false)
       setResultModal("success")
     } catch (saveError) {
       setError(
@@ -138,6 +187,7 @@ export function InternalDocumentShell({ document, canEdit }: Props) {
           : "Uložení dokumentu se nezdařilo. Zkuste to prosím znovu."
       )
       setResultModal("error")
+      throw saveError
     } finally {
       setSaving(false)
     }
@@ -192,6 +242,24 @@ export function InternalDocumentShell({ document, canEdit }: Props) {
             vrátit zpět na přehled dokumentů.
           </p>
 
+          {lastChanges.length > 0 && (
+            <div className="mt-3 space-y-1.5 rounded-md border bg-muted/40 p-3">
+              <p className="text-xs font-medium text-foreground">
+                Provedené změny:
+              </p>
+              <ul className="space-y-1 text-xs text-muted-foreground">
+                {lastChanges.map((change) => (
+                  <li key={change.field}>
+                    <span className="font-medium text-foreground">
+                      {change.label}:
+                    </span>{" "}
+                    {change.oldValue} → {change.newValue}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div className="mt-4 flex justify-end gap-2">
             <Button
               type="button"
@@ -207,10 +275,10 @@ export function InternalDocumentShell({ document, canEdit }: Props) {
               size="sm"
               onClick={() => {
                 setResultModal(null)
-                router.back()
+                goBackToDocuments()
               }}
             >
-              Zpět na dokumenty
+              Zavřít dokument
             </Button>
           </div>
         </DialogContent>
@@ -245,54 +313,137 @@ export function InternalDocumentShell({ document, canEdit }: Props) {
         </DialogContent>
       </Dialog>
 
-      <header className="space-y-1">
-        <h1 className="text-xl font-semibold">
-          {titleName ? `${titleName} – ` : ""}
-          {docTypeLabel(doc.type)}
-        </h1>
-
-        {(positionText || departmentText) && (
-          <p className="text-sm text-muted-foreground">
-            {positionText ? <span>{positionText}</span> : null}
-            {positionText && departmentText ? <span> · </span> : null}
-            {departmentText ? <span>{departmentText}</span> : null}
-          </p>
-        )}
-
-        {doc.completedAt && (
-          <p className="text-xs text-muted-foreground">
-            Vyplněno: {formatDateTime(doc.completedAt)}
-          </p>
-        )}
-
-        {readOnly && (
-          <div className="mt-2 inline-flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
-            <Lock className="size-3" />
-            {doc.isLocked
-              ? "Dokument je uzamčený. Pro úpravy ho nejprve odemkněte v seznamu dokumentů."
-              : "Nemáte oprávnění dokument upravovat. Dokument je zobrazen pouze pro čtení."}
-          </div>
-        )}
-
-        {error && (
-          <p className="mt-2 text-xs text-red-600" role="alert">
-            {error}
-          </p>
-        )}
-      </header>
-
-      <div className="pb-8">{renderForm()}</div>
-
-      <div className="flex justify-between gap-2 pt-4">
+      <div className="flex items-center justify-between gap-2">
         <Button
           type="button"
           variant="outline"
           size="sm"
-          onClick={() => router.back()}
-          disabled={saving}
+          onClick={() => goBackToDocuments()}
         >
-          Zpět na dokumenty
+          Zavřít dokument
         </Button>
+
+        {canRequestEdit && (
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => setEditing(true)}
+            className="gap-2 bg-[#3dbd9b] text-white hover:bg-[#35a889]"
+            title="Dokument je zobrazen pouze pro čtení, pro úpravy klikněte na toto tlačítko."
+          >
+            <Pencil className="size-4" />
+            Odemknout pro úpravy
+          </Button>
+        )}
+
+        {canCancelEdit && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setEditing(false)}
+            disabled={saving}
+          >
+            Zrušit úpravu
+          </Button>
+        )}
+      </div>
+
+      <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900/30">
+        <p className="text-lg font-medium text-slate-500 dark:text-slate-400">
+          Interní zobrazení – {docTypeLabel(doc.type)}
+        </p>
+
+        <div className="rounded-md border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-background">
+          <h1 className="text-lg font-semibold text-foreground">
+            {titleName || "Zaměstnanec"}
+          </h1>
+
+          {(positionText || departmentText || unitText) && (
+            <p className="text-sm text-muted-foreground">
+              {positionText ? <span>{positionText}</span> : null}
+              {positionText && departmentText ? <span> · </span> : null}
+              {departmentText ? <span>{departmentText}</span> : null}
+              {(positionText || departmentText) && unitText ? (
+                <span> · </span>
+              ) : null}
+              {unitText ? <span>{unitText}</span> : null}
+            </p>
+          )}
+        </div>
+
+        {(() => {
+          const edited = wasEditedAfterCompletion(
+            doc.completedAt,
+            doc.lastEditedAt
+          )
+
+          if (!doc.completedAt && !doc.lastEditedAt) return null
+
+          return (
+            <div className="space-y-0.5 text-xs text-muted-foreground">
+              {doc.completedAt && (
+                <p>
+                  Vyplněno: {formatDateTime(doc.completedAt)}
+                  {!edited && doc.lastEditedBy ? `, ${doc.lastEditedBy}` : ""}
+                </p>
+              )}
+              {edited && doc.lastEditedAt && (
+                <p>
+                  Naposledy upraveno: {formatDateTime(doc.lastEditedAt)}
+                  {doc.lastEditedBy ? `, ${doc.lastEditedBy}` : ""}
+                </p>
+              )}
+              {edited && doc.lastEditSummary && (
+                <p>Změny: {doc.lastEditSummary}</p>
+              )}
+              {canRequestEdit && (
+                <p>
+                  Dokument je zobrazen pouze pro čtení, pro úpravy klikněte na
+                  tlačítko „Odemknout pro úpravy“.
+                </p>
+              )}
+            </div>
+          )
+        })()}
+
+        {doc.isLocked && (
+          <div className="flex items-center justify-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
+            <Lock className="size-3" />
+            Dokument je uzamčený. Pro úpravy ho nejprve odemkněte v seznamu
+            dokumentů.
+          </div>
+        )}
+
+        {!doc.isLocked && !canEdit && (
+          <div className="flex items-center justify-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
+            <Lock className="size-3" />
+            Nemáte oprávnění dokument upravovat. Dokument je zobrazen pouze pro
+            čtení.
+          </div>
+        )}
+
+        {error && (
+          <p className="text-center text-xs text-red-600" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
+
+      <div className="pb-8">{renderForm()}</div>
+
+      <div className="flex justify-between gap-2 pt-4">
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => goBackToDocuments()}
+            disabled={saving}
+          >
+            Zavřít dokument
+          </Button>
+        </div>
 
         <Button
           type="button"

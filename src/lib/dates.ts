@@ -19,26 +19,57 @@ export function formatDayCountCs(days: number): string {
   return `${n} dní`
 }
 
+function diffMonthsAndDays(
+  from: Date,
+  to: Date
+): { months: number; days: number } {
+  const totalDays = differenceInCalendarDays(to, from)
+  if (totalDays <= 0) return { months: 0, days: 0 }
+
+  // differenceInCalendarMonths srovnává jen čísla měsíců (7 -> 8 = 1 měsíc),
+  // nehledí na den v měsíci - u např. 23.7. -> 15.8. by tak vrátilo "1
+  // měsíc", i když je to jen 23 dní. Dokud addMonths(from, months)
+  // přestřeluje "to", měsíc se odečte, aby zbylo jen skutečně celé počty
+  // měsíců podle kalendářní délky.
+  let months = differenceInCalendarMonths(to, from)
+  let afterMonths = addMonths(from, months)
+
+  while (months > 0 && afterMonths > to) {
+    months -= 1
+    afterMonths = addMonths(from, months)
+  }
+
+  if (months <= 0) return { months: 0, days: totalDays }
+
+  const remainderDays = differenceInCalendarDays(to, afterMonths)
+
+  return { months, days: remainderDays }
+}
+
 /**
  * "2 měsíce 12 dní" for gaps of a month or more, otherwise just "12 dní" —
  * computed from real calendar months, not a /30 approximation.
  */
 export function formatHumanDurationBetween(from: Date, to: Date): string {
-  const days = differenceInCalendarDays(to, from)
-  if (days <= 0) return formatDayCountCs(0)
-
-  const months = differenceInCalendarMonths(to, from)
+  const { months, days } = diffMonthsAndDays(from, to)
   if (months <= 0) return formatDayCountCs(days)
-
-  const afterMonths = addMonths(from, months)
-  const remainderDays = differenceInCalendarDays(to, afterMonths)
 
   const monthWord =
     months === 1 ? "měsíc" : months >= 2 && months <= 4 ? "měsíce" : "měsíců"
 
-  return remainderDays > 0
-    ? `${months} ${monthWord} ${formatDayCountCs(remainderDays)}`
+  return days > 0
+    ? `${months} ${monthWord} ${formatDayCountCs(days)}`
     : `${months} ${monthWord}`
+}
+
+/**
+ * Compact "3m 12d" / "12d" form for tight spaces like a progress-bar label.
+ */
+export function formatHumanDurationCompact(from: Date, to: Date): string {
+  const { months, days } = diffMonthsAndDays(from, to)
+  if (months <= 0) return `${days}d`
+
+  return days > 0 ? `${months}m ${days}d` : `${months}m`
 }
 
 export type DateProgressBucket =

@@ -2,7 +2,13 @@
 
 import * as React from "react"
 import { useEffect, useMemo, useState } from "react"
-import { differenceInDays, format } from "date-fns"
+import { differenceInCalendarDays, format } from "date-fns"
+
+import {
+  formatDayCountCs,
+  formatHumanDurationBetween,
+  formatHumanDurationCompact,
+} from "@/lib/dates"
 
 import {
   Tooltip,
@@ -15,11 +21,13 @@ type DepartureVariant = "planned" | "actual" | "notice"
 
 export function DepartureProgressBar({
   targetDate,
+  startDate,
   variant = "planned",
   label,
   className = "",
 }: {
   targetDate: string
+  startDate?: string | null
   variant?: DepartureVariant
   label?: string
   className?: string
@@ -27,16 +35,25 @@ export function DepartureProgressBar({
   const today = new Date()
   const target = new Date(targetDate)
 
-  const rawRemaining = Math.ceil(differenceInDays(target, today))
+  // Běžný, neposunutý rozdíl dat - "N dní zbývá" počítá dny od zítřka do
+  // cílového data včetně, přesně jak to ukazuje kalendář. Jediná výjimka je
+  // samotný poslední den (rawRemaining === 0): ten se pořád počítá jako
+  // běžící (zaměstnanec je ještě v práci), ne jako už uplynulý.
+  const rawRemaining = differenceInCalendarDays(target, today)
+  const isCompleted = rawRemaining < 0
+  const daysRemaining = rawRemaining === 0 ? 1 : Math.max(rawRemaining, 0)
 
-  const maxDays = variant === "notice" ? 60 : 90
+  const start = startDate ? new Date(startDate) : null
+  const maxDays = start
+    ? Math.max(differenceInCalendarDays(target, start), 1)
+    : variant === "notice"
+      ? 60
+      : 90
 
   const pct = Math.max(
     0,
-    Math.min(100, ((maxDays - rawRemaining) / maxDays) * 100)
+    Math.min(100, ((maxDays - daysRemaining) / maxDays) * 100)
   )
-  const isCompleted = rawRemaining <= 0 || pct >= 100
-  const daysRemaining = Math.max(rawRemaining, 0)
 
   const [animatedPct, setAnimatedPct] = useState(0)
   useEffect(() => {
@@ -91,7 +108,15 @@ export function DepartureProgressBar({
     ? variant === "notice"
       ? "Uplynula"
       : "Odešel"
-    : `${daysRemaining}d`
+    : rawRemaining === 0
+      ? "1d"
+      : formatHumanDurationCompact(today, target)
+
+  const elapsedText = start ? formatHumanDurationBetween(start, today) : null
+  const remainingText =
+    rawRemaining === 0
+      ? formatDayCountCs(1)
+      : formatHumanDurationBetween(today, target)
 
   return (
     <TooltipProvider>
@@ -134,14 +159,12 @@ export function DepartureProgressBar({
               </p>
             ) : (
               <>
-                <p className="text-sm">
-                  {daysRemaining}{" "}
-                  {daysRemaining === 1
-                    ? "den"
-                    : daysRemaining < 5
-                      ? "dny"
-                      : "dní"}
-                </p>
+                {elapsedText && (
+                  <p className="text-xs text-muted-foreground">
+                    Uplynulo: {elapsedText}
+                  </p>
+                )}
+                <p className="text-sm">Zbývá: {remainingText}</p>
                 <p className="text-xs text-muted-foreground">
                   do {format(target, "d.M.yyyy")}
                 </p>

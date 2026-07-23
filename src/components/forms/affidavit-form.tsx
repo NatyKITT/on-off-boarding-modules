@@ -2,15 +2,16 @@
 
 import * as React from "react"
 import { useTransition } from "react"
-import Image from "next/image"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { CheckCircle, XCircle } from "lucide-react"
+import { XCircle } from "lucide-react"
 import { useFieldArray, useForm } from "react-hook-form"
 
 import { useToast } from "@/hooks/use-toast"
 import { EmployeeMeta } from "@/lib/employee-meta"
+import { ServerValidationError } from "@/lib/server-validation-error"
 import {
   affidavitSchema,
+  experienceTypeEnum,
   type AffidavitSchema,
 } from "@/lib/validations/employment-documents"
 
@@ -40,6 +41,14 @@ type MilitaryEntry = AffidavitSchema["militaryService"][number]
 type CloseRelativeCareEntry = AffidavitSchema["closeRelativeCare"][number]
 type DoctoralStudyEntry = AffidavitSchema["doctoralStudy"][number]
 
+const EXPERIENCE_TYPE_LABELS: Record<string, string> = {
+  EMPLOYMENT: "Zaměstnanecký poměr",
+  OSVC: "OSVČ",
+  DPP: "Dohoda o provedení práce (DPP)",
+  DPC: "Dohoda o pracovní činnosti (DPČ)",
+  OTHER: "Jiné",
+}
+
 type AffidavitFormBaseProps = {
   documentId: number
   initialData?: unknown
@@ -65,6 +74,29 @@ export type AffidavitFormProps =
   | AffidavitFormPublicProps
   | AffidavitFormInternalProps
 
+const baseDefaultValues: Partial<AffidavitSchema> = {
+  noExperience: false,
+  experience: [
+    {
+      employer: "",
+      jobType: "",
+      employmentType: undefined,
+      from: "",
+      to: "",
+      ongoing: false,
+    },
+  ],
+  militaryService: [{ service: undefined, from: "", to: "", ongoing: false }],
+  maternityParental: [{ childName: "", childBirthDate: "", from: "", to: "" }],
+  continuousCare: [{ childName: "", childBirthDate: "", from: "", to: "" }],
+  disabledChildCare: [{ childName: "", childBirthDate: "", from: "", to: "" }],
+  closeRelativeCare: [
+    { personName: "", dependencyLevel: undefined, from: "", to: "" },
+  ],
+  doctoralStudy: [{ schoolName: "", studyProgram: "", from: "", to: "" }],
+  unpaidLeave: [{ reason: "", from: "", to: "" }],
+}
+
 export function AffidavitForm(props: AffidavitFormProps) {
   const { toast } = useToast()
   const [status, setStatus] = React.useState<
@@ -73,27 +105,15 @@ export function AffidavitForm(props: AffidavitFormProps) {
   const [resultModal, setResultModal] = React.useState<
     "success" | "error" | null
   >(null)
+  const [errorMessage, setErrorMessage] = React.useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
   const form = useForm<AffidavitSchema>({
     mode: "onChange",
     resolver: zodResolver(affidavitSchema),
-    defaultValues: (props.initialData as AffidavitSchema | undefined) ?? {
-      noExperience: false,
-      experience: [{ employer: "", jobType: "", from: "", to: "" }],
-      militaryService: [{ service: undefined, from: "", to: "" }],
-      maternityParental: [
-        { childName: "", childBirthDate: "", from: "", to: "" },
-      ],
-      continuousCare: [{ childName: "", childBirthDate: "", from: "", to: "" }],
-      disabledChildCare: [
-        { childName: "", childBirthDate: "", from: "", to: "" },
-      ],
-      closeRelativeCare: [
-        { personName: "", dependencyLevel: undefined, from: "", to: "" },
-      ],
-      doctoralStudy: [{ schoolName: "", studyProgram: "", from: "", to: "" }],
-      unpaidLeave: [{ reason: "", from: "", to: "" }],
+    defaultValues: {
+      ...baseDefaultValues,
+      ...(props.initialData as Partial<AffidavitSchema> | undefined),
     },
   })
 
@@ -101,9 +121,18 @@ export function AffidavitForm(props: AffidavitFormProps) {
     register,
     handleSubmit,
     setValue,
+    setError,
     control,
     formState: { errors },
   } = form
+
+  React.useEffect(() => {
+    const subscription = form.watch(() => {
+      setResultModal((previous) => (previous === "error" ? null : previous))
+    })
+
+    return () => subscription.unsubscribe()
+  }, [form])
 
   const isTruthful = form.watch("isTruthful") as boolean | undefined
   const noExperience = form.watch("noExperience") as boolean
@@ -150,6 +179,15 @@ export function AffidavitForm(props: AffidavitFormProps) {
     (props.mode === "public" && isCompleted) ||
     props.readOnly === true
 
+  const handleInvalid = () => {
+    toast({
+      title: "Formulář nelze odeslat",
+      description:
+        "Některá povinná pole nejsou vyplněná nebo obsahují chybu. Zkontrolujte prosím červeně označená pole.",
+      variant: "destructive",
+    })
+  }
+
   const handleSubmitForm = (values: AffidavitSchema) => {
     startTransition(async () => {
       setStatus("loading")
@@ -166,25 +204,38 @@ export function AffidavitForm(props: AffidavitFormProps) {
           })
 
           if (!res.ok) {
-            throw new Error(await res.text())
+            const response = await res.json().catch(() => null)
+            throw new ServerValidationError(
+              response?.message || "Uložení se nezdařilo.",
+              response?.issues ?? []
+            )
           }
 
           setStatus("completed")
-          setResultModal("success")
           props.onSubmitted?.()
         } else {
           await props.onSubmitInternal?.(values)
           setStatus("completed")
-          setResultModal("success")
         }
       } catch (error) {
         console.error(error)
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Dokument se nepodařilo uložit. Zkuste to prosím znovu nebo kontaktujte HR."
         setStatus("filling")
+        setErrorMessage(message)
         setResultModal("error")
+
+        if (error instanceof ServerValidationError) {
+          for (const issue of error.issues) {
+            setError(issue.path.join(".") as never, { message: issue.message })
+          }
+        }
+
         toast({
           title: "Chyba při ukládání",
-          description:
-            "Dokument se nepodařilo uložit. Zkuste to prosím znovu nebo kontaktujte HR.",
+          description: message,
           variant: "destructive",
         })
       }
@@ -194,24 +245,7 @@ export function AffidavitForm(props: AffidavitFormProps) {
   return (
     <>
       <Dialog
-        open={resultModal === "success"}
-        onOpenChange={(open) => !open && setResultModal(null)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <CheckCircle className="size-5 text-green-500" />
-              Dokument uložen
-            </DialogTitle>
-            <DialogDescription>
-              Čestné prohlášení bylo úspěšně uloženo.
-            </DialogDescription>
-          </DialogHeader>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={resultModal === "error"}
+        open={props.mode === "public" && resultModal === "error"}
         onOpenChange={(open) => !open && setResultModal(null)}
       >
         <DialogContent>
@@ -221,28 +255,29 @@ export function AffidavitForm(props: AffidavitFormProps) {
               Chyba při ukládání
             </DialogTitle>
             <DialogDescription>
-              Dokument se nepodařilo uložit. Zkuste to prosím znovu nebo
-              kontaktujte své HR oddělení.
+              {errorMessage ??
+                "Dokument se nepodařilo uložit. Zkuste to prosím znovu nebo kontaktujte své HR oddělení."}
             </DialogDescription>
           </DialogHeader>
         </DialogContent>
       </Dialog>
 
       <form
-        onSubmit={handleSubmit(handleSubmitForm)}
-        className="mx-auto max-w-3xl space-y-6"
+        onSubmit={handleSubmit(handleSubmitForm, handleInvalid)}
+        className="mx-auto w-full max-w-5xl space-y-6"
       >
-        <header className="space-y-4 text-sm text-muted-foreground">
-          <div className="flex flex-col items-center gap-3 text-center">
-            <Image
-              src="/assets/images/logo-kitt6.png"
-              alt="Městská část Praha 6"
-              width={100}
-              height={100}
-            />
-            <h1 className="text-xl font-semibold text-foreground">
+        <header className="space-y-4 rounded-lg border border-emerald-200 bg-emerald-50/40 p-4 text-sm text-muted-foreground dark:border-emerald-900 dark:bg-emerald-950/10">
+          <div className="flex flex-col items-center gap-6 text-center">
+            <h1 className="text-2xl font-semibold text-foreground">
               Česté prohlášení
             </h1>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/assets/images/Logo_Praha%206.svg"
+              alt="Městská část Praha 6"
+              width={76}
+              height={86}
+            />
           </div>
           <p>Važena paní, važený pane,</p>
           <p>
@@ -302,7 +337,7 @@ export function AffidavitForm(props: AffidavitFormProps) {
         <section
           className={`space-y-3 rounded-md border p-4 ${!noExperience && errors.experience?.message ? "border-destructive" : ""}`}
         >
-          <h2 className="text-sm font-medium">
+          <h2 className="text-base font-medium">
             Praxe <span className="text-destructive">*</span>
           </h2>
 
@@ -323,7 +358,7 @@ export function AffidavitForm(props: AffidavitFormProps) {
                 htmlFor="no-experience"
                 className="cursor-pointer font-normal leading-snug"
               >
-                Nemám žádnou praxi (jsem čerstvě po škole)
+                Nemám žádnou praxi (jsem např. čerstvě po škole nebo jiné)
               </Label>
               <p className="text-xs text-muted-foreground">
                 Zaškrtněte pokud ještě nemáte žádnou pracovní zkušenost.
@@ -361,7 +396,7 @@ export function AffidavitForm(props: AffidavitFormProps) {
             experienceArray.fields.map((field, index) => (
               <div
                 key={field.id}
-                className="mt-3 space-y-3 rounded-md border bg-muted/30 p-4"
+                className="mt-3 space-y-3 rounded-md border p-4"
               >
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="space-y-1">
@@ -399,6 +434,46 @@ export function AffidavitForm(props: AffidavitFormProps) {
                   </div>
                 </div>
 
+                <div className="space-y-1">
+                  <Label>
+                    Typ výkonu práce <span className="text-destructive">*</span>
+                  </Label>
+                  <Select
+                    value={
+                      form.watch(
+                        `experience.${index}.employmentType` as const
+                      ) ?? ""
+                    }
+                    onValueChange={(value) =>
+                      setValue(
+                        `experience.${index}.employmentType` as const,
+                        value as ExperienceEntry["employmentType"],
+                        { shouldValidate: true }
+                      )
+                    }
+                    disabled={isDisabled}
+                  >
+                    <SelectTrigger className="w-full max-w-xs">
+                      <SelectValue placeholder="Vyberte typ" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {experienceTypeEnum.options.map((opt) => (
+                        <SelectItem key={opt} value={opt}>
+                          {EXPERIENCE_TYPE_LABELS[opt]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {errors.experience?.[index]?.employmentType && (
+                    <p className="text-xs text-destructive">
+                      {
+                        errors.experience[index]?.employmentType
+                          ?.message as string
+                      }
+                    </p>
+                  )}
+                </div>
+
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="space-y-1">
                     <Label>
@@ -421,13 +496,42 @@ export function AffidavitForm(props: AffidavitFormProps) {
                     <Input
                       type="date"
                       {...register(`experience.${index}.to` as const)}
-                      disabled={isDisabled}
+                      disabled={
+                        isDisabled || form.watch(`experience.${index}.ongoing`)
+                      }
                     />
                     {errors.experience?.[index]?.to && (
                       <p className="text-xs text-destructive">
                         {errors.experience[index]?.to?.message as string}
                       </p>
                     )}
+                    <div className="flex items-center gap-2 pt-1">
+                      <Checkbox
+                        id={`experience-ongoing-${index}`}
+                        checked={
+                          form.watch(`experience.${index}.ongoing`) === true
+                        }
+                        onCheckedChange={(checked) => {
+                          setValue(
+                            `experience.${index}.ongoing` as const,
+                            checked === true,
+                            { shouldValidate: true }
+                          )
+                          if (checked === true) {
+                            setValue(`experience.${index}.to` as const, "", {
+                              shouldValidate: true,
+                            })
+                          }
+                        }}
+                        disabled={isDisabled}
+                      />
+                      <Label
+                        htmlFor={`experience-ongoing-${index}`}
+                        className="cursor-pointer font-normal"
+                      >
+                        Stále trvá
+                      </Label>
+                    </div>
                   </div>
                 </div>
 
@@ -456,8 +560,10 @@ export function AffidavitForm(props: AffidavitFormProps) {
                 experienceArray.append({
                   employer: "",
                   jobType: "",
+                  employmentType: undefined,
                   from: "",
                   to: "",
+                  ongoing: false,
                 } as ExperienceEntry)
               }
               disabled={isDisabled}
@@ -477,15 +583,18 @@ export function AffidavitForm(props: AffidavitFormProps) {
         </section>
 
         <section className="space-y-3 rounded-md border p-4">
-          <h2 className="text-sm font-medium">
+          <h2 className="text-base font-medium">
             Výkon vojenské základní (náhradní) služby nebo civilní služby{" "}
             <span className="text-muted-foreground">[1]</span>
           </h2>
+          <p className="text-xs text-muted-foreground">
+            Vyplňte jen pokud jste vojenskou nebo civilní službu podstoupili.
+          </p>
 
           {militaryArray.fields.map((field, idx) => (
             <div
               key={field.id}
-              className="mt-3 space-y-3 rounded-md border bg-muted/30 p-4"
+              className="mt-3 space-y-3 rounded-md border p-4"
             >
               <div className="space-y-1">
                 <Label>Druh služby</Label>
@@ -538,13 +647,42 @@ export function AffidavitForm(props: AffidavitFormProps) {
                   <Input
                     type="date"
                     {...register(`militaryService.${idx}.to` as const)}
-                    disabled={isDisabled}
+                    disabled={
+                      isDisabled || form.watch(`militaryService.${idx}.ongoing`)
+                    }
                   />
                   {errors.militaryService?.[idx]?.to && (
                     <p className="text-xs text-destructive">
                       {errors.militaryService[idx]?.to?.message as string}
                     </p>
                   )}
+                  <div className="flex items-center gap-2 pt-1">
+                    <Checkbox
+                      id={`military-ongoing-${idx}`}
+                      checked={
+                        form.watch(`militaryService.${idx}.ongoing`) === true
+                      }
+                      onCheckedChange={(checked) => {
+                        setValue(
+                          `militaryService.${idx}.ongoing` as const,
+                          checked === true,
+                          { shouldValidate: true }
+                        )
+                        if (checked === true) {
+                          setValue(`militaryService.${idx}.to` as const, "", {
+                            shouldValidate: true,
+                          })
+                        }
+                      }}
+                      disabled={isDisabled}
+                    />
+                    <Label
+                      htmlFor={`military-ongoing-${idx}`}
+                      className="cursor-pointer font-normal"
+                    >
+                      Stále trvá
+                    </Label>
+                  </div>
                 </div>
               </div>
 
@@ -574,6 +712,7 @@ export function AffidavitForm(props: AffidavitFormProps) {
                 service: undefined,
                 from: "",
                 to: "",
+                ongoing: false,
               } as MilitaryEntry)
             }
             disabled={isDisabled}
@@ -587,18 +726,18 @@ export function AffidavitForm(props: AffidavitFormProps) {
         </section>
 
         <section className="space-y-3 rounded-md border p-4">
-          <h2 className="text-sm font-medium">
+          <h2 className="text-base font-medium">
             Pracovní volno bez náhrady platu/mzdy
           </h2>
           <p className="text-xs text-muted-foreground">
             např. následování manžela do ciziny, péče o dítě bez nároku na
-            příspěvek
+            příspěvek. Vyplňte, pokud se Vás tyto údaje týkají.
           </p>
 
           {unpaidArray.fields.map((field, idx) => (
             <div
               key={field.id}
-              className="mt-3 space-y-3 rounded-md border bg-muted/30 p-4"
+              className="mt-3 space-y-3 rounded-md border p-4"
             >
               <div className="space-y-1">
                 <Label>Důvod</Label>
@@ -670,20 +809,21 @@ export function AffidavitForm(props: AffidavitFormProps) {
         </section>
 
         <section className="space-y-3 rounded-md border p-4">
-          <h2 className="text-sm font-medium">
+          <h2 className="text-base font-medium">
             Doba skutečného čerpání mateřské dovolené, další mateřské dovolené
             nebo rodičovské dovolené
           </h2>
           <p className="text-xs text-muted-foreground">
             včetně doby péče o dítě do 4 let jeho věku za podmínky nároku na
             rodičovský příspěvek, avšak za podmínky, že současně neprobíhala s
-            přípravou na povolání v denním/prezenčním studiu
+            přípravou na povolání v denním/prezenčním studiu. Vyplňte, pokud se
+            Vás tyto údaje týkají.
           </p>
 
           {maternityArray.fields.map((field, idx) => (
             <div
               key={field.id}
-              className="mt-3 space-y-3 rounded-md border bg-muted/30 p-4"
+              className="mt-3 space-y-3 rounded-md border p-4"
             >
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-1">
@@ -785,18 +925,18 @@ export function AffidavitForm(props: AffidavitFormProps) {
         </section>
 
         <section className="space-y-3 rounded-md border p-4">
-          <h2 className="text-sm font-medium">
+          <h2 className="text-base font-medium">
             Doba trvalé péče o dítě nebo děti
           </h2>
           <p className="text-xs text-muted-foreground">
             pokud tato péče neprobíhala současně s přípravou na povolání v
-            denním/prezenčním studiu
+            denním/prezenčním studiu. Vyplňte, pokud se Vás tyto údaje týkají.
           </p>
 
           {continuousArray.fields.map((field, idx) => (
             <div
               key={field.id}
-              className="mt-3 space-y-3 rounded-md border bg-muted/30 p-4"
+              className="mt-3 space-y-3 rounded-md border p-4"
             >
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-1">
@@ -895,20 +1035,21 @@ export function AffidavitForm(props: AffidavitFormProps) {
         </section>
 
         <section className="space-y-3 rounded-md border p-4">
-          <h2 className="text-sm font-medium">
+          <h2 className="text-base font-medium">
             Doba osobní péče o dlouhodobě těžce zdravotně postižené nezletilé
             dítě
           </h2>
           <p className="text-xs text-muted-foreground">
             které vyžadovalo mimořádnou péči, pokud nebylo umístěno v ústavu pro
             takové děti, pokud tato péče neprobíhala současně s přípravou na
-            povolání v denním/prezenčním studiu
+            povolání v denním/prezenčním studiu. Vyplňte, pokud se Vás tyto
+            údaje týkají.
           </p>
 
           {disabledArray.fields.map((field, idx) => (
             <div
               key={field.id}
-              className="mt-3 space-y-3 rounded-md border bg-muted/30 p-4"
+              className="mt-3 space-y-3 rounded-md border p-4"
             >
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-1">
@@ -1010,20 +1151,21 @@ export function AffidavitForm(props: AffidavitFormProps) {
         </section>
 
         <section className="space-y-3 rounded-md border p-4">
-          <h2 className="text-sm font-medium">
+          <h2 className="text-base font-medium">
             Doba péče o osobu blízkou podle § 22 odst. 1 občanského zákoníku{" "}
             <span className="text-muted-foreground">[1]</span>
           </h2>
           <p className="text-xs text-muted-foreground">
             která je závislá na pomoci jiné osoby ve stupni III (těžká
             závislost) nebo ve stupni IV (úplná závislost) podle § 8 zákona o
-            sociálních službách <span>[2]</span>
+            sociálních službách <span>[2]</span>. Vyplňte, pokud se Vás tyto
+            údaje týkají.
           </p>
 
           {closeRelativeArray.fields.map((field, idx) => (
             <div
               key={field.id}
-              className="mt-3 space-y-3 rounded-md border bg-muted/30 p-4"
+              className="mt-3 space-y-3 rounded-md border p-4"
             >
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-1">
@@ -1154,16 +1296,19 @@ export function AffidavitForm(props: AffidavitFormProps) {
         </section>
 
         <section className="space-y-3 rounded-md border p-4">
-          <h2 className="text-sm font-medium">
+          <h2 className="text-base font-medium">
             Doba řádně ukončeného studia v doktorském studijním programu podle §
             47 zákona o vysokých školách{" "}
             <span className="text-muted-foreground">[1]</span>
           </h2>
+          <p className="text-xs text-muted-foreground">
+            Vyplňte, pokud se Vás tyto údaje týkají.
+          </p>
 
           {doctoralArray.fields.map((field, idx) => (
             <div
               key={field.id}
-              className="mt-3 space-y-3 rounded-md border bg-muted/30 p-4"
+              className="mt-3 space-y-3 rounded-md border p-4"
             >
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-1">
@@ -1265,7 +1410,7 @@ export function AffidavitForm(props: AffidavitFormProps) {
         </section>
 
         <section className="space-y-3 rounded-md border p-4">
-          <h2 className="text-sm font-medium">Čestné prohlášení</h2>
+          <h2 className="text-base font-medium">Čestné prohlášení</h2>
           <p className="text-xs text-muted-foreground">
             Čestně prohlašuji, že mnou uvedené údaje jsou pravdivé. Jsem si plně
             vědom(a), že budou použity pro zápočet doby rozhodné pro zařazení do

@@ -3,6 +3,10 @@ export type EmployeeMeta = {
   position?: string
   unitName?: string
   department?: string
+  firstName?: string
+  lastName?: string
+  titleBefore?: string
+  titleAfter?: string
 }
 
 type OnboardingLike = {
@@ -25,11 +29,19 @@ export function buildEmployeeMeta(onb: OnboardingLike): EmployeeMeta {
   const unitName = (onb.unitName ?? undefined)?.trim() || undefined
   const department = (onb.department ?? undefined)?.trim() || undefined
   const position = (onb.positionName ?? undefined)?.trim() || undefined
+  const firstName = (onb.name ?? undefined)?.trim() || undefined
+  const lastName = (onb.surname ?? undefined)?.trim() || undefined
+  const titleBefore = (onb.titleBefore ?? undefined)?.trim() || undefined
+  const titleAfter = (onb.titleAfter ?? undefined)?.trim() || undefined
 
   return {
     fullName,
     position,
     unitName,
     department,
+    firstName,
+    lastName,
+    titleBefore,
+    titleAfter,
   }
 }

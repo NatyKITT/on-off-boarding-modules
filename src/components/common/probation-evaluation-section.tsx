@@ -23,6 +23,7 @@ import {
 
 import { useIsReadonly } from "@/hooks/use-current-role"
 import { useToast } from "@/hooks/use-toast"
+import { formatDayCountCs } from "@/lib/dates"
 
 import {
   AlertDialog,
@@ -642,7 +643,7 @@ export function ProbationEvaluationSection({
   const shouldWarnNotCompleted =
     !isCompleted &&
     typeof daysToEnd === "number" &&
-    daysToEnd <= 21 &&
+    daysToEnd <= 14 &&
     daysToEnd >= 0
 
   const shouldWarnThreeDays =
@@ -1137,8 +1138,8 @@ export function ProbationEvaluationSection({
                         {typeof daysToEnd === "number" && !isCompleted && (
                           <div className="text-xs font-normal text-muted-foreground">
                             {daysToEnd >= 0
-                              ? `zbývá ${daysToEnd} dní`
-                              : `po termínu ${Math.abs(daysToEnd)} dní`}
+                              ? `zbývá ${formatDayCountCs(daysToEnd === 0 ? 1 : daysToEnd)}`
+                              : `po termínu ${formatDayCountCs(Math.abs(daysToEnd))}`}
                           </div>
                         )}
                       </div>
@@ -1279,8 +1280,8 @@ export function ProbationEvaluationSection({
                 tone="warning"
                 title="Zkušební doba končí za 3 dny nebo méně."
               >
-                Pokud formulář není vyplněný, 3 dny před koncem bude na HR a
-                vedoucímu zaslána připomínka.
+                Pokud formulář není vyplněný, budou HR a vedoucímu postupně
+                zasílány připomínky (7, 3, 2 a 1 den před koncem).
               </AlertBox>
             )}
 

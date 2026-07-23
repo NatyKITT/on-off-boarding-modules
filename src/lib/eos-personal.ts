@@ -17,6 +17,8 @@ export async function getLastDc2PersonalNumber(): Promise<{
   let best: Employee | null = null
 
   for (const e of employees) {
+    if (e.terminated) continue
+
     const num = e.personalNumber?.trim()
     if (!num || !/^\d+$/.test(num)) continue
 

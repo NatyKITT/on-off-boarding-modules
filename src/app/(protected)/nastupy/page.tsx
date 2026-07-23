@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { addMonths, differenceInCalendarDays, format, parseISO } from "date-fns"
+import { addMonths, format, parseISO } from "date-fns"
 import { cs } from "date-fns/locale"
 import {
   AlertTriangle,
@@ -33,8 +33,6 @@ import { useFacetedFilter } from "@/hooks/use-faceted-filter"
 import { useTextFilter } from "@/hooks/use-text-filter"
 import {
   EMPTY_DAY_RANGE,
-  formatDayCountCs,
-  formatHumanDurationBetween,
   getDateProgressBucket,
   getDaysRemaining,
   isDayRangeActive,
@@ -411,46 +409,6 @@ function formatOptionalDate(value?: string | null) {
   const date = new Date(value)
 
   return Number.isNaN(date.getTime()) ? "–" : format(date, "d.M.yyyy")
-}
-
-function formatProbationRemaining(
-  probationEnd?: string | null,
-  frozenAt?: string | null
-): { text: string; isPast: boolean } | null {
-  if (!probationEnd) return null
-
-  const end = new Date(`${probationEnd.slice(0, 10)}T00:00:00`)
-  if (Number.isNaN(end.getTime())) return null
-
-  if (
-    frozenAt &&
-    end.getTime() > new Date(`${frozenAt.slice(0, 10)}T00:00:00`).getTime()
-  ) {
-    return {
-      text: `zastaveno k ${format(new Date(`${frozenAt.slice(0, 10)}T00:00:00`), "d.M.yyyy")}`,
-      isPast: true,
-    }
-  }
-
-  const today = new Date()
-  const todayOnly = new Date(
-    today.getFullYear(),
-    today.getMonth(),
-    today.getDate()
-  )
-
-  if (end.getTime() > todayOnly.getTime()) {
-    return {
-      text: `zbývá ${formatHumanDurationBetween(todayOnly, end)}`,
-      isPast: false,
-    }
-  }
-
-  const elapsedDays = differenceInCalendarDays(todayOnly, end)
-
-  return elapsedDays === 0
-    ? { text: "končí dnes", isPast: false }
-    : { text: `${formatDayCountCs(elapsedDays)} po konci`, isPast: true }
 }
 
 function EmployeeChangeInfoButton({
@@ -1441,6 +1399,12 @@ export default function OnboardingPage() {
 
     setHighlightedArrivalVariant(variant)
     setHighlightedArrivalId(id)
+
+    const params = new URLSearchParams(sp.toString())
+    params.delete("highlight")
+    params.delete("status")
+    const queryString = params.toString()
+    router.replace(queryString ? `/nastupy?${queryString}` : "/nastupy")
   }, [
     qpHighlightId,
     qpHighlightStatus,
@@ -1448,6 +1412,8 @@ export default function OnboardingPage() {
     expandVariant,
     clearAllFacetFilters,
     setSearchQuery,
+    sp,
+    router,
   ])
 
   useEffect(() => {
@@ -2099,27 +2065,6 @@ export default function OnboardingPage() {
                 <div className="text-[11px] font-medium text-foreground">
                   Konec {formatOptionalDate(arrival.probationEnd)}
                 </div>
-                {(() => {
-                  const remaining = formatProbationRemaining(
-                    arrival.probationEnd,
-                    arrival.linkedOffboarding?.probationShouldBeStopped
-                      ? arrival.linkedOffboarding.exitDate
-                      : null
-                  )
-                  if (!remaining) return null
-
-                  return (
-                    <div
-                      className={
-                        remaining.isPast
-                          ? "text-[11px] font-medium text-muted-foreground"
-                          : "text-[11px] font-semibold text-[#00847C] dark:text-[#4fd1c5]"
-                      }
-                    >
-                      {remaining.text}
-                    </div>
-                  )
-                })()}
               </div>
             </div>
           ) : (
@@ -2328,7 +2273,7 @@ export default function OnboardingPage() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-        {loading ? (
+        {loading && !hasLoadedOnce ? (
           <div className="flex items-center justify-center py-8">
             <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
             <span className="ml-2 text-muted-foreground">Načítám data...</span>
@@ -2569,7 +2514,7 @@ export default function OnboardingPage() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-        {loading ? (
+        {loading && !hasLoadedOnce ? (
           <div className="flex items-center justify-center py-8">
             <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
             <span className="ml-2 text-muted-foreground">Načítám data...</span>
@@ -2755,7 +2700,7 @@ export default function OnboardingPage() {
   const cancelledSectionContent = (
     <>
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-        {loading ? (
+        {loading && !hasLoadedOnce ? (
           <div className="flex items-center justify-center py-8">
             <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
             <span className="ml-2 text-muted-foreground">Načítám data...</span>

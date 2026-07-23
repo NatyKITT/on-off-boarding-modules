@@ -29,6 +29,17 @@ function buildSublabel(parts: Array<string | null | undefined>) {
   return parts.filter(Boolean).join(" · ")
 }
 
+// Rozdělí dotaz na jednotlivá klíčová slova - každé slovo musí sedět
+// NĚKDE (jméno, příjmení, pozice, odbor...), ale klidně v jiném poli než
+// ostatní slova. Díky tomu najde "Jan Novák" i když appka drží jméno a
+// příjmení ve dvou samostatných sloupcích.
+function splitKeywords(q: string): string[] {
+  return q
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter(Boolean)
+}
+
 export async function GET(request: NextRequest) {
   const session = await auth()
 
@@ -46,22 +57,26 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ status: "success", data: [] })
   }
 
+  const keywords = splitKeywords(q)
+
   try {
     const [onboardings, offboardings, changes] = await Promise.all([
       canReadOnboarding(role)
         ? prisma.employeeOnboarding.findMany({
             where: {
               deletedAt: null,
-              OR: [
-                { name: { contains: q } },
-                { surname: { contains: q } },
-                { titleBefore: { contains: q } },
-                { titleAfter: { contains: q } },
-                { positionName: { contains: q } },
-                { department: { contains: q } },
-                { unitName: { contains: q } },
-                { personalNumber: { contains: q } },
-              ],
+              AND: keywords.map((word) => ({
+                OR: [
+                  { name: { contains: word } },
+                  { surname: { contains: word } },
+                  { titleBefore: { contains: word } },
+                  { titleAfter: { contains: word } },
+                  { positionName: { contains: word } },
+                  { department: { contains: word } },
+                  { unitName: { contains: word } },
+                  { personalNumber: { contains: word } },
+                ],
+              })),
             },
             select: {
               id: true,
@@ -85,16 +100,18 @@ export async function GET(request: NextRequest) {
         ? prisma.employeeOffboarding.findMany({
             where: {
               deletedAt: null,
-              OR: [
-                { name: { contains: q } },
-                { surname: { contains: q } },
-                { titleBefore: { contains: q } },
-                { titleAfter: { contains: q } },
-                { positionName: { contains: q } },
-                { department: { contains: q } },
-                { unitName: { contains: q } },
-                { personalNumber: { contains: q } },
-              ],
+              AND: keywords.map((word) => ({
+                OR: [
+                  { name: { contains: word } },
+                  { surname: { contains: word } },
+                  { titleBefore: { contains: word } },
+                  { titleAfter: { contains: word } },
+                  { positionName: { contains: word } },
+                  { department: { contains: word } },
+                  { unitName: { contains: word } },
+                  { personalNumber: { contains: word } },
+                ],
+              })),
             },
             select: {
               id: true,
@@ -117,19 +134,21 @@ export async function GET(request: NextRequest) {
         where: {
           deletedAt: null,
           status: { not: "CANCELLED" },
-          OR: [
-            { name: { contains: q } },
-            { surname: { contains: q } },
-            { titleBefore: { contains: q } },
-            { titleAfter: { contains: q } },
-            { oldPositionName: { contains: q } },
-            { newPositionName: { contains: q } },
-            { oldDepartment: { contains: q } },
-            { newDepartment: { contains: q } },
-            { oldUnitName: { contains: q } },
-            { newUnitName: { contains: q } },
-            { personalNumber: { contains: q } },
-          ],
+          AND: keywords.map((word) => ({
+            OR: [
+              { name: { contains: word } },
+              { surname: { contains: word } },
+              { titleBefore: { contains: word } },
+              { titleAfter: { contains: word } },
+              { oldPositionName: { contains: word } },
+              { newPositionName: { contains: word } },
+              { oldDepartment: { contains: word } },
+              { newDepartment: { contains: word } },
+              { oldUnitName: { contains: word } },
+              { newUnitName: { contains: word } },
+              { personalNumber: { contains: word } },
+            ],
+          })),
         },
         select: {
           id: true,

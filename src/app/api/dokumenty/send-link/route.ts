@@ -4,7 +4,7 @@ import { EmploymentDocumentType } from "@prisma/client"
 import { z } from "zod"
 
 import { prisma } from "@/lib/db"
-import { logEmailHistory, sendMail } from "@/lib/email"
+import { EMAIL_FOOTER_HTML, logEmailHistory, sendMail } from "@/lib/email"
 import { buildEmployeeMeta } from "@/lib/employee-meta"
 import { canManageEmploymentDocuments } from "@/lib/rbac"
 import { absoluteUrl } from "@/lib/url"
@@ -147,10 +147,11 @@ export async function POST(req: NextRequest) {
     : "Dokumenty k nástupu"
 
   const departmentText = meta.department?.trim()
+  const unitNameText = meta.unitName?.trim()
   const positionText = meta.position?.trim()
 
   const infoBlock =
-    departmentText || positionText
+    departmentText || unitNameText || positionText
       ? `
         <div style="margin: 12px 0 0 0; padding: 10px 12px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
           <div style="font-size: 12px; color: #374151;">
@@ -161,7 +162,12 @@ export async function POST(req: NextRequest) {
             }
             ${
               departmentText
-                ? `<div><strong>Odbor / oddělení:</strong> ${departmentText}</div>`
+                ? `<div><strong>Odbor:</strong> ${departmentText}</div>`
+                : ""
+            }
+            ${
+              unitNameText
+                ? `<div><strong>Oddělení:</strong> ${unitNameText}</div>`
                 : ""
             }
           </div>
@@ -199,12 +205,13 @@ export async function POST(req: NextRequest) {
             <li>Odkazy jsou určeny pouze pro vás – <strong>nepřeposílejte je</strong> dalším osobám.</li>
             <li>Formuláře vyplňte <strong>osobně</strong>, <strong>pravdivě</strong> a <strong>pečlivě</strong>.</li>
             <li>Po odeslání už zpravidla není potřeba dokumenty vyplňovat znovu.</li>
+            <li>Pokud jméno nebo pozice u odkazů nesouhlasí s vámi, formuláře <strong>nevyplňujte</strong> a okamžitě kontaktujte personální oddělení.</li>
           </ul>
         </div>
       </div>
 
-      <p style="margin: 0; color: #6b7280; font-size: 12px;">
-        Tento e-mail byl automaticky vygenerován systémem On-Boarding Modul ÚMČ Praha 6.
+      <p style="margin: 14px 0 0 0; color: #6b7280; font-size: 12px; line-height: 1.5;">
+        ${EMAIL_FOOTER_HTML}
       </p>
     </div>
   `

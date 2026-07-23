@@ -2,8 +2,27 @@ import { NextRequest, NextResponse } from "next/server"
 import { EmploymentDocumentType, Prisma } from "@prisma/client"
 
 import { prisma } from "@/lib/db"
-import { logEmailHistory, sendMail } from "@/lib/email"
-import { buildEmployeeMeta } from "@/lib/employee-meta"
+import { EMAIL_FOOTER_HTML, logEmailHistory, sendMail } from "@/lib/email"
+import { buildEmployeeMeta, type EmployeeMeta } from "@/lib/employee-meta"
+import { buildEmploymentDocumentPdf } from "@/lib/employment-document-pdf"
+
+const EMAIL_FOOTER = `
+  <p style="margin: 14px 0 0 0; color: #6b7280; font-size: 12px; line-height: 1.5;">
+    ${EMAIL_FOOTER_HTML}
+  </p>
+`
+
+function buildOrgInfoHtml(meta: EmployeeMeta | undefined) {
+  if (!meta?.position && !meta?.department && !meta?.unitName) return ""
+
+  return `
+    <p style="margin: 0 0 12px 0; color: #374151;">
+      ${meta?.position ? `<strong>Pozice:</strong> ${meta.position}<br/>` : ""}
+      ${meta?.department ? `<strong>Odbor:</strong> ${meta.department}<br/>` : ""}
+      ${meta?.unitName ? `<strong>Oddělení:</strong> ${meta.unitName}` : ""}
+    </p>
+  `
+}
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -132,6 +151,8 @@ export async function PATCH(
       data: body.data as Prisma.InputJsonValue,
       status: "SIGNED",
       completedAt: now,
+      lastEditedBy: `${employeeName} (veřejný odkaz)`,
+      lastEditedAt: now,
     },
     select: { id: true },
   })
@@ -165,31 +186,44 @@ export async function PATCH(
           <strong>${typeText}</strong>.
         </p>
 
-        ${
-          meta?.position || meta?.department || meta?.unitName
-            ? `<p style="margin: 0 0 12px 0; color: #374151;">
-                ${meta?.position ? `<strong>Pozice:</strong> ${meta.position}<br/>` : ""}
-                ${meta?.department || meta?.unitName ? `<strong>Oddělení / Útvar:</strong> ${[meta?.department, meta?.unitName].filter(Boolean).join(" / ")}` : ""}
-              </p>`
-            : ""
-        }
+        ${buildOrgInfoHtml(meta)}
 
         <p style="margin: 0 0 12px 0; color: #374151;">
           <strong>Datum a čas vyplnění:</strong> ${now.toLocaleString("cs-CZ")}
         </p>
 
         <p style="margin: 0 0 12px 0;">
-          Dokument je k dispozici v interní aplikaci v detailu nástupu.
+          Dokument je k dispozici v interní aplikaci v detailu nástupu a je
+          přiložen k tomuto e-mailu ve formátu PDF.
         </p>
 
-        <p style="margin: 0; color: #6b7280; font-size: 12px;">
-          Tento e-mail byl automaticky vygenerován systémem On-Boarding Modul ÚMČ Praha 6.
-        </p>
+        ${EMAIL_FOOTER}
       </div>
     `
 
+    let hrPdfBuffer: Buffer | null = null
     try {
-      await sendMail({ to: hrRecipients, subject, html: htmlHR })
+      const result = await buildEmploymentDocumentPdf(document.id)
+      hrPdfBuffer = result?.buffer ?? null
+    } catch (error) {
+      console.error("HR PDF generation error:", error)
+    }
+
+    try {
+      await sendMail({
+        to: hrRecipients,
+        subject,
+        html: htmlHR,
+        attachments: hrPdfBuffer
+          ? [
+              {
+                filename: `${employeeName}-${typeText}.pdf`,
+                content: hrPdfBuffer,
+                contentType: "application/pdf",
+              },
+            ]
+          : undefined,
+      })
       await logEmailHistory({
         onboardingEmployeeId: document.onboarding?.id,
         emailType: "SYSTEM_NOTIFICATION",
@@ -215,22 +249,11 @@ export async function PATCH(
   }
 
   if (body.type === "PAYROLL_INFO" && payrollRecipients.length > 0) {
-    let pdfBuffer: ArrayBuffer | null = null
+    let pdfBuffer: Buffer | null = null
 
     try {
-      const origin = (
-        process.env.NEXT_PUBLIC_APP_URL ??
-        process.env.AUTH_URL ??
-        req.nextUrl.origin
-      ).replace(/\/$/, "")
-      const pdfUrl = `${origin}/api/dokumenty/public/${hash}/pdf`
-      const pdfResponse = await fetch(pdfUrl)
-
-      if (pdfResponse.ok) {
-        pdfBuffer = await pdfResponse.arrayBuffer()
-      } else {
-        console.warn("PDF generation failed:", pdfResponse.status)
-      }
+      const result = await buildEmploymentDocumentPdf(document.id)
+      pdfBuffer = result?.buffer ?? null
     } catch (error) {
       console.error("PDF generation error:", error)
     }
@@ -245,14 +268,7 @@ export async function PATCH(
             zaměstnanec <strong>${employeeName}</strong> vyplnil <strong>Dotazník pro vedení mzdové agendy</strong>.
           </p>
 
-          ${
-            meta?.position || meta?.department || meta?.unitName
-              ? `<p style="margin: 0 0 12px 0; color: #374151;">
-                  ${meta?.position ? `<strong>Pozice:</strong> ${meta.position}<br/>` : ""}
-                  ${meta?.department || meta?.unitName ? `<strong>Oddělení / Útvar:</strong> ${[meta?.department, meta?.unitName].filter(Boolean).join(" / ")}` : ""}
-                </p>`
-              : ""
-          }
+          ${buildOrgInfoHtml(meta)}
 
           <p style="margin: 0 0 12px 0; color: #374151;">
             <strong>Datum vyplnění:</strong> ${now.toLocaleString("cs-CZ")}
@@ -262,9 +278,7 @@ export async function PATCH(
             Vyplněný dokument je přiložen k tomuto e-mailu ve formátu PDF.
           </p>
 
-          <p style="margin: 0; color: #6b7280; font-size: 12px;">
-            Tento e-mail byl automaticky vygenerován systémem On-Boarding Modul ÚMČ Praha 6.
-          </p>
+          ${EMAIL_FOOTER}
         </div>
       `
 
@@ -276,7 +290,7 @@ export async function PATCH(
           attachments: [
             {
               filename: `${employeeName}-Dotaznik-mzdova-agenda.pdf`,
-              content: Buffer.from(pdfBuffer),
+              content: pdfBuffer,
               contentType: "application/pdf",
             },
           ],

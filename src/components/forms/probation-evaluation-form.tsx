@@ -876,7 +876,7 @@ export function ProbationEvaluationForm({
 
               <div className="rounded-md border bg-muted/30 p-4">
                 <div className="mb-2 text-sm font-semibold">
-                  Hodnotitel / přímý nadřízený
+                  Hodnotitel / vedoucí odboru
                 </div>
 
                 <div className="space-y-1 text-sm">

@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import { useTransition } from "react"
-import Image from "next/image"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { CheckCircle, XCircle } from "lucide-react"
 import { useFieldArray, useForm } from "react-hook-form"
@@ -184,11 +183,12 @@ export function ExperienceForm(props: ExperienceFormProps) {
       >
         <header className="space-y-4 text-sm text-muted-foreground">
           <div className="flex flex-col items-center gap-3 text-center">
-            <Image
-              src="/assets/images/logo-kitt6.png"
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/assets/images/Logo_Praha%206.svg"
               alt="Městská část Praha 6"
               width={100}
-              height={100}
+              height={113}
             />
             <h1 className="text-xl font-semibold text-foreground">
               Přehled praxe

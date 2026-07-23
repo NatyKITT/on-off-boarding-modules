@@ -12,10 +12,20 @@ import {
   getSupervisorFullName,
 } from "@/lib/probation-evaluation-request"
 
-type DeadlineReminderKind = "3_DAYS_BEFORE_END" | "END_DAY"
+type ReminderDay = 7 | 3 | 2 | 1
+
+type DeadlineReminderKind =
+  | "7_DAYS_BEFORE_END"
+  | "3_DAYS_BEFORE_END"
+  | "2_DAYS_BEFORE_END"
+  | "1_DAY_BEFORE_END"
+
 type DeadlineReminderAudience = "SUPERVISOR" | "HR"
 
 const ACTIVE_MAIL_STATUSES: MailJobStatus[] = ["QUEUED", "PROCESSING", "SENT"]
+
+const INVITE_DAYS_BEFORE_END = 14
+const INVITE_REMINDER_KIND = "14_DAYS_BEFORE_END"
 
 function getPayloadRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -46,52 +56,90 @@ function asString(value: unknown): string | null {
   return trimmed.length ? trimmed : null
 }
 
-function deadlineReminderKind(daysBeforeEnd: 3 | 0): DeadlineReminderKind {
-  return daysBeforeEnd === 3 ? "3_DAYS_BEFORE_END" : "END_DAY"
+function deadlineReminderKind(
+  daysBeforeEnd: ReminderDay
+): DeadlineReminderKind {
+  switch (daysBeforeEnd) {
+    case 7:
+      return "7_DAYS_BEFORE_END"
+    case 3:
+      return "3_DAYS_BEFORE_END"
+    case 2:
+      return "2_DAYS_BEFORE_END"
+    case 1:
+      return "1_DAY_BEFORE_END"
+  }
 }
 
-function deadlineReminderLabel(daysBeforeEnd: 3 | 0) {
-  return daysBeforeEnd === 3
-    ? "3 dny před koncem zkušební doby"
-    : "v den konce zkušební doby"
+function deadlineReminderLabel(daysBeforeEnd: ReminderDay) {
+  switch (daysBeforeEnd) {
+    case 7:
+      return "7 dní před koncem zkušební doby"
+    case 3:
+      return "3 dny před koncem zkušební doby"
+    case 2:
+      return "2 dny před koncem zkušební doby"
+    case 1:
+      return "poslední den na vyplnění (1 den před koncem zkušební doby)"
+  }
 }
 
 function supervisorReminderSubject(args: {
   employeeName: string
-  daysBeforeEnd: 3 | 0
+  daysBeforeEnd: ReminderDay
 }) {
-  if (args.daysBeforeEnd === 3) {
-    return `Připomínka: zkušební doba končí za 3 dny – ${args.employeeName}`
+  switch (args.daysBeforeEnd) {
+    case 7:
+      return `Připomínka: zkušební doba končí za 7 dní – ${args.employeeName}`
+    case 3:
+      return `Připomínka: zkušební doba končí za 3 dny – ${args.employeeName}`
+    case 2:
+      return `Připomínka: zkušební doba končí za 2 dny – ${args.employeeName}`
+    case 1:
+      return `Poslední den na vyplnění – zkušební doba končí zítra – ${args.employeeName}`
   }
-
-  return `Dnes končí zkušební doba – chybí vyhodnocení – ${args.employeeName}`
 }
 
 function hrReminderSubject(args: {
   employeeName: string
-  daysBeforeEnd: 3 | 0
+  daysBeforeEnd: ReminderDay
 }) {
-  if (args.daysBeforeEnd === 3) {
-    return `Chybí vyhodnocení zkušební doby, konec za 3 dny – ${args.employeeName}`
+  switch (args.daysBeforeEnd) {
+    case 7:
+      return `Chybí vyhodnocení zkušební doby, konec za 7 dní – ${args.employeeName}`
+    case 3:
+      return `Chybí vyhodnocení zkušební doby, konec za 3 dny – ${args.employeeName}`
+    case 2:
+      return `Chybí vyhodnocení zkušební doby, konec za 2 dny – ${args.employeeName}`
+    case 1:
+      return `Poslední den na vyplnění vyhodnocení zkušební doby – ${args.employeeName}`
   }
-
-  return `Dnes končí zkušební doba a vyhodnocení není dokončené – ${args.employeeName}`
 }
 
-function supervisorReminderIntro(daysBeforeEnd: 3 | 0) {
-  if (daysBeforeEnd === 3) {
-    return "Do konce zkušební doby zbývají 3 dny a vyhodnocení zatím není finálně dokončené. Prosíme o vyplnění a podepsání formuláře."
+function supervisorReminderIntro(daysBeforeEnd: ReminderDay) {
+  switch (daysBeforeEnd) {
+    case 7:
+      return "Do konce zkušební doby zbývá 7 dní a vyhodnocení zatím není finálně dokončené. Prosíme o vyplnění a podepsání formuláře."
+    case 3:
+      return "Do konce zkušební doby zbývají 3 dny a vyhodnocení zatím není finálně dokončené. Prosíme o vyplnění a podepsání formuláře."
+    case 2:
+      return "Do konce zkušební doby zbývají 2 dny a vyhodnocení zatím není finálně dokončené. Prosíme o vyplnění a podepsání formuláře."
+    case 1:
+      return "Zkušební doba končí zítra a vyhodnocení zatím není finálně dokončené. Dnes je poslední den na vyplnění a podepsání formuláře."
   }
-
-  return "Dnes končí zkušební doba a vyhodnocení zatím není finálně dokončené. Prosíme o neprodlené vyplnění a podepsání formuláře."
 }
 
-function hrReminderIntro(daysBeforeEnd: 3 | 0) {
-  if (daysBeforeEnd === 3) {
-    return "Do konce zkušební doby zbývají 3 dny a vyhodnocení zatím není finálně podepsané/dokončené vedoucím."
+function hrReminderIntro(daysBeforeEnd: ReminderDay) {
+  switch (daysBeforeEnd) {
+    case 7:
+      return "Do konce zkušební doby zbývá 7 dní a vyhodnocení zatím není finálně podepsané/dokončené vedoucím. Vedoucímu byla zaslána připomínka."
+    case 3:
+      return "Do konce zkušební doby zbývají 3 dny a vyhodnocení zatím není finálně podepsané/dokončené vedoucím. Vedoucímu byla zaslána připomínka."
+    case 2:
+      return "Do konce zkušební doby zbývají 2 dny a vyhodnocení zatím není finálně podepsané/dokončené vedoucím. Vedoucímu byla zaslána připomínka."
+    case 1:
+      return "Zkušební doba končí zítra a vyhodnocení zatím není finálně podepsané/dokončené vedoucím. Vedoucímu byla zaslána poslední připomínka."
   }
-
-  return "Dnes končí zkušební doba a vyhodnocení zatím není finálně podepsané/dokončené vedoucím."
 }
 
 function isSameEmployeePayload(args: {
@@ -118,7 +166,7 @@ async function existsProbationJobWithReminderMeta(args: {
   type: MailJobType
   requestId: number
   employeeId: number
-  reminderKind: DeadlineReminderKind | "21_DAYS_BEFORE_END"
+  reminderKind: DeadlineReminderKind | typeof INVITE_REMINDER_KIND
   reminderAudience: DeadlineReminderAudience | "HR_INFO" | "INVITE"
 }) {
   const jobs = await prisma.mailQueue.findMany({
@@ -254,8 +302,8 @@ async function queueMissingSupervisorForHr(args: {
 }
 
 async function queueDeadlineReminders(args: {
-  daysBeforeEnd: 3 | 0
-  targetDay: Date
+  daysBeforeEnd: ReminderDay
+  probationEndFilter: { lte: Date; gt?: Date; gte?: Date }
   now: Date
   baseUrl: string
   hrRecipients: string[]
@@ -269,10 +317,7 @@ async function queueDeadlineReminders(args: {
       deletedAt: null,
       actualStart: { not: null },
       status: "COMPLETED",
-      probationEnd: {
-        gte: args.targetDay,
-        lt: addDays(args.targetDay, 1),
-      },
+      probationEnd: args.probationEndFilter,
     },
     select: {
       id: true,
@@ -534,17 +579,26 @@ export async function ensureProbationCronJobs(req: NextRequest) {
 
   const notifications: string[] = []
 
-  const in21Days = addDays(today, 21)
+  const in14Days = addDays(today, INVITE_DAYS_BEFORE_END)
+  const in7Days = addDays(today, 7)
   const in3Days = addDays(today, 3)
+  const in2Days = addDays(today, 2)
+  const in1Day = addDays(today, 1)
 
-  const employeesAt21Days = await prisma.employeeOnboarding.findMany({
+  // "lte" místo přesného dne - zachytí i zaměstnance, u kterých cron
+  // neproběhl přesně 14 dní před koncem (výpadek, nové nasazení...).
+  // Pozvánka se pošle, dokud ještě nebyla nikdy odeslána (viz sentAt níže).
+  // "gte: today" - jakmile zkušební doba skutečně skončí, pozvánka se už
+  // zpětně neposílá (a nehlásí se ani chybějící vedoucí). Od té chvíle si
+  // to řeší HR mimo automatiku.
+  const employeesAt14Days = await prisma.employeeOnboarding.findMany({
     where: {
       deletedAt: null,
       actualStart: { not: null },
       status: "COMPLETED",
       probationEnd: {
-        gte: in21Days,
-        lt: addDays(in21Days, 1),
+        lte: in14Days,
+        gte: today,
       },
     },
     select: {
@@ -567,7 +621,7 @@ export async function ensureProbationCronJobs(req: NextRequest) {
     },
   })
 
-  for (const employee of employeesAt21Days) {
+  for (const employee of employeesAt14Days) {
     const employeeName = buildFullName(employee)
 
     const ensured = await prisma.$transaction(async (tx) => {
@@ -581,19 +635,19 @@ export async function ensureProbationCronJobs(req: NextRequest) {
     const request = ensured.request
 
     if (request.completedAt || request.status === "COMPLETED") {
-      notifications.push(`21_days_before_end_skipped_completed:${employee.id}`)
+      notifications.push(`14_days_before_end_skipped_completed:${employee.id}`)
       continue
     }
 
     if (request.status === "CANCELLED") {
       notifications.push(
-        `21_days_before_end_skipped_probation_stopped:${employee.id}`
+        `14_days_before_end_skipped_probation_stopped:${employee.id}`
       )
       continue
     }
 
     if (request.isLocked) {
-      notifications.push(`21_days_before_end_skipped_locked:${employee.id}`)
+      notifications.push(`14_days_before_end_skipped_locked:${employee.id}`)
       continue
     }
 
@@ -627,7 +681,7 @@ export async function ensureProbationCronJobs(req: NextRequest) {
       type: "PROBATION_EVALUATION_INVITE",
       requestId: request.id,
       employeeId: employee.id,
-      reminderKind: "21_DAYS_BEFORE_END",
+      reminderKind: INVITE_REMINDER_KIND,
       reminderAudience: "INVITE",
     })
 
@@ -654,12 +708,12 @@ export async function ensureProbationCronJobs(req: NextRequest) {
             formType: request.formType,
             subject: `Vyplňte vyhodnocení zkušební doby – ${employeeName}`,
             intro:
-              "Do konce zkušební doby zbývá 21 dní. Prosíme o vyplnění a podepsání formuláře vyhodnocení zkušební doby.",
+              "Do konce zkušební doby zbývá 14 dní. Prosíme o vyplnění a podepsání formuláře vyhodnocení zkušební doby.",
             message:
-              "Do konce zkušební doby zbývá 21 dní. Prosíme o vyplnění a podepsání formuláře vyhodnocení zkušební doby.",
-            reminderKind: "21_DAYS_BEFORE_END",
+              "Do konce zkušební doby zbývá 14 dní. Prosíme o vyplnění a podepsání formuláře vyhodnocení zkušební doby.",
+            reminderKind: INVITE_REMINDER_KIND,
             reminderAudience: "INVITE",
-            daysBeforeProbationEnd: 21,
+            daysBeforeProbationEnd: INVITE_DAYS_BEFORE_END,
             createdBy: "system-cron",
             createdByName: "Systémový cron",
           },
@@ -689,11 +743,11 @@ export async function ensureProbationCronJobs(req: NextRequest) {
           by: "system-cron",
           byName: "Systémový cron",
           mailQueueId: inviteJob.id,
-          message: `Pozvánka k vyhodnocení zkušební doby 21 dní před koncem byla zařazena do fronty pro ${supervisorEmail}.`,
+          message: `Pozvánka k vyhodnocení zkušební doby 14 dní před koncem byla zařazena do fronty pro ${supervisorEmail}.`,
           meta: {
-            reminderKind: "21_DAYS_BEFORE_END",
+            reminderKind: INVITE_REMINDER_KIND,
             reminderAudience: "INVITE",
-            daysBeforeProbationEnd: 21,
+            daysBeforeProbationEnd: INVITE_DAYS_BEFORE_END,
             supervisorName,
             supervisorEmail,
             evaluationLink,
@@ -701,9 +755,9 @@ export async function ensureProbationCronJobs(req: NextRequest) {
         })
       })
 
-      notifications.push(`21_days_before_end_invite_queued:${employee.id}`)
+      notifications.push(`14_days_before_end_invite_queued:${employee.id}`)
     } else {
-      notifications.push(`21_days_before_end_invite_skipped:${employee.id}`)
+      notifications.push(`14_days_before_end_invite_skipped:${employee.id}`)
     }
 
     if (hrRecipients.length > 0) {
@@ -711,7 +765,7 @@ export async function ensureProbationCronJobs(req: NextRequest) {
         type: "PROBATION_EVALUATION_HR_INFO",
         requestId: request.id,
         employeeId: employee.id,
-        reminderKind: "21_DAYS_BEFORE_END",
+        reminderKind: INVITE_REMINDER_KIND,
         reminderAudience: "HR_INFO",
       })
 
@@ -734,12 +788,12 @@ export async function ensureProbationCronJobs(req: NextRequest) {
               formType: request.formType,
               subject: `Zahájeno vyhodnocení zkušební doby – ${employeeName}`,
               intro:
-                "Do konce zkušební doby zbývá 21 dní. Vedoucímu byla připravena pozvánka k vyplnění vyhodnocení.",
+                "Do konce zkušební doby zbývá 14 dní. Vedoucímu byla připravena pozvánka k vyplnění vyhodnocení.",
               message:
-                "Do konce zkušební doby zbývá 21 dní. Vedoucímu byla připravena pozvánka k vyplnění vyhodnocení.",
-              reminderKind: "21_DAYS_BEFORE_END",
+                "Do konce zkušební doby zbývá 14 dní. Vedoucímu byla připravena pozvánka k vyplnění vyhodnocení.",
+              reminderKind: INVITE_REMINDER_KIND,
               reminderAudience: "HR_INFO",
-              daysBeforeProbationEnd: 21,
+              daysBeforeProbationEnd: INVITE_DAYS_BEFORE_END,
               createdBy: "system-cron",
               createdByName: "Systémový cron",
             },
@@ -765,11 +819,11 @@ export async function ensureProbationCronJobs(req: NextRequest) {
             byName: "Systémový cron",
             mailQueueId: hrInfoJob.id,
             message:
-              "HR informace o zahájení vyhodnocení zkušební doby 21 dní před koncem byla zařazena do fronty.",
+              "HR informace o zahájení vyhodnocení zkušební doby 14 dní před koncem byla zařazena do fronty.",
             meta: {
-              reminderKind: "21_DAYS_BEFORE_END",
+              reminderKind: INVITE_REMINDER_KIND,
               reminderAudience: "HR_INFO",
-              daysBeforeProbationEnd: 21,
+              daysBeforeProbationEnd: INVITE_DAYS_BEFORE_END,
               supervisorName,
               supervisorEmail,
               evaluationLink,
@@ -777,29 +831,53 @@ export async function ensureProbationCronJobs(req: NextRequest) {
           })
         })
 
-        notifications.push(`21_days_before_end_hr_info_queued:${employee.id}`)
+        notifications.push(`14_days_before_end_hr_info_queued:${employee.id}`)
       } else {
-        notifications.push(`21_days_before_end_hr_info_skipped:${employee.id}`)
+        notifications.push(`14_days_before_end_hr_info_skipped:${employee.id}`)
       }
     } else {
       notifications.push(
-        `21_days_before_end_hr_info_skipped_no_hr:${employee.id}`
+        `14_days_before_end_hr_info_skipped_no_hr:${employee.id}`
       )
     }
   }
 
-  const at3Days = await queueDeadlineReminders({
-    daysBeforeEnd: 3,
-    targetDay: in3Days,
+  // Připomínky 7 / 3 / 2 / 1 den před koncem - rozsahy se nepřekrývají, aby
+  // se při dohánění zmeškaných dnů (výpadek cronu) neposlaly dvě připomínky
+  // najednou. "1 den" je zároveň finální záchytný interval (lte today),
+  // takže pokryje i dny, kdy zkušebka už skončila a nic se stále neposlalo.
+  const at7Days = await queueDeadlineReminders({
+    daysBeforeEnd: 7,
+    probationEndFilter: { lte: in7Days, gt: in3Days },
     now,
     baseUrl,
     hrRecipients,
     notifications,
   })
 
-  const atEndDay = await queueDeadlineReminders({
-    daysBeforeEnd: 0,
-    targetDay: today,
+  const at3Days = await queueDeadlineReminders({
+    daysBeforeEnd: 3,
+    probationEndFilter: { lte: in3Days, gt: in2Days },
+    now,
+    baseUrl,
+    hrRecipients,
+    notifications,
+  })
+
+  const at2Days = await queueDeadlineReminders({
+    daysBeforeEnd: 2,
+    probationEndFilter: { lte: in2Days, gt: in1Day },
+    now,
+    baseUrl,
+    hrRecipients,
+    notifications,
+  })
+
+  const at1Day = await queueDeadlineReminders({
+    daysBeforeEnd: 1,
+    // "gte: today" - poslední připomínka jde nejpozději v den konce
+    // zkušební doby, ne zpětně po jejím uplynutí (to už řeší HR ručně).
+    probationEndFilter: { lte: in1Day, gte: today },
     now,
     baseUrl,
     hrRecipients,
@@ -811,13 +889,15 @@ export async function ensureProbationCronJobs(req: NextRequest) {
   return {
     status: "success" as const,
     notifications,
-    processed: employeesAt21Days.length + at3Days + atEndDay,
+    processed: employeesAt14Days.length + at7Days + at3Days + at2Days + at1Day,
     queued,
     failed: 0,
     stats: {
-      at21Days: employeesAt21Days.length,
+      at14Days: employeesAt14Days.length,
+      at7Days,
       at3Days,
-      atEndDay,
+      at2Days,
+      at1Day,
       queued,
     },
   }
