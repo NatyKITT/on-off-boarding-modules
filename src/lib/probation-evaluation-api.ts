@@ -54,7 +54,6 @@ type SupervisorMeta = {
   supervisorUnitName: string | null
 }
 
-
 export const probationSignatureSchema = z.object({
   signedByName: z.string().nullable().optional(),
   signedByEmail: z.string().nullable().optional(),
@@ -208,10 +207,18 @@ export function isValidEmail(email: string) {
 }
 
 export function canReadInternalProbation(role?: string | null) {
-  return ["ADMIN", "HR", "IT", "READONLY"].includes(role ?? "")
+  return ["ADMIN", "HR", "IT"].includes(role ?? "")
 }
 
 export function canManageInternalProbation(role?: string | null) {
+  return ["ADMIN", "HR", "IT"].includes(role ?? "")
+}
+
+export function canSendInternalProbation(role?: string | null) {
+  return ["ADMIN", "HR", "IT"].includes(role ?? "")
+}
+
+export function canSaveInternalProbation(role?: string | null) {
   return ["ADMIN", "HR", "IT"].includes(role ?? "")
 }
 
@@ -255,6 +262,54 @@ export async function requireInternalProbationManage() {
       ok: false as const,
       response: jsonError(
         "Nemáte oprávnění upravovat vyhodnocení zkušební doby.",
+        403
+      ),
+    }
+  }
+
+  return { ok: true as const, user }
+}
+
+export async function requireInternalProbationSend() {
+  const session = await auth()
+  const user = session?.user as CurrentUser | undefined
+
+  if (!user) {
+    return {
+      ok: false as const,
+      response: jsonError("Nejste přihlášen(a).", 401),
+    }
+  }
+
+  if (!canSendInternalProbation(user.role)) {
+    return {
+      ok: false as const,
+      response: jsonError(
+        "Nemáte oprávnění odesílat PDF vyhodnocení zkušební doby.",
+        403
+      ),
+    }
+  }
+
+  return { ok: true as const, user }
+}
+
+export async function requireInternalProbationSave() {
+  const session = await auth()
+  const user = session?.user as CurrentUser | undefined
+
+  if (!user) {
+    return {
+      ok: false as const,
+      response: jsonError("Nejste přihlášen(a).", 401),
+    }
+  }
+
+  if (!canSaveInternalProbation(user.role)) {
+    return {
+      ok: false as const,
+      response: jsonError(
+        "Nemáte oprávnění ukládat vyhodnocení zkušební doby.",
         403
       ),
     }
@@ -599,13 +654,17 @@ function pickSupervisorEmployee(
   const byExactFullName = employees.find((employee) => {
     const fullName = normalizeCompare(buildEmployeeFullName(employee))
 
-    return fullName === normalizedName || fullName === normalizedNameWithoutTitles
+    return (
+      fullName === normalizedName || fullName === normalizedNameWithoutTitles
+    )
   })
 
   if (byExactFullName) return byExactFullName
 
   const byEmail = supervisorEmail
-    ? employees.find((employee) => cleanEmail(employee.email) === supervisorEmail)
+    ? employees.find(
+        (employee) => cleanEmail(employee.email) === supervisorEmail
+      )
     : null
 
   if (byEmail) return byEmail
@@ -642,7 +701,7 @@ function samePersonBySavedEvaluatorData(args: {
     supervisorName &&
     evaluatorName &&
     normalizeCompare(stripCommonTitles(supervisorName)) ===
-    normalizeCompare(stripCommonTitles(evaluatorName))
+      normalizeCompare(stripCommonTitles(evaluatorName))
   ) {
     return true
   }
@@ -706,7 +765,9 @@ async function resolveSupervisorFromEmployees(args: {
       return {
         supervisorName: resolvedName || cleanText(args.supervisorName) || null,
         supervisorEmail:
-          cleanEmail(employee.email) || cleanEmail(args.supervisorEmail) || null,
+          cleanEmail(employee.email) ||
+          cleanEmail(args.supervisorEmail) ||
+          null,
         supervisorPosition: getEmployeePosition(employee),
         supervisorDepartment: cleanText(employee.department) || null,
         supervisorUnitName: cleanText(employee.unitName) || null,
@@ -728,23 +789,24 @@ async function buildResolvedSupervisorMeta(
 
   const hasAllOrgData = Boolean(
     base.supervisorPosition &&
-    base.supervisorDepartment &&
-    base.supervisorUnitName
+      base.supervisorDepartment &&
+      base.supervisorUnitName
   )
 
   const resolved = hasAllOrgData
     ? null
     : await resolveSupervisorFromEmployees({
+        supervisorName: base.supervisorName,
+        supervisorEmail: base.supervisorEmail,
+      })
+
+  const savedEvaluatorBelongsToCurrentSupervisor =
+    samePersonBySavedEvaluatorData({
       supervisorName: base.supervisorName,
       supervisorEmail: base.supervisorEmail,
+      evaluatorName: data.evaluatorName,
+      evaluatorEmail: data.evaluatorEmail,
     })
-
-  const savedEvaluatorBelongsToCurrentSupervisor = samePersonBySavedEvaluatorData({
-    supervisorName: base.supervisorName,
-    supervisorEmail: base.supervisorEmail,
-    evaluatorName: data.evaluatorName,
-    evaluatorEmail: data.evaluatorEmail,
-  })
 
   const savedPosition = savedEvaluatorBelongsToCurrentSupervisor
     ? cleanText(data.evaluatorPosition)
@@ -760,9 +822,13 @@ async function buildResolvedSupervisorMeta(
     // DŮLEŽITÉ: jméno/e-mail z nástupu nebo requestu jsou hlavní.
     // EOS lookup je smí doplnit jen pokud v nástupu/requestu nic není.
     supervisorName:
-      cleanText(base.supervisorName) || cleanText(resolved?.supervisorName) || null,
+      cleanText(base.supervisorName) ||
+      cleanText(resolved?.supervisorName) ||
+      null,
     supervisorEmail:
-      cleanEmail(base.supervisorEmail) || cleanEmail(resolved?.supervisorEmail) || null,
+      cleanEmail(base.supervisorEmail) ||
+      cleanEmail(resolved?.supervisorEmail) ||
+      null,
 
     // Org data: nástupní snapshot -> EOS podle hlavního vedoucího -> uložená evaluator data jen pokud patří stejné osobě.
     supervisorPosition:
@@ -853,7 +919,8 @@ export function buildProbationSavedData(args: {
   const reasonIfNo = getReasonIfNo(parsed)
 
   const isFinal = parsed.submitMode === "final"
-  const isSignedMode = parsed.submitMode === "final" || parsed.submitMode === "revision"
+  const isSignedMode =
+    parsed.submitMode === "final" || parsed.submitMode === "revision"
 
   const data: Prisma.InputJsonObject = {
     ...(existingData as Prisma.InputJsonObject),
@@ -897,8 +964,8 @@ export function buildProbationSavedData(args: {
 
     ...(isFinal
       ? {
-        evaluatedAt: nowIso,
-      }
+          evaluatedAt: nowIso,
+        }
       : {}),
   }
 
@@ -942,7 +1009,9 @@ export function buildProbationApiResponse(args: {
         null,
 
       evaluatorPosition:
-        cleanText(data.evaluatorPosition) || supervisor.supervisorPosition || null,
+        cleanText(data.evaluatorPosition) ||
+        supervisor.supervisorPosition ||
+        null,
 
       evaluatorDepartment:
         cleanText(data.evaluatorDepartment) ||
@@ -950,7 +1019,9 @@ export function buildProbationApiResponse(args: {
         null,
 
       evaluatorUnitName:
-        cleanText(data.evaluatorUnitName) || supervisor.supervisorUnitName || null,
+        cleanText(data.evaluatorUnitName) ||
+        supervisor.supervisorUnitName ||
+        null,
 
       lastEditedAt:
         cleanText(data.lastEditedAt) ||
@@ -1028,7 +1099,9 @@ export async function buildResolvedProbationApiResponse(args: {
         null,
 
       evaluatorPosition:
-        cleanText(data.evaluatorPosition) || supervisor.supervisorPosition || null,
+        cleanText(data.evaluatorPosition) ||
+        supervisor.supervisorPosition ||
+        null,
 
       evaluatorDepartment:
         cleanText(data.evaluatorDepartment) ||
@@ -1036,7 +1109,9 @@ export async function buildResolvedProbationApiResponse(args: {
         null,
 
       evaluatorUnitName:
-        cleanText(data.evaluatorUnitName) || supervisor.supervisorUnitName || null,
+        cleanText(data.evaluatorUnitName) ||
+        supervisor.supervisorUnitName ||
+        null,
 
       lastEditedAt:
         cleanText(data.lastEditedAt) ||
@@ -1101,7 +1176,6 @@ function getSignedMeta(value: Prisma.InputJsonObject) {
   }
 }
 
-
 export async function saveProbationEvaluation(args: {
   request: ProbationDetail | PublicProbationDetail
   body: unknown
@@ -1127,10 +1201,7 @@ export async function saveProbationEvaluation(args: {
   if (args.request.isLocked) {
     return {
       ok: false as const,
-      response: jsonError(
-        "Formulář je uzamčený. Změny už nelze uložit.",
-        423
-      ),
+      response: jsonError("Formulář je uzamčený. Změny už nelze uložit.", 423),
     }
   }
 
@@ -1289,6 +1360,7 @@ export async function saveProbationEvaluation(args: {
         data: {
           status: "COMPLETED",
           data: revisionData,
+          isLocked: true,
         },
       })
 
@@ -1351,6 +1423,7 @@ export async function saveProbationEvaluation(args: {
         completedByName: userLabel,
         completedByEmail: args.user.email ?? null,
         data: nextData,
+        isLocked: true,
       },
     })
 
@@ -1558,10 +1631,13 @@ export async function sendCompletedProbationPdfToHr(args: {
       await sendProbationEvaluationPdfEmail({
         to: recipient,
         employeeName,
+        employeePersonalNumber: args.request.onboarding.personalNumber ?? null,
         employeePosition: args.request.onboarding.positionName ?? null,
         employeeDepartment: args.request.onboarding.department ?? null,
         probationEndDate:
-          args.request.probationEnd ?? args.request.onboarding.probationEnd ?? null,
+          args.request.probationEnd ??
+          args.request.onboarding.probationEnd ??
+          null,
         message: isRevision
           ? "Formulář k vyhodnocení zkušební doby byl upraven. Aktuální PDF formulář je v příloze."
           : "Formulář k vyhodnocení zkušební doby byl finálně vyplněn. PDF formulář je v příloze.",

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 
 import { prisma } from "@/lib/db"
+import { logEmploymentDocumentEvent } from "@/lib/employment-document-events"
 import { buildEmploymentDocumentPdf } from "@/lib/employment-document-pdf"
 
 export const runtime = "nodejs"
@@ -89,6 +90,15 @@ export async function GET(
         }
       )
     }
+
+    await logEmploymentDocumentEvent({
+      documentId: doc.id,
+      action: "PDF_DOWNLOADED",
+      by: null,
+      byName: "Veřejný odkaz",
+      byEmail: null,
+      message: "PDF dokumentu bylo staženo přes veřejný odkaz.",
+    })
 
     return new Response(new Uint8Array(result.buffer), {
       status: 200,

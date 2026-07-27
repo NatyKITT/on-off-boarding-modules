@@ -55,6 +55,12 @@ function normalizePersonalNumber(value: string | null | undefined) {
   return value?.trim() ?? ""
 }
 
+function toStr(value: unknown): string {
+  if (value instanceof Date) return value.toISOString()
+  if (value === null || value === undefined) return ""
+  return String(value)
+}
+
 function serializeChange(
   record: {
     id: number
@@ -269,9 +275,6 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         id,
         deletedAt: null,
       },
-      select: {
-        id: true,
-      },
     })
 
     if (!existing) {
@@ -280,6 +283,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         { status: 404 }
       )
     }
+
+    const userKey =
+      (session.user as { id?: string; email?: string }).id ??
+      session.user.email ??
+      "unknown"
 
     const updated = await prisma.employeeChange.update({
       where: {
@@ -301,6 +309,29 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         },
       },
     })
+
+    const existingRec = existing as unknown as Record<string, unknown>
+    const dataRec = data as unknown as Record<string, unknown>
+
+    for (const [key, newValue] of Object.entries(dataRec)) {
+      if (newValue === undefined) continue
+
+      const oldStr = toStr(existingRec[key])
+      const newStr = toStr(newValue)
+
+      if (oldStr === newStr) continue
+
+      await prisma.employeeChangeLog.create({
+        data: {
+          employeeId: id,
+          userId: userKey,
+          action: "UPDATED",
+          field: key,
+          oldValue: oldStr || null,
+          newValue: newStr || null,
+        },
+      })
+    }
 
     const counts = await getLinkCounts(updated.personalNumber)
 
@@ -387,16 +418,31 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
     session.user.email ??
     "unknown"
 
-  await prisma.employeeChange.update({
-    where: {
-      id,
-    },
-    data: {
-      deletedAt: new Date(),
-      deletedBy: userKey,
-      deleteReason: "Smazáno uživatelem",
-      updatedAt: new Date(),
-    },
+  const deletedAt = new Date()
+
+  await prisma.$transaction(async (tx) => {
+    await tx.employeeChange.update({
+      where: {
+        id,
+      },
+      data: {
+        deletedAt,
+        deletedBy: userKey,
+        deleteReason: "Smazáno uživatelem",
+        updatedAt: deletedAt,
+      },
+    })
+
+    await tx.employeeChangeLog.create({
+      data: {
+        employeeId: before.id,
+        userId: userKey,
+        action: "DELETED",
+        field: "deleted_at",
+        oldValue: null,
+        newValue: deletedAt.toISOString(),
+      },
+    })
   })
 
   return NextResponse.json({

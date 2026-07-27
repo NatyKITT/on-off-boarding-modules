@@ -480,6 +480,22 @@ export async function POST(request: NextRequest) {
           })
         }
 
+        await tx.offboardingChangeLog.create({
+          data: {
+            employeeId: record.id,
+            userId: actorId,
+            action: "CREATED",
+            field: "initial_creation",
+            oldValue: null,
+            newValue: JSON.stringify({
+              type: "actual_offboarding",
+              name: `${data.name} ${data.surname}`,
+              position: data.positionName,
+              actualEnd: data.actualEnd.toISOString(),
+            }),
+          },
+        })
+
         return record
       })
 
@@ -574,6 +590,22 @@ export async function POST(request: NextRequest) {
           actorName,
         })
       }
+
+      await tx.offboardingChangeLog.create({
+        data: {
+          employeeId: record.id,
+          userId: actorId,
+          action: "CREATED",
+          field: "initial_creation",
+          oldValue: null,
+          newValue: JSON.stringify({
+            type: "planned_offboarding",
+            name: `${data.name} ${data.surname}`,
+            position: data.positionName,
+            plannedEnd: data.plannedEnd.toISOString(),
+          }),
+        },
+      })
 
       return record
     })

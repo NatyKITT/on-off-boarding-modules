@@ -7,10 +7,10 @@ services:
     environment:
       MYSQL_DATABASE: onoff_db
       MYSQL_USER: onoff_user
-      MYSQL_PASSWORD: strongpassword
-      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?nastavte MYSQL_PASSWORD v .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?nastavte MYSQL_ROOT_PASSWORD v .env}
     ports:
-      - "3306:3306"   # volitelné, pro lokální přístup z hosta
+      - "3306:3306" # volitelné, pro lokální přístup z hosta
     volumes:
       - dbdata:/var/lib/mysql
     command: ["--default-authentication-plugin=caching_sha2_password"]

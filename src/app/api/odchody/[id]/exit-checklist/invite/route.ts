@@ -10,6 +10,7 @@ import {
   sendBehalfSignatureEmail,
   sendSignatureInviteEmail,
 } from "@/lib/email"
+import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
 import { canAdminExitChecklist } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
@@ -210,11 +211,31 @@ export async function POST(
       status: "SENT",
       createdBy: session.user.id ?? session.user.email ?? "unknown",
     })
+
+    await logExitChecklistEvent({
+      checklistId: checklist.id,
+      action: "SIGNATURE_INVITE_SENT",
+      by: session.user.id ?? null,
+      byName: session.user.name ?? session.user.email ?? null,
+      byEmail: session.user.email ?? null,
+      message: isBehalf
+        ? `Pozvánka k podpisu v zastoupení byla odeslána na adresu ${inviteeEmail}.`
+        : `Pozvánka k podpisu byla odeslána na adresu ${inviteeEmail}.`,
+    })
   } catch (error) {
     console.error(
       "[exit-checklist/invite] E-mail se nepodařilo odeslat:",
       error
     )
+
+    await logExitChecklistEvent({
+      checklistId: checklist.id,
+      action: "EMAIL_FAILED",
+      by: session.user.id ?? null,
+      byName: session.user.name ?? session.user.email ?? null,
+      byEmail: session.user.email ?? null,
+      message: `Odeslání pozvánky k podpisu na adresu ${inviteeEmail} se nezdařilo.`,
+    })
 
     return NextResponse.json(
       {

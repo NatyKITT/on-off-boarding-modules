@@ -7,6 +7,7 @@ import {
   Check,
   CheckCircle,
   ChevronDown,
+  History as HistoryIcon,
   Loader2,
   Lock,
   Printer,
@@ -29,6 +30,8 @@ import type {
   HandoverSendHistoryEntry,
 } from "@/types/exit-checklist"
 import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
+
+import { exitChecklistEventActionLabel } from "@/lib/exit-checklist-event-labels"
 
 import {
   AlertDialog,
@@ -76,6 +79,7 @@ import {
 import { SendAllDialog } from "@/components/common/send-all-dialog"
 import { SendInviteBehalfDialog } from "@/components/common/send-invite-behalf-dialog"
 import { SendInviteDialog } from "@/components/common/send-invite-dialog"
+import { DocumentHistoryDialog } from "@/components/history/document-history-dialog"
 
 type Props = {
   offboardingId?: number
@@ -2180,29 +2184,43 @@ export function ExitChecklistForm({
                     }}
                   />
 
-                  {managerName && (
-                    <div className="flex items-start justify-between gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs">
-                      <div>
-                        <div className="font-medium">{managerName}</div>
-                        {managerEmail && (
-                          <div className="text-muted-foreground">
-                            {managerEmail}
-                          </div>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setManagerName("")
-                          setManagerEmail("")
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={managerName}
+                        onChange={(event) => {
+                          setManagerName(event.target.value)
                           markDirty()
                         }}
-                        className="shrink-0 text-muted-foreground hover:text-foreground"
-                      >
-                        <X className="size-3" />
-                      </button>
+                        placeholder="Jméno a příjmení vedoucího (lze vyplnit i ručně)"
+                        className="h-8 text-xs"
+                      />
+                      {managerName && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setManagerName("")
+                            setManagerEmail("")
+                            markDirty()
+                          }}
+                          className="shrink-0 text-muted-foreground hover:text-foreground"
+                          title="Vymazat vedoucího"
+                        >
+                          <X className="size-4" />
+                        </button>
+                      )}
                     </div>
-                  )}
+                    <Input
+                      type="email"
+                      value={managerEmail}
+                      onChange={(event) => {
+                        setManagerEmail(event.target.value)
+                        markDirty()
+                      }}
+                      placeholder="E-mail vedoucího"
+                      className="h-8 text-xs"
+                    />
+                  </div>
                 </div>
               )}
 
@@ -3472,6 +3490,25 @@ export function ExitChecklistForm({
                   </Button>
                 )}
               </>
+            )}
+
+            {isInternalMode && isAdmin && resolvedOffboardingId && (
+              <DocumentHistoryDialog
+                title="Historie výstupního listu"
+                fetchUrl={`/api/odchody/${resolvedOffboardingId}/exit-checklist/history`}
+                actionLabel={exitChecklistEventActionLabel}
+                trigger={
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1"
+                  >
+                    <HistoryIcon className="size-4" />
+                    Historie
+                  </Button>
+                }
+              />
             )}
           </div>
         </CardContent>

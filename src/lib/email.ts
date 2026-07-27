@@ -318,15 +318,15 @@ export async function renderMonthlyReportHtml(args: {
               i % 2 === 0 ? "#ffffff" : "#f9fafb"
             };">
 
-              <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; color: #111827; font-weight: 600;">
+              <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; color: #111827; font-weight: 600; word-break: normal; overflow-wrap: normal;">
                 ${formatName(r)}
               </td>
 
-              <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; color: #111827;">
+              <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; color: #111827; word-break: normal; overflow-wrap: normal;">
                 ${r.position ?? "—"}
               </td>
 
-              <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: 500; color: #111827;">
+              <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: 500; color: #111827; word-break: normal; overflow-wrap: normal;">
                 ${r.department ?? "—"}
               </td>
 
@@ -358,7 +358,7 @@ export async function renderMonthlyReportHtml(args: {
         <tr bgcolor="${primary}" style="background-color: ${primary}; color: #ffffff;">
 
           <th align="left"
-              style="padding: 10px; width: 220px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff;">
+              style="padding: 10px; width: 220px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff; word-break: normal; overflow-wrap: normal; white-space: normal;">
             Zaměstnanec
           </th>
 
@@ -368,12 +368,12 @@ export async function renderMonthlyReportHtml(args: {
           </th>
 
           <th align="left"
-              style="padding: 10px; width: 200px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff;">
+              style="padding: 10px; width: 200px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff; word-break: normal; overflow-wrap: normal; white-space: normal;">
             Pozice
           </th>
 
           <th align="left"
-              style="padding: 10px; width: 190px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff;">
+              style="padding: 10px; width: 190px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff; word-break: normal; overflow-wrap: normal; white-space: normal;">
             Odbor
           </th>
 
@@ -395,7 +395,7 @@ export async function renderMonthlyReportHtml(args: {
           <tr bgcolor="${i % 2 === 0 ? "#ffffff" : "#f9fafb"}"
               style="background-color: ${i % 2 === 0 ? "#ffffff" : "#f9fafb"};">
 
-            <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; color: #111827; font-weight: 600;">
+            <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; color: #111827; font-weight: 600; word-break: normal; overflow-wrap: normal;">
               ${formatName(r)}
             </td>
 
@@ -403,11 +403,11 @@ export async function renderMonthlyReportHtml(args: {
               ${r.personalNumber ?? "—"}
             </td>
 
-            <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; color: #111827;">
+            <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; color: #111827; word-break: normal; overflow-wrap: normal;">
               ${r.position ?? "—"}
             </td>
 
-            <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: 500; color: #111827;">
+            <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: 500; color: #111827; word-break: normal; overflow-wrap: normal;">
               ${r.department ?? "—"}
             </td>
 
@@ -460,25 +460,6 @@ export async function renderMonthlyReportHtml(args: {
         body { margin: 0; padding: 0; }
         table { border-collapse: collapse; }
         ${EMAIL_GLOBAL_FONT_STYLE}
-
-        .card-border { border: 1px solid #d9ece7; }
-        .intro-row { border-bottom: 1px solid #d9ece7; }
-        .footer-row { border-top: 1px solid #d9ece7; }
-
-        .content-pad { padding: 26px 22px !important; }
-
-        @media only screen and (min-width: 600px) {
-          .card-shadow {
-            box-shadow: 0 8px 24px rgba(0,0,0,0.12) !important;
-            border-radius: 12px !important;
-          }
-          .rounded-top { border-radius: 12px 12px 0 0 !important; }
-          .rounded-bottom { border-radius: 0 0 12px 12px !important; }
-        }
-
-        @media only screen and (max-width: 600px) {
-          .content-pad { padding: 18px 14px !important; }
-        }
       </style>
     </head>
     <body style="margin: 0; padding: 0; background-color: ${bgLight}; width: 100% !important; font-family: ${EMAIL_FONT_FAMILY};">
@@ -486,40 +467,28 @@ export async function renderMonthlyReportHtml(args: {
         <tr>
           <td align="center" style="padding: 30px 10px;">
             <table
-              class="card-shadow card-border"
               border="0"
               cellpadding="0"
               cellspacing="0"
               width="860"
               bgcolor="#ffffff"
               style="
-                max-width: 820px;
+                max-width: 860px;
                 background-color: #ffffff;
                 border-collapse: separate;
                 border: 1px solid #d9ece7;
                 border-radius: 12px;
                 overflow: hidden;
-                box-shadow: 0 8px 24px rgba(0,0,0,0.12);
               "
             >
-              <tr>
-                <td
-                  class="rounded-top"
-                  bgcolor="${primary}"
-                  style="
-                    padding: 25px 30px;
-                    background-color: ${primary};
-                    border-radius: 12px 12px 0 0;
-                  "
-                >
-                  <table border="0" cellpadding="0" cellspacing="0" width="100%">
-                    <tr>
-                      <td style="color: #ffffff; font-family: ${EMAIL_FONT_FAMILY};">
-                        <div style="font-size: 13px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 8px; opacity: 0.9;">Personální změny</div>
-                        <div style="font-size: 24px; font-weight: bold; line-height: 1.2;">${subtitle} – ${monthLabel}</div>
-                      </td>
-                    </tr>
-                  </table>
+              <tr bgcolor="${primary}">
+                <td bgcolor="${primary}" style="padding:24px 30px;background-color:${primary};border-radius:12px 12px 0 0;">
+                  <div style="font-family:${EMAIL_FONT_FAMILY};color:#ffffff;font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;">
+                    Personální změny
+                  </div>
+                  <div style="font-family:${EMAIL_FONT_FAMILY};color:#ffffff;font-size:23px;font-weight:700;line-height:1.25;white-space:nowrap;">
+                    ${subtitle} – ${monthLabel}
+                  </div>
                 </td>
               </tr>
 
@@ -527,7 +496,7 @@ export async function renderMonthlyReportHtml(args: {
                 showIntro
                   ? `
                 <tr>
-                  <td class="intro-row" bgcolor="${bgLight}" style="padding: 15px 30px; border-bottom: 1px solid #d9ece7; font-family: ${EMAIL_FONT_FAMILY}; font-size: 14px; line-height: 1.6; color: #082B2A;">
+                  <td bgcolor="${bgLight}" style="padding: 15px 30px; border-bottom: 1px solid #d9ece7; font-family: ${EMAIL_FONT_FAMILY}; font-size: 14px; line-height: 1.6; color: #082B2A;">
                     Vážené kolegyně, vážení kolegové, přinášíme vám aktuální informace o vzniku a ukončení pracovních poměrů v měsíci <strong>${monthLabel}</strong>.
                   </td>
                 </tr>
@@ -536,7 +505,7 @@ export async function renderMonthlyReportHtml(args: {
               }
 
               <tr>
-                <td class="content-pad" bgcolor="#ffffff" style="padding: 26px 22px; background-color: #ffffff; font-family: ${EMAIL_FONT_FAMILY};">
+                <td bgcolor="#ffffff" style="padding: 26px 22px; background-color: #ffffff; font-family: ${EMAIL_FONT_FAMILY};">
                   ${
                     onboardings.length
                       ? `
@@ -571,25 +540,18 @@ export async function renderMonthlyReportHtml(args: {
 
               <tr>
                 <td
-                  class="rounded-bottom footer-row"
                   bgcolor="${bgLight}"
                   style="
                     padding: 18px 26px;
                     font-family: ${EMAIL_FONT_FAMILY};
                     font-size: 12px;
-                    color: #4b5563;
+                    color: #6b7280;
                     line-height: 1.5;
                     border-top: 1px solid #d9ece7;
                     border-radius: 0 0 12px 12px;
                   "
                 >
-                  <table border="0" cellpadding="0" cellspacing="0" width="100%">
-                    <tr>
-                      <td>
-                        ${EMAIL_FOOTER_HTML}
-                      </td>
-                    </tr>
-                  </table>
+                  ${EMAIL_FOOTER_HTML}
                 </td>
               </tr>
 
@@ -738,29 +700,33 @@ function buildEmployeeChangeGroups(
   return groups
 }
 
-function renderChangeValueBubble(
-  label: string,
+function labelGenitive(label: string): string {
+  if (label === "Jméno") return "jména"
+  if (label === "Pozice") return "pozice"
+  return label.toLowerCase()
+}
+
+function renderChangeValueCell(
+  labelPrefix: string,
+  fieldLabel: string,
   value: string,
   variant: "old" | "new"
 ) {
-  const bg = variant === "old" ? "#f3f4f6" : "#E5F5F2"
-  const color = variant === "old" ? "#6b7280" : "#00847C"
-  const fontWeight = variant === "old" ? 400 : 700
+  const bg = variant === "old" ? "#e9ebee" : "#E5F5F2"
+  const border = variant === "old" ? "#c6cbd2" : "#00847C"
+  const color = variant === "old" ? "#4b5563" : "#00847C"
+  const fontWeight = variant === "old" ? 500 : 700
+  const labelColor = variant === "old" ? "#6b7280" : "#00847C"
 
   return `
-    <div style="margin-bottom:6px;font-family:${EMAIL_FONT_FAMILY};">
-      <div style="margin-bottom:2px;font-size:10px;font-weight:600;color:${variant === "old" ? "#9ca3af" : "#00847C"};">
-        ${escapeHtml(label)}
+    <td width="50%" valign="top" bgcolor="${bg}" style="background-color:${bg};border:1px solid ${border};border-radius:8px;padding:8px 10px;font-family:${EMAIL_FONT_FAMILY};">
+      <div style="margin-bottom:4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:${labelColor};">
+        ${escapeHtml(labelPrefix)} - ${escapeHtml(fieldLabel)}
       </div>
-      <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%"
-        style="border-collapse:separate;font-family:${EMAIL_FONT_FAMILY};">
-        <tr>
-          <td bgcolor="${bg}" style="padding:5px 10px;background-color:${bg};border-radius:8px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;font-weight:${fontWeight};color:${color};word-break:break-word;">
-            ${escapeHtml(value)}
-          </td>
-        </tr>
-      </table>
-    </div>
+      <div style="font-size:12px;font-weight:${fontWeight};color:${color};word-break:break-word;">
+        ${escapeHtml(value)}
+      </div>
+    </td>
   `
 }
 
@@ -774,17 +740,20 @@ function renderEmployeeChangeBubbles(
   }
 
   return groups
-    .map(
-      (group) => `
+    .map((group) => {
+      const genitive = labelGenitive(group.label)
+
+      return `
         <div style="margin-bottom:10px;font-family:${EMAIL_FONT_FAMILY};">
-          <div style="margin-bottom:4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#6b7280;">
-            ${escapeHtml(group.label)}
-          </div>
-          ${renderChangeValueBubble("Původní hodnota", group.oldValue, "old")}
-          ${renderChangeValueBubble("Nová hodnota", group.newValue, "new")}
+          <table role="presentation" border="0" cellpadding="0" cellspacing="6" width="100%" style="border-collapse:separate;">
+            <tr>
+              ${renderChangeValueCell("Původní hodnota", genitive, group.oldValue, "old")}
+              ${renderChangeValueCell("Nová hodnota", genitive, group.newValue, "new")}
+            </tr>
+          </table>
         </div>
       `
-    )
+    })
     .join("")
 }
 
@@ -820,39 +789,49 @@ function renderEmployeeChangeTable(
       style="width:100%;border-collapse:collapse;font-family:${EMAIL_FONT_FAMILY};font-size:13px;">
       <thead>
         <tr bgcolor="#00847C" style="background-color:#00847C;color:#ffffff;">
-          <th align="left" style="padding:10px;font-size:11px;text-transform:uppercase;color:#ffffff;">Zaměstnanec</th>
-          <th align="left" style="padding:10px;font-size:11px;text-transform:uppercase;color:#ffffff;">Typ změny</th>
+          <th align="left" style="padding:10px;width:150px;font-size:11px;text-transform:uppercase;color:#ffffff;word-break:normal;overflow-wrap:normal;white-space:normal;">Zaměstnanec</th>
           ${
             showPersonalNumberColumn
-              ? `<th align="left" style="padding:10px;font-size:11px;text-transform:uppercase;color:#ffffff;">Osobní číslo</th>`
+              ? `<th align="left" style="padding:10px;width:60px;font-size:11px;text-transform:uppercase;color:#ffffff;">Osobní číslo</th>`
               : ""
           }
+          <th align="left" style="padding:10px;width:80px;font-size:11px;text-transform:uppercase;color:#ffffff;word-break:normal;overflow-wrap:normal;white-space:normal;">Typ změny</th>
           <th align="left" style="padding:10px;font-size:11px;text-transform:uppercase;color:#ffffff;">Změna</th>
-          <th align="left" style="padding:10px;width:110px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:nowrap;">Účinnost</th>
+          <th align="left" style="padding:10px;width:80px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:nowrap;">Účinnost</th>
         </tr>
       </thead>
 
       <tbody>
         ${records
-          .map(
-            (record, index) => `
+          .map((record, index) => {
+            const assignmentSummary = buildEmployeeChangePositionSummary(
+              record,
+              true
+            )
+
+            return `
               <tr bgcolor="${index % 2 === 0 ? "#ffffff" : "#f9fafb"}" style="background-color:${index % 2 === 0 ? "#ffffff" : "#f9fafb"};">
-                <td style="padding:10px;border-bottom:1px solid #e5e7eb;vertical-align:top;font-weight:600;color:#111827;">
+                <td style="padding:10px;border-bottom:1px solid #e5e7eb;vertical-align:top;font-weight:600;color:#111827;word-break:normal;overflow-wrap:normal;">
                   ${escapeHtml(formatEmployeeChangeName(record))}
                   ${
                     !showPersonalNumberColumn && record.personalNumber
                       ? `<div style="margin-top:2px;font-size:11px;font-weight:400;color:#6b7280;">#${escapeHtml(record.personalNumber)}</div>`
                       : ""
                   }
-                </td>
-                <td style="padding:10px;border-bottom:1px solid #e5e7eb;vertical-align:top;white-space:nowrap;color:#111827;">
-                  ${escapeHtml(employeeChangeTypeLabel(record.type))}
+                  ${
+                    assignmentSummary && assignmentSummary !== "—"
+                      ? `<div style="margin-top:3px;font-size:11px;font-weight:400;color:#6b7280;">${escapeHtml(assignmentSummary)}</div>`
+                      : ""
+                  }
                 </td>
                 ${
                   showPersonalNumberColumn
                     ? `<td style="padding:10px;border-bottom:1px solid #e5e7eb;vertical-align:top;white-space:nowrap;color:#111827;">${escapeHtml(record.personalNumber || "—")}</td>`
                     : ""
                 }
+                <td style="padding:10px;border-bottom:1px solid #e5e7eb;vertical-align:top;color:#111827;word-break:normal;overflow-wrap:normal;">
+                  ${escapeHtml(employeeChangeTypeLabel(record.type))}
+                </td>
                 <td style="padding:10px;border-bottom:1px solid #e5e7eb;vertical-align:top;">
                   ${renderEmployeeChangeBubbles(record)}
                 </td>
@@ -861,7 +840,7 @@ function renderEmployeeChangeTable(
                 </td>
               </tr>
             `
-          )
+          })
           .join("")}
       </tbody>
     </table>
@@ -911,12 +890,12 @@ export async function renderEmployeeChangeReportHtml(args: {
             <table border="0" cellpadding="0" cellspacing="0" width="860"
               bgcolor="#ffffff" style="max-width:860px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;border-collapse:separate;">
 
-              <tr>
-                <td bgcolor="${primary}" style="padding:24px 30px;background-color:${primary};">
+              <tr bgcolor="${primary}">
+                <td bgcolor="${primary}" style="padding:24px 30px;background-color:${primary};border-radius:12px 12px 0 0;">
                   <div style="font-family:${EMAIL_FONT_FAMILY};color:#ffffff;font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;">
                     Personální změny
                   </div>
-                  <div style="font-family:${EMAIL_FONT_FAMILY};color:#ffffff;font-size:23px;font-weight:700;line-height:1.25;">
+                  <div style="font-family:${EMAIL_FONT_FAMILY};color:#ffffff;font-size:23px;font-weight:700;line-height:1.25;white-space:nowrap;">
                     ${escapeHtml(buildEmployeeChangeReportSubject({ month, audience }))}
                   </div>
                 </td>
@@ -943,7 +922,7 @@ export async function renderEmployeeChangeReportHtml(args: {
               </tr>
 
               <tr>
-                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#4b5563;border-top:1px solid #d9ece7;">
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;">
                   ${EMAIL_FOOTER_HTML}
                 </td>
               </tr>
@@ -998,18 +977,6 @@ export async function sendSignatureInviteEmail({
           line-height: 1.6;
           color: #082B2A;
         }
-        .card-border { border: 1px solid #d9ece7; }
-        @media only screen and (min-width: 600px) {
-          .card-shadow {
-            box-shadow: 0 8px 24px rgba(0,0,0,0.12) !important;
-            border-radius: 12px !important;
-          }
-          .rounded-top { border-radius: 12px 12px 0 0 !important; }
-          .rounded-bottom { border-radius: 0 0 12px 12px !important; }
-        }
-        @media only screen and (max-width: 600px) {
-          .content-pad { padding: 18px 14px !important; }
-        }
       </style>
     </head>
 
@@ -1018,16 +985,14 @@ export async function sendSignatureInviteEmail({
         <tr>
           <td align="center" style="padding:30px 10px;">
             <table
-              class="card-shadow card-border"
               border="0"
               cellpadding="0"
               cellspacing="0"
               width="600"
               bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border-collapse:separate;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;"
             >
-              <tr>
+              <tr bgcolor="${primary}">
                 <td
-                  class="rounded-top"
                   bgcolor="${primary}"
                   style="padding:25px 30px;background-color:${primary};border-radius:12px 12px 0 0;"
                 >
@@ -1048,7 +1013,6 @@ export async function sendSignatureInviteEmail({
 
               <tr>
                 <td
-                  class="content-pad"
                   bgcolor="#ffffff"
                   style="padding:26px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};"
                 >
@@ -1083,7 +1047,7 @@ export async function sendSignatureInviteEmail({
                     `
                   <table border="0" cellpadding="0" cellspacing="0">
                     <tr>
-                      <td bgcolor="${primary}" style="border-radius:6px;background-color:${primary};">
+                      <td bgcolor="${primary}" style="border-radius:6px;background-color:${primary};border:1px solid ${primary};">
                         <a
                           href="${escapeHtml(signUrl)}"
                           style="display:inline-block;padding:12px 28px;color:#ffffff;font-family:${EMAIL_FONT_FAMILY};font-size:15px;font-weight:bold;text-decoration:none;border-radius:6px;"
@@ -1110,9 +1074,8 @@ export async function sendSignatureInviteEmail({
 
               <tr>
                 <td
-                  class="rounded-bottom"
                   bgcolor="${bgLight}"
-                  style="padding:18px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#4b5563;line-height:1.5;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;"
+                  style="padding:18px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;line-height:1.5;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;"
                 >
                   ${EMAIL_FOOTER_HTML}
                 </td>
@@ -1257,6 +1220,7 @@ export type SendProbationNotificationEmailParams = {
   headerLabel?: string
   intro: string
   employeeName?: string | null
+  employeePersonalNumber?: string | null
   employeePosition?: string | null
   employeeDepartment?: string | null
   employeeUnitName?: string | null
@@ -1273,6 +1237,7 @@ export type SendProbationNotificationEmailParams = {
 export type SendProbationEvaluationInviteEmailParams = {
   to: string
   employeeName: string
+  employeePersonalNumber?: string | null
   employeePosition?: string | null
   employeeDepartment?: string | null
   employeeUnitName?: string | null
@@ -1292,6 +1257,7 @@ export type SendProbationEvaluationReminderEmailParams =
 export type SendProbationEvaluationPdfEmailParams = {
   to: string
   employeeName: string
+  employeePersonalNumber?: string | null
   employeePosition?: string | null
   employeeDepartment?: string | null
   employeeUnitName?: string | null
@@ -1308,6 +1274,7 @@ export type SendProbationEvaluationPdfEmailParams = {
 export type SendProbationEvaluationCompletedEmailParams = {
   to: string[]
   employeeName: string
+  employeePersonalNumber?: string | null
   employeePosition?: string | null
   employeeDepartment?: string | null
   employeeUnitName?: string | null
@@ -1325,6 +1292,7 @@ export type ProbationMailQueuePayload = {
   to?: string
   supervisorEmail?: string | null
   employeeName?: string | null
+  employeePersonalNumber?: string | null
   position?: string | null
   employeePosition?: string | null
   department?: string | null
@@ -1378,10 +1346,65 @@ function getProbationEmployeeUnitName(payload: ProbationMailQueuePayload) {
   return payload.employeeUnitName ?? payload.unitName ?? null
 }
 
+function renderInfoTable(
+  bgLight: string,
+  rows: Array<{ label: string; value?: string | null; strong?: boolean }>
+) {
+  const visibleRows = rows.filter(
+    (row) => Boolean(row.value) && row.value !== "—"
+  )
+
+  return wrapWithBottomSpacing(
+    `
+    <table border="0" cellpadding="0" cellspacing="0" width="100%"
+      style="border:1px solid #d9ece7;border-radius:8px;overflow:hidden;border-collapse:separate;">
+      ${visibleRows
+        .map((row, index) => {
+          const bg = index % 2 === 0 ? bgLight : "#ffffff"
+          const strong = row.strong === true
+
+          return `
+            <tr bgcolor="${bg}" style="background-color:${bg};">
+              <td style="padding:10px 16px;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:1px;width:170px;">
+                ${escapeHtml(row.label)}
+              </td>
+              <td style="padding:10px 16px;font-size:14px;line-height:1.4;color:${
+                strong ? "#082B2A" : "#374151"
+              };font-weight:${strong ? 700 : 400};">
+                ${escapeHtml(row.value || "—")}
+              </td>
+            </tr>
+          `
+        })
+        .join("")}
+    </table>
+  `,
+    24
+  )
+}
+
+function renderEmploymentDocumentInfoTable(args: {
+  bgLight: string
+  employeeName?: string | null
+  employeePersonalNumber?: string | null
+  employeePosition?: string | null
+  employeeDepartment?: string | null
+  employeeUnitName?: string | null
+}) {
+  return renderInfoTable(args.bgLight, [
+    { label: "Zaměstnanec", value: args.employeeName, strong: true },
+    { label: "Osobní číslo", value: args.employeePersonalNumber },
+    { label: "Pozice", value: args.employeePosition },
+    { label: "Odbor", value: args.employeeDepartment },
+    { label: "Oddělení", value: args.employeeUnitName },
+  ])
+}
+
 function renderProbationInfoTable(args: {
   primary: string
   bgLight: string
   employeeName?: string | null
+  employeePersonalNumber?: string | null
   employeePosition?: string | null
   employeeDepartment?: string | null
   employeeUnitName?: string | null
@@ -1398,6 +1421,10 @@ function renderProbationInfoTable(args: {
       label: "Zaměstnanec",
       value: args.employeeName || "—",
       strong: true,
+    },
+    {
+      label: "Osobní číslo",
+      value: args.employeePersonalNumber || null,
     },
     {
       label: "Pozice",
@@ -1476,6 +1503,7 @@ export async function sendProbationNotificationEmail({
   headerLabel,
   intro,
   employeeName,
+  employeePersonalNumber,
   employeePosition,
   employeeDepartment,
   employeeUnitName,
@@ -1518,22 +1546,19 @@ export async function sendProbationNotificationEmail({
             <table border="0" cellpadding="0" cellspacing="0" width="600"
               bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
 
-              <tr>
-                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};">
-                  <div style="color:#ffffff;font-size:12px;text-transform:uppercase;letter-spacing:2px;margin-bottom:4px;opacity:.85;">
-                    Zkušební doba
+              <tr bgcolor="${primary}">
+                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};border-radius:12px 12px 0 0;">
+                  <div style="color:#ffffff;font-size:12px;text-transform:uppercase;letter-spacing:2px;margin-bottom:10px;opacity:.9;">
+                    Zkušební doba${
+                      headerLabel
+                        ? `<span style="opacity:.6;">&nbsp;·&nbsp;</span>${escapeHtml(headerLabel)}`
+                        : ""
+                    }
                   </div>
-                  ${
-                    headerLabel
-                      ? `
-                  <div style="color:#ffffff;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:.95;">
-                    ${escapeHtml(headerLabel)}
-                  </div>
-                  `
-                      : ""
-                  }
-                  <div style="color:#ffffff;font-size:22px;font-weight:bold;line-height:1.2;white-space:nowrap;">
-                    Vyhodnocení zkušební doby
+                  <div style="color:#ffffff;font-size:20px;font-weight:bold;line-height:1.3;">
+                    Vyhodnocení zkušební doby${
+                      employeeName ? ` – ${escapeHtml(employeeName)}` : ""
+                    }
                   </div>
                 </td>
               </tr>
@@ -1552,6 +1577,7 @@ export async function sendProbationNotificationEmail({
                     primary,
                     bgLight,
                     employeeName,
+                    employeePersonalNumber,
                     employeePosition,
                     employeeDepartment,
                     employeeUnitName,
@@ -1571,7 +1597,7 @@ export async function sendProbationNotificationEmail({
                       `
                     <table border="0" cellpadding="0" cellspacing="0">
                       <tr>
-                        <td bgcolor="${primary}" style="border-radius:6px;background-color:${primary};">
+                        <td bgcolor="${primary}" style="border-radius:6px;background-color:${primary};border:1px solid ${primary};">
                           <a
                             href="${escapeHtml(evaluationLink)}"
                             style="display:inline-block;padding:12px 28px;color:#ffffff;font-family:${EMAIL_FONT_FAMILY};font-size:15px;font-weight:bold;text-decoration:none;border-radius:6px;"
@@ -1600,7 +1626,7 @@ export async function sendProbationNotificationEmail({
               </tr>
 
               <tr>
-                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;">
                   ${EMAIL_FOOTER_HTML}
                 </td>
               </tr>
@@ -1655,6 +1681,7 @@ export async function sendProbationEvaluationInviteEmail(
       args.intro?.trim() ||
       "Personální oddělení vám zaslalo odkaz k vyplnění formuláře Vyhodnocení zkušební doby.",
     employeeName: args.employeeName,
+    employeePersonalNumber: args.employeePersonalNumber,
     employeePosition: args.employeePosition,
     employeeDepartment: args.employeeDepartment,
     employeeUnitName: args.employeeUnitName,
@@ -1679,6 +1706,7 @@ export async function sendProbationEvaluationReminderEmail(
       args.intro?.trim() ||
       "Personální oddělení připomíná, že formulář Vyhodnocení zkušební doby zatím není finálně vyplněný.",
     employeeName: args.employeeName,
+    employeePersonalNumber: args.employeePersonalNumber,
     employeePosition: args.employeePosition,
     employeeDepartment: args.employeeDepartment,
     employeeUnitName: args.employeeUnitName,
@@ -1693,6 +1721,7 @@ export async function sendProbationEvaluationReminderEmail(
 export async function sendProbationHrReminderEmail(args: {
   to: string[]
   employeeName: string
+  employeePersonalNumber?: string | null
   employeePosition?: string | null
   employeeDepartment?: string | null
   employeeUnitName?: string | null
@@ -1714,6 +1743,7 @@ export async function sendProbationHrReminderEmail(args: {
       args.intro?.trim() ||
       "Formulář k vyhodnocení zkušební doby zatím není finálně vyplněný. Prosíme o kontrolu stavu a případné kontaktování vedoucího.",
     employeeName: args.employeeName,
+    employeePersonalNumber: args.employeePersonalNumber,
     employeePosition: args.employeePosition,
     employeeDepartment: args.employeeDepartment,
     employeeUnitName: args.employeeUnitName,
@@ -1728,6 +1758,7 @@ export async function sendProbationHrReminderEmail(args: {
 export async function sendProbationMissingSupervisorEmail(args: {
   to: string[]
   employeeName: string
+  employeePersonalNumber?: string | null
   employeePosition?: string | null
   employeeDepartment?: string | null
   employeeUnitName?: string | null
@@ -1741,6 +1772,7 @@ export async function sendProbationMissingSupervisorEmail(args: {
     intro:
       "U zaměstnance chybí vedoucí nebo e-mail vedoucího. Formulář proto nelze automaticky odeslat k vyplnění.",
     employeeName: args.employeeName,
+    employeePersonalNumber: args.employeePersonalNumber,
     employeePosition: args.employeePosition,
     employeeDepartment: args.employeeDepartment,
     employeeUnitName: args.employeeUnitName,
@@ -1776,16 +1808,17 @@ export async function sendProbationEvaluationPdfEmail(
           <td align="center" style="padding:30px 10px;">
             <table border="0" cellpadding="0" cellspacing="0" width="600"
               bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
-              <tr>
-                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};">
-                  <div style="color:#ffffff;font-size:12px;text-transform:uppercase;letter-spacing:2px;margin-bottom:4px;opacity:.85;">
-                    Zkušební doba
+              <tr bgcolor="${primary}">
+                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};border-radius:12px 12px 0 0;">
+                  <div style="color:#ffffff;font-size:12px;text-transform:uppercase;letter-spacing:2px;margin-bottom:10px;opacity:.9;">
+                    Zkušební doba<span style="opacity:.6;">&nbsp;·&nbsp;</span>PDF příloha
                   </div>
-                  <div style="color:#ffffff;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:.95;">
-                    PDF příloha
-                  </div>
-                  <div style="color:#ffffff;font-size:22px;font-weight:bold;line-height:1.2;white-space:nowrap;">
-                    Vyhodnocení zkušební doby
+                  <div style="color:#ffffff;font-size:20px;font-weight:bold;line-height:1.3;">
+                    Vyhodnocení zkušební doby${
+                      args.employeeName
+                        ? ` – ${escapeHtml(args.employeeName)}`
+                        : ""
+                    }
                   </div>
                 </td>
               </tr>
@@ -1804,6 +1837,7 @@ export async function sendProbationEvaluationPdfEmail(
                     primary,
                     bgLight,
                     employeeName: args.employeeName,
+                    employeePersonalNumber: args.employeePersonalNumber,
                     employeePosition: args.employeePosition,
                     employeeDepartment: args.employeeDepartment,
                     employeeUnitName: args.employeeUnitName,
@@ -1822,7 +1856,7 @@ export async function sendProbationEvaluationPdfEmail(
               </tr>
 
               <tr>
-                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;">
                   ${EMAIL_FOOTER_HTML}
                 </td>
               </tr>
@@ -1899,16 +1933,17 @@ export async function sendProbationEvaluationCompletedEmail(
           <td align="center" style="padding:30px 10px;">
             <table border="0" cellpadding="0" cellspacing="0" width="600"
               bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
-              <tr>
-                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};">
-                  <div style="color:#ffffff;font-size:12px;text-transform:uppercase;letter-spacing:2px;margin-bottom:4px;opacity:.85;">
-                    Zkušební doba
+              <tr bgcolor="${primary}">
+                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};border-radius:12px 12px 0 0;">
+                  <div style="color:#ffffff;font-size:12px;text-transform:uppercase;letter-spacing:2px;margin-bottom:10px;opacity:.9;">
+                    Zkušební doba<span style="opacity:.6;">&nbsp;·&nbsp;</span>Dokončeno
                   </div>
-                  <div style="color:#ffffff;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:.95;">
-                    Dokončeno
-                  </div>
-                  <div style="color:#ffffff;font-size:22px;font-weight:bold;line-height:1.2;white-space:nowrap;">
-                    Vyhodnocení zkušební doby
+                  <div style="color:#ffffff;font-size:20px;font-weight:bold;line-height:1.3;">
+                    Vyhodnocení zkušební doby${
+                      args.employeeName
+                        ? ` – ${escapeHtml(args.employeeName)}`
+                        : ""
+                    }
                   </div>
                 </td>
               </tr>
@@ -1927,6 +1962,7 @@ export async function sendProbationEvaluationCompletedEmail(
                     primary,
                     bgLight,
                     employeeName: args.employeeName,
+                    employeePersonalNumber: args.employeePersonalNumber,
                     employeePosition: args.employeePosition,
                     employeeDepartment: args.employeeDepartment,
                     employeeUnitName: args.employeeUnitName,
@@ -1945,7 +1981,7 @@ export async function sendProbationEvaluationCompletedEmail(
               </tr>
 
               <tr>
-                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;">
                   ${EMAIL_FOOTER_HTML}
                 </td>
               </tr>
@@ -1997,6 +2033,7 @@ export async function sendQueuedProbationEmail(args: {
   const payload = args.payload
 
   const employeeName = payload.employeeName?.trim() || "zaměstnanec"
+  const employeePersonalNumber = payload.employeePersonalNumber ?? null
   const employeePosition = getProbationEmployeePosition(payload)
   const employeeDepartment = getProbationEmployeeDepartment(payload)
   const employeeUnitName = getProbationEmployeeUnitName(payload)
@@ -2012,6 +2049,7 @@ export async function sendQueuedProbationEmail(args: {
     await sendProbationEvaluationInviteEmail({
       to,
       employeeName,
+      employeePersonalNumber,
       employeePosition,
       employeeDepartment,
       employeeUnitName,
@@ -2037,6 +2075,7 @@ export async function sendQueuedProbationEmail(args: {
     await sendProbationEvaluationReminderEmail({
       to,
       employeeName,
+      employeePersonalNumber,
       employeePosition,
       employeeDepartment,
       employeeUnitName,
@@ -2061,6 +2100,7 @@ export async function sendQueuedProbationEmail(args: {
     await sendProbationMissingSupervisorEmail({
       to: recipients,
       employeeName,
+      employeePersonalNumber,
       employeePosition,
       employeeDepartment,
       employeeUnitName,
@@ -2078,6 +2118,7 @@ export async function sendQueuedProbationEmail(args: {
     await sendProbationHrReminderEmail({
       to: recipients,
       employeeName,
+      employeePersonalNumber,
       employeePosition,
       employeeDepartment,
       employeeUnitName,
@@ -2103,6 +2144,7 @@ export async function sendQueuedProbationEmail(args: {
       intro:
         payload.intro || "Níže zasíláme informaci k vyhodnocení zkušební doby.",
       employeeName,
+      employeePersonalNumber,
       employeePosition,
       employeeDepartment,
       employeeUnitName,
@@ -2113,6 +2155,31 @@ export async function sendQueuedProbationEmail(args: {
       recommendation: payload.recommendation,
       evaluatorName: payload.evaluatorName,
       evaluatorEmail: payload.evaluatorEmail,
+      formType: payload.formType,
+    })
+
+    return
+  }
+
+  if (type === "PROBATION_EVALUATION_UNLOCK_REMINDER") {
+    await sendProbationNotificationEmail({
+      to: recipients,
+      subject:
+        payload.subject ||
+        `Formulář vyhodnocení zkušební doby je stále odemčený – ${employeeName}`,
+      headerLabel: "Upozornění",
+      intro:
+        payload.intro ||
+        "Formulář vyhodnocení zkušební doby byl odemčen k opravě a stále zůstává otevřený. Prosíme, dokončete úpravy a formulář znovu uzamkněte.",
+      employeeName,
+      employeePersonalNumber,
+      employeePosition,
+      employeeDepartment,
+      employeeUnitName,
+      probationEndDate: payload.probationEndDate,
+      supervisorName: payload.supervisorName,
+      supervisorEmail: payload.supervisorEmail,
+      evaluationLink: payload.evaluationLink,
       formType: payload.formType,
     })
 
@@ -2177,8 +2244,8 @@ export async function sendHandoverRecipientEmail({
         <table border="0" cellpadding="0" cellspacing="0" width="600"
           bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
 
-          <tr>
-            <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};">
+          <tr bgcolor="${primary}">
+            <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};border-radius:12px 12px 0 0;">
               <div style="color:#ffffff;font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:.9;">
                 Výstupní list
               </div>
@@ -2273,7 +2340,7 @@ export async function sendHandoverRecipientEmail({
           </tr>
 
           <tr>
-            <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
+            <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;">
               ${EMAIL_FOOTER_HTML}
             </td>
           </tr>
@@ -2351,8 +2418,8 @@ export async function sendExitChecklistCompletedEmail({
           <td align="center" style="padding:30px 10px;">
             <table border="0" cellpadding="0" cellspacing="0" width="600"
               bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
-              <tr>
-                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};">
+              <tr bgcolor="${primary}">
+                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};border-radius:12px 12px 0 0;">
                   <div style="color:#ffffff;font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:.9;">
                     Výstupní list
                   </div>
@@ -2373,6 +2440,14 @@ export async function sendExitChecklistCompletedEmail({
                     <strong>${escapeHtml(employeeName)}</strong>
                     byl kompletně vyplněn a podepsán.
                   </p>
+
+                  <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 18px 0;">
+                    <tr>
+                      <td bgcolor="${bgLight}" style="padding:12px 16px;border:1px solid #d9ece7;border-radius:8px;font-size:13px;color:#0B4A46;line-height:1.5;">
+                        Nezapomeňte prosím zaslat podepsanou PDF verzi výstupního listu danému zaměstnanci/zaměstnankyni.
+                      </td>
+                    </tr>
+                  </table>
 
                   ${renderExitChecklistInfoTable({
                     primary,
@@ -2396,7 +2471,7 @@ export async function sendExitChecklistCompletedEmail({
                     `
                   <table border="0" cellpadding="0" cellspacing="0">
                     <tr>
-                      <td bgcolor="${primary}" style="border-radius:6px;background-color:${primary};">
+                      <td bgcolor="${primary}" style="border-radius:6px;background-color:${primary};border:1px solid ${primary};">
                         <a
                           href="${escapeHtml(checklistUrl)}"
                           style="display:inline-block;padding:12px 28px;color:#ffffff;font-family:${EMAIL_FONT_FAMILY};font-size:15px;font-weight:bold;text-decoration:none;border-radius:6px;"
@@ -2419,7 +2494,7 @@ export async function sendExitChecklistCompletedEmail({
               </tr>
 
               <tr>
-                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;">
                   ${EMAIL_FOOTER_HTML}
                 </td>
               </tr>
@@ -2432,6 +2507,8 @@ export async function sendExitChecklistCompletedEmail({
 
   const text = [
     `výstupní list je kompletně vyplněn – ${employeeName}`,
+    "",
+    "Nezapomeňte prosím zaslat podepsanou PDF verzi výstupního listu danému zaměstnanci/zaměstnankyni.",
     "",
     `Zaměstnanec: ${employeeName}`,
     `Pozice: ${employeePosition || "—"}`,
@@ -2496,8 +2573,8 @@ export async function sendExitChecklistPdfEmail({
           <td align="center" style="padding:30px 10px;">
             <table border="0" cellpadding="0" cellspacing="0" width="600"
               bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
-              <tr>
-                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};">
+              <tr bgcolor="${primary}">
+                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};border-radius:12px 12px 0 0;">
                   <div style="color:#ffffff;font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:.9;">
                     Výstupní list
                   </div>
@@ -2541,7 +2618,7 @@ export async function sendExitChecklistPdfEmail({
               </tr>
 
               <tr>
-                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;">
                   ${EMAIL_FOOTER_HTML}
                 </td>
               </tr>
@@ -2662,8 +2739,8 @@ export async function sendBehalfSignatureEmail({
       <td align="center" style="padding:30px 10px;">
         <table border="0" cellpadding="0" cellspacing="0" width="600"
           bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
-          <tr>
-            <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};">
+          <tr bgcolor="${primary}">
+            <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};border-radius:12px 12px 0 0;">
               <div style="color:#ffffff;font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:.9;">
                 Výstupní list – zastoupení
               </div>
@@ -2749,7 +2826,7 @@ export async function sendBehalfSignatureEmail({
                 `
               <table border="0" cellpadding="0" cellspacing="0">
                 <tr>
-                  <td bgcolor="${primary}" style="border-radius:6px;background-color:${primary};">
+                  <td bgcolor="${primary}" style="border-radius:6px;background-color:${primary};border:1px solid ${primary};">
                     <a href="${signUrl}"
                       style="display:inline-block;padding:12px 28px;color:#ffffff;font-family:${EMAIL_FONT_FAMILY};font-size:15px;font-weight:bold;text-decoration:none;border-radius:6px;">
                       Otevřít výstupní list
@@ -2773,7 +2850,7 @@ export async function sendBehalfSignatureEmail({
           </tr>
 
           <tr>
-            <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;">
+            <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;">
               ${EMAIL_FOOTER_HTML}
             </td>
           </tr>
@@ -2802,4 +2879,277 @@ export async function sendBehalfSignatureEmail({
   ].join("\n")
 
   await sendMail({ to: [to], subject, html, text })
+}
+
+type EmploymentDocumentEmailInfo = {
+  employeeName: string
+  employeePersonalNumber?: string | null
+  employeePosition?: string | null
+  employeeDepartment?: string | null
+  employeeUnitName?: string | null
+}
+
+export async function sendEmploymentDocumentLinkEmail(
+  args: EmploymentDocumentEmailInfo & {
+    to: string
+    documents: Array<{ label: string; url: string }>
+  }
+): Promise<{ subject: string; html: string }> {
+  const primary = "#00847C"
+  const bgLight = "#E5F5F2"
+  const subject = args.employeeName
+    ? `Dokumenty k nástupu – ${args.employeeName}`
+    : "Dokumenty k nástupu"
+
+  const html = `
+  <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+  <html xmlns="http://www.w3.org/1999/xhtml" lang="cs">
+    <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <title>${escapeHtml(subject)}</title>
+      <style type="text/css">
+        body { margin: 0; padding: 0; }
+        table { border-collapse: collapse; }
+        ${EMAIL_GLOBAL_FONT_STYLE}
+      </style>
+    </head>
+
+    <body style="margin:0;padding:0;background-color:${bgLight};font-family:${EMAIL_FONT_FAMILY};">
+      <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
+        <tr>
+          <td align="center" style="padding:30px 10px;">
+            <table border="0" cellpadding="0" cellspacing="0" width="600"
+              bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
+              <tr bgcolor="${primary}">
+                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};border-radius:12px 12px 0 0;">
+                  <div style="color:#ffffff;font-size:12px;text-transform:uppercase;letter-spacing:2px;margin-bottom:10px;opacity:.9;">
+                    Nástup
+                  </div>
+                  <div style="color:#ffffff;font-size:20px;font-weight:bold;line-height:1.3;">
+                    Dokumenty k vyplnění${args.employeeName ? ` – ${escapeHtml(args.employeeName)}` : ""}
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="#ffffff" style="padding:26px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};">
+                  <p style="margin:0 0 16px 0;font-size:14px;color:#082B2A;">
+                    Dobrý den${args.employeeName ? `, ${escapeHtml(args.employeeName)}` : ""},
+                  </p>
+
+                  <p style="margin:0 0 18px 0;font-size:14px;color:#374151;line-height:1.6;">
+                    prosíme o vyplnění následujících dokumentů pro uvedenou pozici.
+                  </p>
+
+                  ${renderEmploymentDocumentInfoTable({
+                    bgLight,
+                    employeeName: args.employeeName,
+                    employeePersonalNumber: args.employeePersonalNumber,
+                    employeePosition: args.employeePosition,
+                    employeeDepartment: args.employeeDepartment,
+                    employeeUnitName: args.employeeUnitName,
+                  })}
+
+                  <table border="0" cellpadding="0" cellspacing="0" width="100%"
+                    style="border:1px solid #d9ece7;border-radius:8px;overflow:hidden;border-collapse:separate;margin-bottom:24px;">
+                    ${args.documents
+                      .map(
+                        (document, index) => `
+                      <tr bgcolor="${index % 2 === 0 ? bgLight : "#ffffff"}" style="background-color:${index % 2 === 0 ? bgLight : "#ffffff"};">
+                        <td style="padding:10px 16px;font-size:14px;color:#082B2A;font-weight:700;">
+                          ${escapeHtml(document.label)}
+                        </td>
+                        <td style="padding:10px 16px;font-size:12px;">
+                          <a href="${escapeHtml(document.url)}" style="color:${primary};word-break:break-all;">${escapeHtml(document.url)}</a>
+                        </td>
+                      </tr>
+                    `
+                      )
+                      .join("")}
+                  </table>
+
+                  <table border="0" cellpadding="0" cellspacing="0" width="100%"
+                    style="border:1px solid #fed7aa;border-radius:8px;overflow:hidden;border-collapse:separate;">
+                    <tr bgcolor="#fff7ed" style="background-color:#fff7ed;">
+                      <td style="padding:12px 14px;font-size:12px;color:#9a3412;line-height:1.6;">
+                        <strong>Důležité:</strong>
+                        <ul style="margin:8px 0 0 18px;padding:0;">
+                          <li>Odkazy jsou určeny pouze pro vás – <strong>nepřeposílejte je</strong> dalším osobám.</li>
+                          <li>Formuláře vyplňte <strong>osobně</strong>, <strong>pravdivě</strong> a <strong>pečlivě</strong>.</li>
+                          <li>Po odeslání už zpravidla není potřeba dokumenty vyplňovat znovu.</li>
+                          <li>Pokud jméno nebo pozice u odkazů nesouhlasí s vámi, formuláře <strong>nevyplňujte</strong> a okamžitě kontaktujte personální oddělení.</li>
+                        </ul>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;">
+                  ${EMAIL_FOOTER_HTML}
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+  </html>`
+
+  const text = [
+    `Dobrý den${args.employeeName ? `, ${args.employeeName}` : ""},`,
+    "",
+    "prosíme o vyplnění následujících dokumentů pro uvedenou pozici:",
+    "",
+    `Zaměstnanec: ${args.employeeName}`,
+    args.employeePersonalNumber
+      ? `Osobní číslo: ${args.employeePersonalNumber}`
+      : "",
+    `Pozice: ${args.employeePosition || "—"}`,
+    `Odbor: ${args.employeeDepartment || "—"}`,
+    `Oddělení: ${args.employeeUnitName || "—"}`,
+    "",
+    ...args.documents.map((document) => `${document.label}: ${document.url}`),
+    "",
+    "Odkazy jsou určeny pouze pro vás – nepřeposílejte je dalším osobám.",
+  ]
+    .filter(Boolean)
+    .join("\n")
+
+  await sendMail({ to: [args.to], subject, html, text })
+
+  return { subject, html }
+}
+
+export async function sendEmploymentDocumentPdfEmail(
+  args: EmploymentDocumentEmailInfo & {
+    to: string
+    documentLabels: string[]
+    attachments: Array<{
+      filename: string
+      content: Buffer
+      contentType: string
+    }>
+  }
+): Promise<{ subject: string; html: string }> {
+  const primary = "#00847C"
+  const bgLight = "#E5F5F2"
+  const subject = args.employeeName
+    ? `Vyplněné dokumenty k nástupu – ${args.employeeName}`
+    : "Vyplněné dokumenty k nástupu"
+
+  const html = `
+  <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+  <html xmlns="http://www.w3.org/1999/xhtml" lang="cs">
+    <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <title>${escapeHtml(subject)}</title>
+      <style type="text/css">
+        body { margin: 0; padding: 0; }
+        table { border-collapse: collapse; }
+        ${EMAIL_GLOBAL_FONT_STYLE}
+      </style>
+    </head>
+
+    <body style="margin:0;padding:0;background-color:${bgLight};font-family:${EMAIL_FONT_FAMILY};">
+      <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
+        <tr>
+          <td align="center" style="padding:30px 10px;">
+            <table border="0" cellpadding="0" cellspacing="0" width="600"
+              bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
+              <tr bgcolor="${primary}">
+                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};border-radius:12px 12px 0 0;">
+                  <div style="color:#ffffff;font-size:12px;text-transform:uppercase;letter-spacing:2px;margin-bottom:10px;opacity:.9;">
+                    Nástup
+                  </div>
+                  <div style="color:#ffffff;font-size:20px;font-weight:bold;line-height:1.3;">
+                    Vyplněné dokumenty${args.employeeName ? ` – ${escapeHtml(args.employeeName)}` : ""}
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="#ffffff" style="padding:26px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};">
+                  <p style="margin:0 0 16px 0;font-size:14px;color:#082B2A;">
+                    Dobrý den,
+                  </p>
+
+                  <p style="margin:0 0 18px 0;font-size:14px;color:#374151;line-height:1.6;">
+                    personální oddělení zasílá vyplněné dokumenty níže uvedeného zaměstnance.
+                  </p>
+
+                  ${renderEmploymentDocumentInfoTable({
+                    bgLight,
+                    employeeName: args.employeeName,
+                    employeePersonalNumber: args.employeePersonalNumber,
+                    employeePosition: args.employeePosition,
+                    employeeDepartment: args.employeeDepartment,
+                    employeeUnitName: args.employeeUnitName,
+                  })}
+
+                  <table border="0" cellpadding="0" cellspacing="0" width="100%"
+                    style="border:1px solid #d9ece7;border-radius:8px;overflow:hidden;border-collapse:separate;">
+                    ${args.documentLabels
+                      .map(
+                        (label, index) => `
+                      <tr bgcolor="${index % 2 === 0 ? bgLight : "#ffffff"}" style="background-color:${index % 2 === 0 ? bgLight : "#ffffff"};">
+                        <td style="padding:10px 16px;font-size:14px;color:#082B2A;font-weight:700;">
+                          ${escapeHtml(label)}
+                        </td>
+                      </tr>
+                    `
+                      )
+                      .join("")}
+                  </table>
+
+                  <p style="margin:18px 0 0 0;font-size:12px;color:#6b7280;">
+                    Dokumenty naleznete v příloze tohoto e-mailu ve formátu PDF.
+                  </p>
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;">
+                  ${EMAIL_FOOTER_HTML}
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+  </html>`
+
+  const text = [
+    "Dobrý den,",
+    "",
+    "personální oddělení zasílá vyplněné dokumenty níže uvedeného zaměstnance:",
+    "",
+    `Zaměstnanec: ${args.employeeName}`,
+    args.employeePersonalNumber
+      ? `Osobní číslo: ${args.employeePersonalNumber}`
+      : "",
+    `Pozice: ${args.employeePosition || "—"}`,
+    `Odbor: ${args.employeeDepartment || "—"}`,
+    `Oddělení: ${args.employeeUnitName || "—"}`,
+    "",
+    ...args.documentLabels,
+    "",
+    "Dokumenty naleznete v příloze tohoto e-mailu ve formátu PDF.",
+  ]
+    .filter(Boolean)
+    .join("\n")
+
+  await sendMail({
+    to: [args.to],
+    subject,
+    html,
+    text,
+    attachments: args.attachments,
+  })
+
+  return { subject, html }
 }

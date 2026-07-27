@@ -3,6 +3,7 @@ import { auth } from "@/auth"
 
 import { getEmployees, type Employee } from "@/lib/eos-employees"
 import { canReadInternalApp } from "@/lib/rbac"
+import { getSentryEnvironment } from "@/lib/sentry-environment"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -81,6 +82,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       status: "success",
       data: employeeToOffboardingData(employee),
+      outsideProduction: getSentryEnvironment() !== "production",
     })
   } catch (error) {
     console.error("Chyba při předvyplňování z EOS:", error)

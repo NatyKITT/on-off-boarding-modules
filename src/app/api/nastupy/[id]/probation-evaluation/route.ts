@@ -6,8 +6,8 @@ import {
   getOrEnsureProbationDetail,
   getProbationDetailByOnboardingId,
   jsonError,
-  requireInternalProbationManage,
   requireInternalProbationRead,
+  requireInternalProbationSave,
   saveProbationEvaluation,
   sendCompletedProbationPdfToHr,
 } from "@/lib/probation-evaluation-api"
@@ -61,7 +61,7 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const authResult = await requireInternalProbationManage()
+  const authResult = await requireInternalProbationSave()
   if (!authResult.ok) return authResult.response
 
   const onboardingId = getNumericId(params.id)

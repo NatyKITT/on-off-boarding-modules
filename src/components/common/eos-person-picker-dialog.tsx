@@ -148,8 +148,14 @@ export function EosPersonPickerDialog({
                     <User className="mt-0.5 size-4 text-muted-foreground" />
                     <div className="min-w-0 flex-1">
                       <div className="font-medium">
-                        [ item.titleBefore, item.name, item.surname,
-                        item.titleAfter, ] .filter(Boolean) .join(&#34; &#34;)
+                        {[
+                          item.titleBefore,
+                          item.name,
+                          item.surname,
+                          item.titleAfter,
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
                       </div>
                       <div className="text-xs text-muted-foreground">
                         {item.personalNumber}

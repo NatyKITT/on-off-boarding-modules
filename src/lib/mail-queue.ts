@@ -19,6 +19,7 @@ const PROBATION_MAIL_JOB_TYPES: MailJobType[] = [
   "PROBATION_EVALUATION_HR_INFO",
   "PROBATION_EVALUATION_HR_MISSING_SUPERVISOR",
   "PROBATION_EVALUATION_HR_NOT_COMPLETED",
+  "PROBATION_EVALUATION_UNLOCK_REMINDER",
 ]
 
 function asPayload(value: unknown): QueuePayload {
@@ -134,6 +135,10 @@ function getProbationSentAction(
     return "HR_REMINDER_SENT"
   }
 
+  if (type.includes("UNLOCK_REMINDER")) {
+    return "UNLOCK_REMINDER_SENT"
+  }
+
   if (type.includes("REMINDER")) {
     return "REMINDER_SENT"
   }
@@ -165,6 +170,10 @@ function getProbationSentMessage(type: string, payload: QueuePayload) {
 
   if (type.includes("HR_NOT_COMPLETED")) {
     return `HR připomínka, že vyhodnocení zkušební doby není vyplněné, byla odeslána z fronty.${recipientText}`
+  }
+
+  if (type.includes("UNLOCK_REMINDER")) {
+    return `Připomínka, že formulář zůstává odemčený k úpravě, byla odeslána z fronty.${recipientText}`
   }
 
   if (type.includes("REMINDER")) {

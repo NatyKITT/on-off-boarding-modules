@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { Role } from "@prisma/client"
 import {
   AlertTriangle,
+  History,
   InfoIcon,
   Lock,
   Plus,
@@ -34,7 +35,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { DocumentHistoryDialog } from "@/components/history/document-history-dialog"
 import { Icons } from "@/components/shared/icons"
+
+const USER_AUDIT_ACTION_LABEL: Record<string, string> = {
+  CREATED: "Vytvořen",
+  ROLE_CHANGED: "Změna role",
+  REMOVED: "Odebrán",
+  DEMOTED: "Odebrán přístup",
+}
+
+function userAuditActionLabel(action: string) {
+  return USER_AUDIT_ACTION_LABEL[action] ?? action
+}
 
 type DbUser = {
   id: string
@@ -743,7 +756,21 @@ export function UserRoleManagement() {
 
   return (
     <div className="space-y-6">
-      <RoleLegend />
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <RoleLegend />
+
+        <DocumentHistoryDialog
+          title="Historie správy uživatelů"
+          fetchUrl="/api/admin/users/history"
+          actionLabel={userAuditActionLabel}
+          trigger={
+            <Button variant="outline" size="sm" className="gap-1.5">
+              <History className="size-4" />
+              Historie
+            </Button>
+          }
+        />
+      </div>
 
       <div className="space-y-3">
         <div className="flex items-center gap-2">

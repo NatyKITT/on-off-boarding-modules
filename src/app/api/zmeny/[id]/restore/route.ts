@@ -61,14 +61,32 @@ export async function POST(
     )
   }
 
-  await prisma.employeeChange.update({
-    where: { id },
-    data: {
-      deletedAt: null,
-      deletedBy: null,
-      deleteReason: null,
-      updatedAt: new Date(),
-    },
+  const userKey =
+    (session.user as { id?: string; email?: string }).id ??
+    session.user.email ??
+    "unknown"
+
+  await prisma.$transaction(async (tx) => {
+    await tx.employeeChange.update({
+      where: { id },
+      data: {
+        deletedAt: null,
+        deletedBy: null,
+        deleteReason: null,
+        updatedAt: new Date(),
+      },
+    })
+
+    await tx.employeeChangeLog.create({
+      data: {
+        employeeId: record.id,
+        userId: userKey,
+        action: "RESTORED",
+        field: "deleted_at",
+        oldValue: record.deletedAt?.toISOString() ?? null,
+        newValue: null,
+      },
+    })
   })
 
   return NextResponse.json({

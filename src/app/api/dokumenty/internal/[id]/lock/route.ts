@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
+import { logEmploymentDocumentEvent } from "@/lib/employment-document-events"
 import { canManageEmploymentDocuments } from "@/lib/rbac"
 
 interface Params {
@@ -58,6 +59,15 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     where: { id },
     data: { isLocked: body.locked },
     select: { id: true, isLocked: true },
+  })
+
+  await logEmploymentDocumentEvent({
+    documentId: updated.id,
+    action: body.locked ? "LOCKED" : "UNLOCKED",
+    by: (session.user as { id?: string }).id ?? null,
+    byName: session.user.name ?? session.user.email ?? null,
+    byEmail: session.user.email ?? null,
+    message: body.locked ? "Dokument byl uzamčen." : "Dokument byl odemčen.",
   })
 
   return NextResponse.json({ document: updated })

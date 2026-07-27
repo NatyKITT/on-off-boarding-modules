@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 
 import { canAccessInternalApp } from "@/lib/rbac"
+import { logReportAccess } from "@/lib/report-access-log"
 import {
   buildStatisticsReportFilename,
   renderStatisticsPdfBuffer,
@@ -89,6 +90,20 @@ export async function POST(request: NextRequest) {
     })
 
     const filename = buildStatisticsReportFilename(filters.year, generatedAt)
+    const periodLabel =
+      filters.fromMonth && filters.toMonth
+        ? filters.fromMonth === filters.toMonth
+          ? `${filters.fromMonth}/${filters.year}`
+          : `${filters.fromMonth}–${filters.toMonth}/${filters.year}`
+        : String(filters.year)
+
+    await logReportAccess({
+      reportType: "STATISTICS_REPORT",
+      by: (session.user as { id?: string }).id ?? null,
+      byName: generatedByName,
+      byEmail: session.user.email ?? null,
+      message: `PDF statistik za období ${periodLabel} bylo staženo (${filename}).`,
+    })
 
     return new NextResponse(bufferToArrayBuffer(buffer), {
       status: 200,

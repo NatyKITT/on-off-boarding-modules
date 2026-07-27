@@ -18,6 +18,7 @@ import {
   Info,
   Mail,
   RotateCcw,
+  Search,
   Trash2,
   User,
   UserCheck,
@@ -76,6 +77,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { ActiveFilterChips } from "@/components/common/active-filter-chips"
+import { AssignCompanyDataDialog } from "@/components/common/assign-company-data-dialog"
 import { EmployeeDocumentsDialog } from "@/components/common/employee-documents-dialog"
 import { LinkedRecordInfoButton } from "@/components/common/linked-record-info-button"
 import { ListPageSkeleton } from "@/components/common/list-page-skeleton"
@@ -806,6 +808,12 @@ export default function OnboardingPage() {
     arrival: Arrival | null
     loading: boolean
   }>({ open: false, arrival: null, loading: false })
+
+  const [assignCompanyDataDialog, setAssignCompanyDataDialog] = useState<{
+    open: boolean
+    arrival: Arrival | null
+  }>({ open: false, arrival: null })
+  const [assignCompanyDataSaving, setAssignCompanyDataSaving] = useState(false)
 
   const [deleteDialog, setDeleteDialog] = useState<{
     open: boolean
@@ -1600,6 +1608,44 @@ export default function OnboardingPage() {
     }
   }
 
+  async function handleAssignCompanyData(data: {
+    userEmail: string | null
+    userName: string | null
+  }) {
+    const arrival = assignCompanyDataDialog.arrival
+    if (!arrival) return
+
+    setAssignCompanyDataSaving(true)
+
+    try {
+      const response = await fetch(`/api/nastupy/${arrival.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null)
+        throw new Error(errorData?.message ?? "Uložení se nezdařilo")
+      }
+
+      setAssignCompanyDataDialog({ open: false, arrival: null })
+      showSuccess(
+        "Firemní účty propojeny",
+        `Údaje pro "${arrival.name} ${arrival.surname}" byly uloženy.`
+      )
+      await reload()
+    } catch (error) {
+      console.error("Error assigning company data:", error)
+      showError(
+        "Chyba při ukládání",
+        error instanceof Error ? error.message : "Uložení se nezdařilo"
+      )
+    } finally {
+      setAssignCompanyDataSaving(false)
+    }
+  }
+
   async function handleCancel() {
     const arrival = cancelDialog.arrival
     const reason = cancelDialog.reason.trim()
@@ -1875,6 +1921,22 @@ export default function OnboardingPage() {
                 employeeName={fullName}
                 offboarding={arrival.linkedOffboarding}
                 sourceCancelled
+              />
+
+              <HistoryDialog
+                id={arrival.id}
+                kind="onboarding"
+                trigger={
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    title="Historie změn"
+                    className="inline-flex items-center justify-center gap-1"
+                  >
+                    <HistoryIcon className="size-4" />
+                    <span className="sr-only">Historie</span>
+                  </Button>
+                }
               />
 
               <Button
@@ -2189,6 +2251,20 @@ export default function OnboardingPage() {
               }}
               readOnly={isReadonly}
             />
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                setAssignCompanyDataDialog({ open: true, arrival })
+              }
+              disabled={isReadonly}
+              title="Propojit firemní účty (EOS)"
+              className="inline-flex items-center justify-center gap-1"
+            >
+              <Search className="size-4" />
+              <span className="hidden sm:inline">Propojit účty</span>
+            </Button>
 
             <Button
               size="sm"
@@ -3404,6 +3480,18 @@ export default function OnboardingPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AssignCompanyDataDialog
+        open={assignCompanyDataDialog.open}
+        onOpenChange={(open) =>
+          setAssignCompanyDataDialog((prev) => ({ ...prev, open }))
+        }
+        personalNumber={assignCompanyDataDialog.arrival?.personalNumber ?? ""}
+        firstName={assignCompanyDataDialog.arrival?.name ?? ""}
+        lastName={assignCompanyDataDialog.arrival?.surname ?? ""}
+        onAssign={handleAssignCompanyData}
+        saving={assignCompanyDataSaving}
+      />
 
       <Dialog
         open={cancelDialog.open}

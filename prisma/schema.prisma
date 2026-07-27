@@ -45,6 +45,7 @@ enum MailJobType {
   PROBATION_EVALUATION_HR_MISSING_SUPERVISOR
   PROBATION_EVALUATION_HR_NOT_COMPLETED
   PROBATION_EVALUATION_COMPLETED
+  PROBATION_EVALUATION_UNLOCK_REMINDER
 
   NOTICE_WARNING
   NOTICE_ENDING
@@ -97,6 +98,42 @@ enum ActionType {
   STATUS_CHANGED
   NOTICE_REMINDER_SENT
   OFFICIAL_CHANGE_APPLIED
+}
+
+enum EmploymentDocumentEventAction {
+  CREATED
+  SENT
+  PDF_SENT
+  FILLED
+  EDITED
+  LOCKED
+  UNLOCKED
+  RESET
+  REGENERATED
+  PDF_DOWNLOADED
+  EMAIL_FAILED
+}
+
+enum ExitChecklistEventAction {
+  LOCKED
+  UNLOCKED
+  UPDATED
+  ITEM_SIGNED
+  ITEM_SIGNATURE_CLEARED
+  ASSET_ADDED
+  ASSET_UPDATED
+  ASSET_REMOVED
+  SIGNATURE_INVITE_SENT
+  HANDOVER_RECIPIENT_INVITE_SENT
+  PDF_DOWNLOADED
+  EMAIL_FAILED
+}
+
+enum UserAuditAction {
+  CREATED
+  ROLE_CHANGED
+  REMOVED
+  DEMOTED
 }
 
 enum PersonalNumberStatus {
@@ -168,6 +205,9 @@ enum ProbationEvaluationEventAction {
   CANCELLED
   EXPIRED
   EMAIL_FAILED
+  PDF_DOWNLOADED
+  UNLOCK_REMINDER_QUEUED
+  UNLOCK_REMINDER_SENT
 }
 
 enum ProbationEvaluationStatus {
@@ -471,6 +511,7 @@ model EmployeeChange {
 
   targets      EmployeeChangeTarget[]
   EmailHistory EmailHistory[]
+  changeLog    EmployeeChangeLog[]
 
   @@index([type])
   @@index([status])
@@ -478,6 +519,23 @@ model EmployeeChange {
   @@index([effectiveDate])
   @@index([personalNumber])
   @@index([deletedAt])
+}
+
+model EmployeeChangeLog {
+  id         Int            @id @default(autoincrement())
+  employee   EmployeeChange @relation(fields: [employeeId], references: [id])
+  employeeId Int
+  userId     String
+  action     ActionType
+  field      String
+  oldValue   String?
+  newValue   String?
+  createdAt  DateTime       @default(now())
+  ipAddress  String?
+  userAgent  String?
+
+  @@index([employeeId, createdAt])
+  @@index([action])
 }
 
 model EmployeeChangeTarget {
@@ -629,6 +687,42 @@ model SystemSettings {
   @@index([key])
 }
 
+model ReportAccessLog {
+  id         Int         @id @default(autoincrement())
+  reportType MailJobType
+
+  by      String?
+  byName  String?
+  byEmail String?
+
+  message String? @db.Text
+  meta    Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([reportType])
+  @@index([createdAt])
+}
+
+model UserAuditLog {
+  id           Int             @id @default(autoincrement())
+  targetUserId String?
+  targetEmail  String
+  action       UserAuditAction
+  oldValue     String?
+  newValue     String?
+
+  by      String?
+  byName  String?
+  byEmail String?
+
+  createdAt DateTime @default(now())
+
+  @@index([targetUserId])
+  @@index([action])
+  @@index([createdAt])
+}
+
 model EmploymentDocument {
   id              Int                    @id @default(autoincrement())
   isLocked        Boolean                @default(false)
@@ -650,9 +744,31 @@ model EmploymentDocument {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  events EmploymentDocumentEvent[]
+
   @@unique([onboardingId, type])
   @@index([onboardingId])
   @@index([type])
+}
+
+model EmploymentDocumentEvent {
+  id         Int                @id @default(autoincrement())
+  documentId Int
+  document   EmploymentDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  action  EmploymentDocumentEventAction
+  by      String?
+  byName  String?
+  byEmail String?
+
+  message String? @db.Text
+  meta    Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([documentId])
+  @@index([action])
+  @@index([createdAt])
 }
 
 model OffboardingDocument {
@@ -694,11 +810,32 @@ model ExitChecklist {
 
   items  ExitChecklistItem[]
   assets ExitChecklistAsset[]
+  events ExitChecklistEvent[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([offboardingId])
+}
+
+model ExitChecklistEvent {
+  id          Int           @id @default(autoincrement())
+  checklistId Int
+  checklist   ExitChecklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+
+  action  ExitChecklistEventAction
+  by      String?
+  byName  String?
+  byEmail String?
+
+  message String? @db.Text
+  meta    Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([checklistId])
+  @@index([action])
+  @@index([createdAt])
 }
 
 model ExitChecklistItem {

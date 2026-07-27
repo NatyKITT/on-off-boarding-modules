@@ -4,10 +4,11 @@ import { EmploymentDocumentType } from "@prisma/client"
 import { z } from "zod"
 
 import { prisma } from "@/lib/db"
-import { EMAIL_FOOTER_HTML, logEmailHistory, sendMail } from "@/lib/email"
+import { logEmailHistory, sendEmploymentDocumentPdfEmail } from "@/lib/email"
 import { buildEmployeeMeta } from "@/lib/employee-meta"
+import { logEmploymentDocumentEvent } from "@/lib/employment-document-events"
 import { buildEmploymentDocumentPdf } from "@/lib/employment-document-pdf"
-import { canManageEmploymentDocuments } from "@/lib/rbac"
+import { canSendEmploymentDocuments } from "@/lib/rbac"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -41,7 +42,7 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  if (!canManageEmploymentDocuments(session.user.role)) {
+  if (!canSendEmploymentDocuments(session.user.role)) {
     return NextResponse.json(
       { message: "Nemáte oprávnění odesílat dokumenty." },
       { status: 403 }
@@ -71,6 +72,7 @@ export async function POST(req: NextRequest) {
       name: true,
       surname: true,
       titleAfter: true,
+      personalNumber: true,
       department: true,
       unitName: true,
       positionName: true,
@@ -134,69 +136,16 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const subject = employeeName
-    ? `Vyplněné dokumenty k nástupu – ${employeeName}`
-    : "Vyplněné dokumenty k nástupu"
-
-  const departmentText = meta.department?.trim()
-  const unitNameText = meta.unitName?.trim()
-  const positionText = meta.position?.trim()
-
-  const infoBlock =
-    departmentText || unitNameText || positionText
-      ? `
-        <div style="margin: 12px 0 0 0; padding: 10px 12px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
-          <div style="font-size: 12px; color: #374151;">
-            ${
-              positionText
-                ? `<div><strong>Pozice:</strong> ${positionText}</div>`
-                : ""
-            }
-            ${
-              departmentText
-                ? `<div><strong>Odbor:</strong> ${departmentText}</div>`
-                : ""
-            }
-            ${
-              unitNameText
-                ? `<div><strong>Oddělení:</strong> ${unitNameText}</div>`
-                : ""
-            }
-          </div>
-        </div>
-      `
-      : ""
-
-  const html = `
-    <div style="font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #111827;">
-      <h2 style="margin: 0 0 10px 0;">Vyplněné dokumenty k nástupu</h2>
-
-      <p style="margin: 0 0 12px 0;">
-        Dobrý den,<br/>
-        personální oddělení Vám zasílá vyplněné dokumenty zaměstnance
-        <strong>${employeeName || "—"}</strong> – viz údaje níže.
-      </p>
-
-      ${infoBlock}
-
-      <ul style="padding-left: 18px; margin: 14px 0 14px 0;">
-        ${attachments.map((att) => `<li style="margin: 6px 0;">${att.filename.replace(/\.pdf$/, "")}</li>`).join("")}
-      </ul>
-
-      <p style="margin: 0 0 4px 0;">
-        Dokumenty naleznete v příloze tohoto e-mailu ve formátu PDF.
-      </p>
-
-      <p style="margin: 14px 0 0 0; color: #6b7280; font-size: 12px; line-height: 1.5;">
-        ${EMAIL_FOOTER_HTML}
-      </p>
-    </div>
-  `
-
-  await sendMail({
-    to: [email],
-    subject,
-    html,
+  const { subject, html } = await sendEmploymentDocumentPdfEmail({
+    to: email,
+    employeeName,
+    employeePersonalNumber: onboarding.personalNumber,
+    employeePosition: meta.position,
+    employeeDepartment: meta.department,
+    employeeUnitName: meta.unitName,
+    documentLabels: attachments.map((att) =>
+      att.filename.replace(/\.pdf$/, "")
+    ),
     attachments,
   })
 
@@ -211,6 +160,19 @@ export async function POST(req: NextRequest) {
     status: "SENT",
     createdBy: sentBy,
   })
+
+  await Promise.all(
+    docsFromDb.map((document) =>
+      logEmploymentDocumentEvent({
+        documentId: document.id,
+        action: "PDF_SENT",
+        by: (session.user as { id?: string }).id ?? null,
+        byName: sentBy,
+        byEmail: email,
+        message: `PDF dokumentu bylo odesláno e-mailem na adresu ${email}.`,
+      })
+    )
+  )
 
   return NextResponse.json({
     ok: true,

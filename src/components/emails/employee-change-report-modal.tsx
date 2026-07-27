@@ -19,6 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
+import { ReportsHistoryButton } from "@/components/history/reports-history-button"
 
 type SendMode = "selected" | "all" | "unsentOnly"
 type ReportTypeFilter = "ALL" | "NAME" | "POSITION" | "NAME_AND_POSITION"
@@ -166,7 +167,11 @@ function buildChangeGroups(record: ChangeReportRecord): ChangeGroup[] {
     })
 
     if (oldFull !== newFull) {
-      groups.push({ label: "Jméno", oldValue: oldFull || "–", newValue: newFull || "–" })
+      groups.push({
+        label: "Jméno",
+        oldValue: oldFull || "–",
+        newValue: newFull || "–",
+      })
     }
   }
 
@@ -175,7 +180,11 @@ function buildChangeGroups(record: ChangeReportRecord): ChangeGroup[] {
     const newSummary = positionSummaryOf(record, true)
 
     if (oldSummary !== newSummary) {
-      groups.push({ label: "Pozice", oldValue: oldSummary, newValue: newSummary })
+      groups.push({
+        label: "Pozice",
+        oldValue: oldSummary,
+        newValue: newSummary,
+      })
     }
   }
 
@@ -225,9 +234,9 @@ export function EmployeeChangeReportModal({
   const [selectedKeys, setSelectedKeys] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
-  const [audience, setAudience] = useState<"ONBOARDING_GROUP" | "ALL_EMPLOYEES">(
-    "ONBOARDING_GROUP"
-  )
+  const [audience, setAudience] = useState<
+    "ONBOARDING_GROUP" | "ALL_EMPLOYEES"
+  >("ONBOARDING_GROUP")
   const [typeFilter, setTypeFilter] = useState<ReportTypeFilter>("ALL")
 
   const [confirmState, setConfirmState] = useState<{
@@ -672,6 +681,11 @@ export function EmployeeChangeReportModal({
 
           <div className="shrink-0 border-t px-4 py-3 sm:px-6">
             <div className="flex flex-wrap justify-end gap-2">
+              <ReportsHistoryButton
+                scope="changes"
+                title="Historie reportů změn"
+              />
+
               <Button
                 variant="outline"
                 onClick={() => setOpen(false)}

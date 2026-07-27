@@ -28,6 +28,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { ReportsHistoryButton } from "@/components/history/reports-history-button"
 
 type OnboardingStatus = "planned" | "actual" | "cancelled"
 type OffboardingStatus = "planned" | "actual"
@@ -579,7 +580,7 @@ export function PdfReportModal({ openSignal, canSend }: Props) {
                 </Button>
               </div>
 
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
                 {MONTH_LABELS.map((label, index) => {
                   const month = `${viewYear}-${String(index + 1).padStart(2, "0")}`
                   const isSelected = selectedMonths.includes(month)
@@ -790,6 +791,7 @@ export function PdfReportModal({ openSignal, canSend }: Props) {
             <span className="mr-auto text-sm text-muted-foreground">
               Celkem k zahrnutí: {totalSelected} záznamů
             </span>
+            <ReportsHistoryButton scope="generic" title="Historie reportů" />
             <Button variant="outline" onClick={() => setOpen(false)}>
               Zrušit
             </Button>

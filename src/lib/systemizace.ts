@@ -1,8 +1,5 @@
+import { env } from "@/env.mjs"
 import type { Position } from "@/types/position"
-
-
-
-
 
 type SystemizacePersonData = {
   gid?: string | null
@@ -35,13 +32,11 @@ type SystemizaceResponse = {
   data?: SystemizacePositionItem[]
 }
 
-const SYSTEMIZACE_URL =
-  "https://systemizace.praha6.cz/api/1.0/position/list?detail=1"
+const SYSTEMIZACE_API_BASE =
+  env.SYSTEMIZACE_API_BASE || "https://systemizace.praha6.cz"
 
-// Systemizace se nemění každou chvíli - krátká cache v paměti procesu
-// ušetří opakované volání pomalého externího systému při každém otevření
-// formuláře. Žádný vliv na auth/cache chování samotné route (ta pořád běží
-// per-request), jen se přeskočí zbytečný externí HTTP dotaz.
+const SYSTEMIZACE_URL = `${SYSTEMIZACE_API_BASE}/api/1.0/position/list?detail=1`
+
 const POSITIONS_CACHE_TTL_MS = 5 * 60 * 1000
 let positionsCache: { data: Position[]; expiresAt: number } | null = null
 

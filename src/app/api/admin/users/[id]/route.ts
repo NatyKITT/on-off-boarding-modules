@@ -4,6 +4,7 @@ import { Role } from "@prisma/client"
 import { prisma } from "@/lib/db"
 import { canManageUsers } from "@/lib/rbac"
 import { getCurrentUser } from "@/lib/session"
+import { logUserAudit } from "@/lib/user-audit-log"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -163,6 +164,17 @@ export async function PATCH(
       })
     }
 
+    await logUserAudit({
+      targetUserId: targetUser.id,
+      targetEmail: targetUser.email,
+      action: "ROLE_CHANGED",
+      oldValue: targetUser.role,
+      newValue: newRole,
+      by: currentUser.id ?? null,
+      byName: currentUser.name ?? currentUser.email ?? null,
+      byEmail: currentUser.email ?? null,
+    })
+
     return NextResponse.json({
       success: true,
       user: updatedUser,
@@ -242,6 +254,17 @@ export async function DELETE(
         }),
       ])
 
+      await logUserAudit({
+        targetUserId: targetUser.id,
+        targetEmail: targetUser.email,
+        action: "DEMOTED",
+        oldValue: targetUser.role,
+        newValue: Role.USER,
+        by: currentUser.id ?? null,
+        byName: currentUser.name ?? currentUser.email ?? null,
+        byEmail: currentUser.email ?? null,
+      })
+
       return NextResponse.json({
         success: true,
         action: "revoked",
@@ -259,6 +282,16 @@ export async function DELETE(
         where: { id: targetUser.id },
       }),
     ])
+
+    await logUserAudit({
+      targetUserId: null,
+      targetEmail: targetUser.email,
+      action: "REMOVED",
+      oldValue: targetUser.role,
+      by: currentUser.id ?? null,
+      byName: currentUser.name ?? currentUser.email ?? null,
+      byEmail: currentUser.email ?? null,
+    })
 
     return NextResponse.json({
       success: true,

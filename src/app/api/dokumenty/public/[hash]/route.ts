@@ -4,6 +4,7 @@ import { EmploymentDocumentType, Prisma } from "@prisma/client"
 import { prisma } from "@/lib/db"
 import { EMAIL_FOOTER_HTML, logEmailHistory, sendMail } from "@/lib/email"
 import { buildEmployeeMeta, type EmployeeMeta } from "@/lib/employee-meta"
+import { logEmploymentDocumentEvent } from "@/lib/employment-document-events"
 import { buildEmploymentDocumentPdf } from "@/lib/employment-document-pdf"
 
 const EMAIL_FOOTER = `
@@ -155,6 +156,15 @@ export async function PATCH(
       lastEditedAt: now,
     },
     select: { id: true },
+  })
+
+  await logEmploymentDocumentEvent({
+    documentId: updated.id,
+    action: "FILLED",
+    by: null,
+    byName: employeeName,
+    byEmail: document.onboarding?.userEmail ?? null,
+    message: "Zaměstnanec vyplnil dokument přes veřejný odkaz.",
   })
 
   const hrRecipients = [

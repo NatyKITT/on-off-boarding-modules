@@ -129,7 +129,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       },
     })
 
-    const emailHistory = await prisma.emailHistory.create({
+    await prisma.emailHistory.create({
       data: {
         mailQueueId: mailJob.id,
         onboardingEmployeeId: rec.id,
@@ -151,8 +151,6 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         oldValue: null,
         newValue: JSON.stringify({
           to: recipients,
-          mailJobId: mailJob.id,
-          emailHistoryId: emailHistory.id,
           subject: customSubject || defaultSubject,
         }),
       },

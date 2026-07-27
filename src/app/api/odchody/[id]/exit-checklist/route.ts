@@ -19,22 +19,28 @@ import {
   sendExitChecklistCompletedEmail,
 } from "@/lib/email"
 import {
+  assetLabel,
   buildHeaderFromOff,
   getOrCreateChecklist,
+  handoverSummaryLabel,
   mapToExitChecklistData,
   preserveHandoverSendMetadata,
+  resolutionLabel,
   sanitizeHandoverForJson,
   sanitizeIsoDate,
   sanitizeSignaturesForJson,
   sanitizeSignatureValueForJson,
   sanitizeText,
+  trackSignatureChange,
 } from "@/lib/exit-checklist"
 import { getExitChecklistCompletionState } from "@/lib/exit-checklist-completion"
+import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
 import {
   canAccessInternalApp,
   canAdminExitChecklist,
   canReadExitChecklist,
   canSignExitChecklist,
+  isReadonlyRole,
 } from "@/lib/rbac"
 import { getSession } from "@/lib/session"
 
@@ -86,7 +92,9 @@ function canOverwriteSignature(
   )
 }
 
-function isSignatureValue(value: unknown): value is ExitChecklistSignatureValue {
+function isSignatureValue(
+  value: unknown
+): value is ExitChecklistSignatureValue {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false
 
   const record = value as Record<string, unknown>
@@ -125,9 +133,9 @@ function normalizeProtectedSignatureValue(
     canAdmin ||
     Boolean(
       currentUserEmail &&
-      existing.signedByEmail &&
-      normalizeEmail(existing.signedByEmail) ===
-      normalizeEmail(currentUserEmail)
+        existing.signedByEmail &&
+        normalizeEmail(existing.signedByEmail) ===
+          normalizeEmail(currentUserEmail)
     )
 
   if (!canTouch) return existing
@@ -336,6 +344,7 @@ export async function PUT(
 
   const canAdmin = canAdminExitChecklist(userRole)
   const canSign = canSignExitChecklist(userRole)
+  const canEditContent = canAdmin || isReadonlyRole(userRole)
 
   if (!canSign) {
     return NextResponse.json(
@@ -407,6 +416,15 @@ export async function PUT(
         },
       })
 
+      await logExitChecklistEvent({
+        checklistId: checklist.id,
+        action: "UNLOCKED",
+        by: userId,
+        byName: user.name ?? user.email ?? null,
+        byEmail: user.email ?? null,
+        message: "Výstupní list byl odemknut pro úpravy.",
+      })
+
       const data = mapToExitChecklistData(off, unlockedChecklist)
 
       return NextResponse.json({
@@ -440,8 +458,9 @@ export async function PUT(
     const currentHandover = currentHeader.handover
     const currentSignatures = getCurrentSignatures(currentHeader)
 
-    const incomingSignatures =
-      getJsonRecord(bodyRecord.signatures) as unknown as ExitChecklistSignatures
+    const incomingSignatures = getJsonRecord(
+      bodyRecord.signatures
+    ) as unknown as ExitChecklistSignatures
 
     const signatures = buildNextSignatures({
       incoming: incomingSignatures,
@@ -457,9 +476,45 @@ export async function PUT(
       canAdmin,
     })
 
-    const incomingHandover = canAdmin
-      ? sanitizeHandoverForJson(bodyRecord.handover) ??
-      sanitizeHandoverForJson(currentHandover)
+    const signedLabels: string[] = []
+    const clearedLabels: string[] = []
+
+    const currentHandoverManagerSignature = normalizeCurrentSignatureValue(
+      currentHeader.handoverManagerSignature
+    )
+
+    trackSignatureChange(
+      "Podpis zaměstnance",
+      currentSignatures.employee,
+      signatures.employee,
+      signedLabels,
+      clearedLabels
+    )
+    trackSignatureChange(
+      "Podpis vedoucího odboru",
+      currentSignatures.manager,
+      signatures.manager,
+      signedLabels,
+      clearedLabels
+    )
+    trackSignatureChange(
+      "Podpis Odboru služeb",
+      currentSignatures.issuer,
+      signatures.issuer,
+      signedLabels,
+      clearedLabels
+    )
+    trackSignatureChange(
+      "Podpis k předávané agendě",
+      currentHandoverManagerSignature,
+      handoverManagerSignature,
+      signedLabels,
+      clearedLabels
+    )
+
+    const incomingHandover = canEditContent
+      ? (sanitizeHandoverForJson(bodyRecord.handover) ??
+        sanitizeHandoverForJson(currentHandover))
       : sanitizeHandoverForJson(currentHandover)
 
     const handover = preserveHandoverSendMetadata(
@@ -469,20 +524,27 @@ export async function PUT(
 
     const existingConflictOfInterest = Boolean(currentHeader.conflictOfInterest)
 
-    const conflictOfInterest = canAdmin
+    const conflictOfInterest = canEditContent
       ? Boolean(bodyRecord.conflictOfInterest)
       : existingConflictOfInterest
 
-    const managerEmail = canAdmin
+    const conflictOfInterestChanged =
+      existingConflictOfInterest !== conflictOfInterest
+
+    const previousHandoverSummary = handoverSummaryLabel(currentHandover)
+    const nextHandoverSummary = handoverSummaryLabel(handover)
+    const handoverChanged = previousHandoverSummary !== nextHandoverSummary
+
+    const managerEmail = canEditContent
       ? sanitizeText(bodyRecord.managerEmail) ||
-      sanitizeText(currentHeader.managerEmail) ||
-      null
+        sanitizeText(currentHeader.managerEmail) ||
+        null
       : sanitizeText(currentHeader.managerEmail) || null
 
-    const managerName = canAdmin
+    const managerName = canEditContent
       ? sanitizeText(bodyRecord.managerName) ||
-      sanitizeText(currentHeader.managerName) ||
-      null
+        sanitizeText(currentHeader.managerName) ||
+        null
       : sanitizeText(currentHeader.managerName) || null
 
     const header = buildHeaderFromOff(off)
@@ -506,6 +568,8 @@ export async function PUT(
       ...existingCompletionMetadata,
     }
 
+    const resolutionChanges: string[] = []
+
     for (let index = 0; index < EXIT_CHECKLIST_ROWS.length; index++) {
       const rowDef = EXIT_CHECKLIST_ROWS[index]
       const incoming = items.find((item) => item.key === rowDef.key)
@@ -526,19 +590,19 @@ export async function PUT(
         ? ChecklistResolution.NOT_APPLICABLE
         : incoming && canTouchRow
           ? toResolution(incoming.resolved)
-          : existing?.resolution ?? ChecklistResolution.NOT_APPLICABLE
+          : (existing?.resolution ?? ChecklistResolution.NOT_APPLICABLE)
 
       const signedByName = isInactiveLawInfo
         ? null
         : incoming && canTouchRow
           ? sanitizeText(incoming.signedByName) || null
-          : existing?.signedByName ?? null
+          : (existing?.signedByName ?? null)
 
       const signedByEmail = isInactiveLawInfo
         ? null
         : incoming && canTouchRow
           ? sanitizeText(incoming.signedByEmail) || null
-          : existing?.signedByEmail ?? null
+          : (existing?.signedByEmail ?? null)
 
       const signedAt = isInactiveLawInfo
         ? null
@@ -546,7 +610,30 @@ export async function PUT(
           ? incoming.signedAt
             ? new Date(incoming.signedAt)
             : null
-          : existing?.signedAt ?? null
+          : (existing?.signedAt ?? null)
+
+      if (
+        existing &&
+        existing.resolution !== resolution &&
+        !isInactiveLawInfo
+      ) {
+        resolutionChanges.push(
+          `${rowDef.obligation}: ${resolutionLabel(resolution)}`
+        )
+      }
+
+      trackSignatureChange(
+        rowDef.obligation,
+        existing
+          ? {
+              signedAt: existing.signedAt,
+              signedByEmail: existing.signedByEmail,
+            }
+          : null,
+        { signedAt, signedByEmail },
+        signedLabels,
+        clearedLabels
+      )
 
       await prisma.exitChecklistItem.upsert({
         where: {
@@ -578,7 +665,11 @@ export async function PUT(
       })
     }
 
-    if (canAdmin) {
+    const assetsAddedLabels: string[] = []
+    const assetsUpdatedLabels: string[] = []
+    const assetsRemovedLabels: string[] = []
+
+    if (canEditContent) {
       const existingAssets = await prisma.exitChecklistAsset.findMany({
         where: { checklistId: checklist.id },
       })
@@ -604,6 +695,17 @@ export async function PUT(
 
           seenExistingIds.add(numericId)
 
+          const canTouchAsset = canAdmin || existing.createdById === userId
+
+          if (!canTouchAsset) continue
+
+          if (
+            existing.subject !== subject ||
+            existing.inventoryNumber !== inventoryNumber
+          ) {
+            assetsUpdatedLabels.push(assetLabel(subject, inventoryNumber))
+          }
+
           await prisma.exitChecklistAsset.update({
             where: { id: numericId },
             data: {
@@ -623,20 +725,29 @@ export async function PUT(
             createdById: userId,
           },
         })
+        assetsAddedLabels.push(assetLabel(subject, inventoryNumber))
       }
 
-      const deletableIds = existingAssets
-        .filter((asset) => !seenExistingIds.has(asset.id))
-        .map((asset) => asset.id)
+      const deletableAssets = existingAssets.filter(
+        (asset) =>
+          !seenExistingIds.has(asset.id) &&
+          (canAdmin || asset.createdById === userId)
+      )
 
-      if (deletableIds.length > 0) {
+      if (deletableAssets.length > 0) {
         await prisma.exitChecklistAsset.deleteMany({
           where: {
             id: {
-              in: deletableIds,
+              in: deletableAssets.map((asset) => asset.id),
             },
           },
         })
+
+        for (const asset of deletableAssets) {
+          assetsRemovedLabels.push(
+            assetLabel(asset.subject, asset.inventoryNumber)
+          )
+        }
       }
     }
 
@@ -661,6 +772,96 @@ export async function PUT(
         offboarding: true,
       },
     })
+
+    const actorInfo = {
+      by: userId,
+      byName: user.name ?? user.email ?? null,
+      byEmail: user.email ?? null,
+    }
+
+    if (lock && !checklist.lockedAt) {
+      await logExitChecklistEvent({
+        checklistId: checklist.id,
+        action: "LOCKED",
+        ...actorInfo,
+        message: "Výstupní list byl uzamčen.",
+      })
+    } else {
+      const headerChanges: string[] = []
+
+      if (conflictOfInterestChanged) {
+        headerChanges.push(`Střet zájmů: ${conflictOfInterest ? "ano" : "ne"}`)
+      }
+
+      if (handoverChanged) {
+        headerChanges.push(`Předávaná agenda: ${nextHandoverSummary}`)
+      }
+
+      const summaryParts: string[] = []
+
+      if (resolutionChanges.length > 0) {
+        summaryParts.push(`Vyplněno: ${resolutionChanges.join("; ")}.`)
+      }
+
+      if (headerChanges.length > 0) {
+        summaryParts.push(`${headerChanges.join("; ")}.`)
+      }
+
+      await logExitChecklistEvent({
+        checklistId: checklist.id,
+        action: "UPDATED",
+        ...actorInfo,
+        message:
+          summaryParts.length > 0
+            ? summaryParts.join(" ")
+            : "Výstupní list byl uložen (bez věcné změny položek nebo hlavičky).",
+      })
+    }
+
+    if (assetsAddedLabels.length > 0) {
+      await logExitChecklistEvent({
+        checklistId: checklist.id,
+        action: "ASSET_ADDED",
+        ...actorInfo,
+        message: `Přidáno k vrácení: ${assetsAddedLabels.join(", ")}.`,
+      })
+    }
+
+    if (assetsUpdatedLabels.length > 0) {
+      await logExitChecklistEvent({
+        checklistId: checklist.id,
+        action: "ASSET_UPDATED",
+        ...actorInfo,
+        message: `Upraveno k vrácení: ${assetsUpdatedLabels.join(", ")}.`,
+      })
+    }
+
+    if (signedLabels.length > 0) {
+      await logExitChecklistEvent({
+        checklistId: checklist.id,
+        action: "ITEM_SIGNED",
+        ...actorInfo,
+        message: `Elektronicky podepsáno: ${signedLabels.join(", ")}.`,
+      })
+    }
+
+    if (clearedLabels.length > 0) {
+      await logExitChecklistEvent({
+        checklistId: checklist.id,
+        action: "ITEM_SIGNATURE_CLEARED",
+        ...actorInfo,
+        message: `Zrušen elektronický podpis: ${clearedLabels.join(", ")}.`,
+      })
+    }
+
+    if (assetsRemovedLabels.length > 0) {
+      await logExitChecklistEvent({
+        checklistId: checklist.id,
+        action: "ASSET_REMOVED",
+        ...actorInfo,
+        message: `Odebráno z vrácení: ${assetsRemovedLabels.join(", ")}.`,
+      })
+    }
 
     let data = mapToExitChecklistData(off, updatedChecklist)
     const completion = getExitChecklistCompletionState(data)

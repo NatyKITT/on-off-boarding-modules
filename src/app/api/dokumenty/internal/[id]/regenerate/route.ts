@@ -5,6 +5,7 @@ import { auth } from "@/auth"
 import { DocumentStatus, Prisma } from "@prisma/client"
 
 import { prisma } from "@/lib/db"
+import { logEmploymentDocumentEvent } from "@/lib/employment-document-events"
 import { canManageEmploymentDocuments } from "@/lib/rbac"
 
 export const runtime = "nodejs"
@@ -91,6 +92,15 @@ export async function PATCH(_req: NextRequest, { params }: Params) {
           accessHash: true,
           expiresAt: true,
         },
+      })
+
+      await logEmploymentDocumentEvent({
+        documentId: updated.id,
+        action: "REGENERATED",
+        by: (session.user as { id?: string }).id ?? null,
+        byName: session.user.name ?? session.user.email ?? null,
+        byEmail: session.user.email ?? null,
+        message: "Byl obnoven přístupový odkaz na dokument.",
       })
 
       return NextResponse.json({ document: updated })

@@ -12,6 +12,8 @@ import type {
   HandoverAgendaData,
 } from "@/types/exit-checklist"
 
+import { prisma } from "@/lib/db"
+import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
 import { canAccessInternalApp, canReadExitChecklist } from "@/lib/rbac"
 
 export const runtime = "nodejs"
@@ -1331,6 +1333,26 @@ export async function GET(
     }
 
     const pdfBytes = await pdf.save()
+
+    const isInternalFetch = req.headers.get("x-internal-fetch") === "1"
+
+    if (!isInternalFetch) {
+      const existingChecklist = await prisma.exitChecklist.findUnique({
+        where: { offboardingId: id },
+        select: { id: true },
+      })
+
+      if (existingChecklist) {
+        await logExitChecklistEvent({
+          checklistId: existingChecklist.id,
+          action: "PDF_DOWNLOADED",
+          by: (user as { id?: string }).id ?? null,
+          byName: user.name ?? user.email ?? null,
+          byEmail: user.email ?? null,
+          message: "PDF výstupního listu bylo staženo.",
+        })
+      }
+    }
 
     return new Response(toArrayBuffer(pdfBytes), {
       status: 200,

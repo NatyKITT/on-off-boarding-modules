@@ -10,6 +10,7 @@ import {
 } from "@/lib/reports/pdf-report-data"
 import {
   buildReportFilename,
+  buildReportMonthsLabel,
   buildReportTitle,
   renderPdfReportBuffer,
 } from "@/lib/reports/pdf-report-pdf"
@@ -107,10 +108,12 @@ export async function POST(request: NextRequest) {
       ],
     })
 
+    const monthsLabel = buildReportMonthsLabel(sections)
+
     await logEmailHistory({
       emailType: "GENERIC_EMAIL",
       recipients: [email],
-      subject: title,
+      subject: monthsLabel ? `${title} (${monthsLabel})` : title,
       content: html,
       status: "SENT",
       createdBy: session.user.id ?? session.user.email ?? "unknown",

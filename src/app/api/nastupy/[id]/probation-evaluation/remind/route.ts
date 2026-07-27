@@ -103,6 +103,7 @@ export async function POST(
     await sendProbationEvaluationReminderEmail({
       to: supervisorEmail,
       employeeName,
+      employeePersonalNumber: existing.onboarding.personalNumber ?? null,
       employeePosition: existing.onboarding.positionName,
       employeeDepartment: existing.onboarding.department,
       employeeUnitName: existing.onboarding.unitName,

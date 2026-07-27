@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
-import { canReadEmployeeChanges } from "@/lib/rbac"
+import { canEditInternalApp } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
@@ -20,6 +20,13 @@ type HistoryEvent = {
   createdAt: string
 }
 
+function normalizeAction(a: string) {
+  if (a === "CREATED") return "CREATE"
+  if (a === "UPDATED") return "UPDATE"
+  if (a === "DELETED") return "DELETE"
+  return a
+}
+
 export async function GET(
   _: NextRequest,
   { params }: { params: { id: string } }
@@ -33,7 +40,7 @@ export async function GET(
     )
   }
 
-  if (!canReadEmployeeChanges(session.user.role)) {
+  if (!canEditInternalApp(session.user.role)) {
     return NextResponse.json(
       { status: "error", message: "Nemáte oprávnění číst historii změny." },
       { status: 403 }
@@ -109,17 +116,24 @@ export async function GET(
       createdAt: record.createdAt.toISOString(),
     })
 
-    if (record.updatedAt.getTime() !== record.createdAt.getTime()) {
+    const changeLogRows = await prisma.employeeChangeLog.findMany({
+      where: { employeeId: id },
+      orderBy: { createdAt: "desc" },
+    })
+
+    for (const row of changeLogRows) {
+      const userDisplay = await resolveUserDisplay(row.userId)
+
       events.push({
         id: syntheticId++,
         employeeId: id,
-        userId: "system",
-        displayUser: "Systém",
-        action: "UPDATE",
-        field: "updated_at",
-        oldValue: null,
-        newValue: record.updatedAt.toISOString(),
-        createdAt: record.updatedAt.toISOString(),
+        userId: row.userId,
+        displayUser: userDisplay,
+        action: normalizeAction(row.action),
+        field: row.field,
+        oldValue: row.oldValue,
+        newValue: row.newValue,
+        createdAt: row.createdAt.toISOString(),
       })
     }
 
@@ -141,22 +155,6 @@ export async function GET(
           recipients: email.recipients,
         }),
         createdAt: (email.sentAt ?? email.createdAt).toISOString(),
-      })
-    }
-
-    if (record.deletedAt) {
-      const userDisplay = await resolveUserDisplay(record.deletedBy)
-
-      events.push({
-        id: syntheticId++,
-        employeeId: id,
-        userId: record.deletedBy ?? "unknown",
-        displayUser: userDisplay,
-        action: "DELETE",
-        field: "deleted_at",
-        oldValue: null,
-        newValue: record.deletedAt.toISOString(),
-        createdAt: record.deletedAt.toISOString(),
       })
     }
 

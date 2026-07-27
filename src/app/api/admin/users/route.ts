@@ -4,6 +4,7 @@ import { Role } from "@prisma/client"
 import { prisma } from "@/lib/db"
 import { canManageUsers } from "@/lib/rbac"
 import { getCurrentUser } from "@/lib/session"
+import { logUserAudit } from "@/lib/user-audit-log"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -175,6 +176,16 @@ export async function POST(req: NextRequest) {
         canAccessApp: true,
         createdAt: true,
       },
+    })
+
+    await logUserAudit({
+      targetUserId: newUser.id,
+      targetEmail: newUser.email,
+      action: "CREATED",
+      newValue: finalRole,
+      by: currentUser.id ?? null,
+      byName: currentUser.name ?? currentUser.email ?? null,
+      byEmail: currentUser.email ?? null,
     })
 
     return NextResponse.json(

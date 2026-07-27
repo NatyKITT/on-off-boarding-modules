@@ -3,6 +3,7 @@ import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
 import { sendExitChecklistPdfEmail } from "@/lib/email"
+import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
 import { canAdminExitChecklist } from "@/lib/rbac"
 
 export const runtime = "nodejs"
@@ -87,6 +88,7 @@ export async function POST(
       unitName: true,
       actualEnd: true,
       plannedEnd: true,
+      exitChecklist: { select: { id: true } },
     },
   })
 
@@ -104,7 +106,7 @@ export async function POST(
     `${baseUrl}/api/odchody/${offboardingId}/vystupni-list`,
     {
       cache: "no-store",
-      headers: { cookie },
+      headers: { cookie, "x-internal-fetch": "1" },
     }
   )
 
@@ -147,6 +149,17 @@ export async function POST(
     pdfBuffer,
     filename: `Vystupni-list-${sanitizeFilename(employeeName || String(offboardingId))}.pdf`,
   })
+
+  if (offboarding.exitChecklist) {
+    await logExitChecklistEvent({
+      checklistId: offboarding.exitChecklist.id,
+      action: "PDF_DOWNLOADED",
+      by: (session.user as { id?: string }).id ?? null,
+      byName: session.user.name ?? session.user.email ?? null,
+      byEmail: session.user.email ?? null,
+      message: `PDF výstupního listu bylo odesláno na adresu ${to}.`,
+    })
+  }
 
   return NextResponse.json({
     status: "ok",

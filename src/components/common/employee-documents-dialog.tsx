@@ -5,9 +5,18 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import type { DocumentStatus, EmploymentDocumentType } from "@prisma/client"
 import { format } from "date-fns"
 import { cs } from "date-fns/locale"
-import { FileText, Lock, RotateCw, Trash2, Unlock } from "lucide-react"
+import {
+  FileText,
+  History as HistoryIcon,
+  Lock,
+  RotateCw,
+  Trash2,
+  Unlock,
+} from "lucide-react"
 
+import { useCurrentRole } from "@/hooks/use-current-role"
 import { useToast } from "@/hooks/use-toast"
+import { canEditInternalApp } from "@/lib/rbac"
 
 import {
   AlertDialog,
@@ -30,8 +39,27 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { DocumentHistoryDialog } from "@/components/history/document-history-dialog"
 
 import { ProbationEvaluationSection } from "./probation-evaluation-section"
+
+const DOCUMENT_EVENT_ACTION_LABEL: Record<string, string> = {
+  CREATED: "Vytvořeno",
+  SENT: "Odkaz odeslán",
+  PDF_SENT: "PDF odesláno e-mailem",
+  FILLED: "Vyplněno zaměstnancem",
+  EDITED: "Upraveno interně",
+  LOCKED: "Uzamčeno",
+  UNLOCKED: "Odemčeno",
+  RESET: "Data vymazána",
+  REGENERATED: "Odkaz obnoven",
+  PDF_DOWNLOADED: "PDF staženo",
+  EMAIL_FAILED: "Odeslání e-mailu selhalo",
+}
+
+function documentEventActionLabel(action: string) {
+  return DOCUMENT_EVENT_ACTION_LABEL[action] ?? action
+}
 
 type EmploymentDocumentLite = {
   id: number
@@ -156,6 +184,7 @@ type DocumentCardProps = {
   resettingId: number | null
   docToReset: EmploymentDocumentLite | null
   readOnly: boolean
+  canViewHistory: boolean
   onOpen: () => void
   onOpenPdf: () => void
   onToggleLock: () => void
@@ -172,6 +201,7 @@ function DocumentCard({
   resettingId,
   docToReset,
   readOnly,
+  canViewHistory,
   onOpen,
   onOpenPdf,
   onToggleLock,
@@ -302,6 +332,26 @@ function DocumentCard({
           )}
         </Button>
 
+        {canViewHistory && (
+          <DocumentHistoryDialog
+            title={`Historie – ${typeLabel(doc.type)}`}
+            fetchUrl={`/api/dokumenty/internal/${doc.id}/history`}
+            actionLabel={documentEventActionLabel}
+            trigger={
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-7"
+                title="Historie dokumentu"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <HistoryIcon className="size-3.5" />
+              </Button>
+            }
+          />
+        )}
+
         {needsResend && (
           <span className="text-[10px] text-amber-600">
             po změně odešli odkaz znovu
@@ -328,6 +378,9 @@ export function EmployeeDocumentsDialog({
   readOnly = false,
 }: EmployeeDocumentsDialogProps) {
   const [open, setOpen] = useState(false)
+
+  const role = useCurrentRole()
+  const canViewHistory = canEditInternalApp(role)
 
   const [activeTab, setActiveTab] = useState<ActiveTab>("onboarding")
 
@@ -1014,6 +1067,7 @@ export function EmployeeDocumentsDialog({
                           resettingId={resettingId}
                           docToReset={docToReset}
                           readOnly={readOnly}
+                          canViewHistory={canViewHistory}
                           onOpen={() => openDocument(doc)}
                           onOpenPdf={() => openPdf(doc)}
                           onToggleLock={() => void handleToggleLock(doc)}
@@ -1162,7 +1216,6 @@ export function EmployeeDocumentsDialog({
                       onClick={() => void handleSendPdf()}
                       disabled={
                         sendingPdf ||
-                        readOnly ||
                         !emailInput ||
                         !pdfEmailSelection.some((type) =>
                           completedOnboardingDocuments.some(

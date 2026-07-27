@@ -19,6 +19,7 @@ import type {
 import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
 
 import { prisma } from "@/lib/db"
+import { resolveSupervisorFromPositionNum } from "@/lib/systemizace-superior"
 
 export type ChecklistWithRelations = Prisma.ExitChecklistGetPayload<{
   include: {
@@ -79,6 +80,61 @@ export function sanitizeIsoDate(value: unknown): string {
 function getRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {}
   return value as Record<string, unknown>
+}
+
+export function resolutionLabel(value: ChecklistResolution): string {
+  if (value === ChecklistResolution.YES) return "Ano"
+  if (value === ChecklistResolution.NO) return "Ne"
+  return "Nepodává se"
+}
+
+export function handoverSummaryLabel(value: unknown): string {
+  const h = getRecord(value)
+
+  if (!h.includeHandoverAgenda) return "nevyplněna"
+
+  const parts: string[] = []
+
+  if (h.option1) parts.push("předáno do spisovny / na jiné funkční místo")
+  if (h.option2) parts.push("OI-KITT6 předá dokumenty na jiné funkční místo")
+  if (h.option3) parts.push("zůstává na neobsazeném funkčním místě")
+
+  return parts.length > 0 ? parts.join("; ") : "nevyplněna"
+}
+
+export function trackSignatureChange(
+  label: string,
+  before: {
+    signedAt: string | Date | null
+    signedByEmail: string | null
+  } | null,
+  after: {
+    signedAt: string | Date | null
+    signedByEmail: string | null
+  } | null,
+  signedLabels: string[],
+  clearedLabels: string[]
+) {
+  const wasSigned = Boolean(before?.signedAt)
+  const isSigned = Boolean(after?.signedAt)
+
+  const beforeEmail = (before?.signedByEmail ?? "").trim().toLowerCase()
+  const afterEmail = (after?.signedByEmail ?? "").trim().toLowerCase()
+
+  if (!wasSigned && isSigned) {
+    signedLabels.push(label)
+  } else if (wasSigned && !isSigned) {
+    clearedLabels.push(label)
+  } else if (wasSigned && isSigned && beforeEmail !== afterEmail) {
+    signedLabels.push(label)
+  }
+}
+
+export function assetLabel(
+  subject: string,
+  inventoryNumber: string | null
+): string {
+  return inventoryNumber ? `${subject} (${inventoryNumber})` : subject
 }
 
 function sanitizeNullableText(value: unknown): string | null {
@@ -710,7 +766,24 @@ export async function getOrCreateChecklist(offboardingId: number) {
   if (!off) return null
 
   if (!off.exitChecklist) {
-    const header = buildHeaderFromOff(off)
+    const header: Record<string, unknown> = buildHeaderFromOff(off)
+
+    if (off.positionNum) {
+      const resolved = await resolveSupervisorFromPositionNum(off.positionNum)
+
+      if (resolved?.snapshot) {
+        const managerName = buildEmployeeName({
+          titleBefore: resolved.snapshot.titleBefore,
+          name: resolved.snapshot.name ?? "",
+          surname: resolved.snapshot.surname ?? "",
+          titleAfter: resolved.snapshot.titleAfter,
+        })
+
+        if (managerName) header.managerName = managerName
+        if (resolved.snapshot.email)
+          header.managerEmail = resolved.snapshot.email
+      }
+    }
 
     const created = await prisma.exitChecklist.create({
       data: {

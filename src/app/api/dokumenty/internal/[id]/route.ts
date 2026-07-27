@@ -3,6 +3,7 @@ import { auth } from "@/auth"
 import { DocumentStatus, EmploymentDocumentType, Prisma } from "@prisma/client"
 
 import { prisma } from "@/lib/db"
+import { logEmploymentDocumentEvent } from "@/lib/employment-document-events"
 import {
   canManageEmploymentDocuments,
   canReadEmploymentDocuments,
@@ -355,6 +356,15 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         lastEditedAt: true,
         lastEditSummary: true,
       },
+    })
+
+    await logEmploymentDocumentEvent({
+      documentId: doc.id,
+      action: "EDITED",
+      by: (session.user as { id?: string }).id ?? null,
+      byName: editedBy,
+      byEmail: session.user.email ?? null,
+      message: editSummary || "Dokument byl vyplněn interně.",
     })
 
     return NextResponse.json({ document: doc, changes })

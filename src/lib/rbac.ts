@@ -13,8 +13,10 @@ export type Permission =
   | "EMPLOYEE_CHANGE_WRITE"
   | "EMPLOYMENT_DOCUMENT_READ"
   | "EMPLOYMENT_DOCUMENT_MANAGE"
+  | "EMPLOYMENT_DOCUMENT_SEND"
   | "PROBATION_EVALUATION_READ"
   | "PROBATION_EVALUATION_MANAGE"
+  | "PROBATION_EVALUATION_SEND"
   | "EXIT_CHECKLIST_READ"
   | "EXIT_CHECKLIST_SIGN"
   | "EXIT_CHECKLIST_ADMIN"
@@ -38,9 +40,11 @@ const ROLE_PERMS: Record<Role, Permission[]> = {
 
     "EMPLOYMENT_DOCUMENT_READ",
     "EMPLOYMENT_DOCUMENT_MANAGE",
+    "EMPLOYMENT_DOCUMENT_SEND",
 
     "PROBATION_EVALUATION_READ",
     "PROBATION_EVALUATION_MANAGE",
+    "PROBATION_EVALUATION_SEND",
 
     "EXIT_CHECKLIST_READ",
     "EXIT_CHECKLIST_SIGN",
@@ -62,9 +66,11 @@ const ROLE_PERMS: Record<Role, Permission[]> = {
 
     "EMPLOYMENT_DOCUMENT_READ",
     "EMPLOYMENT_DOCUMENT_MANAGE",
+    "EMPLOYMENT_DOCUMENT_SEND",
 
     "PROBATION_EVALUATION_READ",
     "PROBATION_EVALUATION_MANAGE",
+    "PROBATION_EVALUATION_SEND",
 
     "EXIT_CHECKLIST_READ",
     "EXIT_CHECKLIST_SIGN",
@@ -85,9 +91,11 @@ const ROLE_PERMS: Record<Role, Permission[]> = {
     "EMPLOYEE_CHANGE_WRITE",
 
     "EMPLOYMENT_DOCUMENT_READ",
+    "EMPLOYMENT_DOCUMENT_SEND",
 
     "PROBATION_EVALUATION_READ",
     "PROBATION_EVALUATION_MANAGE",
+    "PROBATION_EVALUATION_SEND",
 
     "EXIT_CHECKLIST_READ",
     "EXIT_CHECKLIST_SIGN",
@@ -100,9 +108,7 @@ const ROLE_PERMS: Record<Role, Permission[]> = {
     "EMPLOYEE_CHANGE_READ",
 
     "MONTHLY_REPORT_READ",
-
-    "EMPLOYMENT_DOCUMENT_READ",
-    "PROBATION_EVALUATION_READ",
+    "MONTHLY_REPORT_SEND",
 
     "EXIT_CHECKLIST_READ",
     "EXIT_CHECKLIST_SIGN",
@@ -167,12 +173,20 @@ export function canManageEmploymentDocuments(role: Role | null | undefined) {
   return hasPerm(role, "EMPLOYMENT_DOCUMENT_MANAGE")
 }
 
+export function canSendEmploymentDocuments(role: Role | null | undefined) {
+  return hasPerm(role, "EMPLOYMENT_DOCUMENT_SEND")
+}
+
 export function canReadProbationEvaluation(role: Role | null | undefined) {
   return hasPerm(role, "PROBATION_EVALUATION_READ")
 }
 
 export function canManageProbationEvaluation(role: Role | null | undefined) {
   return hasPerm(role, "PROBATION_EVALUATION_MANAGE")
+}
+
+export function canSendProbationEvaluation(role: Role | null | undefined) {
+  return hasPerm(role, "PROBATION_EVALUATION_SEND")
 }
 
 export function canReadExitChecklist(role: Role | null | undefined) {

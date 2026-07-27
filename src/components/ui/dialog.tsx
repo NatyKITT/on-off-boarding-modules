@@ -133,7 +133,7 @@ const DialogContent = React.forwardRef<
   return (
     <DialogPortal>
       <DialogOverlay />
-      <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <DialogPrimitive.Content
           ref={ref}
           className={cn(

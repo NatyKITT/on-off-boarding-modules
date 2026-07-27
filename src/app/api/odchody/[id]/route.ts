@@ -399,19 +399,6 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         })
       }
 
-      if (completingNow) {
-        await tx.offboardingChangeLog.create({
-          data: {
-            employeeId: id,
-            userId: userKey,
-            action: "STATUS_CHANGED",
-            field: "status",
-            oldValue: before.status,
-            newValue: "COMPLETED",
-          },
-        })
-      }
-
       if (
         data.probationStopDecision !== undefined &&
         data.probationStopDecision !== before.probationStopDecision

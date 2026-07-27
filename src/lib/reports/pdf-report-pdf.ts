@@ -839,6 +839,19 @@ export function buildReportTitle(sections: ReportSection[]): string {
   return `Reporty – ${labels.slice(0, -1).join(", ")} a ${labels[labels.length - 1]}`
 }
 
+export function buildReportMonthsLabel(sections: ReportSection[]): string {
+  const months = Array.from(new Set(sections.map((section) => section.month)))
+    .filter(Boolean)
+    .sort()
+
+  return months
+    .map((month) => {
+      const [year, monthNum] = month.split("-")
+      return year && monthNum ? `${monthNum}/${year}` : month
+    })
+    .join(", ")
+}
+
 function slugify(text: string): string {
   return (
     text

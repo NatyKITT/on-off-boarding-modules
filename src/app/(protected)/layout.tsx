@@ -1,6 +1,7 @@
 import { sidebarLinks } from "@/config/dashboard"
 
 import { canReadMonthlyReports, canSendMonthlyReports } from "@/lib/rbac"
+import { getSentryEnvironment } from "@/lib/sentry-environment"
 import { requireInternalUser } from "@/lib/session"
 
 import { SearchCommand } from "@/components/dashboard/search-command"
@@ -23,6 +24,7 @@ interface ProtectedLayoutProps {
 
 export default async function Dashboard({ children }: ProtectedLayoutProps) {
   const user = await requireInternalUser()
+  const isProduction = getSentryEnvironment() === "production"
 
   const filteredLinks = sidebarLinks
     .map((section) => ({
@@ -35,12 +37,15 @@ export default async function Dashboard({ children }: ProtectedLayoutProps) {
 
   return (
     <div className="relative flex min-h-screen w-full overflow-x-hidden">
-      <DashboardSidebar links={filteredLinks} />
+      <DashboardSidebar links={filteredLinks} isProduction={isProduction} />
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-50 flex h-14 bg-background px-4 lg:h-16 xl:px-8">
           <MaxWidthWrapper className="flex max-w-7xl items-center gap-x-3 px-0">
-            <MobileSheetSidebar links={filteredLinks} />
+            <MobileSheetSidebar
+              links={filteredLinks}
+              isProduction={isProduction}
+            />
 
             <div className="w-full min-w-0 flex-1">
               <SearchCommand />

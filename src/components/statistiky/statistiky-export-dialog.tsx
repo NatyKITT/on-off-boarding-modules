@@ -241,18 +241,6 @@ export function StatistikyExportDialog({
           />
           <div className="flex shrink-0 gap-2">
             <Button
-              onClick={() => void handleDownload()}
-              disabled={busy}
-              className="gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73]"
-            >
-              {downloading ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Download className="size-4" />
-              )}
-              Stáhnout PDF
-            </Button>
-            <Button
               onClick={() => void handleSend()}
               disabled={busy || !email.trim()}
               className="gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73]"
@@ -263,6 +251,18 @@ export function StatistikyExportDialog({
                 <Send className="size-4" />
               )}
               Odeslat
+            </Button>
+            <Button
+              onClick={() => void handleDownload()}
+              disabled={busy}
+              className="gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73]"
+            >
+              {downloading ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Download className="size-4" />
+              )}
+              Stáhnout PDF
             </Button>
           </div>
         </div>

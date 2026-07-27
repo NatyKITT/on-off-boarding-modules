@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 import { auth } from "@/auth"
 
+import { logEmploymentDocumentEvent } from "@/lib/employment-document-events"
 import { buildEmploymentDocumentPdf } from "@/lib/employment-document-pdf"
 import { canReadEmploymentDocuments } from "@/lib/rbac"
 
@@ -51,6 +52,15 @@ export async function GET(
         }
       )
     }
+
+    await logEmploymentDocumentEvent({
+      documentId: id,
+      action: "PDF_DOWNLOADED",
+      by: (session.user as { id?: string }).id ?? null,
+      byName: session.user.name ?? session.user.email ?? null,
+      byEmail: session.user.email ?? null,
+      message: "PDF dokumentu bylo staženo interně.",
+    })
 
     return new Response(new Uint8Array(result.buffer), {
       status: 200,

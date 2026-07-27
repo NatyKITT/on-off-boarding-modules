@@ -4,6 +4,7 @@ import { z, ZodError } from "zod"
 
 import { prisma } from "@/lib/db"
 import { sendHandoverRecipientEmail } from "@/lib/email"
+import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
 import { canAdminExitChecklist } from "@/lib/rbac"
 import { getSession } from "@/lib/session"
 
@@ -597,6 +598,15 @@ export async function POST(
     await prisma.exitChecklist.update({
       where: { id: offboarding.exitChecklist.id },
       data: { header: nextHeader },
+    })
+
+    await logExitChecklistEvent({
+      checklistId: offboarding.exitChecklist.id,
+      action: "HANDOVER_RECIPIENT_INVITE_SENT",
+      by: user.id ?? null,
+      byName: sentByName,
+      byEmail: sentByEmail,
+      message: `Informace pro předání agendy byly odeslány (${uniqueRecipients.length} příjemců).`,
     })
 
     const sendCount = sanitizeNumber(nextHandover.handoverRecipientsSentCount)

@@ -711,9 +711,11 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
           >
             {departure.userEmail ?? "–"}
           </span>
-          <span className="font-mono text-xs text-muted-foreground">
-            {departure.userName ?? "–"}
-          </span>
+          {departure.userName && (
+            <span className="font-mono text-xs text-muted-foreground">
+              {departure.userName}
+            </span>
+          )}
         </div>
       </TableCell>
 

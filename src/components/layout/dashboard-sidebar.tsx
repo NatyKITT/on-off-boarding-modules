@@ -5,7 +5,12 @@ import Image from "next/image"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { SidebarNavItem } from "@/types"
-import { Menu, PanelLeftClose, PanelRightClose } from "lucide-react"
+import {
+  AlertTriangle,
+  Menu,
+  PanelLeftClose,
+  PanelRightClose,
+} from "lucide-react"
 
 import { useMediaQuery } from "@/hooks/use-media-query"
 import { cn } from "@/lib/utils"
@@ -25,9 +30,13 @@ import { Icons } from "@/components/shared/icons"
 
 interface DashboardSidebarProps {
   links: SidebarNavItem[]
+  isProduction?: boolean
 }
 
-export function DashboardSidebar({ links }: DashboardSidebarProps) {
+export function DashboardSidebar({
+  links,
+  isProduction = true,
+}: DashboardSidebarProps) {
   const path = usePathname()
   const { isTablet } = useMediaQuery()
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(!isTablet)
@@ -171,7 +180,18 @@ export function DashboardSidebar({ links }: DashboardSidebarProps) {
                     })}
                   </section>
                 ))}
+
                 <BuildVersionBadge compact={!isSidebarExpanded} />
+
+                {!isProduction && isSidebarExpanded && (
+                  <p className="flex items-start gap-1.5 rounded-md border border-[#00847C]/20 bg-[#00847C]/10 px-2 py-1.5 text-[11px] leading-snug text-[#00847C] dark:border-[#00847C]/30 dark:bg-[#00847C]/15 dark:text-[#4fd1c5]">
+                    <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                    <span>
+                      Jste v testovacím prostředí. Data ze systemizace a EOS se
+                      dohledávají podle skutečnosti.
+                    </span>
+                  </p>
+                )}
               </nav>
             </div>
           </aside>
@@ -181,7 +201,10 @@ export function DashboardSidebar({ links }: DashboardSidebarProps) {
   )
 }
 
-export function MobileSheetSidebar({ links }: DashboardSidebarProps) {
+export function MobileSheetSidebar({
+  links,
+  isProduction = true,
+}: DashboardSidebarProps) {
   const path = usePathname()
   const [open, setOpen] = useState(false)
   const { isSm, isMobile } = useMediaQuery()
@@ -260,7 +283,18 @@ export function MobileSheetSidebar({ links }: DashboardSidebarProps) {
                     })}
                   </section>
                 ))}
+
                 <BuildVersionBadge />
+
+                {!isProduction && (
+                  <p className="flex items-start gap-1.5 rounded-md border border-[#00847C]/20 bg-[#00847C]/10 px-2 py-1.5 text-xs leading-snug text-[#00847C] dark:border-[#00847C]/30 dark:bg-[#00847C]/15 dark:text-[#4fd1c5]">
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                    <span>
+                      Jste v testovacím prostředí. Data ze systemizace a EOS se
+                      dohledávají podle skutečnosti.
+                    </span>
+                  </p>
+                )}
               </nav>
             </div>
           </ScrollArea>

@@ -4,8 +4,9 @@ import { EmploymentDocumentType } from "@prisma/client"
 import { z } from "zod"
 
 import { prisma } from "@/lib/db"
-import { EMAIL_FOOTER_HTML, logEmailHistory, sendMail } from "@/lib/email"
+import { logEmailHistory, sendEmploymentDocumentLinkEmail } from "@/lib/email"
 import { buildEmployeeMeta } from "@/lib/employee-meta"
+import { logEmploymentDocumentEvent } from "@/lib/employment-document-events"
 import { canManageEmploymentDocuments } from "@/lib/rbac"
 import { absoluteUrl } from "@/lib/url"
 
@@ -80,6 +81,7 @@ export async function POST(req: NextRequest) {
       name: true,
       surname: true,
       titleAfter: true,
+      personalNumber: true,
       department: true,
       unitName: true,
       positionName: true,
@@ -142,84 +144,17 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const subject = employeeName
-    ? `Dokumenty k nástupu – ${employeeName}`
-    : "Dokumenty k nástupu"
-
-  const departmentText = meta.department?.trim()
-  const unitNameText = meta.unitName?.trim()
-  const positionText = meta.position?.trim()
-
-  const infoBlock =
-    departmentText || unitNameText || positionText
-      ? `
-        <div style="margin: 12px 0 0 0; padding: 10px 12px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
-          <div style="font-size: 12px; color: #374151;">
-            ${
-              positionText
-                ? `<div><strong>Pozice:</strong> ${positionText}</div>`
-                : ""
-            }
-            ${
-              departmentText
-                ? `<div><strong>Odbor:</strong> ${departmentText}</div>`
-                : ""
-            }
-            ${
-              unitNameText
-                ? `<div><strong>Oddělení:</strong> ${unitNameText}</div>`
-                : ""
-            }
-          </div>
-        </div>
-      `
-      : ""
-
-  const html = `
-    <div style="font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #111827;">
-      <h2 style="margin: 0 0 10px 0;">Dokumenty k nástupu</h2>
-
-      <p style="margin: 0 0 12px 0;">
-        Dobrý den${employeeName ? `, <strong>${employeeName}</strong>` : ""},<br/>
-        prosíme o vyplnění následujících dokumentů pro uvedenou pozici:
-      </p>
-
-      ${infoBlock}
-
-      <ul style="padding-left: 18px; margin: 14px 0 14px 0;">
-        ${mapped
-          .map(
-            (document) => `
-          <li style="margin: 6px 0;">
-            <strong>${document.label}</strong> –
-            <a href="${document.url}" target="_blank" rel="noopener noreferrer">${document.url}</a>
-          </li>`
-          )
-          .join("")}
-      </ul>
-
-      <div style="margin: 14px 0 12px 0; padding: 12px 12px; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px;">
-        <div style="font-size: 12px; color: #9a3412;">
-          <strong>Důležité:</strong>
-          <ul style="margin: 8px 0 0 18px; padding: 0;">
-            <li>Odkazy jsou určeny pouze pro vás – <strong>nepřeposílejte je</strong> dalším osobám.</li>
-            <li>Formuláře vyplňte <strong>osobně</strong>, <strong>pravdivě</strong> a <strong>pečlivě</strong>.</li>
-            <li>Po odeslání už zpravidla není potřeba dokumenty vyplňovat znovu.</li>
-            <li>Pokud jméno nebo pozice u odkazů nesouhlasí s vámi, formuláře <strong>nevyplňujte</strong> a okamžitě kontaktujte personální oddělení.</li>
-          </ul>
-        </div>
-      </div>
-
-      <p style="margin: 14px 0 0 0; color: #6b7280; font-size: 12px; line-height: 1.5;">
-        ${EMAIL_FOOTER_HTML}
-      </p>
-    </div>
-  `
-
-  await sendMail({
-    to: [email],
-    subject,
-    html,
+  const { subject, html } = await sendEmploymentDocumentLinkEmail({
+    to: email,
+    employeeName,
+    employeePersonalNumber: onboarding.personalNumber,
+    employeePosition: meta.position,
+    employeeDepartment: meta.department,
+    employeeUnitName: meta.unitName,
+    documents: mapped.map((document) => ({
+      label: document.label,
+      url: document.url,
+    })),
   })
 
   const sentBy = session.user.name ?? session.user.email ?? "unknown"
@@ -239,6 +174,16 @@ export async function POST(req: NextRequest) {
       where: { id: { in: mapped.map((document) => document.id) } },
       data: { sentAt, sentBy },
     }),
+    ...mapped.map((document) =>
+      logEmploymentDocumentEvent({
+        documentId: document.id,
+        action: "SENT",
+        by: (session.user as { id?: string }).id ?? null,
+        byName: sentBy,
+        byEmail: email,
+        message: `Odkaz na dokument byl odeslán na e-mail ${email}.`,
+      })
+    ),
   ])
 
   return NextResponse.json({

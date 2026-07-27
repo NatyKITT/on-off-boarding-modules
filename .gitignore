@@ -46,6 +46,9 @@ logs/
 # typescript
 *.tsbuildinfo
 
+# auto-generated at build time (scripts/build-info.mjs)
+/src/build-info.ts
+
 # email
 /.react-email/
 

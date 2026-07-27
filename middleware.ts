@@ -158,7 +158,9 @@ function isReadonlyAllowedMutatingApi(path: string) {
     path.startsWith("/api/nastupy/public/") ||
     /^\/api\/odchody\/\d+\/exit-checklist(\/.*)?$/.test(path) ||
     path === "/api/statistiky/pdf" ||
-    path === "/api/reporty/pdf"
+    path === "/api/statistiky/pdf/odeslat" ||
+    path === "/api/reporty/pdf" ||
+    path === "/api/dokumenty/send-pdf"
   )
 }
 

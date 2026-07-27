@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 
+import { collectUserRefs, resolveUserRefs } from "@/lib/audit-log-user-refs"
 import { prisma } from "@/lib/db"
-import { canReadOnboarding } from "@/lib/rbac"
+import { canEditInternalApp } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
@@ -27,7 +28,7 @@ export async function GET(
     )
   }
 
-  if (!canReadOnboarding(session.user.role)) {
+  if (!canEditInternalApp(session.user.role)) {
     return NextResponse.json(
       {
         status: "error",
@@ -77,8 +78,14 @@ export async function GET(
     })
 
     const userKeys = Array.from(
-      new Set(rows.map((r) => r.userId).filter((v): v is string => Boolean(v)))
-    )
+      new Set(
+        rows.flatMap((r) => [
+          r.userId,
+          ...collectUserRefs(r.oldValue),
+          ...collectUserRefs(r.newValue),
+        ])
+      )
+    ).filter((v): v is string => Boolean(v))
 
     const users =
       userKeys.length > 0
@@ -104,10 +111,10 @@ export async function GET(
       userId: r.userId,
       displayUser:
         (r.userId && nameByKey.get(r.userId)) || r.userId || "Neznámý uživatel",
-      action: normalizeAction(r.action), // <<< tady
+      action: normalizeAction(r.action),
       field: r.field ?? null,
-      oldValue: r.oldValue ?? null,
-      newValue: r.newValue ?? null,
+      oldValue: resolveUserRefs(r.oldValue, nameByKey),
+      newValue: resolveUserRefs(r.newValue, nameByKey),
       createdAt: r.createdAt.toISOString(),
     }))
 

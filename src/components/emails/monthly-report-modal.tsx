@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ReportsHistoryButton } from "@/components/history/reports-history-button"
 
 type Kind = "planned" | "actual"
 type TypeFilter = "nastupy" | "odchody"
@@ -522,6 +523,11 @@ export function MonthlyReportModal({
 
           <div className="shrink-0 border-t px-4 py-3 sm:px-6">
             <div className="flex flex-wrap justify-end gap-2">
+              <ReportsHistoryButton
+                scope="monthly"
+                title="Historie měsíčních reportů"
+              />
+
               <Button
                 variant="outline"
                 onClick={() => setOpen(false)}

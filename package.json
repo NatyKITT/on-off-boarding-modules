@@ -2,7 +2,7 @@
   "private": true,
   "name": "On-Off-Boarding-Module",
   "description": "",
-  "version": "0.2.8",
+  "version": "0.3.9",
   "type": "module",
   "scripts": {
     "dev": "next dev -p 3001",
@@ -17,7 +17,7 @@
     "db:push": "prisma db push",
     "db:pull": "prisma db pull",
     "shadcn:add": "npx shadcn-ui@latest add",
-    "packages:update-all": "npm update --location=project --save --save-dev",
+    "packages:update-all": "pnpm update",
     "prettier:format": "prettier --write \"**/*.{ts,tsx,mdx}\" --cache",
     "prettier:check": "prettier --check \"**/*.{ts,tsx,mdx}\" --cache",
     "email": "email dev --dir emails --port 3333",

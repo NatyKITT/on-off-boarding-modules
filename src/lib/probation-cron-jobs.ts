@@ -204,6 +204,7 @@ async function queueMissingSupervisorForHr(args: {
   requestId: number
   employeeId: number
   employeeName: string
+  employeePersonalNumber?: string | null
   employeePosition?: string | null
   employeeDepartment?: string | null
   employeeUnitName?: string | null
@@ -263,6 +264,7 @@ async function queueMissingSupervisorForHr(args: {
         requestId: args.requestId,
         employeeId: args.employeeId,
         employeeName: args.employeeName,
+        employeePersonalNumber: args.employeePersonalNumber,
         employeePosition: args.employeePosition,
         employeeDepartment: args.employeeDepartment,
         employeeUnitName: args.employeeUnitName,
@@ -325,6 +327,7 @@ async function queueDeadlineReminders(args: {
       name: true,
       surname: true,
       titleAfter: true,
+      personalNumber: true,
       positionName: true,
       positionType: true,
       department: true,
@@ -404,6 +407,7 @@ async function queueDeadlineReminders(args: {
               requestId: request.id,
               employeeId: employee.id,
               employeeName,
+              employeePersonalNumber: employee.personalNumber,
               employeePosition: employee.positionName,
               employeeDepartment: employee.department,
               employeeUnitName: employee.unitName,
@@ -508,6 +512,7 @@ async function queueDeadlineReminders(args: {
           requestId: request.id,
           employeeId: employee.id,
           employeeName,
+          employeePersonalNumber: employee.personalNumber,
           employeePosition: employee.positionName,
           employeeDepartment: employee.department,
           employeeUnitName: employee.unitName,
@@ -571,6 +576,124 @@ async function queueDeadlineReminders(args: {
   return employees.length
 }
 
+const UNLOCK_REMINDER_THRESHOLD_HOURS = 24
+
+async function queueUnlockReminders(args: {
+  now: Date
+  hrRecipients: string[]
+  notifications: string[]
+}) {
+  if (args.hrRecipients.length === 0) return 0
+
+  const thresholdDate = new Date(
+    args.now.getTime() - UNLOCK_REMINDER_THRESHOLD_HOURS * 60 * 60 * 1000
+  )
+
+  const unlockedRequests = await prisma.probationEvaluationRequest.findMany({
+    where: {
+      isLocked: false,
+      completedAt: { not: null },
+    },
+    select: {
+      id: true,
+      formType: true,
+      onboarding: {
+        select: {
+          id: true,
+          titleBefore: true,
+          name: true,
+          surname: true,
+          titleAfter: true,
+          personalNumber: true,
+          positionName: true,
+          department: true,
+          unitName: true,
+          probationEnd: true,
+        },
+      },
+    },
+  })
+
+  let queuedCount = 0
+
+  for (const request of unlockedRequests) {
+    const lastUnlockedEvent =
+      await prisma.probationEvaluationRequestEvent.findFirst({
+        where: { requestId: request.id, action: "UNLOCKED" },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      })
+
+    if (!lastUnlockedEvent) continue
+
+    if (lastUnlockedEvent.createdAt > thresholdDate) {
+      args.notifications.push(
+        `unlock_reminder_skipped_too_recent:${request.id}`
+      )
+      continue
+    }
+
+    const alreadyReminded =
+      await prisma.probationEvaluationRequestEvent.findFirst({
+        where: {
+          requestId: request.id,
+          action: { in: ["UNLOCK_REMINDER_QUEUED", "UNLOCK_REMINDER_SENT"] },
+          createdAt: { gt: lastUnlockedEvent.createdAt },
+        },
+        select: { id: true },
+      })
+
+    if (alreadyReminded) {
+      args.notifications.push(
+        `unlock_reminder_skipped_already_sent:${request.id}`
+      )
+      continue
+    }
+
+    const employeeName = buildFullName(request.onboarding)
+
+    const job = await prisma.mailQueue.create({
+      data: {
+        type: "PROBATION_EVALUATION_UNLOCK_REMINDER",
+        payload: {
+          recipients: args.hrRecipients,
+          requestId: request.id,
+          employeeId: request.onboarding.id,
+          employeeName,
+          employeePersonalNumber: request.onboarding.personalNumber,
+          employeePosition: request.onboarding.positionName,
+          employeeDepartment: request.onboarding.department,
+          employeeUnitName: request.onboarding.unitName,
+          probationEndDate:
+            request.onboarding.probationEnd?.toISOString() ?? null,
+          formType: request.formType,
+          subject: `Formulář vyhodnocení zkušební doby je stále odemčený – ${employeeName}`,
+          intro: `Formulář vyhodnocení zkušební doby pro ${employeeName} byl odemčen k opravě a stále zůstává otevřený k úpravě. Prosíme, dokončete úpravy a formulář znovu uzamkněte.`,
+          createdBy: "system-cron",
+          createdByName: "Systémový cron",
+        },
+        status: "QUEUED",
+        priority: 3,
+        createdBy: "system-cron",
+      },
+    })
+
+    await addProbationEvent(prisma, {
+      requestId: request.id,
+      action: "UNLOCK_REMINDER_QUEUED",
+      by: "system-cron",
+      byName: "Systémový cron",
+      mailQueueId: job.id,
+      message: `Připomínka, že formulář zůstává odemčený k úpravě, byla zařazena do fronty (odemčeno déle než ${UNLOCK_REMINDER_THRESHOLD_HOURS} h).`,
+    })
+
+    queuedCount += 1
+    args.notifications.push(`unlock_reminder_queued:${request.id}`)
+  }
+
+  return queuedCount
+}
+
 export async function ensureProbationCronJobs(req: NextRequest) {
   const now = new Date()
   const today = startOfDay(now)
@@ -607,6 +730,7 @@ export async function ensureProbationCronJobs(req: NextRequest) {
       name: true,
       surname: true,
       titleAfter: true,
+      personalNumber: true,
       positionName: true,
       positionType: true,
       department: true,
@@ -662,6 +786,7 @@ export async function ensureProbationCronJobs(req: NextRequest) {
         requestId: request.id,
         employeeId: employee.id,
         employeeName,
+        employeePersonalNumber: employee.personalNumber,
         employeePosition: employee.positionName,
         employeeDepartment: employee.department,
         employeeUnitName: employee.unitName,
@@ -698,6 +823,7 @@ export async function ensureProbationCronJobs(req: NextRequest) {
             requestId: request.id,
             employeeId: employee.id,
             employeeName,
+            employeePersonalNumber: employee.personalNumber,
             employeePosition: employee.positionName,
             employeeDepartment: employee.department,
             employeeUnitName: employee.unitName,
@@ -778,6 +904,7 @@ export async function ensureProbationCronJobs(req: NextRequest) {
               requestId: request.id,
               employeeId: employee.id,
               employeeName,
+              employeePersonalNumber: employee.personalNumber,
               employeePosition: employee.positionName,
               employeeDepartment: employee.department,
               employeeUnitName: employee.unitName,
@@ -884,12 +1011,24 @@ export async function ensureProbationCronJobs(req: NextRequest) {
     notifications,
   })
 
+  const unlockReminders = await queueUnlockReminders({
+    now,
+    hrRecipients,
+    notifications,
+  })
+
   const queued = notifications.filter((item) => item.includes("_queued")).length
 
   return {
     status: "success" as const,
     notifications,
-    processed: employeesAt14Days.length + at7Days + at3Days + at2Days + at1Day,
+    processed:
+      employeesAt14Days.length +
+      at7Days +
+      at3Days +
+      at2Days +
+      at1Day +
+      unlockReminders,
     queued,
     failed: 0,
     stats: {

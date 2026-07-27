@@ -4,6 +4,7 @@ import { auth } from "@/auth"
 import { prisma } from "@/lib/db"
 import { getEmployees } from "@/lib/eos-employees"
 import { canReadInternalApp } from "@/lib/rbac"
+import { getSentryEnvironment } from "@/lib/sentry-environment"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -75,6 +76,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       data: filteredEmployees.slice(0, limit),
+      outsideProduction: getSentryEnvironment() !== "production",
     })
   } catch (error) {
     console.error("GET /api/zamestnanci/hledat error:", error)

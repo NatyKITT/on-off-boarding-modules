@@ -9,7 +9,7 @@ import {
   getOrEnsureProbationDetail,
   isValidEmail,
   jsonError,
-  requireInternalProbationManage,
+  requireInternalProbationSend,
 } from "@/lib/probation-evaluation-api"
 import { renderProbationEvaluationPdfBuffer } from "@/lib/probation-evaluation-pdf"
 import {
@@ -44,7 +44,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const authResult = await requireInternalProbationManage()
+  const authResult = await requireInternalProbationSend()
   if (!authResult.ok) return authResult.response
 
   const onboardingId = getNumericId(params.id)
@@ -93,6 +93,7 @@ export async function POST(
     await sendProbationEvaluationPdfEmail({
       to,
       employeeName,
+      employeePersonalNumber: request.onboarding.personalNumber ?? null,
       employeePosition: request.onboarding.positionName ?? null,
       employeeDepartment: request.onboarding.department ?? null,
       probationEndDate:

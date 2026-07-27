@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 
+import { collectUserRefs, resolveUserRefs } from "@/lib/audit-log-user-refs"
 import { prisma } from "@/lib/db"
-import { canReadOffboarding } from "@/lib/rbac"
+import { canEditInternalApp } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
@@ -29,7 +30,7 @@ export async function GET(
     )
   }
 
-  if (!canReadOffboarding(session.user.role)) {
+  if (!canEditInternalApp(session.user.role)) {
     return NextResponse.json(
       {
         status: "error",
@@ -80,11 +81,13 @@ export async function GET(
 
     const userKeys = Array.from(
       new Set(
-        rows
-          .map((row) => row.userId)
-          .filter((value): value is string => Boolean(value))
+        rows.flatMap((row) => [
+          row.userId,
+          ...collectUserRefs(row.oldValue),
+          ...collectUserRefs(row.newValue),
+        ])
       )
-    )
+    ).filter((value): value is string => Boolean(value))
 
     const users =
       userKeys.length > 0
@@ -118,8 +121,8 @@ export async function GET(
         "Neznámý uživatel",
       action: normalizeAction(row.action),
       field: row.field ?? null,
-      oldValue: row.oldValue ?? null,
-      newValue: row.newValue ?? null,
+      oldValue: resolveUserRefs(row.oldValue, nameByKey),
+      newValue: resolveUserRefs(row.newValue, nameByKey),
       createdAt: row.createdAt.toISOString(),
     }))
 

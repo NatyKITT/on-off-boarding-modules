@@ -21,9 +21,10 @@ import {
   UserRound,
 } from "lucide-react"
 
-import { useIsReadonly } from "@/hooks/use-current-role"
+import { useCurrentRole, useIsReadonly } from "@/hooks/use-current-role"
 import { useToast } from "@/hooks/use-toast"
 import { formatDayCountCs } from "@/lib/dates"
+import { canEditInternalApp } from "@/lib/rbac"
 
 import {
   AlertDialog,
@@ -382,6 +383,18 @@ function eventLabel(eventOrAction: ProbationEvent | string) {
       return "E-mail se nepodařilo odeslat"
     case "MISSING_SUPERVISOR":
       return "Chybí vedoucí daného zaměstnance"
+    case "TOKEN_REGENERATED":
+      return "Odkaz na formulář obnoven"
+    case "CANCELLED":
+      return "Zrušeno"
+    case "EXPIRED":
+      return "Platnost odkazu vypršela"
+    case "PDF_DOWNLOADED":
+      return "PDF staženo"
+    case "UNLOCK_REMINDER_QUEUED":
+      return "Připomínka odemčení zařazena k odeslání"
+    case "UNLOCK_REMINDER_SENT":
+      return "Připomínka odemčení odeslána HR"
     default:
       return action
   }
@@ -496,6 +509,8 @@ export function ProbationEvaluationSection({
 }: Props) {
   const { toast } = useToast()
   const isReadonly = useIsReadonly()
+  const role = useCurrentRole()
+  const canViewHistory = canEditInternalApp(role)
   const hasLoadedRef = React.useRef(false)
 
   const [request, setRequest] =
@@ -842,6 +857,8 @@ export function ProbationEvaluationSection({
   async function handleToggleLock() {
     if (!request) return
 
+    const nextLocked = !request.isLocked
+
     setLocking(true)
     setError(null)
 
@@ -854,7 +871,7 @@ export function ProbationEvaluationSection({
           cache: "no-store",
           credentials: "include",
           body: JSON.stringify({
-            locked: !request.isLocked,
+            locked: nextLocked,
           }),
         }
       )
@@ -875,12 +892,10 @@ export function ProbationEvaluationSection({
       await refreshFromJsonOrReload(json)
 
       toast({
-        title: request.isLocked
-          ? "Formulář je odemknutý"
-          : "Formulář je zamčený",
-        description: request.isLocked
-          ? "Formulář je znovu možné upravovat."
-          : "Formulář je uzamčený proti úpravám.",
+        title: nextLocked ? "Formulář je zamčený" : "Formulář je odemknutý",
+        description: nextLocked
+          ? "Formulář je uzamčený proti úpravám."
+          : "Formulář je znovu možné upravovat.",
       })
     } catch (err) {
       const message =
@@ -1312,6 +1327,16 @@ export function ProbationEvaluationSection({
               </AlertBox>
             )}
 
+            {isCompleted && revisionOpen && (
+              <AlertBox tone="danger" title="Formulář je odemčený k úpravě.">
+                Byl znovu otevřen k opravě po dokončení a v tuto chvíli ho může
+                upravit kdokoli s přístupem. Až úpravy dokončíte, prosím
+                formulář co nejdřív uložte a v případě potřeby ho tlačítkem
+                &bdquo;Zamknout&ldquo; výše znovu uzamkněte, ať nezůstává
+                otevřený déle, než je nutné.
+              </AlertBox>
+            )}
+
             <section className="rounded-xl border bg-muted/20 p-4">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div>
@@ -1504,16 +1529,18 @@ export function ProbationEvaluationSection({
                   {request.isLocked ? "Odemknout" : "Zamknout"}
                 </Button>
 
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setHistoryOpen(true)}
-                  disabled={!request.events?.length}
-                  className="gap-2"
-                >
-                  <History className="size-4" />
-                  Historie
-                </Button>
+                {canViewHistory && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setHistoryOpen(true)}
+                    disabled={!request.events?.length}
+                    className="gap-2"
+                  >
+                    <History className="size-4" />
+                    Historie
+                  </Button>
+                )}
 
                 <Button
                   size="sm"

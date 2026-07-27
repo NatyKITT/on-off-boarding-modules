@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 
+import { prisma } from "@/lib/db"
 import {
   buildEarlyExitNote,
   buildResolvedProbationApiResponse,
@@ -9,6 +10,11 @@ import {
   requireInternalProbationRead,
 } from "@/lib/probation-evaluation-api"
 import { renderProbationEvaluationPdfBuffer } from "@/lib/probation-evaluation-pdf"
+import {
+  addProbationEvent,
+  getUserKey,
+  getUserLabel,
+} from "@/lib/probation-evaluation-request"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -71,6 +77,21 @@ export async function GET(
     const filename = sanitizeFilename(
       payload.onboarding.fullName || String(onboardingId)
     )
+
+    await addProbationEvent(prisma, {
+      requestId: request.id,
+      action: "PDF_DOWNLOADED",
+      by: getUserKey({
+        id: authResult.user.id,
+        email: authResult.user.email,
+      }),
+      byName: getUserLabel({
+        name: authResult.user.name,
+        email: authResult.user.email,
+      }),
+      byEmail: authResult.user.email ?? null,
+      message: "PDF formuláře vyhodnocení zkušební doby bylo staženo.",
+    })
 
     return new NextResponse(bufferToArrayBuffer(pdfBuffer), {
       status: 200,

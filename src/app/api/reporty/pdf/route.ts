@@ -2,12 +2,15 @@ import { NextResponse, type NextRequest } from "next/server"
 import { auth } from "@/auth"
 
 import { canReadMonthlyReports } from "@/lib/rbac"
+import { logReportAccess } from "@/lib/report-access-log"
 import {
   buildReportSections,
   reportSelectionPayloadSchema,
 } from "@/lib/reports/pdf-report-data"
 import {
   buildReportFilename,
+  buildReportMonthsLabel,
+  buildReportTitle,
   renderPdfReportBuffer,
 } from "@/lib/reports/pdf-report-pdf"
 
@@ -69,6 +72,18 @@ export async function POST(request: NextRequest) {
     })
 
     const filename = buildReportFilename(sections, generatedAt)
+    const monthsLabel = buildReportMonthsLabel(sections)
+    const title = buildReportTitle(sections)
+
+    await logReportAccess({
+      reportType: "GENERIC_EMAIL",
+      by: (session.user as { id?: string }).id ?? null,
+      byName: session.user.name ?? session.user.email ?? null,
+      byEmail: session.user.email ?? null,
+      message: monthsLabel
+        ? `${title} byl stažen jako PDF (${monthsLabel}).`
+        : `${title} byl stažen jako PDF.`,
+    })
 
     return new NextResponse(bufferToArrayBuffer(buffer), {
       status: 200,

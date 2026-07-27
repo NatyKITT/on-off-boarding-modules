@@ -34,6 +34,8 @@ export const env = createEnv({
     EOS_API_BASE: z.string().url().optional(),
     EOS_API_TOKEN: z.string().optional(),
 
+    SYSTEMIZACE_API_BASE: z.string().url().optional(),
+
     CRON_SECRET: z.string().min(1),
   },
 
@@ -79,6 +81,8 @@ export const env = createEnv({
 
     EOS_API_BASE: process.env.EOS_API_BASE,
     EOS_API_TOKEN: process.env.EOS_API_TOKEN,
+
+    SYSTEMIZACE_API_BASE: process.env.SYSTEMIZACE_API_BASE,
 
     CRON_SECRET: process.env.CRON_SECRET,
   },

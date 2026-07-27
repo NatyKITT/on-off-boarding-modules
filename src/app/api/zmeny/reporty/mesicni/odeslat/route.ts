@@ -321,6 +321,15 @@ export async function POST(request: Request) {
       )
     )
 
+    await logEmailHistory({
+      emailType: "EMPLOYEE_CHANGE_SUMMARY",
+      recipients: reportRecipients,
+      subject: finalSubject,
+      content: html,
+      status: "SENT",
+      createdBy,
+    })
+
     await prisma.employeeChange.updateMany({
       where: {
         id: {

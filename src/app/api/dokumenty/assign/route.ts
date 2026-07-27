@@ -6,6 +6,7 @@ import { EmploymentDocumentType } from "@prisma/client"
 import { z } from "zod"
 
 import { prisma } from "@/lib/db"
+import { logEmploymentDocumentEvent } from "@/lib/employment-document-events"
 import { canManageEmploymentDocuments } from "@/lib/rbac"
 import { absoluteUrl } from "@/lib/url"
 
@@ -71,6 +72,15 @@ export async function POST(req: NextRequest) {
       accessHash,
       expiresAt,
     },
+  })
+
+  await logEmploymentDocumentEvent({
+    documentId: doc.id,
+    action: "CREATED",
+    by: (session.user as { id?: string }).id ?? null,
+    byName: session.user.name ?? session.user.email ?? null,
+    byEmail: session.user.email ?? null,
+    message: "Dokument byl vytvořen a přiřazen k nástupu.",
   })
 
   const publicUrl = absoluteUrl(`/dokumenty/${accessHash}`, req)

@@ -60,6 +60,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
+import { AssignCompanyDataDialog } from "@/components/common/assign-company-data-dialog"
 
 type Mode = "create-planned" | "create-actual" | "edit"
 
@@ -970,6 +971,8 @@ export function OnboardingFormUnified({
 
   const [skippedOpen, setSkippedOpen] = useState(false)
   const [skippedNumbersState, setSkippedNumbersState] = useState<string[]>([])
+
+  const [assignCompanyDataOpen, setAssignCompanyDataOpen] = useState(false)
 
   const [isSupervisorLoading, setIsSupervisorLoading] = useState(false)
   const [supervisorLoadError, setSupervisorLoadError] = useState<string | null>(
@@ -2251,6 +2254,193 @@ export function OnboardingFormUnified({
             </CardContent>
           </Card>
 
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <User className="size-5" /> Osobní číslo
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <FormField
+                  name="personalNumber"
+                  control={form.control}
+                  render={({ field }) => (
+                    <FormItem className="md:col-span-2">
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <FormLabel>
+                          Osobní číslo
+                          {isActualMode && (
+                            <span className="text-destructive"> *</span>
+                          )}
+                        </FormLabel>
+                        {skippedNumbersState.length > 0 && (
+                          <Popover
+                            open={skippedOpen}
+                            onOpenChange={setSkippedOpen}
+                          >
+                            <PopoverTrigger asChild>
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 rounded-md border border-input bg-background px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
+                              >
+                                <ListChecks className="size-3" />
+                                Přeskočená čísla
+                              </button>
+                            </PopoverTrigger>
+                            <PopoverContent
+                              className="w-72 p-3"
+                              align="end"
+                              sideOffset={4}
+                              onOpenAutoFocus={(e) => e.preventDefault()}
+                              onWheelCapture={(e) => e.stopPropagation()}
+                            >
+                              <p className="text-xs text-muted-foreground">
+                                Osobní čísla, která byla přeskočena a dosud
+                                nejsou využita.
+                              </p>
+
+                              <div className="mt-2 max-h-[min(40vh,220px)] overflow-y-auto pr-1">
+                                <div className="flex flex-wrap gap-2">
+                                  {skippedNumbersState.map((num) => (
+                                    <button
+                                      key={num}
+                                      type="button"
+                                      className="rounded bg-muted px-2 py-1 font-mono text-xs hover:bg-muted/80"
+                                      onClick={() => {
+                                        form.setValue("personalNumber", num, {
+                                          shouldDirty: true,
+                                          shouldValidate: true,
+                                        })
+                                        void checkPersonalNumber(num)
+                                        setSkippedOpen(false)
+                                      }}
+                                    >
+                                      {num}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        )}
+                      </div>
+
+                      <FormControl>
+                        <Input
+                          {...field}
+                          className={`font-mono ${focusRing}`}
+                          placeholder={suggestedPersonalNumber || "např. 0123"}
+                          onChange={(e) => {
+                            setPersonalCheck({ status: "idle" })
+                            form.clearErrors("personalNumber")
+                            field.onChange(e)
+                          }}
+                          onBlur={async (e) => {
+                            field.onBlur()
+                            await checkPersonalNumber(e.target.value)
+                          }}
+                        />
+                      </FormControl>
+
+                      <FormDescription>
+                        {!isActualMode ? (
+                          <>Nepovinné – lze doplnit později.</>
+                        ) : (
+                          <>Povinné u skutečného nástupu.</>
+                        )}
+                      </FormDescription>
+
+                      {(resolvedPersonalMeta?.lastUsedNumber ||
+                        resolvedPersonalMeta?.lastDc2Number) && (
+                        <div className="mt-2 text-xs text-muted-foreground">
+                          <ul className="list-disc space-y-1 pl-5">
+                            {resolvedPersonalMeta?.lastUsedNumber && (
+                              <li>
+                                Poslední použité číslo:{" "}
+                                <span className="font-mono font-semibold">
+                                  {resolvedPersonalMeta.lastUsedNumber}
+                                </span>
+                                {resolvedPersonalMeta.lastUsedName ? (
+                                  <> – {resolvedPersonalMeta.lastUsedName}</>
+                                ) : null}
+                              </li>
+                            )}
+
+                            {resolvedPersonalMeta?.lastDc2Number && (
+                              <li>
+                                Poslední číslo v DC2:{" "}
+                                <span className="font-mono font-semibold">
+                                  {resolvedPersonalMeta.lastDc2Number}
+                                </span>
+                                {resolvedPersonalMeta.lastDc2AssignedTo ? (
+                                  <>
+                                    {" "}
+                                    – {resolvedPersonalMeta.lastDc2AssignedTo}
+                                  </>
+                                ) : null}
+                              </li>
+                            )}
+                          </ul>
+                        </div>
+                      )}
+
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                        {suggestedPersonalNumber && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={async () => {
+                              form.setValue(
+                                "personalNumber",
+                                suggestedPersonalNumber,
+                                {
+                                  shouldDirty: true,
+                                  shouldValidate: true,
+                                }
+                              )
+                              await checkPersonalNumber(suggestedPersonalNumber)
+                            }}
+                          >
+                            Použít návrh
+                          </Button>
+                        )}
+
+                        {personalCheck.status === "checking" && (
+                          <span className="text-muted-foreground">
+                            Ověřuji číslo v EOS…
+                          </span>
+                        )}
+                        {personalCheck.status === "ok" && (
+                          <span className="text-green-600">
+                            Číslo je v EOS volné.
+                          </span>
+                        )}
+                        {personalCheck.status === "taken" && (
+                          <span className="text-red-600">
+                            Číslo už je v EOS použito
+                            {personalCheck.usedBy
+                              ? ` – ${personalCheck.usedBy}.`
+                              : "."}
+                          </span>
+                        )}
+                        {personalCheck.status === "error" && (
+                          <span className="text-red-600">
+                            {personalCheck.message ??
+                              "Nepodařilo se ověřit číslo v EOS."}
+                          </span>
+                        )}
+                      </div>
+
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
           <Card className="border-l-4 border-l-[#00847C]">
             <CardHeader>
               <div className="flex items-center justify-between gap-3">
@@ -2503,243 +2693,6 @@ export function OnboardingFormUnified({
                         />
                       </FormControl>
                       <FormDescription>Nepovinné.</FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <User className="size-5" /> Účty a přístupy
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <FormField
-                  name="userEmail"
-                  control={form.control}
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Firemní e-mail</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="email"
-                          autoComplete="off"
-                          {...field}
-                          placeholder="např. jmeno.prijmeni@praha6.cz"
-                          className={focusRing}
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        Doporučený formát:{" "}
-                        <span className="font-mono">
-                          jmeno.prijmeni@praha6.cz
-                        </span>
-                        .
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  name="userName"
-                  control={form.control}
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Uživatelské jméno</FormLabel>
-                      <FormControl>
-                        <Input
-                          {...field}
-                          className={`font-mono ${focusRing}`}
-                          placeholder="např. jprijmeni"
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        Doporučený formát:{" "}
-                        <span className="font-mono">jprijmeni</span>.
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <FormField
-                  name="personalNumber"
-                  control={form.control}
-                  render={({ field }) => (
-                    <FormItem className="md:col-span-2">
-                      <div className="mb-1 flex items-center justify-between gap-2">
-                        <FormLabel>
-                          Osobní číslo
-                          {isActualMode && (
-                            <span className="text-destructive"> *</span>
-                          )}
-                        </FormLabel>
-                        {skippedNumbersState.length > 0 && (
-                          <Popover
-                            open={skippedOpen}
-                            onOpenChange={setSkippedOpen}
-                          >
-                            <PopoverTrigger asChild>
-                              <button
-                                type="button"
-                                className="inline-flex items-center gap-1 rounded-md border border-input bg-background px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
-                              >
-                                <ListChecks className="size-3" />
-                                Přeskočená čísla
-                              </button>
-                            </PopoverTrigger>
-                            <PopoverContent
-                              className="w-72 p-3"
-                              align="end"
-                              sideOffset={4}
-                              onOpenAutoFocus={(e) => e.preventDefault()}
-                              onWheelCapture={(e) => e.stopPropagation()}
-                            >
-                              <p className="text-xs text-muted-foreground">
-                                Osobní čísla, která byla přeskočena a dosud
-                                nejsou využita.
-                              </p>
-
-                              <div className="mt-2 max-h-[min(40vh,220px)] overflow-y-auto pr-1">
-                                <div className="flex flex-wrap gap-2">
-                                  {skippedNumbersState.map((num) => (
-                                    <button
-                                      key={num}
-                                      type="button"
-                                      className="rounded bg-muted px-2 py-1 font-mono text-xs hover:bg-muted/80"
-                                      onClick={() => {
-                                        form.setValue("personalNumber", num, {
-                                          shouldDirty: true,
-                                          shouldValidate: true,
-                                        })
-                                        void checkPersonalNumber(num)
-                                        setSkippedOpen(false)
-                                      }}
-                                    >
-                                      {num}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                            </PopoverContent>
-                          </Popover>
-                        )}
-                      </div>
-
-                      <FormControl>
-                        <Input
-                          {...field}
-                          className={`font-mono ${focusRing}`}
-                          placeholder={suggestedPersonalNumber || "např. 0123"}
-                          onChange={(e) => {
-                            setPersonalCheck({ status: "idle" })
-                            form.clearErrors("personalNumber")
-                            field.onChange(e)
-                          }}
-                          onBlur={async (e) => {
-                            field.onBlur()
-                            await checkPersonalNumber(e.target.value)
-                          }}
-                        />
-                      </FormControl>
-
-                      <FormDescription>
-                        {!isActualMode ? (
-                          <>Nepovinné – lze doplnit později.</>
-                        ) : (
-                          <>Povinné u skutečného nástupu.</>
-                        )}
-                      </FormDescription>
-
-                      {(resolvedPersonalMeta?.lastUsedNumber ||
-                        resolvedPersonalMeta?.lastDc2Number) && (
-                        <div className="mt-2 text-xs text-muted-foreground">
-                          <ul className="list-disc space-y-1 pl-5">
-                            {resolvedPersonalMeta?.lastUsedNumber && (
-                              <li>
-                                Poslední použité číslo:{" "}
-                                <span className="font-mono font-semibold">
-                                  {resolvedPersonalMeta.lastUsedNumber}
-                                </span>
-                                {resolvedPersonalMeta.lastUsedName ? (
-                                  <> – {resolvedPersonalMeta.lastUsedName}</>
-                                ) : null}
-                              </li>
-                            )}
-
-                            {resolvedPersonalMeta?.lastDc2Number && (
-                              <li>
-                                Poslední číslo v DC2:{" "}
-                                <span className="font-mono font-semibold">
-                                  {resolvedPersonalMeta.lastDc2Number}
-                                </span>
-                                {resolvedPersonalMeta.lastDc2AssignedTo ? (
-                                  <>
-                                    {" "}
-                                    – {resolvedPersonalMeta.lastDc2AssignedTo}
-                                  </>
-                                ) : null}
-                              </li>
-                            )}
-                          </ul>
-                        </div>
-                      )}
-
-                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                        {suggestedPersonalNumber && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={async () => {
-                              form.setValue(
-                                "personalNumber",
-                                suggestedPersonalNumber,
-                                {
-                                  shouldDirty: true,
-                                  shouldValidate: true,
-                                }
-                              )
-                              await checkPersonalNumber(suggestedPersonalNumber)
-                            }}
-                          >
-                            Použít návrh
-                          </Button>
-                        )}
-
-                        {personalCheck.status === "checking" && (
-                          <span className="text-muted-foreground">
-                            Ověřuji číslo v EOS…
-                          </span>
-                        )}
-                        {personalCheck.status === "ok" && (
-                          <span className="text-green-600">
-                            Číslo je v EOS volné.
-                          </span>
-                        )}
-                        {personalCheck.status === "taken" && (
-                          <span className="text-red-600">
-                            Číslo už je v EOS použito
-                            {personalCheck.usedBy
-                              ? ` – ${personalCheck.usedBy}.`
-                              : "."}
-                          </span>
-                        )}
-                        {personalCheck.status === "error" && (
-                          <span className="text-red-600">
-                            {personalCheck.message ??
-                              "Nepodařilo se ověřit číslo v EOS."}
-                          </span>
-                        )}
-                      </div>
-
                       <FormMessage />
                     </FormItem>
                   )}
@@ -3138,6 +3091,85 @@ export function OnboardingFormUnified({
           </Card>
 
           <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <User className="size-5" /> Firemní účty a přístupy
+                  </CardTitle>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Zakládá a spravuje IT. Data lze načíst z EOS.
+                  </p>
+                </div>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setAssignCompanyDataOpen(true)}
+                >
+                  <Search className="mr-2 size-4" />
+                  Propojit firemní účty
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                Pokud údaje vyplňujete ručně a účet ještě není založený v EOS,
+                kontaktujte IT oddělení KITT6. Ruční vyplnění se nedoporučuje,
+                ať údaje odpovídají skutečnosti – raději nechte nevyplněné.
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <FormField
+                  name="userEmail"
+                  control={form.control}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Firemní e-mail</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="email"
+                          autoComplete="off"
+                          {...field}
+                          placeholder="např. jprijmeni@praha6.cz"
+                          className={focusRing}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        Doporučený formát:{" "}
+                        <span className="font-mono">jprijmeni@praha6.cz</span>.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  name="userName"
+                  control={form.control}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Uživatelské jméno</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          className={`font-mono ${focusRing}`}
+                          placeholder="např. jprijmeni"
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        Doporučený formát:{" "}
+                        <span className="font-mono">jprijmeni</span>.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
             <CardContent className="pt-6">
               <FormField
                 name="notes"
@@ -3271,6 +3303,29 @@ export function OnboardingFormUnified({
           </div>
         </DialogContent>
       </Dialog>
+
+      <AssignCompanyDataDialog
+        open={assignCompanyDataOpen}
+        onOpenChange={setAssignCompanyDataOpen}
+        personalNumber={form.watch("personalNumber")}
+        firstName={form.watch("name")}
+        lastName={form.watch("surname")}
+        onAssign={(data) => {
+          if (data.userEmail) {
+            form.setValue("userEmail", data.userEmail, {
+              shouldDirty: true,
+              shouldValidate: true,
+            })
+          }
+          if (data.userName) {
+            form.setValue("userName", data.userName, {
+              shouldDirty: true,
+              shouldValidate: true,
+            })
+          }
+          setAssignCompanyDataOpen(false)
+        }}
+      />
     </>
   )
 }

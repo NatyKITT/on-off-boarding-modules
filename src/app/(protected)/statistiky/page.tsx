@@ -1,6 +1,7 @@
 import { requireInternalUser } from "@/lib/session"
 
 import { DashboardHeader } from "@/components/dashboard/header"
+import { ReportsHistoryButton } from "@/components/history/reports-history-button"
 import { StatistikyClient } from "@/components/statistiky/statistiky-client"
 
 export default async function StatistikyPage() {
@@ -11,7 +12,9 @@ export default async function StatistikyPage() {
       <DashboardHeader
         heading="Statistiky"
         text="Přehled nástupů, odchodů a změn v čase, zdraví procesu a vlastní pohledy."
-      />
+      >
+        <ReportsHistoryButton scope="statistics" title="Historie statistiky" />
+      </DashboardHeader>
       <StatistikyClient />
     </div>
   )
