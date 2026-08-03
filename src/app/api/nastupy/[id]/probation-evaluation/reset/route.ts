@@ -112,7 +112,7 @@ export async function PATCH(
         byName: userLabel,
         byEmail: authResult.user.email ?? null,
         message:
-          "HR vymazalo vyplněná data formuláře k vyhodnocení zkušební doby.",
+          "Personální oddělení vymazalo vyplněná data formuláře k vyhodnocení zkušební doby.",
         meta: {
           source: "manual",
           previousStatus: existing.status,

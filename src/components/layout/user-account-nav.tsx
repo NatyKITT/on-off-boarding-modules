@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react"
 import Link from "next/link"
+import type { Role } from "@prisma/client"
 import {
   ArrowLeftRight,
   Eye,
@@ -16,6 +17,7 @@ import { signOut, useSession } from "next-auth/react"
 import { Drawer } from "vaul"
 
 import { useMediaQuery } from "@/hooks/use-media-query"
+import { roleLabel } from "@/lib/rbac"
 
 import { Badge } from "@/components/ui/badge"
 import {
@@ -29,14 +31,11 @@ import { UserAvatar } from "@/components/shared/user-avatar"
 
 const SIGNOUT_SUCCESS_REDIRECT = "/signin?logout=success"
 
-const ROLE_CONFIG: Record<
-  string,
-  { label: string; variant: "secondary" | "outline" }
-> = {
-  ADMIN: { label: "Administrátor", variant: "secondary" },
-  HR: { label: "HR", variant: "secondary" },
-  IT: { label: "IT", variant: "secondary" },
-  READONLY: { label: "Pouze čtení", variant: "outline" },
+const ROLE_BADGE_VARIANT: Record<string, "secondary" | "outline"> = {
+  ADMIN: "secondary",
+  HR: "secondary",
+  IT: "secondary",
+  READONLY: "outline",
 }
 
 type SessionUserWithSurname = {
@@ -44,7 +43,7 @@ type SessionUserWithSurname = {
   surname?: string | null
   email?: string | null
   image?: string | null
-  role?: string | null
+  role?: Role | null
 }
 
 type MenuItem = {
@@ -69,19 +68,17 @@ function buildDisplayName(user: SessionUserWithSurname) {
   return `${name} ${surname}`
 }
 
-function RoleBadge({ role }: { role?: string | null }) {
-  if (!role) return null
-
-  const config = ROLE_CONFIG[role]
-  if (!config) return null
+function RoleBadge({ role }: { role?: Role | null }) {
+  const variant = role ? ROLE_BADGE_VARIANT[role] : undefined
+  if (!role || !variant) return null
 
   return (
     <Badge
-      variant={config.variant}
+      variant={variant}
       className="mt-1 w-fit rounded-full px-3 py-0.5 text-[11px] font-semibold"
     >
       {role === "READONLY" && <Eye className="mr-1 size-3" />}
-      {config.label}
+      {roleLabel(role)}
     </Badge>
   )
 }

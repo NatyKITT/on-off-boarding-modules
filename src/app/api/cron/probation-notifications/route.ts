@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 
 import { requireCronAuthorization } from "@/lib/cron-auth"
+import { isLocalHourNow } from "@/lib/cron-schedule"
 import { ensureProbationCronJobs } from "@/lib/probation-cron-jobs"
 
 export const runtime = "nodejs"
@@ -13,6 +14,15 @@ export async function GET(req: NextRequest) {
 
   if (unauthorizedResponse) {
     return unauthorizedResponse
+  }
+
+  const force = req.nextUrl.searchParams.get("force") === "true"
+
+  if (!force && !isLocalHourNow(8)) {
+    return NextResponse.json({
+      status: "skipped",
+      message: "Mimo denní okno 8:00 pražského času.",
+    })
   }
 
   try {

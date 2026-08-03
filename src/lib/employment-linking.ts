@@ -421,14 +421,14 @@ export function buildLinkedOffboardingInfo(params: {
         ? "Odešel ve zkušební době – hodnocení zastaveno"
         : probationStopDecision === "KEEP"
           ? "Odešel ve zkušební době – hodnocení pokračuje"
-          : "Odešel ve zkušební době – čeká na rozhodnutí HR"
+          : "Odešel ve zkušební době – čeká na rozhodnutí Personálního oddělení"
 
     const description =
       probationStopDecision === "STOP"
-        ? `Zaměstnanec má ${exitKind} odchod ${formatDateCz(exitDate)} v průběhu zkušební doby. HR potvrdila zastavení hodnocení zkušební doby, formulář ani e-maily se dále neposílají.`
+        ? `Zaměstnanec má ${exitKind} odchod ${formatDateCz(exitDate)} v průběhu zkušební doby. Personální oddělení potvrdilo zastavení hodnocení zkušební doby, formulář ani e-maily se dále neposílají.`
         : probationStopDecision === "KEEP"
-          ? `Zaměstnanec má ${exitKind} odchod ${formatDateCz(exitDate)} v průběhu zkušební doby. HR se při zakládání odchodu rozhodla hodnocení zkušební doby nezastavovat, formulář i e-maily běží dál.`
-          : `Zaměstnanec má ${exitKind} odchod ${formatDateCz(exitDate)} v průběhu zkušební doby. Na záznamu odchodu čeká rozhodnutí HR, zda hodnocení zkušební doby zastavit.`
+          ? `Zaměstnanec má ${exitKind} odchod ${formatDateCz(exitDate)} v průběhu zkušební doby. Personální oddělení se při zakládání odchodu rozhodlo hodnocení zkušební doby nezastavovat, formulář i e-maily běží dál.`
+          : `Zaměstnanec má ${exitKind} odchod ${formatDateCz(exitDate)} v průběhu zkušební doby. Na záznamu odchodu čeká rozhodnutí Personálního oddělení, zda hodnocení zkušební doby zastavit.`
 
     return {
       id: offboarding.id,

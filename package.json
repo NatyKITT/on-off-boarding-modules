@@ -2,7 +2,7 @@
   "private": true,
   "name": "On-Off-Boarding-Module",
   "description": "",
-  "version": "0.3.9",
+  "version": "0.4.0",
   "type": "module",
   "scripts": {
     "dev": "next dev -p 3001",
@@ -25,7 +25,8 @@
     "lint": "next lint",
     "lint:fix": "next lint --fix",
     "email:process": "curl -X GET http://localhost:3001/api/cron/mail-worker",
-    "probation:check": "curl -X GET http://localhost:3001/api/cron/probation-notifications"
+    "probation:check": "curl -X GET \"http://localhost:3001/api/cron/probation-notifications?force=true\"",
+    "offboarding:check": "curl -X GET \"http://localhost:3001/api/cron/offboarding-notifications?force=true\""
   },
   "dependencies": {
     "@auth/core": "0.30.0",

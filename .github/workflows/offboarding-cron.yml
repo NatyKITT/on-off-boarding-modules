@@ -1,0 +1,91 @@
+name: Offboarding Check
+
+on:
+  schedule:
+    # GitHub Actions cron runs in UTC and can't express a timezone, so we
+    # fire at both UTC offsets that correspond to 8:00 in Prague (06:00 UTC
+    # in CEST/summer, 07:00 UTC in CET/winter). The route itself checks the
+    # actual local time and no-ops the run that doesn't land on 8:00.
+    - cron: "0 6,7 * * *"
+  workflow_dispatch:
+
+jobs:
+  offboarding-check:
+    name: Offboarding check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Run offboarding notifications cron
+        shell: bash
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${APP_URL:-}" ]; then
+            echo "Error: APP_URL secret is not configured."
+            exit 1
+          fi
+
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "Error: CRON_SECRET secret is not configured."
+            exit 1
+          fi
+
+          APP_URL="${APP_URL%/}"
+          ENDPOINT="$APP_URL/api/cron/offboarding-notifications"
+
+          echo "Starting offboarding notifications cron for $APP_URL ..."
+
+          RESPONSE_FILE="$(mktemp)"
+
+          HTTP_STATUS="$(
+            curl -sS \
+              -X POST \
+              -o "$RESPONSE_FILE" \
+              -w "%{http_code}" \
+              "$ENDPOINT" \
+              -H "Authorization: Bearer $CRON_SECRET"
+          )"
+
+          RESPONSE="$(cat "$RESPONSE_FILE")"
+
+          echo "HTTP Status: $HTTP_STATUS"
+          echo "Response:"
+          echo "$RESPONSE"
+
+          if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
+            echo "Error: Offboarding notifications cron failed with HTTP status $HTTP_STATUS."
+            exit 1
+          fi
+
+          if ! echo "$RESPONSE" | jq empty >/dev/null 2>&1; then
+            echo "Error: Offboarding notifications cron returned invalid JSON response."
+            exit 1
+          fi
+
+          STATUS="$(echo "$RESPONSE" | jq -r '.status // empty')"
+          FAILED="$(echo "$RESPONSE" | jq -r '.failed // .errors // 0')"
+          QUEUED="$(echo "$RESPONSE" | jq -r '.queued // .created // .enqueued // 0')"
+          PROCESSED="$(echo "$RESPONSE" | jq -r '.processed // .checked // 0')"
+
+          if [ -n "$STATUS" ]; then
+            echo "Status: $STATUS"
+          fi
+
+          echo "Processed/checked: $PROCESSED"
+          echo "Queued/created: $QUEUED"
+          echo "Failed/errors: $FAILED"
+
+          if ! [[ "$FAILED" =~ ^[0-9]+$ ]]; then
+            echo "Warning: Offboarding notifications cron returned non-numeric failed/errors count: $FAILED"
+            FAILED="0"
+          fi
+
+          if [ "$FAILED" -gt 0 ]; then
+            echo "Error: Offboarding notifications cron finished with failed/errors count: $FAILED"
+            exit 1
+          fi
+
+          echo "Offboarding notifications cron finished successfully."

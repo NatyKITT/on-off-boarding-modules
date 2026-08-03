@@ -76,6 +76,7 @@ export default async function InternalDocumentPage({ params }: PageProps) {
         <InternalDocumentShell
           document={doc}
           canEdit={canEditInternalDocument}
+          role={role}
         />
       </div>
     </main>

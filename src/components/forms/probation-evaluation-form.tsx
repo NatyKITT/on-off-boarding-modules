@@ -1207,7 +1207,7 @@ export function ProbationEvaluationForm({
                   <div className="text-xs text-muted-foreground">
                     Rozpracované vyhodnocení můžete uložit a vrátit se k němu
                     později. Finální odeslání formulář uzavře a odešle PDF
-                    vyplněného formuláře na HR.
+                    vyplněného formuláře na Personální oddělení.
                   </div>
 
                   <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
@@ -1231,7 +1231,7 @@ export function ProbationEvaluationForm({
                       {isSubmitting && submittingMode === "final"
                         ? "Ukládám a odesílám…"
                         : mode === "public"
-                          ? "Uložit a odeslat na HR"
+                          ? "Uložit a odeslat"
                           : "Uložit jako finální vyhodnocení"}
                     </Button>
                   </div>

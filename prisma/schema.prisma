@@ -127,6 +127,7 @@ enum ExitChecklistEventAction {
   HANDOVER_RECIPIENT_INVITE_SENT
   PDF_DOWNLOADED
   EMAIL_FAILED
+  DEADLINE_REMINDER_SENT
 }
 
 enum UserAuditAction {

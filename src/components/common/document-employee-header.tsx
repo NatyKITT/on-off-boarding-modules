@@ -34,7 +34,7 @@ export function DocumentEmployeeHeader({
         <p>Vyplňujte údaje pravdivě a pouze za sebe.</p>
         <p>
           Pokud jméno nebo pozice u tohoto odkazu nesouhlasí s vámi, formulář
-          nevyplňujte a okamžitě kontaktujte personální oddělení.
+          nevyplňujte a okamžitě kontaktujte Personální oddělení.
         </p>
         <p>
           Odesláním vyplněného formuláře potvrzujete, že Úřad městské části

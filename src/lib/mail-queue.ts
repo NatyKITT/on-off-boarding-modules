@@ -6,6 +6,7 @@ import type {
 
 import { prisma } from "@/lib/db"
 import {
+  sendExitChecklistDueSoonReminderEmail,
   sendQueuedProbationEmail,
   type ProbationMailQueuePayload,
 } from "@/lib/email"
@@ -20,6 +21,7 @@ const PROBATION_MAIL_JOB_TYPES: MailJobType[] = [
   "PROBATION_EVALUATION_HR_MISSING_SUPERVISOR",
   "PROBATION_EVALUATION_HR_NOT_COMPLETED",
   "PROBATION_EVALUATION_UNLOCK_REMINDER",
+  "NOTICE_WARNING",
 ]
 
 function asPayload(value: unknown): QueuePayload {
@@ -104,6 +106,22 @@ function getProbationRequestId(payload: QueuePayload) {
   return asNumber(payload.requestId)
 }
 
+function toExitChecklistReminderPayload(payload: QueuePayload) {
+  return {
+    to: getRecipients(payload),
+    employeeName: asStr(payload.employeeName) ?? "",
+    employeePersonalNumber: asStr(payload.employeePersonalNumber),
+    employeePosition: asStr(payload.employeePosition),
+    employeeDepartment: asStr(payload.employeeDepartment),
+    employeeUnitName: asStr(payload.employeeUnitName),
+    employmentEndDate: asStr(payload.employmentEndDate),
+    daysBeforeEnd: asNumber(payload.daysBeforeEnd) ?? 0,
+    checklistLink: asStr(payload.checklistLink),
+    subject: asStr(payload.subject),
+    intro: asStr(payload.intro),
+  }
+}
+
 function getProbationEventAuthor(job: MailQueue, payload: QueuePayload) {
   return {
     by:
@@ -169,7 +187,7 @@ function getProbationSentMessage(type: string, payload: QueuePayload) {
   }
 
   if (type.includes("HR_NOT_COMPLETED")) {
-    return `HR připomínka, že vyhodnocení zkušební doby není vyplněné, byla odeslána z fronty.${recipientText}`
+    return `Připomínka pro Personální oddělení, že vyhodnocení zkušební doby není vyplněné, byla odeslána z fronty.${recipientText}`
   }
 
   if (type.includes("UNLOCK_REMINDER")) {
@@ -181,7 +199,7 @@ function getProbationSentMessage(type: string, payload: QueuePayload) {
   }
 
   if (type.includes("HR_INFO")) {
-    return `HR informace k vyhodnocení zkušební doby byla odeslána z fronty.${recipientText}`
+    return `Informace pro Personální oddělení k vyhodnocení zkušební doby byla odeslána z fronty.${recipientText}`
   }
 
   if (type.includes("COMPLETED")) {
@@ -298,6 +316,13 @@ async function failJob(job: MailQueue, error: unknown) {
 
 async function processJob(job: MailQueue) {
   const payload = asPayload(job.payload)
+
+  if (job.type === "NOTICE_WARNING") {
+    await sendExitChecklistDueSoonReminderEmail(
+      toExitChecklistReminderPayload(payload)
+    )
+    return
+  }
 
   await sendQueuedProbationEmail({
     type: job.type,

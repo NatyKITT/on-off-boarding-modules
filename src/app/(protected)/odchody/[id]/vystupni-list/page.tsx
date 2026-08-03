@@ -29,6 +29,8 @@ export default async function VystupniListPage({ params }: Props) {
       surname: true,
       titleBefore: true,
       titleAfter: true,
+      plannedEnd: true,
+      actualEnd: true,
     },
   })
 
@@ -44,10 +46,15 @@ export default async function VystupniListPage({ params }: Props) {
     .join(" ")
     .trim()
 
+  const employmentEndDate = (
+    offboarding.actualEnd ?? offboarding.plannedEnd
+  ).toISOString()
+
   return (
     <ExitChecklistPageClient
       offboardingId={offboardingId}
       employeeName={employeeName}
+      employmentEndDate={employmentEndDate}
     />
   )
 }

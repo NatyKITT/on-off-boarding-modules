@@ -7,12 +7,18 @@ const site_url = env.NEXT_PUBLIC_APP_URL
 export const siteConfig: SiteConfig = {
   name: "On/Off Boarding Module",
   description:
-    "Interní aplikace pro správu nástupů a odchodů zaměstnanců v rámci KITT6. Umožňuje efektivní spolupráci mezi HR, IT a vedením při onboardingu a offboardingu.",
+    "Interní aplikace pro správu nástupů a odchodů zaměstnanců v rámci KITT6. Umožňuje efektivní spolupráci mezi Personálním oddělením, IT a vedením při onboardingu a offboardingu.",
   url: site_url,
   ogImage: `${site_url}/assets/og.png`,
   author: "Tým KITT6",
   hostingRegion: "fra1",
-  keywords: ["onboarding", "offboarding", "HR", "firemní nástupy", "KITT6"],
+  keywords: [
+    "onboarding",
+    "offboarding",
+    "personální oddělení",
+    "firemní nástupy",
+    "KITT6",
+  ],
   mailSupport: "podpora@kitt6.cz",
 }
 

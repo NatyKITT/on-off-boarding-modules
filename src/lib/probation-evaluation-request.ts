@@ -357,7 +357,10 @@ export async function ensureProbationEvaluationRequest(
       return "COMPLETED"
     }
 
-    if (existing.tokenExpiresAt && existing.tokenExpiresAt.getTime() < Date.now()) {
+    if (
+      existing.tokenExpiresAt &&
+      existing.tokenExpiresAt.getTime() < Date.now()
+    ) {
       return "EXPIRED"
     }
 
@@ -401,7 +404,7 @@ export async function ensureProbationEvaluationRequest(
         action: "CANCELLED",
         by: args.decisionActorId ?? "system-link",
         byName: args.decisionActorName ?? "Automatické propojení s odchodem",
-        message: `Hodnocení zkušební doby bylo zastaveno – propojený odchod (ID ${linkedOffboarding?.id}) spadá do zkušební doby a HR potvrdila zastavení hodnocení.`,
+        message: `Hodnocení zkušební doby bylo zastaveno – propojený odchod (ID ${linkedOffboarding?.id}) spadá do zkušební doby a Personální oddělení potvrdilo zastavení hodnocení.`,
         meta: {
           linkedOffboardingId: linkedOffboarding?.id ?? null,
         },
@@ -515,7 +518,7 @@ export async function ensureProbationEvaluationRequest(
         action: "CANCELLED",
         by: args.decisionActorId ?? "system-link",
         byName: args.decisionActorName ?? "Automatické propojení s odchodem",
-        message: `Hodnocení zkušební doby bylo rovnou zastaveno – propojený odchod (ID ${linkedOffboarding?.id}) spadá do zkušební doby a HR potvrdila zastavení hodnocení.`,
+        message: `Hodnocení zkušební doby bylo rovnou zastaveno – propojený odchod (ID ${linkedOffboarding?.id}) spadá do zkušební doby a Personální oddělení potvrdilo zastavení hodnocení.`,
         meta: {
           linkedOffboardingId: linkedOffboarding?.id ?? null,
         },

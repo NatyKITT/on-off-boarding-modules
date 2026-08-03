@@ -26,6 +26,7 @@ import { useSession } from "next-auth/react"
 
 import { useDismissableHighlight } from "@/hooks/use-dismissable-highlight"
 import { useFacetedFilter } from "@/hooks/use-faceted-filter"
+import { useSessionStorageState } from "@/hooks/use-session-storage-state"
 import { useTextFilter } from "@/hooks/use-text-filter"
 import {
   EMPTY_DAY_RANGE,
@@ -39,6 +40,11 @@ import {
   buildDistinctOptions,
   filterAvailableOptions,
 } from "@/lib/filter-options"
+import {
+  canReadOffboarding as hasOffboardingReadAccess,
+  canWriteOffboarding as hasOffboardingWriteAccess,
+  isReadonlyRole,
+} from "@/lib/rbac"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -79,7 +85,7 @@ import {
 } from "@/components/common/multi-select-filter"
 import { RangeFacetFilter } from "@/components/common/range-facet-filter"
 import { SearchInput } from "@/components/common/search-input"
-import { MonthlyReportLauncher } from "@/components/emails/monthly-report-launcher"
+import { CombinedReportLauncher } from "@/components/emails/combined-report-launcher"
 import {
   FormValues,
   OffboardingFormUnified,
@@ -578,6 +584,7 @@ interface DepartureTableRowProps {
   variant: "planned" | "actual"
   canManage: boolean
   canOpenExitChecklist: boolean
+  isReadonly: boolean
   onEdit: () => void
   onConfirm?: () => void
   onRevert?: () => void
@@ -592,6 +599,7 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
   variant,
   canManage,
   canOpenExitChecklist,
+  isReadonly,
   onEdit,
   onConfirm,
   onDelete,
@@ -732,16 +740,6 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
             probationStopDecision={departure.probationStopDecision}
           />
 
-          <HistoryDialog
-            id={departure.id}
-            kind="offboarding"
-            trigger={
-              <Button size="sm" variant="outline" title="Historie změn">
-                <HistoryIcon className="size-4" />
-              </Button>
-            }
-          />
-
           {canOpenExitChecklist && (
             <Button
               size="sm"
@@ -755,17 +753,19 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
             </Button>
           )}
 
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onEdit}
-            title="Upravit záznam"
-          >
-            <Edit className="size-4" />
-            <span className="ml-1 hidden sm:inline">Upravit</span>
-          </Button>
+          {!isReadonly && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onEdit}
+              title="Upravit záznam"
+            >
+              <Edit className="size-4" />
+              <span className="ml-1 hidden sm:inline">Upravit</span>
+            </Button>
+          )}
 
-          {variant === "planned" && onConfirm ? (
+          {!isReadonly && variant === "planned" && onConfirm ? (
             <Button
               size="sm"
               variant="default"
@@ -777,7 +777,7 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
               <Check className="size-4" />
               <span className="ml-1 hidden sm:inline">Odešel</span>
             </Button>
-          ) : variant === "actual" && onRevert ? (
+          ) : !isReadonly && variant === "actual" && onRevert ? (
             <Button
               size="sm"
               variant="outline"
@@ -793,16 +793,28 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
             </Button>
           ) : null}
 
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onDelete}
-            disabled={!canManage}
-            title="Smazat záznam"
-            className="text-red-600 hover:bg-red-50 hover:text-red-700"
-          >
-            <Trash2 className="size-4" />
-          </Button>
+          <HistoryDialog
+            id={departure.id}
+            kind="offboarding"
+            trigger={
+              <Button size="sm" variant="outline" title="Historie změn">
+                <HistoryIcon className="size-4" />
+              </Button>
+            }
+          />
+
+          {!isReadonly && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onDelete}
+              disabled={!canManage}
+              title="Smazat záznam"
+              className="text-red-600 hover:bg-red-50 hover:text-red-700"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          )}
         </div>
       </TableCell>
     </TableRow>
@@ -849,12 +861,15 @@ export default function OffboardingPage() {
     loading: boolean
   }>({ open: false, departure: null, relatedChanges: [], loading: false })
 
-  const [expandedPlannedYears, setExpandedPlannedYears] = useState<string[]>([])
-  const [expandedPlannedMonths, setExpandedPlannedMonths] = useState<string[]>(
-    []
-  )
-  const [expandedActualYears, setExpandedActualYears] = useState<string[]>([])
-  const [expandedActualMonths, setExpandedActualMonths] = useState<string[]>([])
+  const [expandedPlannedYears, setExpandedPlannedYears] =
+    useSessionStorageState<string[]>("odchody:expandedPlannedYears", [])
+  const [expandedPlannedMonths, setExpandedPlannedMonths] =
+    useSessionStorageState<string[]>("odchody:expandedPlannedMonths", [])
+  const [expandedActualYears, setExpandedActualYears] = useSessionStorageState<
+    string[]
+  >("odchody:expandedActualYears", [])
+  const [expandedActualMonths, setExpandedActualMonths] =
+    useSessionStorageState<string[]>("odchody:expandedActualMonths", [])
 
   const [successModal, setSuccessModal] = useState({
     open: false,
@@ -885,10 +900,9 @@ export default function OffboardingPage() {
   const currentMonth = format(new Date(), "yyyy-MM")
 
   const role = session?.user?.role ?? "USER"
-  const canManageOffboarding =
-    role === "ADMIN" || role === "HR" || role === "IT"
-  const canReadOffboarding =
-    role === "ADMIN" || role === "HR" || role === "IT" || role === "READONLY"
+  const canManageOffboarding = hasOffboardingWriteAccess(role)
+  const canReadOffboarding = hasOffboardingReadAccess(role)
+  const isReadonly = isReadonlyRole(role)
 
   const showSuccess = React.useCallback((title: string, message: string) => {
     setSuccessModal({ open: true, title, message })
@@ -906,7 +920,10 @@ export default function OffboardingPage() {
     [planned, actual]
   )
 
-  const [departureDateFilter, setDepartureDateFilter] = useState("")
+  const [departureDateFilter, setDepartureDateFilter] = useSessionStorageState(
+    "odchody:dateFilter",
+    ""
+  )
   const [departurePresets, setDeparturePresets] = useState<string[]>([])
   const [departureDayRange, setDepartureDayRange] =
     useState<DayRangeValue>(EMPTY_DAY_RANGE)
@@ -1029,7 +1046,9 @@ export default function OffboardingPage() {
     query: searchQuery,
     setQuery: setSearchQuery,
     filterRows,
-  } = useTextFilter(getDepartureSearchableText)
+  } = useTextFilter(getDepartureSearchableText, {
+    persistKey: "odchody:searchQuery",
+  })
 
   const dateFilteredDepartures = useMemo(() => {
     const hasProgressFilter =
@@ -1086,7 +1105,8 @@ export default function OffboardingPage() {
     availableValues,
   } = useFacetedFilter<Departure, DepartureFacetKey>(
     searchedDepartures,
-    departureFacets
+    departureFacets,
+    { persistKey: "odchody:facetFilters" }
   )
 
   const handleStatusFilterChange = React.useCallback(
@@ -1207,7 +1227,17 @@ export default function OffboardingPage() {
     [filteredActual]
   )
 
+  const plannedExpandInitRef = React.useRef(false)
+  const actualExpandInitRef = React.useRef(false)
+
   useEffect(() => {
+    if (!plannedExpandInitRef.current) {
+      plannedExpandInitRef.current = true
+      if (expandedPlannedYears.length > 0 || expandedPlannedMonths.length > 0) {
+        return
+      }
+    }
+
     if (isAnyFilterActive) {
       const { years, months } = getAllYearsAndMonths(plannedGrouped)
       setExpandedPlannedYears(years)
@@ -1218,9 +1248,23 @@ export default function OffboardingPage() {
     const { year, month } = getLatestYearAndMonth(filteredPlanned, "plannedEnd")
     setExpandedPlannedYears(year ? [year] : [])
     setExpandedPlannedMonths(month ? [month] : [])
-  }, [filteredPlanned, plannedGrouped, isAnyFilterActive])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    filteredPlanned,
+    plannedGrouped,
+    isAnyFilterActive,
+    setExpandedPlannedYears,
+    setExpandedPlannedMonths,
+  ])
 
   useEffect(() => {
+    if (!actualExpandInitRef.current) {
+      actualExpandInitRef.current = true
+      if (expandedActualYears.length > 0 || expandedActualMonths.length > 0) {
+        return
+      }
+    }
+
     if (isAnyFilterActive) {
       const { years, months } = getAllYearsAndMonths(actualGrouped)
       setExpandedActualYears(years)
@@ -1231,7 +1275,14 @@ export default function OffboardingPage() {
     const { year, month } = getLatestYearAndMonth(filteredActual, "actualEnd")
     setExpandedActualYears(year ? [year] : [])
     setExpandedActualMonths(month ? [month] : [])
-  }, [filteredActual, actualGrouped, isAnyFilterActive])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    filteredActual,
+    actualGrouped,
+    isAnyFilterActive,
+    setExpandedActualYears,
+    setExpandedActualMonths,
+  ])
 
   const appliedHighlightRef = React.useRef<string | null>(null)
   const previousHighlightIdRef = React.useRef<string | null>(null)
@@ -1263,6 +1314,10 @@ export default function OffboardingPage() {
     highlightedDepartureVariant,
     planned,
     actual,
+    setExpandedPlannedYears,
+    setExpandedPlannedMonths,
+    setExpandedActualYears,
+    setExpandedActualMonths,
   ])
 
   useEffect(() => {
@@ -1307,7 +1362,14 @@ export default function OffboardingPage() {
         setExpandedActualMonths(months)
       }
     },
-    [planned, actual]
+    [
+      planned,
+      actual,
+      setExpandedPlannedYears,
+      setExpandedPlannedMonths,
+      setExpandedActualYears,
+      setExpandedActualMonths,
+    ]
   )
 
   useEffect(() => {
@@ -1339,6 +1401,7 @@ export default function OffboardingPage() {
     expandVariant,
     clearAllFacetFilters,
     setSearchQuery,
+    setDepartureDateFilter,
   ])
 
   useEffect(() => {
@@ -1611,7 +1674,7 @@ export default function OffboardingPage() {
   const plannedSectionContent = (
     <>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        {canReadOffboarding ? (
+        {canManageOffboarding ? (
           <Dialog open={openNewPlanned} onOpenChange={setOpenNewPlanned}>
             <DialogTrigger asChild>
               <Button className="w-full justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] sm:w-auto">
@@ -1643,7 +1706,7 @@ export default function OffboardingPage() {
           <div />
         )}
 
-        {canReadOffboarding && (
+        {canManageOffboarding && (
           <div className="w-full sm:w-auto [&_button]:w-full sm:[&_button]:w-auto">
             <DeletedRecordsDialog
               kind="offboarding"
@@ -1669,7 +1732,7 @@ export default function OffboardingPage() {
               Žádné plánované odchody
             </p>
             <p className="text-sm text-muted-foreground">
-              {canReadOffboarding
+              {canManageOffboarding
                 ? "Přidejte první záznam pomocí tlačítka výše"
                 : "Momentálně zde nejsou žádné záznamy"}
             </p>
@@ -1803,6 +1866,7 @@ export default function OffboardingPage() {
                                               canOpenExitChecklist={
                                                 canReadOffboarding
                                               }
+                                              isReadonly={isReadonly}
                                               onEdit={() =>
                                                 void openEditDialog(
                                                   e,
@@ -1849,9 +1913,10 @@ export default function OffboardingPage() {
 
       {canManageOffboarding && (
         <div className="mt-2 flex justify-end">
-          <MonthlyReportLauncher
-            initialType="odchody"
-            kind="planned"
+          <CombinedReportLauncher
+            defaultAudience="ONBOARDING_GROUP"
+            defaultKind="planned"
+            context="odchody"
             defaultMonth={currentMonth}
           />
         </div>
@@ -1862,7 +1927,7 @@ export default function OffboardingPage() {
   const actualSectionContent = (
     <>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        {canReadOffboarding ? (
+        {canManageOffboarding ? (
           <Dialog open={openNewActual} onOpenChange={setOpenNewActual}>
             <DialogTrigger asChild>
               <Button className="w-full justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] sm:w-auto">
@@ -1892,7 +1957,7 @@ export default function OffboardingPage() {
           <div />
         )}
 
-        {canReadOffboarding && (
+        {canManageOffboarding && (
           <div className="w-full sm:w-auto [&_button]:w-full sm:[&_button]:w-auto">
             <DeletedRecordsDialog
               kind="offboarding"
@@ -1918,7 +1983,7 @@ export default function OffboardingPage() {
               Žádné skutečné odchody
             </p>
             <p className="text-sm text-muted-foreground">
-              {canReadOffboarding
+              {canManageOffboarding
                 ? "Přidejte první záznam pomocí tlačítka výše"
                 : "Momentálně zde nejsou žádné záznamy"}
             </p>
@@ -2052,6 +2117,7 @@ export default function OffboardingPage() {
                                               canOpenExitChecklist={
                                                 canReadOffboarding
                                               }
+                                              isReadonly={isReadonly}
                                               onEdit={() =>
                                                 void openEditDialog(e, "actual")
                                               }
@@ -2099,9 +2165,10 @@ export default function OffboardingPage() {
 
       {canManageOffboarding && (
         <div className="mt-2 flex justify-end">
-          <MonthlyReportLauncher
-            initialType="odchody"
-            kind="actual"
+          <CombinedReportLauncher
+            defaultAudience="ALL_EMPLOYEES"
+            defaultKind="actual"
+            context="odchody"
             defaultMonth={currentMonth}
           />
         </div>

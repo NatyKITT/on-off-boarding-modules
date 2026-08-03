@@ -317,7 +317,7 @@ export default function OnboardingDetailPage({ params }: PageProps) {
             </p>
           )}
           <p>
-            <strong>Poznámka HR:</strong> {data.notes ?? "–"}
+            <strong>Poznámka Personálního oddělení:</strong> {data.notes ?? "–"}
           </p>
         </div>
       </div>
@@ -375,8 +375,8 @@ export default function OnboardingDetailPage({ params }: PageProps) {
                     {data.linkedOffboarding.probationStopDecision === "STOP"
                       ? "Pozastavena"
                       : data.linkedOffboarding.probationStopDecision === "KEEP"
-                        ? "Pokračuje (HR potvrdila nezastavovat)"
-                        : "Čeká na rozhodnutí HR"}
+                        ? "Pokračuje (Personální oddělení potvrdilo nezastavovat)"
+                        : "Čeká na rozhodnutí Personálního oddělení"}
                   </div>
 
                   {data.linkedOffboarding.probationStopDecisionBy && (

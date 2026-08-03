@@ -191,6 +191,14 @@ function normalizePositionsResponse(api: unknown): Position[] {
           : typeof item.supervisor_email === "string"
             ? item.supervisor_email
             : "",
+      personName:
+        typeof item.personName === "string" ? item.personName : undefined,
+      personPersonalNumber:
+        typeof item.personPersonalNumber === "string"
+          ? item.personPersonalNumber
+          : undefined,
+      personGid:
+        typeof item.personGid === "string" ? item.personGid : undefined,
     })
   }
 
@@ -1216,6 +1224,11 @@ export function OnboardingFormUnified({
     [fallbackPositions, positions]
   )
 
+  const selectedPositionOccupant = useMemo(
+    () => activePositions.find((p) => p.num === watchPositionNum) ?? null,
+    [activePositions, watchPositionNum]
+  )
+
   const loadFallbackPositions = useCallback(async () => {
     if (positions.length > 0 || fallbackPositions.length > 0) return
 
@@ -2201,6 +2214,13 @@ export function OnboardingFormUnified({
                       <FormDescription>
                         Vyhledejte pozici podle čísla nebo názvu.
                       </FormDescription>
+                      {selectedPositionOccupant && (
+                        <p className="text-xs text-muted-foreground">
+                          {selectedPositionOccupant.personPersonalNumber
+                            ? `Obsazeno: ${selectedPositionOccupant.personName ?? "—"} (osobní číslo ${selectedPositionOccupant.personPersonalNumber})`
+                            : "Neobsazená pracovní pozice."}
+                        </p>
+                      )}
                       <FormMessage />
                     </FormItem>
                   )}
@@ -2667,7 +2687,7 @@ export function OnboardingFormUnified({
                       <FormControl>
                         <Input
                           {...field}
-                          placeholder="Doplní HR"
+                          placeholder="Doplní Personální oddělení"
                           className={`${focusRing} leading-normal`}
                         />
                       </FormControl>

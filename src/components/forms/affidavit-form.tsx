@@ -222,7 +222,7 @@ export function AffidavitForm(props: AffidavitFormProps) {
         const message =
           error instanceof Error
             ? error.message
-            : "Dokument se nepodařilo uložit. Zkuste to prosím znovu nebo kontaktujte HR."
+            : "Dokument se nepodařilo uložit. Zkuste to prosím znovu nebo kontaktujte Personální oddělení."
         setStatus("filling")
         setErrorMessage(message)
         setResultModal("error")
@@ -256,7 +256,7 @@ export function AffidavitForm(props: AffidavitFormProps) {
             </DialogTitle>
             <DialogDescription>
               {errorMessage ??
-                "Dokument se nepodařilo uložit. Zkuste to prosím znovu nebo kontaktujte své HR oddělení."}
+                "Dokument se nepodařilo uložit. Zkuste to prosím znovu nebo kontaktujte své Personální oddělení."}
             </DialogDescription>
           </DialogHeader>
         </DialogContent>
@@ -284,8 +284,8 @@ export function AffidavitForm(props: AffidavitFormProps) {
             dovolujeme si Vás požádat o vyplnění následujícich údajů pro účely
             zpracování personální a mzdové agendy. Vaše údaje budou k dispozici
             pouze tajemníkovi úřadu, zaměstnancům personálního oddělení, mzdové
-            účtárně a HR specialistce. Data jsou přenášena šifrovaná a uložena
-            na zabezpečeném úložišti.
+            účtárně a personalistce. Data jsou přenášena šifrovaná a uložena na
+            zabezpečeném úložišti.
           </p>
           <p>Dotazník Vám zabere maximálně 30 minut.</p>
           <p>Děkujeme a těšíme se na spolupráci.</p>

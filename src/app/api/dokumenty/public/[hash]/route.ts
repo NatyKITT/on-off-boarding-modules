@@ -127,7 +127,10 @@ export async function PATCH(
 
   if (document.isLocked) {
     return NextResponse.json(
-      { message: "Dokument je uzamčen pro úpravy. Kontaktujte prosím HR." },
+      {
+        message:
+          "Dokument je uzamčen pro úpravy. Kontaktujte prosím Personální oddělení.",
+      },
       { status: 423 }
     )
   }

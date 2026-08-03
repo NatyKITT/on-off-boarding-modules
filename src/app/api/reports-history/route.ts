@@ -14,6 +14,7 @@ const SCOPE_TO_EMAIL_TYPES: Record<string, MailJobType[]> = {
   monthly: ["MONTHLY_SUMMARY"],
   changes: ["EMPLOYEE_CHANGE_SUMMARY"],
   statistics: ["STATISTICS_REPORT"],
+  combined: ["MONTHLY_SUMMARY", "EMPLOYEE_CHANGE_SUMMARY"],
 }
 
 const ALL_REPORT_EMAIL_TYPES: MailJobType[] = [

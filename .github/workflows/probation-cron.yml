@@ -2,9 +2,11 @@ name: Probation Check
 
 on:
   schedule:
-    # GitHub Actions cron runs in UTC.
-    # 7 6 * * * = every day at 06:07 UTC.
-    - cron: "7 6 * * *"
+    # GitHub Actions cron runs in UTC and can't express a timezone, so we
+    # fire at both UTC offsets that correspond to 8:00 in Prague (06:00 UTC
+    # in CEST/summer, 07:00 UTC in CET/winter). The route itself checks the
+    # actual local time and no-ops the run that doesn't land on 8:00.
+    - cron: "0 6,7 * * *"
   workflow_dispatch:
 
 jobs:

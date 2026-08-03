@@ -88,7 +88,42 @@ function resolveRoleForUser(params: {
   return getDefaultRoleForEmail(params.email)
 }
 
-async function syncUserAccess(userId: string, email: string) {
+function splitProfileName(profile: unknown): {
+  name: string | null
+  surname: string | null
+} {
+  const googleProfile = profile as
+    | {
+        given_name?: string | null
+        family_name?: string | null
+        name?: string | null
+      }
+    | undefined
+
+  const givenName = googleProfile?.given_name?.trim()
+  const familyName = googleProfile?.family_name?.trim()
+
+  if (givenName || familyName) {
+    return { name: givenName || null, surname: familyName || null }
+  }
+
+  const fullName = googleProfile?.name?.trim()
+  if (!fullName) return { name: null, surname: null }
+
+  const parts = fullName.split(/\s+/)
+  if (parts.length === 1) return { name: parts[0], surname: null }
+
+  return {
+    name: parts.slice(0, -1).join(" "),
+    surname: parts[parts.length - 1],
+  }
+}
+
+async function syncUserAccess(
+  userId: string,
+  email: string,
+  profile?: unknown
+) {
   const normalizedEmail = email.toLowerCase()
 
   const dbUser = await prisma.user.findUnique({
@@ -113,18 +148,35 @@ async function syncUserAccess(userId: string, email: string) {
 
   const nextCanAccessApp = isInternalRole(nextRole)
 
-  if (dbUser.role !== nextRole || dbUser.canAccessApp !== nextCanAccessApp) {
+  const roleChanged =
+    dbUser.role !== nextRole || dbUser.canAccessApp !== nextCanAccessApp
+
+  let nextName = dbUser.name
+  let nextSurname = dbUser.surname
+
+  if (!dbUser.name && !dbUser.surname && profile) {
+    const parsed = splitProfileName(profile)
+    nextName = parsed.name
+    nextSurname = parsed.surname
+  }
+
+  const nameChanged = nextName !== dbUser.name || nextSurname !== dbUser.surname
+
+  if (roleChanged || nameChanged) {
     await prisma.user.update({
       where: { id: userId },
       data: {
         role: nextRole,
         canAccessApp: nextCanAccessApp,
+        ...(nameChanged ? { name: nextName, surname: nextSurname } : {}),
       },
     })
   }
 
   return {
     ...dbUser,
+    name: nextName,
+    surname: nextSurname,
     role: nextRole,
     canAccessApp: nextCanAccessApp,
   }
@@ -156,14 +208,14 @@ export const authConfig = {
   ],
 
   events: {
-    async signIn({ user }) {
+    async signIn({ user, profile }) {
       try {
         const userId = user.id ? String(user.id) : null
         const email = user.email?.toLowerCase() ?? null
 
         if (!userId || !email) return
 
-        await syncUserAccess(userId, email)
+        await syncUserAccess(userId, email, profile)
       } catch (error) {
         console.warn("[auth signIn syncUserAccess] Non-fatal error:", error)
       }
@@ -231,15 +283,25 @@ export const authConfig = {
       }
 
       if (userId && token.email) {
-        const dbUser = await syncUserAccess(userId, String(token.email))
+        try {
+          const dbUser = await syncUserAccess(
+            userId,
+            String(token.email),
+            profile
+          )
 
-        if (dbUser) {
-          token.role = dbUser.role
-          token.canAccessApp = dbUser.canAccessApp
+          if (dbUser) {
+            token.role = dbUser.role
+            token.canAccessApp = dbUser.canAccessApp
 
-          if (!token.name && (dbUser.name || dbUser.surname)) {
-            token.name = [dbUser.name, dbUser.surname].filter(Boolean).join(" ")
+            if (!token.name && (dbUser.name || dbUser.surname)) {
+              token.name = [dbUser.name, dbUser.surname]
+                .filter(Boolean)
+                .join(" ")
+            }
           }
+        } catch (error) {
+          console.warn("[auth jwt syncUserAccess] Non-fatal error:", error)
         }
       }
 

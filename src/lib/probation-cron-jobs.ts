@@ -556,7 +556,7 @@ async function queueDeadlineReminders(args: {
         by: "system-cron",
         byName: "Systémový cron",
         mailQueueId: hrReminderJob.id,
-        message: `HR připomínka ${label}, že vyhodnocení zkušební doby není finálně podepsané/dokončené, byla zařazena do fronty.`,
+        message: `Připomínka pro Personální oddělení ${label}, že vyhodnocení zkušební doby není finálně podepsané/dokončené, byla zařazena do fronty.`,
         meta: {
           reminderKind,
           reminderAudience: "HR",
@@ -946,7 +946,7 @@ export async function ensureProbationCronJobs(req: NextRequest) {
             byName: "Systémový cron",
             mailQueueId: hrInfoJob.id,
             message:
-              "HR informace o zahájení vyhodnocení zkušební doby 14 dní před koncem byla zařazena do fronty.",
+              "Informace pro Personální oddělení o zahájení vyhodnocení zkušební doby 14 dní před koncem byla zařazena do fronty.",
             meta: {
               reminderKind: INVITE_REMINDER_KIND,
               reminderAudience: "HR_INFO",

@@ -2,7 +2,11 @@
 
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import type { DocumentStatus, EmploymentDocumentType } from "@prisma/client"
+import type {
+  DocumentStatus,
+  EmploymentDocumentType,
+  Role,
+} from "@prisma/client"
 import { AlertCircle, CheckCircle, Lock, Pencil } from "lucide-react"
 
 import { buildEmployeeMeta } from "@/lib/employee-meta"
@@ -15,6 +19,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { PermissionAlert } from "@/components/common/permission-alert"
 import { AffidavitForm } from "@/components/forms/affidavit-form"
 import { PayrollInfoForm } from "@/components/forms/payroll-info-form"
 import { PersonalQuestionnaireForm } from "@/components/forms/personal-questionnaire-form"
@@ -54,6 +59,7 @@ type FieldChange = {
 type Props = {
   document: InternalDocument
   canEdit: boolean
+  role?: Role | null
 }
 
 function docTypeLabel(type: EmploymentDocumentType) {
@@ -96,7 +102,7 @@ function wasEditedAfterCompletion(
   return edited - completed > 60_000
 }
 
-export function InternalDocumentShell({ document, canEdit }: Props) {
+export function InternalDocumentShell({ document, canEdit, role }: Props) {
   const [doc, setDoc] = useState(document)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -416,11 +422,10 @@ export function InternalDocumentShell({ document, canEdit }: Props) {
         )}
 
         {!doc.isLocked && !canEdit && (
-          <div className="flex items-center justify-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
-            <Lock className="size-3" />
-            Nemáte oprávnění dokument upravovat. Dokument je zobrazen pouze pro
-            čtení.
-          </div>
+          <PermissionAlert
+            role={role}
+            message="Nemáte oprávnění dokument upravovat. Dokument je zobrazen pouze pro čtení."
+          />
         )}
 
         {error && (

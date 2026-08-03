@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { Loader2 } from "lucide-react"
 
+import { useSessionStorageState } from "@/hooks/use-session-storage-state"
 import type {
   StatDimension,
   StatisticsFilterOptions,
@@ -63,9 +64,18 @@ type OverviewResponse = StatisticsOverview & {
 
 export function StatistikyClient() {
   const currentYear = new Date().getFullYear()
-  const [years, setYears] = useState<number[]>([currentYear])
-  const [fromMonth, setFromMonth] = useState<number | "all">("all")
-  const [toMonth, setToMonth] = useState<number | "all">("all")
+  const [years, setYears] = useSessionStorageState<number[]>(
+    "statistiky:years",
+    [currentYear]
+  )
+  const [fromMonth, setFromMonth] = useSessionStorageState<number | "all">(
+    "statistiky:fromMonth",
+    "all"
+  )
+  const [toMonth, setToMonth] = useSessionStorageState<number | "all">(
+    "statistiky:toMonth",
+    "all"
+  )
 
   const [overviewsByYear, setOverviewsByYear] = useState<
     Record<number, OverviewResponse>

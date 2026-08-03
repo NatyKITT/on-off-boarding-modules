@@ -1244,7 +1244,7 @@ export async function saveProbationEvaluation(args: {
     return {
       ok: false as const,
       response: jsonError(
-        "Formulář už byl finálně vyplněn. Pro nové vyplnění kontaktujte personální oddělení.",
+        "Formulář už byl finálně vyplněn. Pro nové vyplnění kontaktujte Personální oddělení.",
         409
       ),
     }
@@ -1561,7 +1561,7 @@ export async function buildEarlyExitNote(params: {
       mostRelevant?.probationStopDecisionBy
     )
 
-    return `${baseInfo} HR rozhodla hodnocení zkušební doby nezastavovat${
+    return `${baseInfo} Personální oddělení rozhodlo hodnocení zkušební doby nezastavovat${
       decidedByName ? ` (rozhodl(a): ${decidedByName})` : ""
     } – formulář zůstává v platnosti.`
   }
@@ -1593,8 +1593,8 @@ export async function sendCompletedProbationPdfToHr(args: {
         }),
         byEmail: args.user.email ?? null,
         message: isRevision
-          ? "Formulář byl upraven, ale HR e-mail nebyl odeslán, protože nejsou nastavení HR příjemci."
-          : "Formulář byl finálně vyplněn, ale HR e-mail nebyl odeslán, protože nejsou nastavení HR příjemci.",
+          ? "Formulář byl upraven, ale e-mail pro Personální oddělení nebyl odeslán, protože nejsou nastavení příjemci."
+          : "Formulář byl finálně vyplněn, ale e-mail pro Personální oddělení nebyl odeslán, protože nejsou nastavení příjemci.",
         meta: {
           reason: "missing_hr_recipients",
           mode,
@@ -1674,8 +1674,8 @@ export async function sendCompletedProbationPdfToHr(args: {
         }),
         byEmail: args.user.email ?? null,
         message: isRevision
-          ? "HR bylo odesláno upravené vyhodnocení zkušební doby včetně nové PDF přílohy."
-          : "HR bylo odesláno finální vyhodnocení zkušební doby včetně PDF přílohy.",
+          ? "Personálnímu oddělení bylo odesláno upravené vyhodnocení zkušební doby včetně nové PDF přílohy."
+          : "Personálnímu oddělení bylo odesláno finální vyhodnocení zkušební doby včetně PDF přílohy.",
         meta: {
           recipients: hrRecipients,
           employeeName,
@@ -1699,8 +1699,8 @@ export async function sendCompletedProbationPdfToHr(args: {
         }),
         byEmail: args.user.email ?? null,
         message: isRevision
-          ? "Formulář byl upraven, ale HR e-mail s PDF se nepodařilo odeslat."
-          : "Formulář byl finálně vyplněn, ale HR e-mail s PDF se nepodařilo odeslat.",
+          ? "Formulář byl upraven, ale e-mail s PDF pro Personální oddělení se nepodařilo odeslat."
+          : "Formulář byl finálně vyplněn, ale e-mail s PDF pro Personální oddělení se nepodařilo odeslat.",
         meta: {
           recipients: hrRecipients,
           mode,

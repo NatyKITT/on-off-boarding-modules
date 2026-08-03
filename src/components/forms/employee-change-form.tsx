@@ -19,8 +19,8 @@ import { useForm, useWatch } from "react-hook-form"
 import { z } from "zod"
 
 import { type Position } from "@/types/position"
-import { useIsReadonly } from "@/hooks/use-current-role"
 
+import { useIsReadonly } from "@/hooks/use-current-role"
 import { cn } from "@/lib/utils"
 
 import { Badge } from "@/components/ui/badge"
@@ -289,93 +289,103 @@ function PositionCombobox({
   }, [positions, query])
 
   return (
-    <Popover
-      modal={false}
-      open={open}
-      onOpenChange={(nextOpen) => {
-        setOpen(nextOpen)
-        if (!nextOpen) setQuery("")
-      }}
-    >
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          className={cn(
-            "h-auto min-h-10 w-full justify-between whitespace-normal text-left",
-            focusRing
-          )}
-        >
-          <span className="line-clamp-2">
-            {selected ? positionLabel(selected) : placeholder}
-          </span>
-          <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-
-      <PopoverContent
-        className="w-[--radix-popover-trigger-width] p-0"
-        align="start"
-        sideOffset={4}
-        onOpenAutoFocus={(event) => event.preventDefault()}
-        onCloseAutoFocus={(event) => event.preventDefault()}
-        onWheelCapture={(event) => event.stopPropagation()}
+    <div className="space-y-1">
+      <Popover
+        modal={false}
+        open={open}
+        onOpenChange={(nextOpen) => {
+          setOpen(nextOpen)
+          if (!nextOpen) setQuery("")
+        }}
       >
-        <Command shouldFilter={false}>
-          <CommandInput
-            value={query}
-            onValueChange={setQuery}
-            placeholder="Hledat číslo, pozici nebo odbor…"
-            className={focusRing}
-          />
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            role="combobox"
+            aria-expanded={open}
+            className={cn(
+              "h-auto min-h-10 w-full justify-between whitespace-normal text-left",
+              focusRing
+            )}
+          >
+            <span className="line-clamp-2">
+              {selected ? positionLabel(selected) : placeholder}
+            </span>
+            <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
 
-          <CommandEmpty>Žádná pozice nenalezena.</CommandEmpty>
+        <PopoverContent
+          className="w-[--radix-popover-trigger-width] p-0"
+          align="start"
+          sideOffset={4}
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          onCloseAutoFocus={(event) => event.preventDefault()}
+          onWheelCapture={(event) => event.stopPropagation()}
+        >
+          <Command shouldFilter={false}>
+            <CommandInput
+              value={query}
+              onValueChange={setQuery}
+              placeholder="Hledat číslo, pozici nebo odbor…"
+              className={focusRing}
+            />
 
-          <CommandList className="max-h-80 overflow-y-auto overscroll-contain">
-            <CommandGroup>
-              {filtered.map((position) => (
-                <CommandItem
-                  key={position.num}
-                  value={position.num}
-                  onSelect={() => {
-                    onSelect(position)
-                    setOpen(false)
-                    setQuery("")
-                  }}
-                  className="flex cursor-pointer items-start gap-3 py-3"
-                >
-                  <Check
-                    className={cn(
-                      "mt-0.5 size-4 shrink-0",
-                      value === position.num ? "opacity-100" : "opacity-0"
-                    )}
-                  />
+            <CommandEmpty>Žádná pozice nenalezena.</CommandEmpty>
 
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
-                        {position.num}
-                      </span>
-                      <span className="truncate text-sm font-medium">
-                        {position.name}
-                      </span>
+            <CommandList className="max-h-80 overflow-y-auto overscroll-contain">
+              <CommandGroup>
+                {filtered.map((position) => (
+                  <CommandItem
+                    key={position.num}
+                    value={position.num}
+                    onSelect={() => {
+                      onSelect(position)
+                      setOpen(false)
+                      setQuery("")
+                    }}
+                    className="flex cursor-pointer items-start gap-3 py-3"
+                  >
+                    <Check
+                      className={cn(
+                        "mt-0.5 size-4 shrink-0",
+                        value === position.num ? "opacity-100" : "opacity-0"
+                      )}
+                    />
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
+                          {position.num}
+                        </span>
+                        <span className="truncate text-sm font-medium">
+                          {position.name}
+                        </span>
+                      </div>
+
+                      <div className="mt-1 truncate text-xs text-muted-foreground">
+                        {[position.dept_name, position.unit_name]
+                          .filter(Boolean)
+                          .join(" • ")}
+                      </div>
                     </div>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
 
-                    <div className="mt-1 truncate text-xs text-muted-foreground">
-                      {[position.dept_name, position.unit_name]
-                        .filter(Boolean)
-                        .join(" • ")}
-                    </div>
-                  </div>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+      {selected && (
+        <p className="text-xs text-muted-foreground">
+          {selected.personPersonalNumber
+            ? `Obsazeno: ${selected.personName ?? "—"} (osobní číslo ${selected.personPersonalNumber})`
+            : "Neobsazená pracovní pozice."}
+        </p>
+      )}
+    </div>
   )
 }
 
@@ -1215,7 +1225,7 @@ export function EmployeeChangeForm({
                       <Textarea
                         {...field}
                         rows={4}
-                        placeholder="Doplňující informace pro HR nebo pro e-mail…"
+                        placeholder="Doplňující informace pro Personální oddělení nebo pro e-mail…"
                         className={focusRing}
                       />
                     </FormControl>

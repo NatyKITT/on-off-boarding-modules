@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation"
 import { format } from "date-fns"
 import { CheckCircle, XCircle } from "lucide-react"
 
+import { useIsReadonly } from "@/hooks/use-current-role"
+
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
@@ -97,6 +99,7 @@ const ErrorModal: React.FC<ErrorModalProps> = ({
 
 export default function OffboardingEditPage({ params }: PageProps) {
   const router = useRouter()
+  const isReadonly = useIsReadonly()
 
   const [loading, setLoading] = React.useState(true)
   const [row, setRow] = React.useState<OffRow | null>(null)
@@ -125,6 +128,12 @@ export default function OffboardingEditPage({ params }: PageProps) {
   }
 
   React.useEffect(() => {
+    if (isReadonly) router.replace("/no-access")
+  }, [isReadonly, router])
+
+  React.useEffect(() => {
+    if (isReadonly) return
+
     let cancelled = false
 
     ;(async () => {
@@ -159,7 +168,9 @@ export default function OffboardingEditPage({ params }: PageProps) {
     return () => {
       cancelled = true
     }
-  }, [params.id, router])
+  }, [params.id, router, isReadonly])
+
+  if (isReadonly) return null
 
   return (
     <div className="mx-auto w-full max-w-5xl p-4">

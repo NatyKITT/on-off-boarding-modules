@@ -173,7 +173,8 @@ export async function POST(
   }
 
   const signUrl = `${getAppBaseUrl(req)}/odchody-public/${checklist.publicToken}`
-  const sentByName = session.user.name ?? session.user.email ?? "HR oddělení"
+  const sentByName =
+    session.user.name ?? session.user.email ?? "Personální oddělení"
 
   try {
     if (isBehalf) {

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 
 import { type Position } from "@/types/position"
 
+import { useIsReadonly } from "@/hooks/use-current-role"
 import { useToast } from "@/hooks/use-toast"
 
 import { Button } from "@/components/ui/button"
@@ -21,6 +22,9 @@ type RawPosition = {
   supervisorEmail?: unknown
   supervisor_name?: unknown
   supervisor_email?: unknown
+  personName?: unknown
+  personPersonalNumber?: unknown
+  personGid?: unknown
 }
 
 function normalizePositions(payload: unknown): Position[] {
@@ -56,6 +60,14 @@ function normalizePositions(payload: unknown): Position[] {
           : typeof value.supervisor_email === "string"
             ? value.supervisor_email
             : "",
+      personName:
+        typeof value.personName === "string" ? value.personName : undefined,
+      personPersonalNumber:
+        typeof value.personPersonalNumber === "string"
+          ? value.personPersonalNumber
+          : undefined,
+      personGid:
+        typeof value.personGid === "string" ? value.personGid : undefined,
     }
   })
 
@@ -86,6 +98,7 @@ interface PageProps {
 export default function EmployeeChangeEditPage({ params }: PageProps) {
   const router = useRouter()
   const { toast } = useToast()
+  const isReadonly = useIsReadonly()
 
   const [loading, setLoading] = React.useState(true)
   const [loadingPositions, setLoadingPositions] = React.useState(false)
@@ -96,6 +109,11 @@ export default function EmployeeChangeEditPage({ params }: PageProps) {
   const isValidId = Number.isFinite(numericId)
 
   React.useEffect(() => {
+    if (isReadonly) router.replace("/no-access")
+  }, [isReadonly, router])
+
+  React.useEffect(() => {
+    if (isReadonly) return
     if (!isValidId) {
       toast({
         title: "Neplatné ID",
@@ -167,7 +185,9 @@ export default function EmployeeChangeEditPage({ params }: PageProps) {
     return () => {
       cancelled = true
     }
-  }, [isValidId, numericId, router, toast])
+  }, [isValidId, numericId, router, toast, isReadonly])
+
+  if (isReadonly) return null
 
   return (
     <div className="mx-auto w-full max-w-5xl p-4">

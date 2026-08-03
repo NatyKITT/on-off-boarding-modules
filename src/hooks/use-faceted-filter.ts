@@ -1,5 +1,7 @@
 import * as React from "react"
 
+import { useSessionStorageState } from "@/hooks/use-session-storage-state"
+
 export type FacetValueGetter<T> = (row: T) => Array<string | null | undefined>
 
 function normalizeValues(values: Array<string | null | undefined>): string[] {
@@ -31,30 +33,36 @@ function normalizeValues(values: Array<string | null | undefined>): string[] {
  */
 export function useFacetedFilter<T, K extends string>(
   rows: T[],
-  facets: Record<K, FacetValueGetter<T>>
+  facets: Record<K, FacetValueGetter<T>>,
+  options?: { persistKey?: string }
 ) {
   const facetKeys = Object.keys(facets) as K[]
   const facetKeysSignature = facetKeys.join("|")
 
   const emptyFilters = React.useMemo(
     () =>
-      Object.fromEntries(facetKeys.map((key) => [key, [] as string[]])) as Record<
-        K,
-        string[]
-      >,
+      Object.fromEntries(
+        facetKeys.map((key) => [key, [] as string[]])
+      ) as Record<K, string[]>,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [facetKeysSignature]
   )
 
-  const [filters, setFilters] = React.useState<Record<K, string[]>>(emptyFilters)
+  const [filters, setFilters] = useSessionStorageState<Record<K, string[]>>(
+    options?.persistKey,
+    emptyFilters
+  )
 
-  const setFacetValues = React.useCallback((key: K, values: string[]) => {
-    setFilters((prev) => ({ ...prev, [key]: values }))
-  }, [])
+  const setFacetValues = React.useCallback(
+    (key: K, values: string[]) => {
+      setFilters((prev) => ({ ...prev, [key]: values }))
+    },
+    [setFilters]
+  )
 
   const clearAll = React.useCallback(() => {
     setFilters(emptyFilters)
-  }, [emptyFilters])
+  }, [emptyFilters, setFilters])
 
   const rowMatchesFacet = React.useCallback(
     (row: T, key: K) => {

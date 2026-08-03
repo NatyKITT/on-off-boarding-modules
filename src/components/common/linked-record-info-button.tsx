@@ -82,8 +82,9 @@ function decisionChip(decision: ProbationDecision): {
 
 function decisionText(decision: ProbationDecision): string {
   if (decision === "STOP") return "Potvrzeno zastavení hodnocení zkušební doby"
-  if (decision === "KEEP") return "Pokračuje (HR se rozhodla nezastavovat)"
-  return "Čeká na rozhodnutí HR"
+  if (decision === "KEEP")
+    return "Pokračuje (Personální oddělení se rozhodlo nezastavovat)"
+  return "Čeká na rozhodnutí Personálního oddělení"
 }
 
 const infoChip = {

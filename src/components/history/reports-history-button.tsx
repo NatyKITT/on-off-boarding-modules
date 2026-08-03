@@ -27,7 +27,7 @@ export function ReportsHistoryButton({
   variant = "full",
   className,
 }: {
-  scope: "generic" | "monthly" | "changes" | "statistics"
+  scope: "generic" | "monthly" | "changes" | "statistics" | "combined"
   title?: string
   label?: string
   variant?: "full" | "compact"

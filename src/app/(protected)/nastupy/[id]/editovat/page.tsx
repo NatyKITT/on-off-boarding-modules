@@ -6,6 +6,7 @@ import { format } from "date-fns"
 
 import { type Position } from "@/types/position"
 
+import { useIsReadonly } from "@/hooks/use-current-role"
 import { useToast } from "@/hooks/use-toast"
 
 import { Button } from "@/components/ui/button"
@@ -99,6 +100,14 @@ function normalizePositions(api: unknown): Position[] {
           : typeof item.supervisor_email === "string"
             ? item.supervisor_email
             : "",
+      personName:
+        typeof item.personName === "string" ? item.personName : undefined,
+      personPersonalNumber:
+        typeof item.personPersonalNumber === "string"
+          ? item.personPersonalNumber
+          : undefined,
+      personGid:
+        typeof item.personGid === "string" ? item.personGid : undefined,
     })
   }
 
@@ -108,6 +117,7 @@ function normalizePositions(api: unknown): Position[] {
 export default function OnboardingEditPage({ params }: PageProps) {
   const router = useRouter()
   const { toast } = useToast()
+  const isReadonly = useIsReadonly()
 
   const [loading, setLoading] = React.useState(true)
   const [loadingPositions, setLoadingPositions] = React.useState(false)
@@ -119,6 +129,11 @@ export default function OnboardingEditPage({ params }: PageProps) {
     : "planned"
 
   React.useEffect(() => {
+    if (isReadonly) router.replace("/no-access")
+  }, [isReadonly, router])
+
+  React.useEffect(() => {
+    if (isReadonly) return
     let cancelled = false
 
     ;(async () => {
@@ -184,7 +199,9 @@ export default function OnboardingEditPage({ params }: PageProps) {
     return () => {
       cancelled = true
     }
-  }, [params.id, router, toast])
+  }, [params.id, router, toast, isReadonly])
+
+  if (isReadonly) return null
 
   return (
     <div className="mx-auto w-full max-w-5xl p-4">

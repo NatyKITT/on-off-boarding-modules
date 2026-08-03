@@ -26,6 +26,7 @@ import MiniCalendar from "react-calendar"
 import { type Position } from "@/types/position"
 
 import { useIsReadonly } from "@/hooks/use-current-role"
+import { useSessionStorageState } from "@/hooks/use-session-storage-state"
 import { useToast } from "@/hooks/use-toast"
 
 import { Button } from "@/components/ui/button"
@@ -453,10 +454,21 @@ function shouldClusterLabelShowTime(args: {
 export default function DashboardPage(): JSX.Element {
   const isReadonly = useIsReadonly()
   const { toast } = useToast()
-  const [currentDate, setCurrentDate] = useState<Date>(new Date())
-  const [bigView, setBigView] = useState<View>("month")
+  const [currentDateIso, setCurrentDateIso] = useSessionStorageState(
+    "prehled:currentDate",
+    new Date().toISOString()
+  )
+  const currentDate = useMemo(() => new Date(currentDateIso), [currentDateIso])
+  const setCurrentDate = useCallback(
+    (date: Date) => setCurrentDateIso(date.toISOString()),
+    [setCurrentDateIso]
+  )
+  const [bigView, setBigView] = useSessionStorageState<View>(
+    "prehled:bigView",
+    "month"
+  )
   const [miniActiveStart, setMiniActiveStart] = useState<Date>(
-    startOfMonth(new Date())
+    startOfMonth(currentDate)
   )
 
   const [isMobile, setIsMobile] = useState(false)
@@ -717,28 +729,40 @@ export default function DashboardPage(): JSX.Element {
     return () => document.removeEventListener("pointerdown", onPointerDown)
   }, [])
 
-  const handleBigNavigate = useCallback((date: Date) => {
-    setCurrentDate(date)
-    setMiniActiveStart(startOfMonth(date))
-  }, [])
-
-  const handleBigView = useCallback((view: View) => setBigView(view), [])
-
-  const handleMiniActiveChange = useCallback((args: RCOnArgs) => {
-    if (args.activeStartDate) {
-      setMiniActiveStart(args.activeStartDate)
-      setCurrentDate(args.activeStartDate)
-    }
-  }, [])
-
-  const handleMiniChange = useCallback((value: RCValue) => {
-    const date = Array.isArray(value) ? value[0] : value
-    if (date) {
-      setMiniSelected(date)
+  const handleBigNavigate = useCallback(
+    (date: Date) => {
       setCurrentDate(date)
-      setBigView("day")
-    }
-  }, [])
+      setMiniActiveStart(startOfMonth(date))
+    },
+    [setCurrentDate]
+  )
+
+  const handleBigView = useCallback(
+    (view: View) => setBigView(view),
+    [setBigView]
+  )
+
+  const handleMiniActiveChange = useCallback(
+    (args: RCOnArgs) => {
+      if (args.activeStartDate) {
+        setMiniActiveStart(args.activeStartDate)
+        setCurrentDate(args.activeStartDate)
+      }
+    },
+    [setCurrentDate]
+  )
+
+  const handleMiniChange = useCallback(
+    (value: RCValue) => {
+      const date = Array.isArray(value) ? value[0] : value
+      if (date) {
+        setMiniSelected(date)
+        setCurrentDate(date)
+        setBigView("day")
+      }
+    },
+    [setCurrentDate, setBigView]
+  )
 
   const displayEvents = useMemo<CalendarEvent[]>(() => {
     if (bigView === "month") {
@@ -1060,13 +1084,15 @@ export default function DashboardPage(): JSX.Element {
 
   const handleSelectSlot = useCallback(
     ({ start }: { start: Date }) => {
+      if (isReadonly) return
+
       const isMidnight = start.getHours() === 0 && start.getMinutes() === 0
       const normalized =
         bigView === "month" || isMidnight ? setToWorkStart(start) : start
       setSlotDate(normalized)
       setPlanOpen(true)
     },
-    [bigView]
+    [bigView, isReadonly]
   )
 
   const openCreate = useCallback(
@@ -1155,6 +1181,24 @@ export default function DashboardPage(): JSX.Element {
         return
       }
 
+      if (isReadonly) {
+        setClusterItems([ev])
+
+        const showTime = shouldClusterLabelShowTime({
+          view: bigView,
+          anchor: ev.start,
+          items: [ev],
+        })
+
+        setClusterSlotLabel(
+          dfFormat(ev.start, showTime ? "d. M. yyyy HH:mm" : "d. M. yyyy", {
+            locale: cs,
+          })
+        )
+        setClusterOpen(true)
+        return
+      }
+
       if (ev.entity === "onb") {
         const d = await fetchOnb(ev.numericId)
         if (!d) {
@@ -1207,7 +1251,7 @@ export default function DashboardPage(): JSX.Element {
         }
       }
     },
-    [bigView, fetchOnb, fetchOff, toast]
+    [bigView, fetchOnb, fetchOff, toast, isReadonly]
   )
 
   const reloadAll = useCallback(async () => {

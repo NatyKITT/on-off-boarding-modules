@@ -3,6 +3,7 @@ import { format } from "date-fns"
 import { cs } from "date-fns/locale"
 import { Resend } from "resend"
 
+import { formatDayCountCs } from "@/lib/dates"
 import { prisma } from "@/lib/db"
 
 const resend = process.env.RESEND_API_KEY
@@ -32,14 +33,33 @@ if (!DEFAULT_FROM) {
 const EMAIL_FONT_FAMILY = "'Civil Premium', 'Segoe UI', Arial, sans-serif"
 
 export const EMAIL_FOOTER_HTML = `
-  Tento e-mail byl automaticky vygenerován systémem
-  <strong>On-Off-Boarding Modul ÚMČ Praha&nbsp;6</strong>.<br/>
-  Prosíme, neodpovídejte na tuto zprávu. V případě dotazů kontaktujte personální oddělení.
+  <p style="margin: 0; font-size: 12px; color: #6b7280; line-height: 1.5; -webkit-text-size-adjust: 100%; text-size-adjust: 100%;">
+    Tento e-mail byl automaticky vygenerován systémem
+    <strong>On-Off-Boarding Modul ÚMČ Praha&nbsp;6</strong>.<br/>
+    Prosíme, neodpovídejte na tuto zprávu. V případě dotazů kontaktujte Personální oddělení.
+  </p>
 `
 
 const EMAIL_GLOBAL_FONT_STYLE = `
+        :root {
+          color-scheme: light;
+          supported-color-schemes: light;
+        }
         body, table, td, th, div, p, a, span {
           font-family: ${EMAIL_FONT_FAMILY};
+        }
+        [bgcolor="#00847C"], [bgcolor="#00847C"] * {
+          color: #ffffff !important;
+        }
+        @media (prefers-color-scheme: dark) {
+          [bgcolor="#00847C"], [bgcolor="#00847C"] * {
+            background-color: #00847C !important;
+            color: #ffffff !important;
+          }
+        }
+        [data-ogsc] [bgcolor="#00847C"], [data-ogsc] [bgcolor="#00847C"] * {
+          background-color: #00847C !important;
+          color: #ffffff !important;
         }
       `
 
@@ -199,6 +219,178 @@ function plannedScopeLabel(hasOnboarding: boolean, hasOffboarding: boolean) {
   return "předpokládané nástupy"
 }
 
+function plannedScopeLabelWithChanges(
+  hasOnboarding: boolean,
+  hasOffboarding: boolean,
+  hasChanges: boolean
+): string {
+  const parts: string[] = []
+  if (hasOnboarding) parts.push("nástupy")
+  if (hasOffboarding) parts.push("odchody")
+  if (hasChanges) parts.push("změny")
+
+  if (parts.length === 0) return "předpokládané změny"
+  if (parts.length === 1) return `předpokládané ${parts[0]}`
+
+  return `předpokládané ${parts.slice(0, -1).join(", ")} a ${parts[parts.length - 1]}`
+}
+
+function formatSingleMonthLabel(month: string): string {
+  return format(new Date(`${month}-01T00:00:00`), "LLLL yyyy", { locale: cs })
+}
+
+function formatMonthOnlyLabel(month: string): string {
+  return format(new Date(`${month}-01T00:00:00`), "LLLL", { locale: cs })
+}
+
+function formatMonthList(months: string[]): string {
+  const sorted = [...months].sort()
+
+  if (sorted.length <= 1) {
+    return `v měsíci ${sorted[0] ? formatSingleMonthLabel(sorted[0]) : ""}`
+  }
+
+  const years = new Set(sorted.map((m) => m.slice(0, 4)))
+
+  if (years.size > 1) {
+    const labels = sorted.map(formatSingleMonthLabel)
+    return `v měsících ${labels.slice(0, -1).join(", ")} a ${labels[labels.length - 1]}`
+  }
+
+  const year = sorted[0].slice(0, 4)
+  const labels = sorted.map(formatMonthOnlyLabel)
+
+  return `v měsících ${labels.slice(0, -1).join(", ")} a ${labels[labels.length - 1]} ${year}`
+}
+
+function groupByMonthKey<T>(
+  rows: T[],
+  getDate: (row: T) => string | Date | null
+): [string, T[]][] {
+  const map = new Map<string, T[]>()
+
+  for (const row of rows) {
+    const value = getDate(row)
+    const key = value ? format(new Date(value), "yyyy-MM") : "neuvedeno"
+
+    const list = map.get(key)
+    if (list) {
+      list.push(row)
+    } else {
+      map.set(key, [row])
+    }
+  }
+
+  return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b))
+}
+
+function reportIntroTopic(args: {
+  hasOnboarding: boolean
+  hasOffboarding: boolean
+  hasChanges: boolean
+  kind: "planned" | "actual"
+}): string {
+  const { hasOnboarding, hasOffboarding, hasChanges, kind } = args
+  const isPlanned = kind === "planned"
+
+  if (hasOnboarding && hasOffboarding && !hasChanges) {
+    return isPlanned
+      ? "předpokládaném vzniku a ukončení pracovních poměrů"
+      : "vzniku a ukončení pracovních poměrů"
+  }
+
+  if (hasOnboarding && !hasOffboarding && !hasChanges) {
+    return isPlanned
+      ? "předpokládaném vzniku pracovních poměrů"
+      : "vzniku pracovních poměrů"
+  }
+
+  if (hasOffboarding && !hasOnboarding && !hasChanges) {
+    return isPlanned
+      ? "předpokládaném ukončení pracovních poměrů"
+      : "ukončení pracovních poměrů"
+  }
+
+  return "personálních změnách"
+}
+
+function buildReportIntroSentenceHtml(args: {
+  hasOnboarding: boolean
+  hasOffboarding: boolean
+  hasChanges: boolean
+  kind: "planned" | "actual"
+  months: string[]
+}): string {
+  const topic = reportIntroTopic(args)
+  const monthPhrase = formatMonthList(args.months)
+
+  return `přinášíme vám aktuální informace o ${escapeHtml(topic)} <strong>${escapeHtml(monthPhrase)}</strong>.`
+}
+
+type ReportPresence = "none" | "planned" | "actual" | "mixed"
+
+function presenceOf(hasPlanned: boolean, hasActual: boolean): ReportPresence {
+  if (hasPlanned && hasActual) return "mixed"
+  if (hasPlanned) return "planned"
+  if (hasActual) return "actual"
+  return "none"
+}
+
+function combinedReportIntroTopic(args: {
+  hasOnboarding: boolean
+  hasOffboarding: boolean
+  hasChanges: boolean
+  isPlanned: boolean
+}): string {
+  const { hasOnboarding, hasOffboarding, hasChanges, isPlanned } = args
+
+  if (hasChanges) {
+    return isPlanned
+      ? "předpokládaných personálních změnách"
+      : "personálních změnách"
+  }
+
+  const modifier = isPlanned ? "předpokládaném " : ""
+
+  if (hasOnboarding && hasOffboarding)
+    return `${modifier}vzniku a ukončení pracovních poměrů`
+  if (hasOffboarding) return `${modifier}ukončení pracovních poměrů`
+
+  return `${modifier}vzniku pracovních poměrů`
+}
+
+function buildCombinedIntroSentence(args: {
+  hasOnboarding: boolean
+  hasOffboarding: boolean
+  hasChanges: boolean
+  months: string[]
+  overallKind: "planned" | "actual" | "mixed"
+}): string {
+  const topic = combinedReportIntroTopic({
+    ...args,
+    isPlanned: args.overallKind === "planned",
+  })
+  const monthPhrase = formatMonthList(args.months)
+
+  return `přinášíme vám aktuální informace o ${topic} ${monthPhrase}.`
+}
+
+function buildCombinedIntroSentenceHtml(args: {
+  hasOnboarding: boolean
+  hasOffboarding: boolean
+  hasChanges: boolean
+  months: string[]
+  overallKind: "planned" | "actual" | "mixed"
+}): string {
+  const topic = combinedReportIntroTopic({
+    ...args,
+    isPlanned: args.overallKind === "planned",
+  })
+  const monthPhrase = formatMonthList(args.months)
+
+  return `přinášíme vám aktuální informace o ${escapeHtml(topic)} <strong>${escapeHtml(monthPhrase)}</strong>.`
+}
+
 function kindLabels(args: {
   kind: "planned" | "actual" | "all"
   hasOnboarding: boolean
@@ -240,6 +432,143 @@ export function buildMonthlyReportSubject(
   }
 
   return `Přehled personálních změn – ${monthLabel}`
+}
+
+function renderNastupyOdchodyTableActual(
+  rows: EmailRecord[],
+  dateHeader: string
+): string {
+  if (!rows.length) return ""
+
+  return wrapWithBottomSpacing(
+    `
+      <table border="0" cellpadding="0" cellspacing="0" width="100%"
+        style="width:100%; border-collapse: collapse; font-family: ${EMAIL_FONT_FAMILY}; font-size:13px;">
+        <thead>
+          <tr bgcolor="#00847C" style="background-color: #00847C; color: #ffffff;">
+            <th align="left" style="padding: 13px; width: 220px; font-weight: 600; text-transform: uppercase; font-size:11px; color: #ffffff; white-space: normal;">Zaměstnanec</th>
+            <th align="left" style="padding: 13px; font-weight: 600; text-transform: uppercase; font-size:11px; color: #ffffff; white-space: normal;">Pozice</th>
+            <th align="left" style="padding: 13px; font-weight: 600; text-transform: uppercase; font-size:11px; color: #ffffff; white-space: normal;">Odbor</th>
+            <th align="left" style="padding: 13px; width: 120px; font-weight: 600; text-transform: uppercase; font-size:11px; white-space: nowrap; color: #ffffff;">${dateHeader}</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows
+            .map(
+              (r, i) => `
+            <tr bgcolor="${i % 2 === 0 ? "#ffffff" : "#f9fafb"}" style="background-color: ${
+              i % 2 === 0 ? "#ffffff" : "#f9fafb"
+            };">
+
+              <td style="padding: 13px; border-bottom: 1px solid #e5e7eb; color: #111827; font-weight: 600;">
+                ${formatName(r)}
+              </td>
+
+              <td style="padding: 13px; border-bottom: 1px solid #e5e7eb; color: #111827;">
+                ${r.position ?? "—"}
+              </td>
+
+              <td style="padding: 13px; border-bottom: 1px solid #e5e7eb; font-weight: 500; color: #111827;">
+                ${r.department ?? "—"}
+              </td>
+
+              <td style="padding: 13px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; font-variant-numeric: tabular-nums; color: #111827;">
+                ${fmtDate(r.date)}
+              </td>
+            </tr>
+          `
+            )
+            .join("")}
+        </tbody>
+      </table>
+    `,
+    22
+  )
+}
+
+function renderNastupyOdchodyTablePlanned(
+  rows: EmailRecord[],
+  dateHeader: string
+): string {
+  if (!rows.length) return ""
+
+  return wrapWithBottomSpacing(
+    `
+    <table border="0" cellpadding="0" cellspacing="0" width="100%"
+      style="width:100%; border-collapse: collapse; font-family: ${EMAIL_FONT_FAMILY}; font-size:13px;">
+      <thead>
+        <tr bgcolor="#00847C" style="background-color: #00847C; color: #ffffff;">
+
+          <th align="left"
+              style="padding: 13px; width: 220px; font-weight: 600; text-transform: uppercase; font-size:11px; color: #ffffff; white-space: normal;">
+            Zaměstnanec
+          </th>
+
+          <th align="left"
+              style="padding: 13px; width: 95px; font-weight: 600; text-transform: uppercase; font-size:11px; color: #ffffff;">
+            Osobní číslo
+          </th>
+
+          <th align="left"
+              style="padding: 13px; width: 105px; font-weight: 600; text-transform: uppercase; font-size:11px; color: #ffffff;">
+            Číslo pozice
+          </th>
+
+          <th align="left"
+              style="padding: 13px; width: 200px; font-weight: 600; text-transform: uppercase; font-size:11px; color: #ffffff; white-space: normal;">
+            Pozice
+          </th>
+
+          <th align="left"
+              style="padding: 13px; width: 190px; font-weight: 600; text-transform: uppercase; font-size:11px; color: #ffffff; white-space: normal;">
+            Odbor
+          </th>
+
+          <th align="left"
+              style="padding: 13px; width: 120px; font-weight: 600; text-transform: uppercase; font-size:11px; color: #ffffff;">
+            ${dateHeader}
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows
+          .map(
+            (r, i) => `
+          <tr bgcolor="${i % 2 === 0 ? "#ffffff" : "#f9fafb"}"
+              style="background-color: ${i % 2 === 0 ? "#ffffff" : "#f9fafb"};">
+
+            <td style="padding: 13px; border-bottom: 1px solid #e5e7eb; color: #111827; font-weight: 600;">
+              ${formatName(r)}
+            </td>
+
+            <td style="padding: 13px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; color: #111827;">
+              ${r.personalNumber ?? "—"}
+            </td>
+
+            <td style="padding: 13px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; color: #111827;">
+              ${r.positionNum ?? "—"}
+            </td>
+
+            <td style="padding: 13px; border-bottom: 1px solid #e5e7eb; color: #111827;">
+              ${r.position ?? "—"}
+            </td>
+
+            <td style="padding: 13px; border-bottom: 1px solid #e5e7eb; font-weight: 500; color: #111827;">
+              ${r.department ?? "—"}
+            </td>
+
+            <td style="padding: 13px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; font-variant-numeric: tabular-nums; color: #111827;">
+              ${fmtDate(r.date)}
+            </td>
+          </tr>
+        `
+          )
+          .join("")}
+      </tbody>
+    </table>
+  `,
+    22
+  )
 }
 
 function htmlToText(html: string): string {
@@ -292,145 +621,10 @@ export async function renderMonthlyReportHtml(args: {
   const primary = "#00847C"
   const bgLight = "#E5F5F2"
 
-  const renderTableActual = (
-    rows: EmailRecord[],
-    dateHeader: string
-  ): string => {
-    if (!rows.length) return ""
-
-    return wrapWithBottomSpacing(
-      `
-      <table border="0" cellpadding="0" cellspacing="0" width="100%"
-        style="width:100%; border-collapse: collapse; font-family: ${EMAIL_FONT_FAMILY}; font-size: 13px;">
-        <thead>
-          <tr bgcolor="${primary}" style="background-color: ${primary}; color: #ffffff;">
-            <th align="left" style="padding: 10px; width: 220px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff; word-break: normal; overflow-wrap: normal; white-space: normal;">Zaměstnanec</th>
-            <th align="left" style="padding: 10px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff; word-break: normal; overflow-wrap: normal; white-space: normal;">Pozice</th>
-            <th align="left" style="padding: 10px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff; word-break: normal; overflow-wrap: normal; white-space: normal;">Odbor</th>
-            <th align="left" style="padding: 10px; width: 120px; font-weight: 600; text-transform: uppercase; font-size: 11px; white-space: nowrap; color: #ffffff;">${dateHeader}</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows
-            .map(
-              (r, i) => `
-            <tr bgcolor="${i % 2 === 0 ? "#ffffff" : "#f9fafb"}" style="background-color: ${
-              i % 2 === 0 ? "#ffffff" : "#f9fafb"
-            };">
-
-              <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; color: #111827; font-weight: 600; word-break: normal; overflow-wrap: normal;">
-                ${formatName(r)}
-              </td>
-
-              <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; color: #111827; word-break: normal; overflow-wrap: normal;">
-                ${r.position ?? "—"}
-              </td>
-
-              <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: 500; color: #111827; word-break: normal; overflow-wrap: normal;">
-                ${r.department ?? "—"}
-              </td>
-
-              <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; font-variant-numeric: tabular-nums; color: #111827;">
-                ${fmtDate(r.date)}
-              </td>
-            </tr>
-          `
-            )
-            .join("")}
-        </tbody>
-      </table>
-    `,
-      22
-    )
-  }
-
-  const renderTablePlanned = (
-    rows: EmailRecord[],
-    dateHeader: string
-  ): string => {
-    if (!rows.length) return ""
-
-    return wrapWithBottomSpacing(
-      `
-    <table border="0" cellpadding="0" cellspacing="0" width="100%"
-      style="width:100%; border-collapse: collapse; font-family: ${EMAIL_FONT_FAMILY}; font-size: 13px;">
-      <thead>
-        <tr bgcolor="${primary}" style="background-color: ${primary}; color: #ffffff;">
-
-          <th align="left"
-              style="padding: 10px; width: 220px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff; word-break: normal; overflow-wrap: normal; white-space: normal;">
-            Zaměstnanec
-          </th>
-
-          <th align="left"
-              style="padding: 10px; width: 95px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff;">
-            Osobní číslo
-          </th>
-
-          <th align="left"
-              style="padding: 10px; width: 200px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff; word-break: normal; overflow-wrap: normal; white-space: normal;">
-            Pozice
-          </th>
-
-          <th align="left"
-              style="padding: 10px; width: 190px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff; word-break: normal; overflow-wrap: normal; white-space: normal;">
-            Odbor
-          </th>
-
-          <th align="left"
-              style="padding: 10px; width: 105px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff;">
-            Číslo funkce
-          </th>
-
-          <th align="left"
-              style="padding: 10px; width: 120px; font-weight: 600; text-transform: uppercase; font-size: 11px; color: #ffffff;">
-            ${dateHeader}
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rows
-          .map(
-            (r, i) => `
-          <tr bgcolor="${i % 2 === 0 ? "#ffffff" : "#f9fafb"}"
-              style="background-color: ${i % 2 === 0 ? "#ffffff" : "#f9fafb"};">
-
-            <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; color: #111827; font-weight: 600; word-break: normal; overflow-wrap: normal;">
-              ${formatName(r)}
-            </td>
-
-            <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; color: #111827;">
-              ${r.personalNumber ?? "—"}
-            </td>
-
-            <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; color: #111827; word-break: normal; overflow-wrap: normal;">
-              ${r.position ?? "—"}
-            </td>
-
-            <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: 500; color: #111827; word-break: normal; overflow-wrap: normal;">
-              ${r.department ?? "—"}
-            </td>
-
-            <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; color: #111827;">
-              ${r.positionNum ?? "—"}
-            </td>
-
-            <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; font-variant-numeric: tabular-nums; color: #111827;">
-              ${fmtDate(r.date)}
-            </td>
-          </tr>
-        `
-          )
-          .join("")}
-      </tbody>
-    </table>
-  `,
-      22
-    )
-  }
-
   const renderTable =
-    kind === "planned" ? renderTablePlanned : renderTableActual
+    kind === "planned"
+      ? renderNastupyOdchodyTablePlanned
+      : renderNastupyOdchodyTableActual
 
   const onboardingTitle =
     kind === "planned" ? "Předpokládané nástupy" : "Nástupy"
@@ -447,14 +641,14 @@ export async function renderMonthlyReportHtml(args: {
       ? "Seznam zaměstnanců s předpokládaným odchodem v daném měsíci."
       : "Seznam zaměstnanců s ukončením pracovního poměru v daném měsíci."
 
-  const showIntro = kind !== "planned"
-
   return `
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
   <html xmlns="http://www.w3.org/1999/xhtml" lang="cs">
     <head>
       <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <meta name="color-scheme" content="light" />
+      <meta name="supported-color-schemes" content="light" />
       <title>${subtitle} – ${monthLabel}</title>
       <style type="text/css">
         body { margin: 0; padding: 0; }
@@ -492,25 +686,26 @@ export async function renderMonthlyReportHtml(args: {
                 </td>
               </tr>
 
-              ${
-                showIntro
-                  ? `
-                <tr>
-                  <td bgcolor="${bgLight}" style="padding: 15px 30px; border-bottom: 1px solid #d9ece7; font-family: ${EMAIL_FONT_FAMILY}; font-size: 14px; line-height: 1.6; color: #082B2A;">
-                    Vážené kolegyně, vážení kolegové, přinášíme vám aktuální informace o vzniku a ukončení pracovních poměrů v měsíci <strong>${monthLabel}</strong>.
-                  </td>
-                </tr>
-                `
-                  : ""
-              }
+              <tr>
+                <td bgcolor="${bgLight}" style="padding: 15px 30px; border-bottom: 1px solid #d9ece7; font-family: ${EMAIL_FONT_FAMILY}; font-size: 14px; line-height: 1.6; color: #082B2A;">
+                  <p style="margin:0 0 12px 0;">Vážené kolegyně, vážení kolegové,</p>
+                  <p style="margin:0;">${buildReportIntroSentenceHtml({
+                    hasOnboarding,
+                    hasOffboarding,
+                    hasChanges: false,
+                    kind: kind === "planned" ? "planned" : "actual",
+                    months: [month],
+                  })}</p>
+                </td>
+              </tr>
 
               <tr>
                 <td bgcolor="#ffffff" style="padding: 26px 22px; background-color: #ffffff; font-family: ${EMAIL_FONT_FAMILY};">
                   ${
                     onboardings.length
                       ? `
-                    <h2 style="font-size: 16px; color: #111827; margin: 0 0 4px 0; font-weight: 700;">${onboardingTitle}</h2>
-                    <p style="font-size: 12px; color: #6b7280; margin: 0 0 12px 0; line-height: 1.4;">${onboardingNote}</p>
+                    <h2 style="font-size:16px; color: #111827; margin: 0 0 4px 0; font-weight: 700;">${onboardingTitle}</h2>
+                    <p style="font-size:12px; color: #6b7280; margin: 0 0 12px 0; line-height: 1.4;">${onboardingNote}</p>
                     ${renderTable(onboardings, onboardingDateHeader)}
                     `
                       : ""
@@ -519,8 +714,8 @@ export async function renderMonthlyReportHtml(args: {
                   ${
                     offboardings.length
                       ? `
-                    <h2 style="font-size: 16px; color: #111827; margin: 18px 0 4px 0; font-weight: 700;">${offboardingTitle}</h2>
-                    <p style="font-size: 12px; color: #6b7280; margin: 0 0 12px 0; line-height: 1.4;">${offboardingNote}</p>
+                    <h2 style="font-size:16px; color: #111827; margin: 18px 0 4px 0; font-weight: 700;">${offboardingTitle}</h2>
+                    <p style="font-size:12px; color: #6b7280; margin: 0 0 12px 0; line-height: 1.4;">${offboardingNote}</p>
                     ${renderTable(offboardings, offboardingDateHeader)}
                     `
                       : ""
@@ -544,7 +739,7 @@ export async function renderMonthlyReportHtml(args: {
                   style="
                     padding: 18px 26px;
                     font-family: ${EMAIL_FONT_FAMILY};
-                    font-size: 12px;
+                    font-size:12px;
                     color: #6b7280;
                     line-height: 1.5;
                     border-top: 1px solid #d9ece7;
@@ -616,6 +811,19 @@ function formatEmployeeChangeName(record: EmployeeChangeEmailRecord) {
     .trim()
 }
 
+function formatEmployeeChangeOldName(record: EmployeeChangeEmailRecord) {
+  return [
+    record.oldTitleBefore,
+    record.oldName,
+    record.oldSurname,
+    record.oldTitleAfter,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
 function formatEmployeeChangeNewName(record: EmployeeChangeEmailRecord) {
   return [
     record.newTitleBefore ?? record.titleBefore,
@@ -672,7 +880,7 @@ function buildEmployeeChangeGroups(
   const groups: EmployeeChangeGroup[] = []
 
   if (isEmployeeNameChange(record.type)) {
-    const oldFull = formatEmployeeChangeName(record)
+    const oldFull = formatEmployeeChangeOldName(record)
     const newFull = formatEmployeeChangeNewName(record)
 
     if (oldFull !== newFull) {
@@ -719,12 +927,14 @@ function renderChangeValueCell(
   const labelColor = variant === "old" ? "#6b7280" : "#00847C"
 
   return `
-    <td width="50%" valign="top" bgcolor="${bg}" style="background-color:${bg};border:1px solid ${border};border-radius:8px;padding:8px 10px;font-family:${EMAIL_FONT_FAMILY};">
-      <div style="margin-bottom:4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:${labelColor};">
-        ${escapeHtml(labelPrefix)} - ${escapeHtml(fieldLabel)}
-      </div>
-      <div style="font-size:12px;font-weight:${fontWeight};color:${color};word-break:break-word;">
-        ${escapeHtml(value)}
+    <td width="50%" height="1" valign="top" style="width:50%;height:1px;font-family:${EMAIL_FONT_FAMILY};">
+      <div style="box-sizing:border-box;height:100%;background-color:${bg};border:1px solid ${border};border-radius:8px;padding:8px 10px;-webkit-text-size-adjust:100%;text-size-adjust:100%;">
+        <div style="margin-bottom:4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:${labelColor};-webkit-text-size-adjust:100%;text-size-adjust:100%;">
+          ${escapeHtml(labelPrefix)} - ${escapeHtml(fieldLabel)}
+        </div>
+        <div style="font-size:12px;font-weight:${fontWeight};color:${color};word-break:break-word;-webkit-text-size-adjust:100%;text-size-adjust:100%;">
+          ${escapeHtml(value)}
+        </div>
       </div>
     </td>
   `
@@ -744,25 +954,16 @@ function renderEmployeeChangeBubbles(
       const genitive = labelGenitive(group.label)
 
       return `
-        <div style="margin-bottom:10px;font-family:${EMAIL_FONT_FAMILY};">
-          <table role="presentation" border="0" cellpadding="0" cellspacing="6" width="100%" style="border-collapse:separate;">
-            <tr>
-              ${renderChangeValueCell("Původní hodnota", genitive, group.oldValue, "old")}
-              ${renderChangeValueCell("Nová hodnota", genitive, group.newValue, "new")}
-            </tr>
-          </table>
-        </div>
+        <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="width:100%;margin-bottom:10px;font-family:${EMAIL_FONT_FAMILY};">
+          <tr>
+            ${renderChangeValueCell("Původní hodnota", genitive, group.oldValue, "old")}
+            <td width="12" style="width:12px;min-width:12px;font-size:1px;line-height:1px;">&nbsp;</td>
+            ${renderChangeValueCell("Nová hodnota", genitive, group.newValue, "new")}
+          </tr>
+        </table>
       `
     })
     .join("")
-}
-
-function uniqueEffectiveDates(records: EmployeeChangeEmailRecord[]) {
-  const values = records
-    .map((record) => fmtDate(record.effectiveDate))
-    .filter((date) => date !== "—")
-
-  return Array.from(new Set(values))
 }
 
 export function buildEmployeeChangeReportSubject(args: {
@@ -785,19 +986,21 @@ function renderEmployeeChangeTable(
 
   return wrapWithBottomSpacing(
     `
-    <table border="0" cellpadding="0" cellspacing="0" width="100%"
-      style="width:100%;border-collapse:collapse;font-family:${EMAIL_FONT_FAMILY};font-size:13px;">
+    <div style="width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;">
+    <table border="0" cellpadding="0" cellspacing="0"
+      style="border-collapse:collapse;font-family:${EMAIL_FONT_FAMILY};font-size:13px;">
       <thead>
         <tr bgcolor="#00847C" style="background-color:#00847C;color:#ffffff;">
-          <th align="left" style="padding:10px;width:150px;font-size:11px;text-transform:uppercase;color:#ffffff;word-break:normal;overflow-wrap:normal;white-space:normal;">Zaměstnanec</th>
+          <th align="left" style="padding:13px;width:150px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:normal;">Zaměstnanec</th>
           ${
             showPersonalNumberColumn
-              ? `<th align="left" style="padding:10px;width:60px;font-size:11px;text-transform:uppercase;color:#ffffff;">Osobní číslo</th>`
+              ? `<th align="left" style="padding:13px;width:55px;font-size:11px;text-transform:uppercase;color:#ffffff;">Osobní číslo</th>`
               : ""
           }
-          <th align="left" style="padding:10px;width:80px;font-size:11px;text-transform:uppercase;color:#ffffff;word-break:normal;overflow-wrap:normal;white-space:normal;">Typ změny</th>
-          <th align="left" style="padding:10px;font-size:11px;text-transform:uppercase;color:#ffffff;">Změna</th>
-          <th align="left" style="padding:10px;width:80px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:nowrap;">Účinnost</th>
+          <th align="left" style="padding:13px;width:60px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:nowrap;">Číslo pozice</th>
+          <th align="left" style="padding:13px;width:65px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:normal;">Typ změny</th>
+          <th align="left" style="padding:13px;width:280px;font-size:11px;text-transform:uppercase;color:#ffffff;">Změna</th>
+          <th align="left" style="padding:13px;width:65px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:nowrap;">Účinnost</th>
         </tr>
       </thead>
 
@@ -808,10 +1011,11 @@ function renderEmployeeChangeTable(
               record,
               true
             )
+            const positionNum = record.newPositionNum ?? record.oldPositionNum
 
             return `
               <tr bgcolor="${index % 2 === 0 ? "#ffffff" : "#f9fafb"}" style="background-color:${index % 2 === 0 ? "#ffffff" : "#f9fafb"};">
-                <td style="padding:10px;border-bottom:1px solid #e5e7eb;vertical-align:top;font-weight:600;color:#111827;word-break:normal;overflow-wrap:normal;">
+                <td style="padding:13px;border-bottom:1px solid #e5e7eb;vertical-align:top;font-weight:600;color:#111827;">
                   ${escapeHtml(formatEmployeeChangeName(record))}
                   ${
                     !showPersonalNumberColumn && record.personalNumber
@@ -826,16 +1030,19 @@ function renderEmployeeChangeTable(
                 </td>
                 ${
                   showPersonalNumberColumn
-                    ? `<td style="padding:10px;border-bottom:1px solid #e5e7eb;vertical-align:top;white-space:nowrap;color:#111827;">${escapeHtml(record.personalNumber || "—")}</td>`
+                    ? `<td style="padding:13px;border-bottom:1px solid #e5e7eb;vertical-align:top;white-space:nowrap;color:#111827;">${escapeHtml(record.personalNumber || "—")}</td>`
                     : ""
                 }
-                <td style="padding:10px;border-bottom:1px solid #e5e7eb;vertical-align:top;color:#111827;word-break:normal;overflow-wrap:normal;">
+                <td style="padding:13px;border-bottom:1px solid #e5e7eb;vertical-align:top;white-space:nowrap;color:#111827;">
+                  ${escapeHtml(positionNum || "—")}
+                </td>
+                <td style="padding:13px;border-bottom:1px solid #e5e7eb;vertical-align:top;color:#111827;">
                   ${escapeHtml(employeeChangeTypeLabel(record.type))}
                 </td>
-                <td style="padding:10px;border-bottom:1px solid #e5e7eb;vertical-align:top;">
+                <td style="padding:13px;border-bottom:1px solid #e5e7eb;vertical-align:top;">
                   ${renderEmployeeChangeBubbles(record)}
                 </td>
-                <td style="padding:10px;border-bottom:1px solid #e5e7eb;vertical-align:top;white-space:nowrap;color:#111827;">
+                <td style="padding:13px;border-bottom:1px solid #e5e7eb;vertical-align:top;white-space:nowrap;color:#111827;">
                   ${escapeHtml(fmtDate(record.effectiveDate))}
                 </td>
               </tr>
@@ -844,6 +1051,7 @@ function renderEmployeeChangeTable(
           .join("")}
       </tbody>
     </table>
+    </div>
   `,
     24
   )
@@ -855,7 +1063,6 @@ export async function renderEmployeeChangeReportHtml(args: {
   audience: EmployeeChangeReportAudience
 }): Promise<string> {
   const { records, month, audience } = args
-  const dates = uniqueEffectiveDates(records)
 
   const primary = "#00847C"
   const bgLight = "#E5F5F2"
@@ -864,17 +1071,14 @@ export async function renderEmployeeChangeReportHtml(args: {
     showPersonalNumberColumn: audience === "ONBOARDING_GROUP",
   })
 
-  const effectiveText =
-    dates.length === 1
-      ? `s účinností od ${dates[0]}`
-      : "s účinností dle data uvedeného u jednotlivých záznamů"
-
   return `
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
   <html xmlns="http://www.w3.org/1999/xhtml" lang="cs">
     <head>
       <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <meta name="color-scheme" content="light" />
+      <meta name="supported-color-schemes" content="light" />
       <title>${escapeHtml(buildEmployeeChangeReportSubject({ month, audience }))}</title>
       <style type="text/css">
         body { margin: 0; padding: 0; }
@@ -903,12 +1107,18 @@ export async function renderEmployeeChangeReportHtml(args: {
 
               <tr>
                 <td bgcolor="#ffffff" style="padding:28px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};color:#111827;">
-                  <p style="margin:0 0 26px 0;font-size:15px;line-height:1.6;">
+                  <p style="margin:0 0 12px 0;font-size:15px;line-height:1.6;">
                     Vážené kolegyně, vážení kolegové,
                   </p>
 
-                  <p style="margin:0 0 18px 0;font-size:15px;line-height:1.6;">
-                    tímto vás informuji o následujících změnách ${escapeHtml(effectiveText)}:
+                  <p style="margin:0 0 26px 0;font-size:15px;line-height:1.6;">
+                    ${buildReportIntroSentenceHtml({
+                      hasOnboarding: false,
+                      hasOffboarding: false,
+                      hasChanges: true,
+                      kind: "actual",
+                      months: [month],
+                    })}
                   </p>
 
                   ${tablesHtml}
@@ -933,6 +1143,365 @@ export async function renderEmployeeChangeReportHtml(args: {
     </body>
   </html>
   `
+}
+
+function renderNastupyOdchodySection(args: {
+  title: string
+  note: string
+  rows: EmailRecord[]
+  dateHeader: string
+  kind: "planned" | "actual"
+  spacingTop: boolean
+  showMonthly: boolean
+}): string {
+  if (!args.rows.length) return ""
+
+  const renderTable =
+    args.kind === "planned"
+      ? renderNastupyOdchodyTablePlanned
+      : renderNastupyOdchodyTableActual
+
+  const note = `<p style="font-size: 12px; color: #6b7280; margin: 0 0 12px 0; line-height: 1.4; -webkit-text-size-adjust: 100%; text-size-adjust: 100%;">${escapeHtml(args.note)}</p>`
+
+  if (!args.showMonthly) {
+    return `
+      <h2 style="font-size: 16px; color: #111827; margin: ${
+        args.spacingTop ? "18px" : "0"
+      } 0 4px 0; font-weight: 700;">${escapeHtml(args.title)}</h2>
+      ${note}
+      ${renderTable(args.rows, args.dateHeader)}
+    `
+  }
+
+  const groups = groupByMonthKey(args.rows, (row) => row.date)
+
+  return groups
+    .map(([monthKey, monthRows], index) => {
+      const monthLabel =
+        monthKey === "neuvedeno" ? "" : ` – ${formatSingleMonthLabel(monthKey)}`
+
+      return `
+        <h2 style="font-size: 16px; color: #111827; margin: ${
+          args.spacingTop || index > 0 ? "18px" : "0"
+        } 0 4px 0; font-weight: 700;">${escapeHtml(args.title)}${escapeHtml(monthLabel)}</h2>
+        ${note}
+        ${renderTable(monthRows, args.dateHeader)}
+      `
+    })
+    .join("")
+}
+
+export async function renderCombinedReportHtml(args: {
+  months: string[]
+  onboardingsPlanned: EmailRecord[]
+  onboardingsActual: EmailRecord[]
+  offboardingsPlanned: EmailRecord[]
+  offboardingsActual: EmailRecord[]
+  changes: EmployeeChangeEmailRecord[]
+  changeAudience: EmployeeChangeReportAudience
+}): Promise<{ html: string; text: string; subject: string }> {
+  const {
+    months,
+    onboardingsPlanned,
+    onboardingsActual,
+    offboardingsPlanned,
+    offboardingsActual,
+    changes,
+    changeAudience,
+  } = args
+
+  const primary = "#00847C"
+  const bgLight = "#E5F5F2"
+
+  const recordDates: Array<string | Date | null | undefined> = [
+    ...onboardingsPlanned.map((r) => r.date),
+    ...onboardingsActual.map((r) => r.date),
+    ...offboardingsPlanned.map((r) => r.date),
+    ...offboardingsActual.map((r) => r.date),
+    ...changes.map((r) => r.effectiveDate),
+  ]
+  const actualMonthsSet = new Set(
+    recordDates
+      .filter((d): d is string | Date => d != null)
+      .map((d) => format(new Date(d), "yyyy-MM"))
+  )
+  const actualMonths =
+    actualMonthsSet.size > 0 ? Array.from(actualMonthsSet).sort() : months
+
+  const onboardingPresence = presenceOf(
+    onboardingsPlanned.length > 0,
+    onboardingsActual.length > 0
+  )
+  const offboardingPresence = presenceOf(
+    offboardingsPlanned.length > 0,
+    offboardingsActual.length > 0
+  )
+  const hasChanges = changes.length > 0
+  const hasAnyContent =
+    onboardingPresence !== "none" ||
+    offboardingPresence !== "none" ||
+    hasChanges
+
+  const presences = [onboardingPresence, offboardingPresence].filter(
+    (p) => p !== "none"
+  )
+  const overallKind =
+    presences.length > 0 && presences.every((p) => p === "planned")
+      ? "planned"
+      : presences.length > 0 && presences.every((p) => p === "actual")
+        ? "actual"
+        : "mixed"
+
+  const subjectTopic =
+    overallKind === "planned"
+      ? `Přehled personálních změn – ${plannedScopeLabelWithChanges(
+          onboardingPresence !== "none",
+          offboardingPresence !== "none",
+          hasChanges
+        )}`
+      : "Přehled personálních změn"
+
+  const monthPhrase = formatMonthList(actualMonths)
+  const subject = `${subjectTopic} – ${monthPhrase.replace(/^v měsíc(i|ích) /, "")}`
+
+  const introSentence = buildCombinedIntroSentenceHtml({
+    hasOnboarding: onboardingPresence !== "none",
+    hasOffboarding: offboardingPresence !== "none",
+    hasChanges,
+    months: actualMonths,
+    overallKind,
+  })
+
+  const showMonthly = actualMonths.length > 1
+
+  const onboardingTitlePlanned =
+    onboardingPresence === "mixed" ? "Nástupy – předpokládané" : "Nástupy"
+  const onboardingTitleActual =
+    onboardingPresence === "mixed" ? "Nástupy – uskutečněné" : "Nástupy"
+  const offboardingTitlePlanned =
+    offboardingPresence === "mixed" ? "Odchody – předpokládané" : "Odchody"
+  const offboardingTitleActual =
+    offboardingPresence === "mixed" ? "Odchody – uskutečněné" : "Odchody"
+
+  const sections: string[] = []
+
+  sections.push(
+    renderNastupyOdchodySection({
+      title: onboardingTitlePlanned,
+      note: "Seznam zaměstnanců s předpokládaným nástupem ve vybraném období.",
+      rows: onboardingsPlanned,
+      dateHeader: "Datum nástupu",
+      kind: "planned",
+      spacingTop: sections.length > 0,
+      showMonthly,
+    })
+  )
+
+  sections.push(
+    renderNastupyOdchodySection({
+      title: onboardingTitleActual,
+      note: "Seznam zaměstnanců s nástupem ve vybraném období.",
+      rows: onboardingsActual,
+      dateHeader: "Datum nástupu",
+      kind: "actual",
+      spacingTop: sections.filter(Boolean).length > 0,
+      showMonthly,
+    })
+  )
+
+  sections.push(
+    renderNastupyOdchodySection({
+      title: offboardingTitlePlanned,
+      note: "Seznam zaměstnanců s předpokládaným odchodem ve vybraném období.",
+      rows: offboardingsPlanned,
+      dateHeader: "Datum odchodu",
+      kind: "planned",
+      spacingTop: sections.filter(Boolean).length > 0,
+      showMonthly,
+    })
+  )
+
+  sections.push(
+    renderNastupyOdchodySection({
+      title: offboardingTitleActual,
+      note: "Seznam zaměstnanců s ukončením pracovního poměru ve vybraném období.",
+      rows: offboardingsActual,
+      dateHeader: "Datum odchodu",
+      kind: "actual",
+      spacingTop: sections.filter(Boolean).length > 0,
+      showMonthly,
+    })
+  )
+
+  if (hasChanges) {
+    const changeSpacingTop = sections.filter(Boolean).length > 0
+    const changesNote = `<p style="font-size: 12px; color: #6b7280; margin: 0 0 12px 0; line-height: 1.4; -webkit-text-size-adjust: 100%; text-size-adjust: 100%;">Seznam zaměstnaneckých změn ve vybraném období.</p>`
+
+    if (!showMonthly) {
+      sections.push(`
+        <h2 style="font-size: 16px; color: #111827; margin: ${
+          changeSpacingTop ? "18px" : "0"
+        } 0 4px 0; font-weight: 700;">Personální změny</h2>
+        ${changesNote}
+        ${renderEmployeeChangeTable(changes, {
+          showPersonalNumberColumn: changeAudience === "ONBOARDING_GROUP",
+        })}
+      `)
+    } else {
+      const changeGroups = groupByMonthKey(changes, (row) => row.effectiveDate)
+
+      sections.push(
+        changeGroups
+          .map(([monthKey, monthRows], index) => {
+            const monthLabel =
+              monthKey === "neuvedeno"
+                ? ""
+                : ` – ${formatSingleMonthLabel(monthKey)}`
+
+            return `
+              <h2 style="font-size: 16px; color: #111827; margin: ${
+                changeSpacingTop || index > 0 ? "18px" : "0"
+              } 0 4px 0; font-weight: 700;">Personální změny${escapeHtml(monthLabel)}</h2>
+              ${changesNote}
+              ${renderEmployeeChangeTable(monthRows, {
+                showPersonalNumberColumn: changeAudience === "ONBOARDING_GROUP",
+              })}
+            `
+          })
+          .join("")
+      )
+    }
+  }
+
+  const sectionsHtml = sections.filter(Boolean).join("")
+
+  const html = `
+  <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+  <html xmlns="http://www.w3.org/1999/xhtml" lang="cs">
+    <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <meta name="color-scheme" content="light" />
+      <meta name="supported-color-schemes" content="light" />
+      <title>${escapeHtml(subject)}</title>
+      <style type="text/css">
+        body { margin: 0; padding: 0; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+        table { border-collapse: collapse; }
+        ${EMAIL_GLOBAL_FONT_STYLE}
+        @media (prefers-color-scheme: dark) {
+          .eml-intro-pad, .eml-intro-pad p { color: #ffffff !important; }
+        }
+        [data-ogsc] .eml-intro-pad, [data-ogsc] .eml-intro-pad p {
+          color: #ffffff !important;
+        }
+      </style>
+    </head>
+    <body style="margin: 0; padding: 0; background-color: ${bgLight}; width: 100% !important; font-family: ${EMAIL_FONT_FAMILY}; -webkit-text-size-adjust: 100%; text-size-adjust: 100%;">
+      <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
+        <tr>
+          <td align="center" style="padding: 30px 10px;">
+            <table
+              border="0"
+              cellpadding="0"
+              cellspacing="0"
+              width="100%"
+              bgcolor="#ffffff"
+              style="
+                max-width: 860px;
+                background-color: #ffffff;
+                border-collapse: separate;
+                border: 1px solid #d9ece7;
+                border-radius: 12px;
+                overflow: hidden;
+              "
+            >
+              <tr bgcolor="${primary}">
+                <td bgcolor="${primary}" style="padding:24px 30px;background-color:${primary};border-radius:12px 12px 0 0;">
+                  <div style="font-family:${EMAIL_FONT_FAMILY};color:#ffffff;font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;">
+                    Personální změny
+                  </div>
+                  <div style="font-family:${EMAIL_FONT_FAMILY};color:#ffffff;font-size:23px;font-weight:700;line-height:1.25;">
+                    ${escapeHtml(subject)}
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td class="eml-intro-pad" style="padding: 15px 30px; background-color: transparent; border-bottom: 1px solid #d9ece7; font-family: ${EMAIL_FONT_FAMILY}; font-size: 14px; line-height: 1.6; color: #082B2A;">
+                  <p style="margin:0 0 8px 0; font-size: 14px; -webkit-text-size-adjust: 100%; text-size-adjust: 100%;">Vážené kolegyně, vážení kolegové,</p>
+                  <p style="margin:0; font-size: 14px; -webkit-text-size-adjust: 100%; text-size-adjust: 100%;">${introSentence}</p>
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="#ffffff" style="padding: 26px 22px; background-color: #ffffff; font-family: ${EMAIL_FONT_FAMILY};">
+                  ${
+                    hasAnyContent
+                      ? sectionsHtml
+                      : `
+                    <div style="padding: 40px; text-align: center; border: 2px dashed #d9ece7; color: #6b7280; font-style: italic;">
+                      Pro vybrané období nejsou evidovány žádné personální změny.
+                    </div>
+                    `
+                  }
+                </td>
+              </tr>
+
+              <tr>
+                <td
+                  bgcolor="${bgLight}"
+                  style="
+                    padding: 18px 26px;
+                    font-family: ${EMAIL_FONT_FAMILY};
+                    font-size: 12px;
+                    color: #6b7280;
+                    line-height: 1.5;
+                    border-top: 1px solid #d9ece7;
+                    border-radius: 0 0 12px 12px;
+                  "
+                >
+                  ${EMAIL_FOOTER_HTML}
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+  </html>
+  `
+
+  const textIntro = buildCombinedIntroSentence({
+    hasOnboarding: onboardingPresence !== "none",
+    hasOffboarding: offboardingPresence !== "none",
+    hasChanges,
+    months: actualMonths,
+    overallKind,
+  })
+
+  const text = [
+    "Vážené kolegyně, vážení kolegové,",
+    "",
+    textIntro,
+    "",
+    onboardingsPlanned.length
+      ? `Nástupy – plánované: ${onboardingsPlanned.length}`
+      : "",
+    onboardingsActual.length
+      ? `Nástupy – skutečné: ${onboardingsActual.length}`
+      : "",
+    offboardingsPlanned.length
+      ? `Odchody – plánované: ${offboardingsPlanned.length}`
+      : "",
+    offboardingsActual.length
+      ? `Odchody – skutečné: ${offboardingsActual.length}`
+      : "",
+    hasChanges ? `Personální změny: ${changes.length}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n")
+
+  return { html, text, subject }
 }
 
 type SendSignatureInviteEmailParams = {
@@ -966,6 +1535,8 @@ export async function sendSignatureInviteEmail({
     <head>
       <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <meta name="color-scheme" content="light" />
+      <meta name="supported-color-schemes" content="light" />
       <title>${escapeHtml(subject)}</title>
       <style type="text/css">
         body { margin: 0; padding: 0; }
@@ -973,7 +1544,7 @@ export async function sendSignatureInviteEmail({
         ${EMAIL_GLOBAL_FONT_STYLE}
         .intro-text {
           font-family: ${EMAIL_FONT_FAMILY};
-          font-size: 14px;
+          font-size:14px;
           line-height: 1.6;
           color: #082B2A;
         }
@@ -1531,6 +2102,8 @@ export async function sendProbationNotificationEmail({
     <head>
       <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <meta name="color-scheme" content="light" />
+      <meta name="supported-color-schemes" content="light" />
       <title>${escapeHtml(subject)}</title>
       <style type="text/css">
         body { margin: 0; padding: 0; }
@@ -1737,7 +2310,7 @@ export async function sendProbationHrReminderEmail(args: {
     to: args.to,
     subject:
       args.subject?.trim() ||
-      `HR připomínka: nevyplněné vyhodnocení zkušební doby – ${args.employeeName}`,
+      `Připomínka Personálního oddělení: nevyplněné vyhodnocení zkušební doby – ${args.employeeName}`,
     headerLabel: "Připomínka",
     intro:
       args.intro?.trim() ||
@@ -1781,6 +2354,175 @@ export async function sendProbationMissingSupervisorEmail(args: {
   })
 }
 
+export async function sendExitChecklistDueSoonReminderEmail(args: {
+  to: string[]
+  employeeName: string
+  employeePersonalNumber?: string | null
+  employeePosition?: string | null
+  employeeDepartment?: string | null
+  employeeUnitName?: string | null
+  employmentEndDate?: string | Date | null
+  daysBeforeEnd: number
+  checklistLink?: string | null
+  subject?: string | null
+  intro?: string | null
+}): Promise<void> {
+  const recipients = normalizeEmailList(args.to)
+
+  if (!recipients.length) {
+    throw new Error("Chybí příjemce e-mailu.")
+  }
+
+  const primary = "#00847C"
+  const bgLight = "#E5F5F2"
+
+  const daysLabel = formatDayCountCs(args.daysBeforeEnd)
+
+  const subject =
+    args.subject?.trim() ||
+    `Blíží se konec pracovního poměru – ${args.employeeName}`
+
+  const intro =
+    args.intro?.trim() ||
+    `Pracovní poměr zaměstnance končí za ${daysLabel} a výstupní list zatím není kompletně podepsaný. Prosíme o zajištění podpisu všech povinných polí.`
+
+  const infoTable = renderInfoTable(bgLight, [
+    { label: "Zaměstnanec", value: args.employeeName, strong: true },
+    { label: "Osobní číslo", value: args.employeePersonalNumber },
+    { label: "Pozice", value: args.employeePosition },
+    { label: "Odbor", value: args.employeeDepartment },
+    { label: "Oddělení", value: args.employeeUnitName },
+    {
+      label: "Konec pracovního poměru",
+      value: fmtDate(args.employmentEndDate),
+    },
+    { label: "Zbývá", value: daysLabel },
+  ])
+
+  const checklistLink = args.checklistLink?.trim() || null
+
+  const html = `
+  <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+  <html xmlns="http://www.w3.org/1999/xhtml" lang="cs">
+    <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <meta name="color-scheme" content="light" />
+      <meta name="supported-color-schemes" content="light" />
+      <title>${escapeHtml(subject)}</title>
+      <style type="text/css">
+        body { margin: 0; padding: 0; }
+        table { border-collapse: collapse; }
+        ${EMAIL_GLOBAL_FONT_STYLE}
+      </style>
+    </head>
+
+    <body style="margin:0;padding:0;background-color:${bgLight};font-family:${EMAIL_FONT_FAMILY};">
+      <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
+        <tr>
+          <td align="center" style="padding:30px 10px;">
+            <table border="0" cellpadding="0" cellspacing="0" width="600"
+              bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
+
+              <tr bgcolor="${primary}">
+                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};border-radius:12px 12px 0 0;">
+                  <div style="color:#ffffff;font-size:12px;text-transform:uppercase;letter-spacing:2px;margin-bottom:10px;opacity:.9;">
+                    Odchod zaměstnance&nbsp;·&nbsp;Výstupní list
+                  </div>
+                  <div style="color:#ffffff;font-size:20px;font-weight:bold;line-height:1.3;">
+                    Blíží se konec pracovního poměru – ${escapeHtml(args.employeeName)}
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="#ffffff" style="padding:26px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};">
+                  <p style="margin:0 0 16px 0;font-size:14px;color:#082B2A;">
+                    Dobrý den,
+                  </p>
+
+                  <p style="margin:0 0 18px 0;font-size:14px;color:#374151;line-height:1.6;">
+                    ${escapeHtml(intro)}
+                  </p>
+
+                  ${infoTable}
+
+                  ${
+                    checklistLink
+                      ? `
+                    ${wrapWithBottomSpacing(
+                      `
+                    <table border="0" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td bgcolor="${primary}" style="border-radius:6px;background-color:${primary};border:1px solid ${primary};">
+                          <a
+                            href="${escapeHtml(checklistLink)}"
+                            style="display:inline-block;padding:12px 28px;color:#ffffff;font-family:${EMAIL_FONT_FAMILY};font-size:15px;font-weight:bold;text-decoration:none;border-radius:6px;"
+                          >
+                            Otevřít výstupní list
+                          </a>
+                        </td>
+                      </tr>
+                    </table>
+                    `,
+                      24
+                    )}
+
+                    <p style="margin:0 0 4px 0;font-size:12px;color:#6b7280;">
+                      Pokud tlačítko nefunguje, zkopírujte tento odkaz do prohlížeče:
+                    </p>
+                    <p style="margin:0;word-break:break-all;">
+                      <a href="${escapeHtml(checklistLink)}" style="font-family:monospace;font-size:12px;color:${primary};">
+                        ${escapeHtml(checklistLink)}
+                      </a>
+                    </p>
+                    `
+                      : ""
+                  }
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;">
+                  ${EMAIL_FOOTER_HTML}
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+  </html>`
+
+  const text = [
+    "Dobrý den,",
+    "",
+    intro,
+    "",
+    `Zaměstnanec: ${args.employeeName}`,
+    args.employeePersonalNumber
+      ? `Osobní číslo: ${args.employeePersonalNumber}`
+      : "",
+    args.employeePosition ? `Pozice: ${args.employeePosition}` : "",
+    args.employeeDepartment ? `Odbor: ${args.employeeDepartment}` : "",
+    args.employeeUnitName ? `Oddělení: ${args.employeeUnitName}` : "",
+    args.employmentEndDate
+      ? `Konec pracovního poměru: ${fmtDate(args.employmentEndDate)}`
+      : "",
+    `Zbývá: ${daysLabel}`,
+    checklistLink ? `Odkaz: ${checklistLink}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n")
+
+  await sendMail({
+    to: recipients,
+    subject,
+    html,
+    text,
+  })
+}
+
 export async function sendProbationEvaluationPdfEmail(
   args: SendProbationEvaluationPdfEmailParams
 ): Promise<void> {
@@ -1794,6 +2536,8 @@ export async function sendProbationEvaluationPdfEmail(
     <head>
       <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <meta name="color-scheme" content="light" />
+      <meta name="supported-color-schemes" content="light" />
       <title>${escapeHtml(subject)}</title>
       <style type="text/css">
         body { margin: 0; padding: 0; }
@@ -1919,6 +2663,8 @@ export async function sendProbationEvaluationCompletedEmail(
     <head>
       <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <meta name="color-scheme" content="light" />
+      <meta name="supported-color-schemes" content="light" />
       <title>${escapeHtml(subject)}</title>
       <style type="text/css">
         body { margin: 0; padding: 0; }
@@ -2230,6 +2976,8 @@ export async function sendHandoverRecipientEmail({
 <head>
   <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="color-scheme" content="light" />
+  <meta name="supported-color-schemes" content="light" />
   <title>${subject}</title>
   <style type="text/css">
     body { margin: 0; padding: 0; }
@@ -2404,6 +3152,8 @@ export async function sendExitChecklistCompletedEmail({
     <head>
       <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <meta name="color-scheme" content="light" />
+      <meta name="supported-color-schemes" content="light" />
       <title>${escapeHtml(subject)}</title>
       <style type="text/css">
         body { margin: 0; padding: 0; }
@@ -2559,6 +3309,8 @@ export async function sendExitChecklistPdfEmail({
     <head>
       <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <meta name="color-scheme" content="light" />
+      <meta name="supported-color-schemes" content="light" />
       <title>${escapeHtml(subject)}</title>
       <style type="text/css">
         body { margin: 0; padding: 0; }
@@ -2726,6 +3478,8 @@ export async function sendBehalfSignatureEmail({
 <head>
   <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="color-scheme" content="light" />
+  <meta name="supported-color-schemes" content="light" />
   <title>${subject}</title>
   <style type="text/css">
     body { margin: 0; padding: 0; }
@@ -2907,6 +3661,8 @@ export async function sendEmploymentDocumentLinkEmail(
     <head>
       <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <meta name="color-scheme" content="light" />
+      <meta name="supported-color-schemes" content="light" />
       <title>${escapeHtml(subject)}</title>
       <style type="text/css">
         body { margin: 0; padding: 0; }
@@ -2978,7 +3734,7 @@ export async function sendEmploymentDocumentLinkEmail(
                           <li>Odkazy jsou určeny pouze pro vás – <strong>nepřeposílejte je</strong> dalším osobám.</li>
                           <li>Formuláře vyplňte <strong>osobně</strong>, <strong>pravdivě</strong> a <strong>pečlivě</strong>.</li>
                           <li>Po odeslání už zpravidla není potřeba dokumenty vyplňovat znovu.</li>
-                          <li>Pokud jméno nebo pozice u odkazů nesouhlasí s vámi, formuláře <strong>nevyplňujte</strong> a okamžitě kontaktujte personální oddělení.</li>
+                          <li>Pokud jméno nebo pozice u odkazů nesouhlasí s vámi, formuláře <strong>nevyplňujte</strong> a okamžitě kontaktujte Personální oddělení.</li>
                         </ul>
                       </td>
                     </tr>
@@ -3046,6 +3802,8 @@ export async function sendEmploymentDocumentPdfEmail(
     <head>
       <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <meta name="color-scheme" content="light" />
+      <meta name="supported-color-schemes" content="light" />
       <title>${escapeHtml(subject)}</title>
       <style type="text/css">
         body { margin: 0; padding: 0; }
@@ -3078,7 +3836,7 @@ export async function sendEmploymentDocumentPdfEmail(
                   </p>
 
                   <p style="margin:0 0 18px 0;font-size:14px;color:#374151;line-height:1.6;">
-                    personální oddělení zasílá vyplněné dokumenty níže uvedeného zaměstnance.
+                    Personální oddělení zasílá vyplněné dokumenty níže uvedeného zaměstnance.
                   </p>
 
                   ${renderEmploymentDocumentInfoTable({
@@ -3126,7 +3884,7 @@ export async function sendEmploymentDocumentPdfEmail(
   const text = [
     "Dobrý den,",
     "",
-    "personální oddělení zasílá vyplněné dokumenty níže uvedeného zaměstnance:",
+    "Personální oddělení zasílá vyplněné dokumenty níže uvedeného zaměstnance:",
     "",
     `Zaměstnanec: ${args.employeeName}`,
     args.employeePersonalNumber

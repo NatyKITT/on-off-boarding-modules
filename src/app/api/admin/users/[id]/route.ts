@@ -92,6 +92,8 @@ export async function PATCH(
 
     const body = (await req.json().catch(() => null)) as {
       role?: unknown
+      name?: unknown
+      surname?: unknown
     } | null
 
     const newRole = body?.role
@@ -99,6 +101,15 @@ export async function PATCH(
     if (!isValidRole(newRole)) {
       return NextResponse.json({ error: "Neplatná role." }, { status: 400 })
     }
+
+    const nameProvided = typeof body?.name === "string"
+    const surnameProvided = typeof body?.surname === "string"
+    const nextName = nameProvided
+      ? (body?.name as string).trim() || null
+      : undefined
+    const nextSurname = surnameProvided
+      ? (body?.surname as string).trim() || null
+      : undefined
 
     const targetUser = await prisma.user.findUnique({
       where: { id: params.id },
@@ -146,6 +157,8 @@ export async function PATCH(
       data: {
         role: newRole,
         canAccessApp,
+        ...(nameProvided ? { name: nextName } : {}),
+        ...(surnameProvided ? { surname: nextSurname } : {}),
       },
       select: {
         id: true,

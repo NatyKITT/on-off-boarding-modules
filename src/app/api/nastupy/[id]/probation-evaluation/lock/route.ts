@@ -87,8 +87,8 @@ export async function PATCH(
         byName: userLabel,
         byEmail: authResult.user.email ?? null,
         message: parsed.data.locked
-          ? "HR uzamklo hodnocení zkušební doby."
-          : "HR odemklo hodnocení zkušební doby k úpravám.",
+          ? "Personální oddělení uzamklo hodnocení zkušební doby."
+          : "Personální oddělení odemklo hodnocení zkušební doby k úpravám.",
         meta: {
           source: "manual",
           locked: parsed.data.locked,

@@ -211,9 +211,12 @@ const CZ_VALUE_LABEL: Record<string, string> = {
   MONTHLY_SUMMARY: "Měsíční souhrn",
   PROBATION_EVALUATION_INVITE: "Pozvánka k hodnocení zkušební doby",
   PROBATION_EVALUATION_REMINDER: "Připomínka hodnocení zkušební doby",
-  PROBATION_EVALUATION_HR_INFO: "Info pro HR o hodnocení zkušební doby",
-  PROBATION_EVALUATION_HR_MISSING_SUPERVISOR: "Info pro HR – chybí vedoucí",
-  PROBATION_EVALUATION_HR_NOT_COMPLETED: "Info pro HR – hodnocení nedokončeno",
+  PROBATION_EVALUATION_HR_INFO:
+    "Info pro Personální oddělení o hodnocení zkušební doby",
+  PROBATION_EVALUATION_HR_MISSING_SUPERVISOR:
+    "Info pro Personální oddělení – chybí vedoucí",
+  PROBATION_EVALUATION_HR_NOT_COMPLETED:
+    "Info pro Personální oddělení – hodnocení nedokončeno",
   PROBATION_EVALUATION_COMPLETED: "Hodnocení zkušební doby dokončeno",
   NOTICE_WARNING: "Upozornění na výpověď",
   NOTICE_ENDING: "Konec výpovědní lhůty",
@@ -257,7 +260,7 @@ const CZ_VALUE_LABEL: Record<string, string> = {
 
   ONBOARDING_GROUP: "Skupina nástupů",
   ALL_EMPLOYEES: "Všichni zaměstnanci",
-  HR_GROUP: "Skupina HR",
+  HR_GROUP: "Skupina Personálního oddělení",
 
   STOP: "Zastavit",
   KEEP: "Pokračovat",

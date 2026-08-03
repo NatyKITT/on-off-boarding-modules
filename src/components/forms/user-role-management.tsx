@@ -7,12 +7,15 @@ import {
   History,
   InfoIcon,
   Lock,
+  Pencil,
   Plus,
   ShieldCheck,
   Trash2,
   UserPlus,
 } from "lucide-react"
 import { toast } from "sonner"
+
+import { ROLE_LABELS } from "@/lib/rbac"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -75,14 +78,6 @@ type RemoveDialogUser = {
   role: Role
 } | null
 
-const ROLE_LABELS: Record<Role, string> = {
-  ADMIN: "Administrátor",
-  HR: "HR",
-  IT: "IT",
-  READONLY: "Pouze čtení",
-  USER: "Uživatel",
-}
-
 const ROLE_BADGE_CLASS: Record<Role, string> = {
   ADMIN: "bg-red-100 text-red-800 border-red-200",
   HR: "bg-green-100 text-green-800 border-green-200",
@@ -130,12 +125,16 @@ function RoleLegend() {
 function AddUserDialog({ onAdded }: { onAdded: () => void }) {
   const [open, setOpen] = useState(false)
   const [email, setEmail] = useState("")
+  const [name, setName] = useState("")
+  const [surname, setSurname] = useState("")
   const [role, setRole] = useState<Role>("USER")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   function reset() {
     setEmail("")
+    setName("")
+    setSurname("")
     setRole("USER")
     setError(null)
   }
@@ -161,7 +160,12 @@ function AddUserDialog({ onAdded }: { onAdded: () => void }) {
       const res = await fetch("/api/admin/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: normalized, role }),
+        body: JSON.stringify({
+          email: normalized,
+          role,
+          name: name.trim() || undefined,
+          surname: surname.trim() || undefined,
+        }),
       })
 
       const data = await res.json().catch(() => null)
@@ -237,6 +241,32 @@ function AddUserDialog({ onAdded }: { onAdded: () => void }) {
             <p className="text-xs text-muted-foreground">
               Povolené domény kontroluje server podle konfigurace.
             </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="add-name">Jméno</Label>
+
+              <Input
+                id="add-name"
+                placeholder="Jan"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                disabled={loading}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="add-surname">Příjmení</Label>
+
+              <Input
+                id="add-surname"
+                placeholder="Novák"
+                value={surname}
+                onChange={(event) => setSurname(event.target.value)}
+                disabled={loading}
+              />
+            </div>
           </div>
 
           <div className="space-y-1.5">
@@ -320,15 +350,105 @@ function EnvUsersList({ envUsers }: { envUsers: EnvUser[] }) {
   )
 }
 
+function EditNameDialog({
+  user,
+  loading,
+  onSave,
+}: {
+  user: DbUser
+  loading: boolean
+  onSave: (name: string, surname: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState(user.name ?? "")
+  const [surname, setSurname] = useState(user.surname ?? "")
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(value) => {
+        setOpen(value)
+        if (value) {
+          setName(user.name ?? "")
+          setSurname(user.surname ?? "")
+        }
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button
+          variant="outline"
+          size="icon"
+          className="size-7 shrink-0"
+          title="Upravit jméno"
+        >
+          <Pencil className="size-3.5" />
+        </Button>
+      </DialogTrigger>
+
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Upravit jméno</DialogTitle>
+          <DialogDescription>{user.email}</DialogDescription>
+        </DialogHeader>
+
+        <div className="grid grid-cols-2 gap-3 py-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-name">Jméno</Label>
+            <Input
+              id="edit-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              disabled={loading}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-surname">Příjmení</Label>
+            <Input
+              id="edit-surname"
+              value={surname}
+              onChange={(event) => setSurname(event.target.value)}
+              disabled={loading}
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => setOpen(false)}
+            disabled={loading}
+          >
+            Zrušit
+          </Button>
+
+          <Button
+            onClick={() => {
+              onSave(name.trim(), surname.trim())
+              setOpen(false)
+            }}
+            disabled={loading}
+          >
+            {loading && <Icons.spinner className="mr-2 size-4 animate-spin" />}
+            Uložit
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function DbUsersList({
   users,
   updatingUserId,
   onRoleChange,
+  onRenameUser,
   onRemoveUser,
 }: {
   users: DbUser[]
   updatingUserId: string | null
   onRoleChange: (userId: string, role: Role) => void
+  onRenameUser: (userId: string, name: string, surname: string) => void
   onRemoveUser: (user: DbUser) => void
 }) {
   if (users.length === 0) {
@@ -349,20 +469,30 @@ function DbUsersList({
           return (
             <div key={user.id} className="space-y-3 rounded-md border p-4">
               <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  {fullName ? (
-                    <p className="truncate text-sm font-medium">{fullName}</p>
-                  ) : (
-                    <p className="text-sm italic text-muted-foreground">
-                      {user.hasSignedIn
-                        ? "Bez vyplněného jména"
-                        : "Nepřihlášen/a"}
-                    </p>
-                  )}
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <div className="min-w-0">
+                    {fullName ? (
+                      <p className="truncate text-sm font-medium">{fullName}</p>
+                    ) : (
+                      <p className="text-sm italic text-muted-foreground">
+                        {user.hasSignedIn
+                          ? "Bez vyplněného jména"
+                          : "Nepřihlášen/a"}
+                      </p>
+                    )}
 
-                  <p className="truncate text-xs text-muted-foreground">
-                    {user.email}
-                  </p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {user.email}
+                    </p>
+                  </div>
+
+                  <EditNameDialog
+                    user={user}
+                    loading={updatingUserId === user.id}
+                    onSave={(name, surname) =>
+                      onRenameUser(user.id, name, surname)
+                    }
+                  />
                 </div>
 
                 <Badge className={`${ROLE_BADGE_CLASS[user.role]} shrink-0`}>
@@ -473,11 +603,21 @@ function DbUsersList({
             {users.map((user) => (
               <tr key={user.id}>
                 <td className="px-4 py-3">
-                  {[user.name, user.surname].filter(Boolean).join(" ") || (
-                    <span className="italic text-muted-foreground">
-                      {user.hasSignedIn ? "Bez vyplněného jména" : "—"}
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1.5">
+                    {[user.name, user.surname].filter(Boolean).join(" ") || (
+                      <span className="italic text-muted-foreground">
+                        {user.hasSignedIn ? "Bez vyplněného jména" : "—"}
+                      </span>
+                    )}
+
+                    <EditNameDialog
+                      user={user}
+                      loading={updatingUserId === user.id}
+                      onSave={(name, surname) =>
+                        onRenameUser(user.id, name, surname)
+                      }
+                    />
+                  </div>
                 </td>
 
                 <td className="px-4 py-3 text-muted-foreground">
@@ -712,6 +852,35 @@ export function UserRoleManagement() {
     }
   }
 
+  async function renameUser(userId: string, name: string, surname: string) {
+    const user = dbUsers.find((candidate) => candidate.id === userId)
+    if (!user) return
+
+    setUpdatingUserId(userId)
+
+    try {
+      const res = await fetch(`/api/admin/users/${userId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: user.role, name, surname }),
+      })
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => null)
+        throw new Error(errorData?.error ?? "Chyba při aktualizaci.")
+      }
+
+      toast.success("Jméno bylo aktualizováno.")
+      await fetchAll()
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Nepodařilo se uložit jméno."
+      )
+    } finally {
+      setUpdatingUserId(null)
+    }
+  }
+
   async function removeUser() {
     if (!removeDialogUser) return
 
@@ -814,6 +983,7 @@ export function UserRoleManagement() {
           users={dbUsers}
           updatingUserId={updatingUserId}
           onRoleChange={updateUserRole}
+          onRenameUser={renameUser}
           onRemoveUser={(user) =>
             setRemoveDialogUser({
               id: user.id,

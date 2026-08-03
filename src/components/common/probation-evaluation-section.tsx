@@ -358,13 +358,13 @@ function eventLabel(eventOrAction: ProbationEvent | string) {
     case "REMINDER_QUEUED":
       return "Připomínka zařazena k hromadnému odeslání"
     case "HR_INFO_QUEUED":
-      return "Informace pro HR zařazena k hromadnému odeslání"
+      return "Informace pro Personální oddělení zařazena k hromadnému odeslání"
     case "HR_INFO_SENT":
-      return "Informace pro HR odeslána"
+      return "Informace pro Personální oddělení odeslána"
     case "HR_REMINDER_QUEUED":
-      return "Připomínka pro HR zařazena k hromadnému odeslání"
+      return "Připomínka pro Personální oddělení zařazena k hromadnému odeslání"
     case "HR_REMINDER_SENT":
-      return "Připomínka pro HR odeslána"
+      return "Připomínka pro Personální oddělení odeslána"
     case "COMPLETED":
       return "Formulář vyplněn"
     case "EDIT_REOPENED":
@@ -394,7 +394,7 @@ function eventLabel(eventOrAction: ProbationEvent | string) {
     case "UNLOCK_REMINDER_QUEUED":
       return "Připomínka odemčení zařazena k odeslání"
     case "UNLOCK_REMINDER_SENT":
-      return "Připomínka odemčení odeslána HR"
+      return "Připomínka odemčení odeslána Personálnímu oddělení"
     default:
       return action
   }
@@ -1266,15 +1266,15 @@ export function ProbationEvaluationSection({
                 <ProcessStep
                   done={Boolean(request.completedNotificationSentAt)}
                   active={isCompleted && !request.completedNotificationSentAt}
-                  label="Odesláno HR"
+                  label="Odesláno Personálnímu oddělení"
                   description={
                     hrNotificationAtFormatted !== "—"
                       ? hrNotificationAtFormatted
                       : hrReminderAtFormatted !== "—"
-                        ? `Připomínka HR ${hrReminderAtFormatted}`
+                        ? `Připomínka Personálnímu oddělení ${hrReminderAtFormatted}`
                         : isCompleted
-                          ? "Čeká na odeslání oznámení HR"
-                          : "Odeslání HR po vyplnění formuláře"
+                          ? "Čeká na odeslání oznámení Personálnímu oddělení"
+                          : "Odeslání Personálnímu oddělení po vyplnění formuláře"
                   }
                 />
               </div>
@@ -1295,8 +1295,9 @@ export function ProbationEvaluationSection({
                 tone="warning"
                 title="Zkušební doba končí za 3 dny nebo méně."
               >
-                Pokud formulář není vyplněný, budou HR a vedoucímu postupně
-                zasílány připomínky (7, 3, 2 a 1 den před koncem).
+                Pokud formulář není vyplněný, budou Personálnímu oddělení a
+                vedoucímu postupně zasílány připomínky (7, 3, 2 a 1 den před
+                koncem).
               </AlertBox>
             )}
 
@@ -1322,8 +1323,9 @@ export function ProbationEvaluationSection({
 
             {isLocked && (
               <AlertBox tone="warning" title="Formulář je uzamčený.">
-                HR si formulář může zobrazit, ale úpravy jsou zakázané, dokud ho
-                HR znovu neodemkne. Ostatní k němu již nemají přístup.
+                Personální oddělení si formulář může zobrazit, ale úpravy jsou
+                zakázané, dokud ho znovu neodemkne. Ostatní k němu již nemají
+                přístup.
               </AlertBox>
             )}
 
@@ -1427,7 +1429,7 @@ export function ProbationEvaluationSection({
                       )}
                       {hrReminderAtFormatted !== "—" && (
                         <div className="text-xs font-normal text-muted-foreground">
-                          HR připomínka {hrReminderAtFormatted}
+                          Personální oddělení {hrReminderAtFormatted}
                         </div>
                       )}
                     </div>

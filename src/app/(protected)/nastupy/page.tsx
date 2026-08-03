@@ -7,6 +7,7 @@ import { addMonths, format, parseISO } from "date-fns"
 import { cs } from "date-fns/locale"
 import {
   AlertTriangle,
+  ArrowLeftRight,
   CalendarDays,
   Check,
   CheckCircle,
@@ -18,7 +19,6 @@ import {
   Info,
   Mail,
   RotateCcw,
-  Search,
   Trash2,
   User,
   UserCheck,
@@ -31,6 +31,7 @@ import { type Position } from "@/types/position"
 import { useIsReadonly } from "@/hooks/use-current-role"
 import { useDismissableHighlight } from "@/hooks/use-dismissable-highlight"
 import { useFacetedFilter } from "@/hooks/use-faceted-filter"
+import { useSessionStorageState } from "@/hooks/use-session-storage-state"
 import { useTextFilter } from "@/hooks/use-text-filter"
 import {
   EMPTY_DAY_RANGE,
@@ -88,7 +89,7 @@ import {
 } from "@/components/common/multi-select-filter"
 import { RangeFacetFilter } from "@/components/common/range-facet-filter"
 import { SearchInput } from "@/components/common/search-input"
-import { MonthlyReportLauncher } from "@/components/emails/monthly-report-launcher"
+import { CombinedReportLauncher } from "@/components/emails/combined-report-launcher"
 import type {
   FormValues,
   PersonalNumberMeta,
@@ -682,6 +683,18 @@ function normalizePositions(payload: unknown): Position[] {
           : typeof (v as Record<string, unknown>).supervisor_email === "string"
             ? ((v as Record<string, unknown>).supervisor_email as string)
             : "",
+      personName:
+        typeof (v as Record<string, unknown>).personName === "string"
+          ? ((v as Record<string, unknown>).personName as string)
+          : undefined,
+      personPersonalNumber:
+        typeof (v as Record<string, unknown>).personPersonalNumber === "string"
+          ? ((v as Record<string, unknown>).personPersonalNumber as string)
+          : undefined,
+      personGid:
+        typeof (v as Record<string, unknown>).personGid === "string"
+          ? ((v as Record<string, unknown>).personGid as string)
+          : undefined,
     }
   })
 
@@ -847,18 +860,19 @@ export default function OnboardingPage() {
     message: "",
   })
 
-  const [expandedPlannedYears, setExpandedPlannedYears] = useState<string[]>([])
-  const [expandedPlannedMonths, setExpandedPlannedMonths] = useState<string[]>(
-    []
-  )
-  const [expandedActualYears, setExpandedActualYears] = useState<string[]>([])
-  const [expandedActualMonths, setExpandedActualMonths] = useState<string[]>([])
-  const [expandedCancelledYears, setExpandedCancelledYears] = useState<
+  const [expandedPlannedYears, setExpandedPlannedYears] =
+    useSessionStorageState<string[]>("nastupy:expandedPlannedYears", [])
+  const [expandedPlannedMonths, setExpandedPlannedMonths] =
+    useSessionStorageState<string[]>("nastupy:expandedPlannedMonths", [])
+  const [expandedActualYears, setExpandedActualYears] = useSessionStorageState<
     string[]
-  >([])
-  const [expandedCancelledMonths, setExpandedCancelledMonths] = useState<
-    string[]
-  >([])
+  >("nastupy:expandedActualYears", [])
+  const [expandedActualMonths, setExpandedActualMonths] =
+    useSessionStorageState<string[]>("nastupy:expandedActualMonths", [])
+  const [expandedCancelledYears, setExpandedCancelledYears] =
+    useSessionStorageState<string[]>("nastupy:expandedCancelledYears", [])
+  const [expandedCancelledMonths, setExpandedCancelledMonths] =
+    useSessionStorageState<string[]>("nastupy:expandedCancelledMonths", [])
 
   const [personalMeta, setPersonalMeta] = useState<
     PersonalNumberMeta | undefined
@@ -875,7 +889,10 @@ export default function OnboardingPage() {
 
   const currentMonth = format(new Date(), "yyyy-MM")
 
-  const [arrivalDateFilter, setArrivalDateFilter] = useState("")
+  const [arrivalDateFilter, setArrivalDateFilter] = useSessionStorageState(
+    "nastupy:dateFilter",
+    ""
+  )
   const [probationPresets, setProbationPresets] = useState<string[]>([])
   const [probationDayRange, setProbationDayRange] =
     useState<DayRangeValue>(EMPTY_DAY_RANGE)
@@ -969,10 +986,10 @@ export default function OnboardingPage() {
   }, [reload])
 
   useEffect(() => {
-    if (!qpMode) return
+    if (!qpMode || isReadonly) return
     if (qpMode === "create-actual") setOpenNewActual(true)
     else setOpenNewPlanned(true)
-  }, [qpMode])
+  }, [qpMode, isReadonly])
 
   useEffect(() => {
     const handler = () => void reload()
@@ -1000,7 +1017,9 @@ export default function OnboardingPage() {
     query: searchQuery,
     setQuery: setSearchQuery,
     filterRows,
-  } = useTextFilter(getArrivalSearchableText)
+  } = useTextFilter(getArrivalSearchableText, {
+    persistKey: "nastupy:searchQuery",
+  })
 
   const allArrivals = useMemo(
     () => [...planned, ...actual, ...cancelled],
@@ -1078,7 +1097,8 @@ export default function OnboardingPage() {
     availableValues,
   } = useFacetedFilter<Arrival, ArrivalFacetKey>(
     searchedArrivals,
-    arrivalFacets
+    arrivalFacets,
+    { persistKey: "nastupy:facetFilters" }
   )
 
   const handleStatusFilterChange = React.useCallback(
@@ -1249,7 +1269,18 @@ export default function OnboardingPage() {
     [filteredCancelled]
   )
 
+  const plannedExpandInitRef = React.useRef(false)
+  const actualExpandInitRef = React.useRef(false)
+  const cancelledExpandInitRef = React.useRef(false)
+
   useEffect(() => {
+    if (!plannedExpandInitRef.current) {
+      plannedExpandInitRef.current = true
+      if (expandedPlannedYears.length > 0 || expandedPlannedMonths.length > 0) {
+        return
+      }
+    }
+
     if (isAnyFilterActive) {
       const { years, months } = getAllYearsAndMonths(plannedGrouped)
       setExpandedPlannedYears(years)
@@ -1263,9 +1294,23 @@ export default function OnboardingPage() {
     )
     setExpandedPlannedYears(year ? [year] : [])
     setExpandedPlannedMonths(month ? [month] : [])
-  }, [filteredPlanned, plannedGrouped, isAnyFilterActive])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    filteredPlanned,
+    plannedGrouped,
+    isAnyFilterActive,
+    setExpandedPlannedYears,
+    setExpandedPlannedMonths,
+  ])
 
   useEffect(() => {
+    if (!actualExpandInitRef.current) {
+      actualExpandInitRef.current = true
+      if (expandedActualYears.length > 0 || expandedActualMonths.length > 0) {
+        return
+      }
+    }
+
     if (isAnyFilterActive) {
       const { years, months } = getAllYearsAndMonths(actualGrouped)
       setExpandedActualYears(years)
@@ -1276,9 +1321,26 @@ export default function OnboardingPage() {
     const { year, month } = getLatestYearAndMonth(filteredActual, "actualStart")
     setExpandedActualYears(year ? [year] : [])
     setExpandedActualMonths(month ? [month] : [])
-  }, [filteredActual, actualGrouped, isAnyFilterActive])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    filteredActual,
+    actualGrouped,
+    isAnyFilterActive,
+    setExpandedActualYears,
+    setExpandedActualMonths,
+  ])
 
   useEffect(() => {
+    if (!cancelledExpandInitRef.current) {
+      cancelledExpandInitRef.current = true
+      if (
+        expandedCancelledYears.length > 0 ||
+        expandedCancelledMonths.length > 0
+      ) {
+        return
+      }
+    }
+
     if (isAnyFilterActive) {
       const { years, months } = getAllYearsAndMonths(cancelledGrouped)
       setExpandedCancelledYears(years)
@@ -1292,7 +1354,14 @@ export default function OnboardingPage() {
     )
     setExpandedCancelledYears(year ? [year] : [])
     setExpandedCancelledMonths(month ? [month] : [])
-  }, [filteredCancelled, cancelledGrouped, isAnyFilterActive])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    filteredCancelled,
+    cancelledGrouped,
+    isAnyFilterActive,
+    setExpandedCancelledYears,
+    setExpandedCancelledMonths,
+  ])
 
   const appliedHighlightRef = React.useRef<string | null>(null)
   const previousHighlightIdRef = React.useRef<string | null>(null)
@@ -1329,6 +1398,12 @@ export default function OnboardingPage() {
     planned,
     actual,
     cancelled,
+    setExpandedPlannedYears,
+    setExpandedPlannedMonths,
+    setExpandedActualYears,
+    setExpandedActualMonths,
+    setExpandedCancelledYears,
+    setExpandedCancelledMonths,
   ])
 
   useEffect(() => {
@@ -1382,7 +1457,17 @@ export default function OnboardingPage() {
         setExpandedCancelledMonths(months)
       }
     },
-    [planned, actual, cancelled]
+    [
+      planned,
+      actual,
+      cancelled,
+      setExpandedPlannedYears,
+      setExpandedPlannedMonths,
+      setExpandedActualYears,
+      setExpandedActualMonths,
+      setExpandedCancelledYears,
+      setExpandedCancelledMonths,
+    ]
   )
 
   useEffect(() => {
@@ -1420,6 +1505,7 @@ export default function OnboardingPage() {
     expandVariant,
     clearAllFacetFilters,
     setSearchQuery,
+    setArrivalDateFilter,
     sp,
     router,
   ])
@@ -1939,41 +2025,46 @@ export default function OnboardingPage() {
                 }
               />
 
-              <Button
-                size="sm"
-                variant="default"
-                onClick={() =>
-                  setRestoreCancelledDialog({
-                    open: true,
-                    arrival,
-                    loading: false,
-                    targetType: arrival.actualStart ? "actual" : "planned",
-                  })
-                }
-                className="inline-flex items-center justify-center gap-1 whitespace-nowrap bg-green-600 text-white hover:bg-green-700"
-              >
-                <RotateCcw className="size-4" />
-                <span className="hidden sm:inline">
-                  Vrátit do {arrival.actualStart ? "skutečných" : "plánovaných"}
-                </span>
-              </Button>
+              {!isReadonly && (
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={() =>
+                    setRestoreCancelledDialog({
+                      open: true,
+                      arrival,
+                      loading: false,
+                      targetType: arrival.actualStart ? "actual" : "planned",
+                    })
+                  }
+                  className="inline-flex items-center justify-center gap-1 whitespace-nowrap bg-green-600 text-white hover:bg-green-700"
+                >
+                  <RotateCcw className="size-4" />
+                  <span className="hidden sm:inline">
+                    Vrátit do{" "}
+                    {arrival.actualStart ? "skutečných" : "plánovaných"}
+                  </span>
+                </Button>
+              )}
 
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  setDeleteDialog({
-                    open: true,
-                    arrival,
-                    relatedChanges,
-                    loading: false,
-                  })
-                }
-                className="inline-flex items-center justify-center gap-1 text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950"
-              >
-                <Trash2 className="size-4" />
-                <span className="sr-only">Smazat</span>
-              </Button>
+              {!isReadonly && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    setDeleteDialog({
+                      open: true,
+                      arrival,
+                      relatedChanges,
+                      loading: false,
+                    })
+                  }
+                  className="inline-flex items-center justify-center gap-1 text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950"
+                >
+                  <Trash2 className="size-4" />
+                  <span className="sr-only">Smazat</span>
+                </Button>
+              )}
             </div>
           </TableCell>
         </TableRow>
@@ -2155,6 +2246,96 @@ export default function OnboardingPage() {
               offboarding={arrival.linkedOffboarding}
             />
 
+            {!isReadonly && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleEdit(arrival, variant)}
+                title="Upravit záznam"
+                className="inline-flex items-center justify-center gap-1 whitespace-nowrap"
+              >
+                <Edit className="size-4" />
+                <span className="hidden sm:inline">Upravit</span>
+              </Button>
+            )}
+
+            {!isReadonly &&
+              (variant === "planned" ? (
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={() => openStartDialogFromPlanned(arrival)}
+                  title="Potvrdit skutečný nástup"
+                  className="inline-flex items-center justify-center gap-1 whitespace-nowrap bg-green-600 text-white hover:bg-green-700"
+                >
+                  <Check className="size-4" />
+                  <span className="hidden sm:inline">Nastoupil</span>
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    setRevertDialog({
+                      open: true,
+                      arrival,
+                      loading: false,
+                    })
+                  }
+                  title="Vrátit zpět do plánovaných"
+                  className="inline-flex items-center justify-center gap-1 whitespace-nowrap text-blue-600 hover:bg-blue-50 hover:text-blue-700 dark:hover:bg-blue-950"
+                >
+                  <RotateCcw className="size-4" />
+                  <span className="hidden sm:inline">
+                    Vrátit do plánovaných
+                  </span>
+                </Button>
+              ))}
+
+            {!isReadonly && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  setCancelDialog({
+                    open: true,
+                    arrival,
+                    loading: false,
+                    reason: "",
+                  })
+                }
+                title="Zaměstnanec nenastoupil"
+                className="inline-flex items-center justify-center gap-1 text-orange-600 hover:bg-orange-50 hover:text-orange-700 dark:hover:bg-orange-950"
+              >
+                <XCircle className="size-4" />
+                <span className="hidden sm:inline">Nenastoupil</span>
+              </Button>
+            )}
+
+            {!isReadonly && (
+              <EmployeeDocumentsDialog
+                onboardingId={arrival.id}
+                email={arrival.email}
+                employeeName={fullName}
+                supervisorName={arrival.supervisorName}
+                supervisorEmail={arrival.supervisorEmail}
+                probationEvaluationSentAt={
+                  arrival.probationEvaluationSentAt ?? null
+                }
+                probationEvaluationSentBy={
+                  arrival.probationEvaluationSentBy ?? null
+                }
+                onSent={() => {
+                  showSuccess(
+                    "E-mail odeslán",
+                    "Odkazy na vybrané dokumenty byly odeslány zaměstnanci."
+                  )
+                  void reload()
+                }}
+                readOnly={isReadonly}
+              />
+            )}
+
             <HistoryDialog
               id={arrival.id}
               kind="onboarding"
@@ -2171,118 +2352,40 @@ export default function OnboardingPage() {
               }
             />
 
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => handleEdit(arrival, variant)}
-              title="Upravit záznam"
-              className="inline-flex items-center justify-center gap-1 whitespace-nowrap"
-            >
-              <Edit className="size-4" />
-              <span className="hidden sm:inline">Upravit</span>
-            </Button>
-
-            {variant === "planned" ? (
-              <Button
-                size="sm"
-                variant="default"
-                onClick={() => openStartDialogFromPlanned(arrival)}
-                title="Potvrdit skutečný nástup"
-                className="inline-flex items-center justify-center gap-1 whitespace-nowrap bg-green-600 text-white hover:bg-green-700"
-              >
-                <Check className="size-4" />
-                <span className="hidden sm:inline">Nastoupil</span>
-              </Button>
-            ) : (
+            {!isReadonly && (
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() =>
-                  setRevertDialog({
-                    open: true,
-                    arrival,
-                    loading: false,
-                  })
+                  setAssignCompanyDataDialog({ open: true, arrival })
                 }
-                title="Vrátit zpět do plánovaných"
-                className="inline-flex items-center justify-center gap-1 whitespace-nowrap text-blue-600 hover:bg-blue-50 hover:text-blue-700 dark:hover:bg-blue-950"
+                title="Propojit firemní účty (EOS)"
+                className="inline-flex items-center justify-center gap-1"
               >
-                <RotateCcw className="size-4" />
-                <span className="hidden sm:inline">Vrátit do plánovaných</span>
+                <ArrowLeftRight className="size-4" />
+                <span className="sr-only">Propojit účty</span>
               </Button>
             )}
 
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                setCancelDialog({
-                  open: true,
-                  arrival,
-                  loading: false,
-                  reason: "",
-                })
-              }
-              title="Zaměstnanec nenastoupil"
-              className="inline-flex items-center justify-center gap-1 text-orange-600 hover:bg-orange-50 hover:text-orange-700 dark:hover:bg-orange-950"
-            >
-              <XCircle className="size-4" />
-              <span className="hidden sm:inline">Nenastoupil</span>
-            </Button>
-
-            <EmployeeDocumentsDialog
-              onboardingId={arrival.id}
-              email={arrival.email}
-              employeeName={fullName}
-              supervisorName={arrival.supervisorName}
-              supervisorEmail={arrival.supervisorEmail}
-              probationEvaluationSentAt={
-                arrival.probationEvaluationSentAt ?? null
-              }
-              probationEvaluationSentBy={
-                arrival.probationEvaluationSentBy ?? null
-              }
-              onSent={() => {
-                showSuccess(
-                  "E-mail odeslán",
-                  "Odkazy na vybrané dokumenty byly odeslány zaměstnanci."
-                )
-                void reload()
-              }}
-              readOnly={isReadonly}
-            />
-
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                setAssignCompanyDataDialog({ open: true, arrival })
-              }
-              disabled={isReadonly}
-              title="Propojit firemní účty (EOS)"
-              className="inline-flex items-center justify-center gap-1"
-            >
-              <Search className="size-4" />
-              <span className="hidden sm:inline">Propojit účty</span>
-            </Button>
-
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                setDeleteDialog({
-                  open: true,
-                  arrival,
-                  relatedChanges,
-                  loading: false,
-                })
-              }
-              title="Smazat záznam"
-              className="inline-flex items-center justify-center gap-1 text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950"
-            >
-              <Trash2 className="size-4" />
-              <span className="sr-only">Smazat</span>
-            </Button>
+            {!isReadonly && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  setDeleteDialog({
+                    open: true,
+                    arrival,
+                    relatedChanges,
+                    loading: false,
+                  })
+                }
+                title="Smazat záznam"
+                className="inline-flex items-center justify-center gap-1 text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950"
+              >
+                <Trash2 className="size-4" />
+                <span className="sr-only">Smazat</span>
+              </Button>
+            )}
           </div>
         </TableCell>
       </TableRow>
@@ -2292,60 +2395,64 @@ export default function OnboardingPage() {
   const plannedSectionContent = (
     <>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <Dialog
-          open={openNewPlanned}
-          onOpenChange={(open) => {
-            setOpenNewPlanned(open)
-            if (open && positions.length === 0) {
-              void loadPositions()
-            }
-          }}
-        >
-          <DialogTrigger asChild>
-            <Button className="inline-flex w-full items-center justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] sm:w-auto">
-              Přidat plánovaný nástup
-            </Button>
-          </DialogTrigger>
+        {!isReadonly && (
+          <Dialog
+            open={openNewPlanned}
+            onOpenChange={(open) => {
+              setOpenNewPlanned(open)
+              if (open && positions.length === 0) {
+                void loadPositions()
+              }
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button className="inline-flex w-full items-center justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] sm:w-auto">
+                Přidat plánovaný nástup
+              </Button>
+            </DialogTrigger>
 
-          <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
-            <DialogTitle className="px-6 pt-6">
-              Nový plánovaný nástup
-            </DialogTitle>
-            <div className="p-6">
-              {loadingPositions ? (
-                <div className="flex items-center justify-center py-8">
-                  <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
-                  <span className="ml-2 text-muted-foreground">
-                    Načítám pozice...
-                  </span>
-                </div>
-              ) : (
-                <OnboardingFormClient
-                  positions={positions}
-                  mode="create-planned"
-                  prefillDate={qpDate}
-                  personalNumberMeta={personalMeta}
-                  onSuccess={async () => {
-                    setOpenNewPlanned(false)
-                    showSuccess(
-                      "Záznam vytvořen",
-                      "Plánovaný nástup byl úspěšně přidán."
-                    )
-                    await reload()
-                  }}
-                />
-              )}
-            </div>
-          </DialogContent>
-        </Dialog>
+            <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
+              <DialogTitle className="px-6 pt-6">
+                Nový plánovaný nástup
+              </DialogTitle>
+              <div className="p-6">
+                {loadingPositions ? (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
+                    <span className="ml-2 text-muted-foreground">
+                      Načítám pozice...
+                    </span>
+                  </div>
+                ) : (
+                  <OnboardingFormClient
+                    positions={positions}
+                    mode="create-planned"
+                    prefillDate={qpDate}
+                    personalNumberMeta={personalMeta}
+                    onSuccess={async () => {
+                      setOpenNewPlanned(false)
+                      showSuccess(
+                        "Záznam vytvořen",
+                        "Plánovaný nástup byl úspěšně přidán."
+                      )
+                      await reload()
+                    }}
+                  />
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
 
-        <DeletedRecordsDialog
-          kind="onboarding"
-          title="Smazané nástupy"
-          triggerLabel="Smazané záznamy"
-          successEvent="onboarding:deleted"
-          onRestore={() => void reload()}
-        />
+        {!isReadonly && (
+          <DeletedRecordsDialog
+            kind="onboarding"
+            title="Smazané nástupy"
+            triggerLabel="Smazané záznamy"
+            successEvent="onboarding:deleted"
+            onRestore={() => void reload()}
+          />
+        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
@@ -2522,71 +2629,78 @@ export default function OnboardingPage() {
         )}
       </div>
 
-      <div className="mt-2 flex justify-end">
-        <MonthlyReportLauncher
-          initialType="nastupy"
-          kind="planned"
-          defaultMonth={currentMonth}
-        />
-      </div>
+      {!isReadonly && (
+        <div className="mt-2 flex justify-end">
+          <CombinedReportLauncher
+            defaultAudience="ONBOARDING_GROUP"
+            defaultKind="planned"
+            context="nastupy"
+            defaultMonth={currentMonth}
+          />
+        </div>
+      )}
     </>
   )
 
   const actualSectionContent = (
     <>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <Dialog
-          open={openNewActual}
-          onOpenChange={(open) => {
-            setOpenNewActual(open)
-            if (open && positions.length === 0) {
-              void loadPositions()
-            }
-          }}
-        >
-          <DialogTrigger asChild>
-            <Button className="inline-flex w-full items-center justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] sm:w-auto">
-              Přidat skutečný nástup
-            </Button>
-          </DialogTrigger>
+        {!isReadonly && (
+          <Dialog
+            open={openNewActual}
+            onOpenChange={(open) => {
+              setOpenNewActual(open)
+              if (open && positions.length === 0) {
+                void loadPositions()
+              }
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button className="inline-flex w-full items-center justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] sm:w-auto">
+                Přidat skutečný nástup
+              </Button>
+            </DialogTrigger>
 
-          <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
-            <DialogTitle className="px-6 pt-6">Skutečný nástup</DialogTitle>
-            <div className="p-6">
-              {loadingPositions ? (
-                <div className="flex items-center justify-center py-8">
-                  <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
-                  <span className="ml-2 text-muted-foreground">
-                    Načítám pozice...
-                  </span>
-                </div>
-              ) : (
-                <OnboardingFormClient
-                  positions={positions}
-                  mode="create-actual"
-                  prefillDate={qpDate}
-                  personalNumberMeta={personalMeta}
-                  onSuccess={async () => {
-                    setOpenNewActual(false)
-                    showSuccess(
-                      "Záznam vytvořen",
-                      "Skutečný nástup byl úspěšně přidán."
-                    )
-                    await reload()
-                  }}
-                />
-              )}
-            </div>
-          </DialogContent>
-        </Dialog>
+            <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
+              <DialogTitle className="px-6 pt-6">Skutečný nástup</DialogTitle>
+              <div className="p-6">
+                {loadingPositions ? (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
+                    <span className="ml-2 text-muted-foreground">
+                      Načítám pozice...
+                    </span>
+                  </div>
+                ) : (
+                  <OnboardingFormClient
+                    positions={positions}
+                    mode="create-actual"
+                    prefillDate={qpDate}
+                    personalNumberMeta={personalMeta}
+                    onSuccess={async () => {
+                      setOpenNewActual(false)
+                      showSuccess(
+                        "Záznam vytvořen",
+                        "Skutečný nástup byl úspěšně přidán."
+                      )
+                      await reload()
+                    }}
+                  />
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
 
-        <DeletedRecordsDialog
-          kind="onboarding"
-          title="Smazané nástupy"
-          triggerLabel="Smazané záznamy"
-          successEvent="onboarding:deleted"
-          onRestore={() => void reload()}
-        />
+        {!isReadonly && (
+          <DeletedRecordsDialog
+            kind="onboarding"
+            title="Smazané nástupy"
+            triggerLabel="Smazané záznamy"
+            successEvent="onboarding:deleted"
+            onRestore={() => void reload()}
+          />
+        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
@@ -2763,13 +2877,16 @@ export default function OnboardingPage() {
         )}
       </div>
 
-      <div className="mt-2 flex justify-end">
-        <MonthlyReportLauncher
-          initialType="nastupy"
-          kind="actual"
-          defaultMonth={currentMonth}
-        />
-      </div>
+      {!isReadonly && (
+        <div className="mt-2 flex justify-end">
+          <CombinedReportLauncher
+            defaultAudience="ALL_EMPLOYEES"
+            defaultKind="actual"
+            context="nastupy"
+            defaultMonth={currentMonth}
+          />
+        </div>
+      )}
     </>
   )
 

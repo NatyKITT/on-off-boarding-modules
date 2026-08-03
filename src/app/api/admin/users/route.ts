@@ -103,10 +103,20 @@ export async function POST(req: NextRequest) {
     const body = (await req.json().catch(() => null)) as {
       email?: unknown
       role?: unknown
+      name?: unknown
+      surname?: unknown
     } | null
 
     const email = body?.email
     const requestedRole = body?.role
+    const name =
+      typeof body?.name === "string" && body.name.trim()
+        ? body.name.trim()
+        : null
+    const surname =
+      typeof body?.surname === "string" && body.surname.trim()
+        ? body.surname.trim()
+        : null
 
     if (!email || typeof email !== "string") {
       return NextResponse.json({ error: "Email je povinný." }, { status: 400 })
@@ -166,6 +176,8 @@ export async function POST(req: NextRequest) {
         email: normalizedEmail,
         role: finalRole,
         canAccessApp,
+        name,
+        surname,
       },
       select: {
         id: true,

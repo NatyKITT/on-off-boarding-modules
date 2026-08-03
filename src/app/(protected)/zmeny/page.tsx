@@ -24,6 +24,7 @@ import { type Position } from "@/types/position"
 import { useIsReadonly } from "@/hooks/use-current-role"
 import { useDismissableHighlight } from "@/hooks/use-dismissable-highlight"
 import { useFacetedFilter } from "@/hooks/use-faceted-filter"
+import { useSessionStorageState } from "@/hooks/use-session-storage-state"
 import { useTextFilter } from "@/hooks/use-text-filter"
 import {
   buildDistinctOptions,
@@ -63,7 +64,7 @@ import {
   type MultiSelectOption,
 } from "@/components/common/multi-select-filter"
 import { SearchInput } from "@/components/common/search-input"
-import { EmployeeChangeReportLauncher } from "@/components/emails/employee-change-report-launcher"
+import { CombinedReportLauncher } from "@/components/emails/combined-report-launcher"
 import { EmployeeChangeForm } from "@/components/forms/employee-change-form"
 import { DeletedRecordsDialog } from "@/components/history/deleted-records-dialog"
 import { HistoryDialog } from "@/components/history/history-dialog"
@@ -119,6 +120,9 @@ type RawPosition = {
   name?: unknown
   dept_name?: unknown
   unit_name?: unknown
+  personName?: unknown
+  personPersonalNumber?: unknown
+  personGid?: unknown
 }
 
 function normalizePositions(payload: unknown): Position[] {
@@ -141,6 +145,14 @@ function normalizePositions(payload: unknown): Position[] {
     unit_name: typeof value.unit_name === "string" ? value.unit_name : "",
     supervisorName: "",
     supervisorEmail: "",
+    personName:
+      typeof value.personName === "string" ? value.personName : undefined,
+    personPersonalNumber:
+      typeof value.personPersonalNumber === "string"
+        ? value.personPersonalNumber
+        : undefined,
+    personGid:
+      typeof value.personGid === "string" ? value.personGid : undefined,
   }))
 }
 
@@ -477,10 +489,19 @@ export default function EmployeeChangesPage() {
   const [openEdit, setOpenEdit] = useState(false)
   const [editRow, setEditRow] = useState<ChangeRow | null>(null)
 
-  const [monthFilter, setMonthFilter] = useState("")
+  const [monthFilter, setMonthFilter] = useSessionStorageState(
+    "zmeny:monthFilter",
+    ""
+  )
 
-  const [expandedYears, setExpandedYears] = useState<string[]>([])
-  const [expandedMonths, setExpandedMonths] = useState<string[]>([])
+  const [expandedYears, setExpandedYears] = useSessionStorageState<string[]>(
+    "zmeny:expandedYears",
+    []
+  )
+  const [expandedMonths, setExpandedMonths] = useSessionStorageState<string[]>(
+    "zmeny:expandedMonths",
+    []
+  )
 
   const [successModal, setSuccessModal] = useState({
     open: false,
@@ -599,7 +620,9 @@ export default function EmployeeChangesPage() {
     []
   )
 
-  const { query, setQuery, filterRows } = useTextFilter(getSearchableText)
+  const { query, setQuery, filterRows } = useTextFilter(getSearchableText, {
+    persistKey: "zmeny:searchQuery",
+  })
 
   const dateFilteredRows = useMemo(() => {
     if (!monthFilter) return activeRows
@@ -631,7 +654,9 @@ export default function EmployeeChangesPage() {
     clearAll: clearAllFacetFilters,
     filteredRows,
     availableValues,
-  } = useFacetedFilter<ChangeRow, ChangeFacetKey>(searchedRows, changeFacets)
+  } = useFacetedFilter<ChangeRow, ChangeFacetKey>(searchedRows, changeFacets, {
+    persistKey: "zmeny:facetFilters",
+  })
 
   const departmentOptionsAll = useMemo(
     () =>
@@ -695,7 +720,16 @@ export default function EmployeeChangesPage() {
     facetFilters.changeType.length > 0 ||
     facetFilters.emailSent.length > 0
 
+  const expandInitRef = React.useRef(false)
+
   useEffect(() => {
+    if (!expandInitRef.current) {
+      expandInitRef.current = true
+      if (expandedYears.length > 0 || expandedMonths.length > 0) {
+        return
+      }
+    }
+
     if (isAnyFilterActive) {
       const { years, months } = getAllYearsAndMonths(grouped)
       setExpandedYears(years)
@@ -707,7 +741,14 @@ export default function EmployeeChangesPage() {
 
     setExpandedYears(latest?.year ? [latest.year] : [])
     setExpandedMonths(latest?.month ? [latest.month] : [])
-  }, [filteredRows, grouped, isAnyFilterActive])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    filteredRows,
+    grouped,
+    isAnyFilterActive,
+    setExpandedYears,
+    setExpandedMonths,
+  ])
 
   const appliedHighlightRef = React.useRef<string | null>(null)
   const previousHighlightIdRef = React.useRef<string | null>(null)
@@ -726,7 +767,13 @@ export default function EmployeeChangesPage() {
 
     appliedHighlightRef.current = null
     setHighlightedRowId(null)
-  }, [qpHighlightId, isAnyFilterActive, activeRows])
+  }, [
+    qpHighlightId,
+    isAnyFilterActive,
+    activeRows,
+    setExpandedYears,
+    setExpandedMonths,
+  ])
 
   useEffect(() => {
     if (!qpHighlightId) return
@@ -751,7 +798,7 @@ export default function EmployeeChangesPage() {
     )
     setExpandedYears(years)
     setExpandedMonths(months)
-  }, [activeRows])
+  }, [activeRows, setExpandedYears, setExpandedMonths])
 
   useEffect(() => {
     if (!qpHighlightId) return
@@ -769,7 +816,14 @@ export default function EmployeeChangesPage() {
     expandAllMonths()
 
     setHighlightedRowId(id)
-  }, [qpHighlightId, rows, expandAllMonths, clearAllFacetFilters, setQuery])
+  }, [
+    qpHighlightId,
+    rows,
+    expandAllMonths,
+    clearAllFacetFilters,
+    setQuery,
+    setMonthFilter,
+  ])
 
   useEffect(() => {
     if (!highlightedRowId) return
@@ -1017,16 +1071,6 @@ export default function EmployeeChangesPage() {
 
         <TableCell className="w-[230px] min-w-[230px] whitespace-nowrap text-right align-top">
           <div className="flex justify-end gap-1">
-            <HistoryDialog
-              id={row.id}
-              kind="employee-change"
-              trigger={
-                <Button size="sm" variant="outline" title="Historie změn">
-                  <HistoryIcon className="size-4" />
-                </Button>
-              }
-            />
-
             {hasRelated && (
               <Button
                 size="sm"
@@ -1040,27 +1084,41 @@ export default function EmployeeChangesPage() {
               </Button>
             )}
 
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => openEditDialog(row)}
-              title="Upravit záznam"
-            >
-              <Edit className="size-4" />
-              <span className="ml-1 hidden sm:inline">Upravit</span>
-            </Button>
+            {!isReadonly && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => openEditDialog(row)}
+                title="Upravit záznam"
+              >
+                <Edit className="size-4" />
+                <span className="ml-1 hidden sm:inline">Upravit</span>
+              </Button>
+            )}
 
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                setDeleteDialog({ open: true, row, loading: false })
+            <HistoryDialog
+              id={row.id}
+              kind="employee-change"
+              trigger={
+                <Button size="sm" variant="outline" title="Historie změn">
+                  <HistoryIcon className="size-4" />
+                </Button>
               }
-              title="Smazat záznam"
-              className="text-red-600 hover:bg-red-50 hover:text-red-700"
-            >
-              <Trash2 className="size-4" />
-            </Button>
+            />
+
+            {!isReadonly && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  setDeleteDialog({ open: true, row, loading: false })
+                }
+                title="Smazat záznam"
+                className="text-red-600 hover:bg-red-50 hover:text-red-700"
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            )}
           </div>
         </TableCell>
       </TableRow>
@@ -1215,56 +1273,60 @@ export default function EmployeeChangesPage() {
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <Dialog
-              modal={false}
-              open={openNew}
-              onOpenChange={(open) => {
-                setOpenNew(open)
-                if (open && positions.length === 0) void loadPositions()
-              }}
-            >
-              <DialogTrigger asChild>
-                <Button className="inline-flex w-full items-center justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] sm:w-auto">
-                  Přidat novou změnu
-                </Button>
-              </DialogTrigger>
+            {!isReadonly && (
+              <Dialog
+                modal={false}
+                open={openNew}
+                onOpenChange={(open) => {
+                  setOpenNew(open)
+                  if (open && positions.length === 0) void loadPositions()
+                }}
+              >
+                <DialogTrigger asChild>
+                  <Button className="inline-flex w-full items-center justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] sm:w-auto">
+                    Přidat novou změnu
+                  </Button>
+                </DialogTrigger>
 
-              <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
-                <DialogTitle className="px-6 pt-6">
-                  Přidat novou změnu
-                </DialogTitle>
+                <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
+                  <DialogTitle className="px-6 pt-6">
+                    Přidat novou změnu
+                  </DialogTitle>
 
-                <div className="p-6">
-                  {loadingPositions ? (
-                    <div className="flex items-center justify-center py-8">
-                      <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
-                      <span className="ml-2 text-muted-foreground">
-                        Načítám pozice...
-                      </span>
-                    </div>
-                  ) : (
-                    <EmployeeChangeForm
-                      positions={positions}
-                      mode="create"
-                      onSuccess={async () => {
-                        setOpenNew(false)
-                        await reload()
-                      }}
-                    />
-                  )}
-                </div>
-              </DialogContent>
-            </Dialog>
+                  <div className="p-6">
+                    {loadingPositions ? (
+                      <div className="flex items-center justify-center py-8">
+                        <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
+                        <span className="ml-2 text-muted-foreground">
+                          Načítám pozice...
+                        </span>
+                      </div>
+                    ) : (
+                      <EmployeeChangeForm
+                        positions={positions}
+                        mode="create"
+                        onSuccess={async () => {
+                          setOpenNew(false)
+                          await reload()
+                        }}
+                      />
+                    )}
+                  </div>
+                </DialogContent>
+              </Dialog>
+            )}
 
-            <div className="w-full sm:w-auto [&_button]:w-full sm:[&_button]:w-auto">
-              <DeletedRecordsDialog
-                kind="employee-change"
-                title="Smazané změny"
-                triggerLabel="Smazané záznamy"
-                successEvent="employee-change:deleted"
-                onRestore={() => void reload()}
-              />
-            </div>
+            {!isReadonly && (
+              <div className="w-full sm:w-auto [&_button]:w-full sm:[&_button]:w-auto">
+                <DeletedRecordsDialog
+                  kind="employee-change"
+                  title="Smazané změny"
+                  triggerLabel="Smazané záznamy"
+                  successEvent="employee-change:deleted"
+                  onRestore={() => void reload()}
+                />
+              </div>
+            )}
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto pr-1">
@@ -1436,11 +1498,17 @@ export default function EmployeeChangesPage() {
                   })}
               </div>
             )}
-            <div className="flex justify-end pt-4">
-              <div className="flex items-center gap-2">
-                <EmployeeChangeReportLauncher />
+            {!isReadonly && (
+              <div className="flex justify-end pt-4">
+                <div className="flex items-center gap-2">
+                  <CombinedReportLauncher
+                    defaultAudience="ONBOARDING_GROUP"
+                    defaultKind="actual"
+                    context="zmeny"
+                  />
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </>
       )}

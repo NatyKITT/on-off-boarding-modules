@@ -414,8 +414,8 @@ export function PublicProbationEvaluationShell({ token, employeeName }: Props) {
             </p>
             <p className="mt-1 text-amber-800">
               {data?.request?.status === "CANCELLED"
-                ? "Zaměstnanec v průběhu zkušební doby ukončil pracovní poměr, personální oddělení proto vyhodnocení zastavilo. Formulář už není potřeba vyplňovat."
-                : "Odkaz na vyhodnocení zkušební doby již není platný. V případě potřeby se obraťte na personální oddělení."}
+                ? "Zaměstnanec v průběhu zkušební doby ukončil pracovní poměr, Personální oddělení proto vyhodnocení zastavilo. Formulář už není potřeba vyplňovat."
+                : "Odkaz na vyhodnocení zkušební doby již není platný. V případě potřeby se obraťte na Personální oddělení."}
             </p>
           </div>
         )}

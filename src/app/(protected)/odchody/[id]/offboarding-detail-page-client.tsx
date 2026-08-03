@@ -418,8 +418,8 @@ export function OffboardingDetailPageClient({ data }: Props) {
                       {data.probationStopDecision === "STOP"
                         ? "Pozastavena"
                         : data.probationStopDecision === "KEEP"
-                          ? "Pokračuje (HR potvrdila nezastavovat)"
-                          : "Čeká na rozhodnutí HR"}
+                          ? "Pokračuje (Personální oddělení potvrdilo nezastavovat)"
+                          : "Čeká na rozhodnutí Personálního oddělení"}
                     </div>
 
                     {data.probationStopDecisionBy && (

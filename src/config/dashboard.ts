@@ -21,7 +21,12 @@ export const sidebarLinks: SidebarNavItem[] = [
     title: "Systém",
     items: [
       { href: "/statistiky", icon: "lineChart", title: "Statistiky" },
-      { href: "/nastaveni", icon: "settings", title: "Nastavení" },
+      {
+        href: "/nastaveni",
+        icon: "settings",
+        title: "Nastavení",
+        authorizeOnly: Role.ADMIN,
+      },
       { href: "/prehled", icon: "home", title: "Domů" },
     ],
   },

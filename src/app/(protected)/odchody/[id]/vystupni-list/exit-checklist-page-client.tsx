@@ -3,10 +3,19 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowLeft, CheckCircle, Loader2, XCircle } from "lucide-react"
+import {
+  AlertTriangle,
+  ArrowLeft,
+  CheckCircle,
+  Loader2,
+  XCircle,
+} from "lucide-react"
 import { useSession } from "next-auth/react"
 
 import type { ExitChecklistData } from "@/types/exit-checklist"
+
+import { formatDayCountCs, getDaysRemaining } from "@/lib/dates"
+import { getExitChecklistCompletionState } from "@/lib/exit-checklist-completion"
 
 import {
   AlertDialog,
@@ -23,11 +32,40 @@ import { ExitChecklistForm } from "@/components/forms/exit-checklist-form"
 type Props = {
   offboardingId: number
   employeeName: string
+  employmentEndDate?: string | null
+}
+
+function DeadlineBanner({ daysToEnd }: { daysToEnd: number }) {
+  const tone = daysToEnd <= 7 || daysToEnd < 0 ? "danger" : "warning"
+  const className =
+    tone === "danger"
+      ? "border-red-200 bg-red-50 text-red-700"
+      : "border-amber-200 bg-amber-50 text-amber-800"
+
+  return (
+    <div
+      className={`flex items-start gap-2 rounded-xl border px-4 py-3 text-sm ${className}`}
+    >
+      <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+      <div>
+        <p className="font-medium">
+          {daysToEnd >= 0
+            ? `Zaměstnanec brzy odejde – konec pracovního poměru za ${formatDayCountCs(daysToEnd === 0 ? 1 : daysToEnd)}.`
+            : `Pracovní poměr skončil před ${formatDayCountCs(Math.abs(daysToEnd))}.`}
+        </p>
+        <p className="mt-0.5 text-xs">
+          Výstupní list zatím není kompletně podepsaný. Zajistěte prosím podpis
+          všech povinných polí.
+        </p>
+      </div>
+    </div>
+  )
 }
 
 export function ExitChecklistPageClient({
   offboardingId,
   employeeName,
+  employmentEndDate,
 }: Props) {
   const { data: session } = useSession()
   const router = useRouter()
@@ -123,6 +161,13 @@ export function ExitChecklistPageClient({
 
   const backHref = `/odchody/${offboardingId}`
 
+  const daysToEnd = getDaysRemaining(employmentEndDate)
+  const isComplete = data
+    ? getExitChecklistCompletionState(data).isComplete
+    : true
+  const showDeadlineBanner =
+    !isComplete && typeof daysToEnd === "number" && daysToEnd <= 30
+
   return (
     <div className="min-h-screen bg-neutral-50 px-4 py-6">
       <div className="mx-auto max-w-4xl space-y-4">
@@ -141,6 +186,10 @@ export function ExitChecklistPageClient({
             Výstupní list – {employeeName}
           </span>
         </div>
+
+        {showDeadlineBanner && !loading && (
+          <DeadlineBanner daysToEnd={daysToEnd as number} />
+        )}
 
         {saved && !dirty && (
           <div className="flex items-start gap-3 rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">

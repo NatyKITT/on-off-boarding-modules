@@ -323,8 +323,8 @@ export function ProbationEvaluationPageClient({
         values.submitMode === "draft"
           ? "Rozpracované vyhodnocení zkušební doby bylo úspěšně uloženo."
           : values.submitMode === "revision"
-            ? "Změny ve vyhodnocení zkušební doby byly uloženy. Aktuální PDF bylo znovu odesláno na HR."
-            : "Finální vyhodnocení zkušební doby bylo uloženo a předáno HR."
+            ? "Změny ve vyhodnocení zkušební doby byly uloženy. Aktuální PDF bylo znovu odesláno na Personální oddělení."
+            : "Finální vyhodnocení zkušební doby bylo uloženo a předáno Personálnímu oddělení."
       )
     } catch (err) {
       setError(
@@ -406,7 +406,8 @@ export function ProbationEvaluationPageClient({
             <p className="font-medium">Formulář je otevřený k úpravě.</p>
             <p className="mt-1 text-xs">
               Upravte potřebné údaje a použijte tlačítko „Uložit změny“. Po
-              uložení se formulář znovu uzavře a aktuální PDF se odešle HR.
+              uložení se formulář znovu uzavře a aktuální PDF se odešle
+              Personálnímu oddělení.
             </p>
           </div>
         )}

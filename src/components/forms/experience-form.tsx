@@ -133,7 +133,7 @@ export function ExperienceForm(props: ExperienceFormProps) {
         toast({
           title: "Chyba při ukládání",
           description:
-            "Dokument se nepodařilo uložit. Zkuste to prosím znovu nebo kontaktujte HR.",
+            "Dokument se nepodařilo uložit. Zkuste to prosím znovu nebo kontaktujte Personální oddělení.",
           variant: "destructive",
         })
       }
@@ -171,7 +171,7 @@ export function ExperienceForm(props: ExperienceFormProps) {
             </DialogTitle>
             <DialogDescription>
               Dokument se nepodařilo uložit. Zkuste to prosím znovu nebo
-              kontaktujte své HR oddělení.
+              kontaktujte své Personální oddělení.
             </DialogDescription>
           </DialogHeader>
         </DialogContent>
@@ -204,8 +204,8 @@ export function ExperienceForm(props: ExperienceFormProps) {
             dovolujeme si Vás požádat o vyplnění následujících údajů pro účely
             zpracování personální a mzdové agendy. Vaše údaje budou k dispozici
             pouze tajemníkovi úřadu, zaměstnancům personálního oddělení, mzdové
-            účtárně a HR specialistce. Data jsou přenášena šifrovaná a uložena
-            na zabezpečeném úložišti.
+            účtárně a personalistce. Data jsou přenášena šifrovaná a uložena na
+            zabezpečeném úložišti.
           </p>
           <p>Dotazník Vám zabere maximálně 30 minut.</p>
           <p>Děkujeme a těšíme se na spolupráci.</p>

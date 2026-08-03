@@ -417,7 +417,7 @@ export function ProbationEvaluationDialog({
               ? "Rozpracované vyhodnocení se nepodařilo uložit."
               : values.submitMode === "revision"
                 ? "Změny ve vyhodnocení se nepodařilo uložit."
-                : "Finální vyhodnocení se nepodařilo uložit a odeslat na HR."
+                : "Finální vyhodnocení se nepodařilo uložit a odeslat na Personální oddělení."
           )
         )
       }
@@ -435,8 +435,8 @@ export function ProbationEvaluationDialog({
         values.submitMode === "draft"
           ? "Rozpracované vyhodnocení zkušební doby bylo uloženo. Formulář můžete později znovu otevřít a dokončit."
           : values.submitMode === "revision"
-            ? "Změny ve vyhodnocení zkušební doby byly uloženy, zapsány do historie a aktuální PDF bylo znovu odesláno na HR."
-            : "Finální vyhodnocení zkušební doby bylo uloženo a předáno HR."
+            ? "Změny ve vyhodnocení zkušební doby byly uloženy, zapsány do historie a aktuální PDF bylo znovu odesláno na Personální oddělení."
+            : "Finální vyhodnocení zkušební doby bylo uloženo a předáno Personálnímu oddělení."
       )
 
       onSaved?.(values.submitMode)
@@ -449,7 +449,7 @@ export function ProbationEvaluationDialog({
             ? "Rozpracované vyhodnocení se nepodařilo uložit."
             : values.submitMode === "revision"
               ? "Změny ve vyhodnocení se nepodařilo uložit."
-              : "Finální vyhodnocení se nepodařilo uložit a odeslat na HR."
+              : "Finální vyhodnocení se nepodařilo uložit a odeslat na Personální oddělení."
       )
     } finally {
       setSaving(false)
@@ -465,10 +465,10 @@ export function ProbationEvaluationDialog({
     }
 
     if (mode === "revision") {
-      return "Ukládám změny a odesílám aktuální PDF na HR. Může to chvíli trvat."
+      return "Ukládám změny a odesílám aktuální PDF na Personální oddělení. Může to chvíli trvat."
     }
 
-    return "Ukládám finální vyhodnocení a odesílám PDF na HR. Může to chvíli trvat."
+    return "Ukládám finální vyhodnocení a odesílám PDF na Personální oddělení. Může to chvíli trvat."
   }
 
   function requestClose() {

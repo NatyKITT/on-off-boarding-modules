@@ -1,9 +1,12 @@
 import * as React from "react"
 
+import { useSessionStorageState } from "@/hooks/use-session-storage-state"
+
 export function useTextFilter<T>(
-  getSearchableText: (row: T) => Array<string | null | undefined>
+  getSearchableText: (row: T) => Array<string | null | undefined>,
+  options?: { persistKey?: string }
 ) {
-  const [query, setQuery] = React.useState("")
+  const [query, setQuery] = useSessionStorageState(options?.persistKey, "")
 
   const filterRows = React.useCallback(
     (rows: T[]) => {

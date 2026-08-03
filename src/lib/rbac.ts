@@ -1,5 +1,17 @@
 import type { Role } from "@prisma/client"
 
+export const ROLE_LABELS: Record<Role, string> = {
+  ADMIN: "Administrátor",
+  HR: "HR/PO",
+  IT: "IT",
+  READONLY: "Pouze čtení",
+  USER: "Uživatel",
+}
+
+export function roleLabel(role: Role | null | undefined) {
+  return role ? ROLE_LABELS[role] : "neznámá role"
+}
+
 export type Permission =
   | "ADMIN_ACCESS"
   | "USERS_MANAGE"
@@ -108,7 +120,6 @@ const ROLE_PERMS: Record<Role, Permission[]> = {
     "EMPLOYEE_CHANGE_READ",
 
     "MONTHLY_REPORT_READ",
-    "MONTHLY_REPORT_SEND",
 
     "EXIT_CHECKLIST_READ",
     "EXIT_CHECKLIST_SIGN",
