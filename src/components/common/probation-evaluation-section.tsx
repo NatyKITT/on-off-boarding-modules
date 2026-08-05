@@ -106,6 +106,8 @@ type ProbationEvaluationRequest = {
   completedNotificationSentAt?: string | null
   completedNotificationSentBy?: string | null
 
+  tajemnikRequired?: boolean | null
+
   resetAt?: string | null
   resetBy?: string | null
   resetByName?: string | null
@@ -152,6 +154,14 @@ type ProbationDetailResponse = {
     name: string | null
     email: string | null
   }
+  tajemnik?: {
+    name: string | null
+    email: string | null
+    selfIsTajemnik: boolean
+    isOverridden: boolean
+    overrideName: string | null
+    overrideEmail: string | null
+  }
 }
 
 type StoredSignature = {
@@ -172,6 +182,14 @@ type RevisionMeta = {
   count?: number | null
 }
 
+type TajemnikReview = {
+  agreement?: "yes" | "no" | null
+  comment?: string | null
+  signedByName?: string | null
+  signedByEmail?: string | null
+  signedAt?: string | null
+}
+
 type StoredProbationData = {
   evaluatorName?: string | null
   evaluatorEmail?: string | null
@@ -186,6 +204,7 @@ type StoredProbationData = {
   lastEditedByName?: string | null
   lastEditedByEmail?: string | null
   revision?: RevisionMeta | null
+  tajemnikReview?: TajemnikReview | null
 }
 
 type SendDialogMode = "send" | "remind"
@@ -263,6 +282,14 @@ function getEventRevisionAction(value: unknown) {
   const revisionAction = (value as Record<string, unknown>).revisionAction
 
   return typeof revisionAction === "string" ? revisionAction : null
+}
+
+function getEventAgreement(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
+
+  const agreement = (value as Record<string, unknown>).agreement
+
+  return agreement === "yes" || agreement === "no" ? agreement : null
 }
 
 function statusLabel(status: ProbationStatus) {
@@ -395,6 +422,19 @@ function eventLabel(eventOrAction: ProbationEvent | string) {
       return "Připomínka odemčení zařazena k odeslání"
     case "UNLOCK_REMINDER_SENT":
       return "Připomínka odemčení odeslána Personálnímu oddělení"
+    case "TAJEMNIK_REVIEW_SENT":
+      return "Odesláno tajemníkovi k vyjádření"
+    case "TAJEMNIK_REVIEWED": {
+      const agreement =
+        typeof eventOrAction === "string"
+          ? null
+          : getEventAgreement(eventOrAction.meta)
+
+      if (agreement === "no") return "Tajemník nesouhlasí s doporučením"
+      if (agreement === "yes") return "Tajemník souhlasí s doporučením"
+
+      return "Tajemník se vyjádřil"
+    }
     default:
       return action
   }
@@ -426,7 +466,9 @@ function DetailTile({
         {icon}
         {label}
       </div>
-      <div className="text-sm font-medium leading-snug">{value || "—"}</div>
+      <div className="max-h-40 overflow-y-auto pr-1 text-sm font-medium leading-snug">
+        {value || "—"}
+      </div>
     </div>
   )
 }
@@ -511,7 +553,7 @@ export function ProbationEvaluationSection({
   const isReadonly = useIsReadonly()
   const role = useCurrentRole()
   const canViewHistory = canEditInternalApp(role)
-  const hasLoadedRef = React.useRef(false)
+  const wasActiveRef = React.useRef(false)
 
   const [request, setRequest] =
     React.useState<ProbationEvaluationRequest | null>(null)
@@ -526,9 +568,11 @@ export function ProbationEvaluationSection({
   const [locking, setLocking] = React.useState(false)
   const [resetting, setResetting] = React.useState(false)
   const [sendingPdf, setSendingPdf] = React.useState(false)
+  const [clearingTajemnik, setClearingTajemnik] = React.useState(false)
 
   const [error, setError] = React.useState<string | null>(null)
   const [confirmReset, setConfirmReset] = React.useState(false)
+  const [confirmClearTajemnik, setConfirmClearTajemnik] = React.useState(false)
   const [historyOpen, setHistoryOpen] = React.useState(false)
   const [formDialogOpen, setFormDialogOpen] = React.useState(false)
 
@@ -539,6 +583,12 @@ export function ProbationEvaluationSection({
   const [sendPdfOpen, setSendPdfOpen] = React.useState(false)
   const [pdfEmail, setPdfEmail] = React.useState("")
 
+  const [tajemnikOverrideOpen, setTajemnikOverrideOpen] = React.useState(false)
+  const [tajemnikNameInput, setTajemnikNameInput] = React.useState("")
+  const [tajemnikEmailInput, setTajemnikEmailInput] = React.useState("")
+  const [savingTajemnikOverride, setSavingTajemnikOverride] =
+    React.useState(false)
+
   const onboarding = detail?.onboarding ?? null
   const storedData = React.useMemo(
     () => getStoredData(request?.data),
@@ -547,6 +597,13 @@ export function ProbationEvaluationSection({
   const revision = storedData.revision ?? null
   const revisionOpen = revision?.open === true
   const signature = storedData.signature ?? null
+  const tajemnikReview = storedData.tajemnikReview ?? null
+  const tajemnikInfo = detail?.tajemnik ?? null
+  const tajemnikRequestCompleted =
+    request?.status === "COMPLETED" || Boolean(request?.completedAt)
+  const tajemnikRequired = tajemnikRequestCompleted
+    ? Boolean(request?.tajemnikRequired)
+    : Boolean(tajemnikInfo && !tajemnikInfo.selfIsTajemnik)
 
   const effectiveSupervisorName =
     request?.supervisorName ||
@@ -685,6 +742,8 @@ export function ProbationEvaluationSection({
   const canReset = Boolean(request) && !request?.isLocked
   const canOpenPdf = Boolean(request) && isCompleted
   const canSendPdf = Boolean(request) && isCompleted
+  const canClearTajemnikReview =
+    Boolean(request) && isCompleted && Boolean(tajemnikReview?.signedAt)
 
   const loadOrEnsure = React.useCallback(
     async (opts?: { silent?: boolean }) => {
@@ -747,10 +806,14 @@ export function ProbationEvaluationSection({
   )
 
   React.useEffect(() => {
-    if (!active) return
-    if (hasLoadedRef.current) return
+    if (!active) {
+      wasActiveRef.current = false
+      return
+    }
 
-    hasLoadedRef.current = true
+    if (wasActiveRef.current) return
+
+    wasActiveRef.current = true
     void loadOrEnsure()
   }, [active, loadOrEnsure])
 
@@ -966,6 +1029,123 @@ export function ProbationEvaluationSection({
     } finally {
       setResetting(false)
       setConfirmReset(false)
+    }
+  }
+
+  async function handleClearTajemnikConfirmed() {
+    if (!request) return
+
+    setClearingTajemnik(true)
+    setError(null)
+
+    try {
+      const res = await fetch(
+        `/api/nastupy/${onboardingId}/probation-evaluation/tajemnik-review`,
+        {
+          method: "DELETE",
+          cache: "no-store",
+          credentials: "include",
+        }
+      )
+
+      const json = (await res
+        .json()
+        .catch(() => null)) as ProbationDetailResponse | null
+
+      if (!res.ok) {
+        throw new Error(
+          getErrorMessage(json, "Zrušení stanoviska tajemníka se nezdařilo.")
+        )
+      }
+
+      await refreshFromJsonOrReload(json)
+
+      toast({
+        title: "Stanovisko zrušeno",
+        description: "Stanovisko tajemníka bylo zrušeno.",
+      })
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Zrušení stanoviska tajemníka se nezdařilo."
+
+      setError(message)
+
+      toast({
+        title: "Chyba při rušení stanoviska tajemníka",
+        description: message,
+        variant: "destructive",
+      })
+    } finally {
+      setClearingTajemnik(false)
+      setConfirmClearTajemnik(false)
+    }
+  }
+
+  function openTajemnikOverride() {
+    setTajemnikNameInput(tajemnikInfo?.overrideName ?? tajemnikInfo?.name ?? "")
+    setTajemnikEmailInput(
+      tajemnikInfo?.overrideEmail ?? tajemnikInfo?.email ?? ""
+    )
+    setTajemnikOverrideOpen(true)
+  }
+
+  async function saveTajemnikOverride(clear: boolean) {
+    setSavingTajemnikOverride(true)
+    setError(null)
+
+    try {
+      const res = await fetch(
+        `/api/nastupy/${onboardingId}/probation-evaluation/tajemnik-override`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          credentials: "include",
+          body: JSON.stringify(
+            clear
+              ? { name: null, email: null }
+              : {
+                  name: tajemnikNameInput.trim(),
+                  email: tajemnikEmailInput.trim(),
+                }
+          ),
+        }
+      )
+
+      const json = (await res
+        .json()
+        .catch(() => null)) as ProbationDetailResponse | null
+
+      if (!res.ok) {
+        throw new Error(
+          getErrorMessage(json, "Nastavení tajemníka se nezdařilo.")
+        )
+      }
+
+      await refreshFromJsonOrReload(json)
+      setTajemnikOverrideOpen(false)
+
+      toast({
+        title: clear ? "Vráceno na automatické dohledání" : "Tajemník uložen",
+        description: clear
+          ? "Tajemník se opět dohledává automaticky z EOS."
+          : "Ručně zadaný tajemník byl uložen.",
+      })
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Nastavení tajemníka se nezdařilo."
+
+      setError(message)
+
+      toast({
+        title: "Chyba při nastavení tajemníka",
+        description: message,
+        variant: "destructive",
+      })
+    } finally {
+      setSavingTajemnikOverride(false)
     }
   }
 
@@ -1203,6 +1383,42 @@ export function ProbationEvaluationSection({
                     }
                     tone={hasCompleteSupervisor ? "success" : "warning"}
                   />
+
+                  <DetailTile
+                    icon={<ShieldCheck className="size-3.5" />}
+                    label="Tajemník"
+                    value={
+                      <div className="space-y-1">
+                        <div className="font-semibold">
+                          {cleanInline(tajemnikInfo?.name) ||
+                            (tajemnikInfo?.email
+                              ? "Jméno neuvedeno"
+                              : "Nedohledán")}
+                        </div>
+
+                        <div className="break-words text-xs font-normal text-muted-foreground">
+                          {tajemnikInfo?.email || "E-mail není k dispozici."}
+                        </div>
+
+                        <div className="text-xs font-normal text-muted-foreground">
+                          {tajemnikInfo?.isOverridden
+                            ? "Ručně nastaveno (globálně, pro všechny nástupy)"
+                            : "Automaticky z EOS"}
+                        </div>
+
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="mt-1"
+                          onClick={openTajemnikOverride}
+                        >
+                          Upravit
+                        </Button>
+                      </div>
+                    }
+                    tone={tajemnikInfo?.email ? "default" : "warning"}
+                  />
                 </div>
               </div>
 
@@ -1229,7 +1445,9 @@ export function ProbationEvaluationSection({
                 <h4 className="text-sm font-semibold">Stav procesu</h4>
               </div>
 
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div
+                className={`grid gap-3 sm:grid-cols-2 ${tajemnikRequired ? "xl:grid-cols-3" : "xl:grid-cols-4"}`}
+              >
                 <ProcessStep
                   done={Boolean(request.createdAt)}
                   label="Vytvořeno"
@@ -1263,20 +1481,67 @@ export function ProbationEvaluationSection({
                   }
                 />
 
-                <ProcessStep
-                  done={Boolean(request.completedNotificationSentAt)}
-                  active={isCompleted && !request.completedNotificationSentAt}
-                  label="Odesláno Personálnímu oddělení"
-                  description={
-                    hrNotificationAtFormatted !== "—"
-                      ? hrNotificationAtFormatted
-                      : hrReminderAtFormatted !== "—"
-                        ? `Připomínka Personálnímu oddělení ${hrReminderAtFormatted}`
-                        : isCompleted
-                          ? "Čeká na odeslání oznámení Personálnímu oddělení"
-                          : "Odeslání Personálnímu oddělení po vyplnění formuláře"
-                  }
-                />
+                {tajemnikRequired ? (
+                  <>
+                    <ProcessStep
+                      done={isCompleted}
+                      active={false}
+                      label="Odesláno tajemníkovi a HR"
+                      description={
+                        isCompleted
+                          ? `${completedAtFormatted} · info k vyjádření + Personálnímu oddělení`
+                          : "Odeslání po vyplnění formuláře"
+                      }
+                    />
+
+                    <ProcessStep
+                      done={Boolean(tajemnikReview?.signedAt)}
+                      active={isCompleted && !tajemnikReview?.signedAt}
+                      label="Vyjádření tajemníka"
+                      description={
+                        tajemnikReview?.signedAt
+                          ? `${formatDateTime(tajemnikReview.signedAt)}${
+                              tajemnikReview.signedByName
+                                ? ` · ${tajemnikReview.signedByName}`
+                                : ""
+                            }`
+                          : isCompleted
+                            ? "Čeká na vyjádření tajemníka"
+                            : "Po vyplnění formuláře vedoucím"
+                      }
+                    />
+
+                    <ProcessStep
+                      done={Boolean(tajemnikReview?.signedAt)}
+                      active={
+                        Boolean(tajemnikReview?.signedAt) &&
+                        !request.completedNotificationSentAt
+                      }
+                      label="Odesláno Personálnímu oddělení (finální)"
+                      description={
+                        tajemnikReview?.signedAt &&
+                        hrNotificationAtFormatted !== "—"
+                          ? hrNotificationAtFormatted
+                          : "Po vyjádření tajemníka"
+                      }
+                    />
+                  </>
+                ) : (
+                  <ProcessStep
+                    done={Boolean(request.completedNotificationSentAt)}
+                    active={isCompleted && !request.completedNotificationSentAt}
+                    label="Odesláno Personálnímu oddělení"
+                    description={
+                      hrNotificationAtFormatted !== "—"
+                        ? hrNotificationAtFormatted
+                        : hrReminderAtFormatted !== "—"
+                          ? `Připomínka Personálnímu oddělení ${hrReminderAtFormatted}`
+                          : isCompleted
+                            ? "Čeká na odeslání oznámení Personálnímu oddělení"
+                            : "Odeslání Personálnímu oddělení po vyplnění formuláře"
+                    }
+                  />
+                )}
               </div>
             </section>
 
@@ -1348,12 +1613,26 @@ export function ProbationEvaluationSection({
                 </div>
 
                 <Badge
-                  variant={recommendationVariant(
-                    request.recommendation ?? storedData.recommendation
-                  )}
+                  variant={
+                    tajemnikRequired &&
+                    tajemnikReview?.signedAt &&
+                    tajemnikReview.agreement === "no"
+                      ? "destructive"
+                      : recommendationVariant(
+                          request.recommendation ?? storedData.recommendation
+                        )
+                  }
                 >
                   {recommendationLabel(
                     request.recommendation ?? storedData.recommendation
+                  )}
+                  {tajemnikRequired && tajemnikReview?.signedAt && (
+                    <span className="ml-1 font-normal">
+                      · tajemník{" "}
+                      {tajemnikReview.agreement === "no"
+                        ? "nesouhlasí"
+                        : "souhlasí"}
+                    </span>
                   )}
                 </Badge>
               </div>
@@ -1362,10 +1641,31 @@ export function ProbationEvaluationSection({
                 <DetailTile
                   icon={<CheckCircle2 className="size-3.5" />}
                   label="Doporučení"
-                  value={recommendationLabel(
-                    request.recommendation ?? storedData.recommendation
-                  )}
-                  tone={request.recommendation ? "success" : "muted"}
+                  value={
+                    <div className="space-y-1">
+                      <div>
+                        {recommendationLabel(
+                          request.recommendation ?? storedData.recommendation
+                        )}
+                      </div>
+                      {tajemnikRequired && tajemnikReview?.signedAt && (
+                        <div className="text-xs font-normal text-muted-foreground">
+                          Tajemník{" "}
+                          {tajemnikReview.agreement === "no"
+                            ? "nesouhlasí"
+                            : "souhlasí"}
+                        </div>
+                      )}
+                    </div>
+                  }
+                  tone={
+                    tajemnikReview?.signedAt &&
+                    tajemnikReview.agreement === "no"
+                      ? "warning"
+                      : request.recommendation
+                        ? "success"
+                        : "muted"
+                  }
                 />
 
                 <DetailTile
@@ -1394,46 +1694,84 @@ export function ProbationEvaluationSection({
                       )}
                     </div>
                   }
+                  tone={request.recommendation ? "success" : "muted"}
                 />
+
+                {tajemnikRequired && (
+                  <DetailTile
+                    icon={<ShieldCheck className="size-3.5" />}
+                    label="Stanovisko tajemníka"
+                    value={
+                      tajemnikReview?.signedAt ? (
+                        <div className="space-y-1">
+                          <div>
+                            {tajemnikReview.agreement === "no"
+                              ? "Nesouhlasí"
+                              : "Souhlasí"}
+                          </div>
+                          <div className="break-words text-xs font-normal text-muted-foreground">
+                            {tajemnikReview.signedByName ||
+                              tajemnikReview.signedByEmail ||
+                              "—"}
+                          </div>
+                          <div className="text-xs font-normal text-muted-foreground">
+                            Podepsáno {formatDateTime(tajemnikReview.signedAt)}
+                          </div>
+                          {tajemnikReview.comment && (
+                            <div className="whitespace-pre-wrap text-xs font-normal text-muted-foreground">
+                              {tajemnikReview.comment}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        "Čeká na vyjádření"
+                      )
+                    }
+                    tone={
+                      tajemnikReview?.signedAt
+                        ? tajemnikReview.agreement === "no"
+                          ? "warning"
+                          : "success"
+                        : "muted"
+                    }
+                  />
+                )}
 
                 <DetailTile
                   icon={<History className="size-3.5" />}
-                  label="Poslední úprava"
+                  label="Zaslání a úpravy"
                   value={
-                    lastEditedAtFormatted !== "—" ? (
-                      <div className="space-y-0.5">
-                        <div>{lastEditedAtFormatted}</div>
-                        {lastEditedByLabel && (
-                          <div className="text-xs font-normal text-muted-foreground">
-                            {lastEditedByLabel}
-                          </div>
-                        )}
+                    <div className="space-y-1.5">
+                      <div className="text-xs font-normal text-muted-foreground">
+                        Odesláno vedoucímu:{" "}
+                        {sentAtFormatted !== "—"
+                          ? `${sentAtFormatted}${sentByLabel ? ` (${sentByLabel})` : ""}`
+                          : "zatím neodesláno"}
                       </div>
-                    ) : (
-                      "—"
-                    )
-                  }
-                  tone={lastEditedAtFormatted !== "—" ? "muted" : "default"}
-                />
 
-                <DetailTile
-                  icon={<Bell className="size-3.5" />}
-                  label="Připomínky / zaslání"
-                  value={
-                    <div className="space-y-0.5">
-                      <div>Vedoucímu {request.reminderCount ?? 0}×</div>
-                      {lastReminderAtFormatted !== "—" && (
-                        <div className="text-xs font-normal text-muted-foreground">
-                          naposledy {lastReminderAtFormatted}
-                        </div>
-                      )}
+                      <div className="text-xs font-normal text-muted-foreground">
+                        Připomínky vedoucímu: {request.reminderCount ?? 0}×
+                        {lastReminderAtFormatted !== "—"
+                          ? ` (naposledy ${lastReminderAtFormatted})`
+                          : ""}
+                      </div>
+
                       {hrReminderAtFormatted !== "—" && (
                         <div className="text-xs font-normal text-muted-foreground">
-                          Personální oddělení {hrReminderAtFormatted}
+                          Připomínka Personálnímu oddělení:{" "}
+                          {hrReminderAtFormatted}
+                        </div>
+                      )}
+
+                      {lastEditedAtFormatted !== "—" && (
+                        <div className="text-xs font-normal text-muted-foreground">
+                          Poslední úprava: {lastEditedAtFormatted}
+                          {lastEditedByLabel ? ` (${lastEditedByLabel})` : ""}
                         </div>
                       )}
                     </div>
                   }
+                  tone={sentAtFormatted !== "—" ? "muted" : "default"}
                 />
               </div>
 
@@ -1558,6 +1896,25 @@ export function ProbationEvaluationSection({
                   )}
                   Vymazat data
                 </Button>
+
+                {tajemnikRequired && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setConfirmClearTajemnik(true)}
+                    disabled={
+                      !canClearTajemnikReview || clearingTajemnik || isReadonly
+                    }
+                    className="gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    {clearingTajemnik ? (
+                      <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    ) : (
+                      <ShieldCheck className="size-4" />
+                    )}
+                    Zrušit stanovisko tajemníka
+                  </Button>
+                )}
               </div>
             </section>
           </div>
@@ -1732,6 +2089,75 @@ export function ProbationEvaluationSection({
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={tajemnikOverrideOpen}
+        onOpenChange={setTajemnikOverrideOpen}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Nastavit tajemníka</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Ve výchozím stavu se tajemník dohledává automaticky z EOS. Ruční
+              nastavení jména a e-mailu platí globálně pro všechny nástupy
+              (aktuální i plánované) – vhodné například pro testovací režim nebo
+              dočasnou změnu, dokud není pozice tajemníka v EOS aktuální.
+            </p>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Jméno tajemníka</label>
+              <Input
+                value={tajemnikNameInput}
+                onChange={(event) => setTajemnikNameInput(event.target.value)}
+                placeholder="Jméno a příjmení"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">E-mail tajemníka</label>
+              <Input
+                type="email"
+                value={tajemnikEmailInput}
+                onChange={(event) => setTajemnikEmailInput(event.target.value)}
+                placeholder="tajemnik@praha6.cz"
+              />
+            </div>
+
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setTajemnikOverrideOpen(false)}
+              >
+                Zrušit
+              </Button>
+
+              {tajemnikInfo?.isOverridden && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void saveTajemnikOverride(true)}
+                  disabled={savingTajemnikOverride}
+                >
+                  Vrátit na automatické
+                </Button>
+              )}
+
+              <Button
+                type="button"
+                onClick={() => void saveTajemnikOverride(false)}
+                disabled={!tajemnikEmailInput.trim() || savingTajemnikOverride}
+                className="bg-[#00847C] text-white hover:bg-[#0B6D73]"
+              >
+                {savingTajemnikOverride ? "Ukládám…" : "Uložit"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <AlertDialog open={confirmReset} onOpenChange={setConfirmReset}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1752,6 +2178,32 @@ export function ProbationEvaluationSection({
               onClick={() => void handleResetConfirmed()}
             >
               Vymazat data formuláře
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={confirmClearTajemnik}
+        onOpenChange={setConfirmClearTajemnik}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Zrušit stanovisko tajemníka?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Stanovisko tajemníka (souhlas/nesouhlas, komentář a podpis) bude
+              odstraněno. Tajemník bude muset formulář znovu posoudit a vyjádřit
+              se.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel>Zrušit</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => void handleClearTajemnikConfirmed()}
+            >
+              Zrušit stanovisko
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

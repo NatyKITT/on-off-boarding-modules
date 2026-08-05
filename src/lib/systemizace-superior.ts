@@ -9,6 +9,7 @@ import {
   snapshotFromEmployee,
   snapshotFromSuperior,
   toSupervisorFields,
+  type PersonSnapshot,
 } from "@/lib/person-snapshot"
 import { getPositions } from "@/lib/systemizace"
 
@@ -109,6 +110,45 @@ export async function resolveSupervisorFromPositionNum(positionNum: string) {
       `Chyba při dohledání vedoucího pro pozici ${positionNum}:`,
       error
     )
+    return null
+  }
+}
+
+// Tajemník nemá v systemizaci/EOS spolehlivě konzistentní kód pozice
+// (viz komentář u findEosEmployeeForPosition výše), ale je nadřízeným
+// úplně každého vedoucího odboru. Stačí tedy najít libovolného aktuálně
+// obsazeného vedoucího odboru a dohledat jeho nadřízeného v EOS -
+// výsledek je vždy aktuální tajemník, i po personální změně.
+export async function resolveTajemnik(): Promise<PersonSnapshot | null> {
+  try {
+    const positions = await getPositions()
+
+    const departmentHead = positions.find(
+      (p) =>
+        p.lead === "1" &&
+        p.unit_name === DEPARTMENT_HEAD_UNIT_NAME &&
+        p.personPersonalNumber?.trim()
+    )
+
+    const personalNumber = departmentHead?.personPersonalNumber?.trim()
+
+    if (!personalNumber) {
+      console.warn(
+        "Nepodařilo se najít žádného obsazeného vedoucího odboru pro dohledání tajemníka"
+      )
+      return null
+    }
+
+    const superior = await getSuperiorByPersonalNumber(personalNumber)
+
+    if (!superior) {
+      console.warn("EOS nevrátil nadřízeného (tajemníka) pro vedoucího odboru")
+      return null
+    }
+
+    return snapshotFromSuperior(superior, "EOS")
+  } catch (error) {
+    console.error("Chyba při dohledání tajemníka:", error)
     return null
   }
 }

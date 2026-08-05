@@ -144,8 +144,11 @@ const CZ_FIELD_LABEL: Record<string, string> = {
 
 const CZ_ACTION_LABEL: Record<string, string> = {
   CREATE: "Vytvoření záznamu",
+  CREATED: "Vytvoření záznamu",
   UPDATE: "Úprava",
+  UPDATED: "Úprava",
   DELETE: "Smazání",
+  DELETED: "Smazání",
   RESTORED: "Obnovení",
   REVERTED: "Vrácení zpět",
   CANCELLED: "Zrušení",
@@ -153,6 +156,7 @@ const CZ_ACTION_LABEL: Record<string, string> = {
   MAIL_ENQUEUED: "E-mail zařazen k odeslání",
   MAIL_SENT: "E-mail odeslán",
   MAIL_FAILED: "Odeslání e-mailu selhalo",
+  NOTICE_REMINDER_SENT: "Upomínka odeslána",
   OFFICIAL_CHANGE_APPLIED: "Propojení se záznamy",
 }
 
@@ -417,9 +421,11 @@ function getActionBadgeVariant(
 ): "default" | "secondary" | "destructive" | "outline" {
   switch (action) {
     case "CREATE":
+    case "CREATED":
     case "RESTORED":
       return "default"
     case "DELETE":
+    case "DELETED":
     case "MAIL_FAILED":
       return "destructive"
     case "STATUS_CHANGED":
@@ -427,6 +433,7 @@ function getActionBadgeVariant(
     case "REVERTED":
     case "MAIL_ENQUEUED":
     case "MAIL_SENT":
+    case "NOTICE_REMINDER_SENT":
     case "OFFICIAL_CHANGE_APPLIED":
       return "secondary"
     default:
@@ -436,14 +443,18 @@ function getActionBadgeVariant(
 
 const ACTION_DESCRIPTION: Record<string, string> = {
   CREATE: "Záznam byl vytvořen.",
+  CREATED: "Záznam byl vytvořen.",
   UPDATE: "Záznam byl upraven.",
+  UPDATED: "Záznam byl upraven.",
   DELETE: "Záznam byl smazán.",
+  DELETED: "Záznam byl smazán.",
   RESTORED: "Záznam byl obnoven ze smazaných.",
   REVERTED: "Poslední krok byl vrácen zpět.",
   CANCELLED: "Záznam byl zrušen.",
   MAIL_ENQUEUED: "E-mail byl zařazen do fronty k odeslání.",
   MAIL_SENT: "E-mail byl úspěšně odeslán.",
   MAIL_FAILED: "Odeslání e-mailu se nezdařilo.",
+  NOTICE_REMINDER_SENT: "Upomínka byla odeslána.",
   OFFICIAL_CHANGE_APPLIED: "Změna byla propojena se záznamy nástupů / odchodů.",
 }
 

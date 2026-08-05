@@ -11,6 +11,7 @@ const EXIT_CHECKLIST_EVENT_ACTION_LABEL: Record<string, string> = {
   HANDOVER_RECIPIENT_INVITE_SENT: "Info o předání agendy odesláno",
   PDF_DOWNLOADED: "PDF staženo/odesláno",
   EMAIL_FAILED: "Odeslání e-mailu selhalo",
+  DEADLINE_REMINDER_SENT: "Upomínka na blížící se konec PP odeslána",
 }
 
 export function exitChecklistEventActionLabel(action: string) {

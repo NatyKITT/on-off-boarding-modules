@@ -704,7 +704,6 @@ export function ProbationEvaluationForm({
         values.evaluatorName?.trim() ||
         evaluatorName?.trim() ||
         signature.signedByName?.trim() ||
-        resolvedCurrentUserName ||
         "",
 
       evaluatorEmail:
@@ -712,7 +711,6 @@ export function ProbationEvaluationForm({
         values.evaluatorEmail?.trim() ||
         evaluatorEmail?.trim() ||
         signature.signedByEmail?.trim() ||
-        resolvedCurrentUserEmail ||
         "",
 
       evaluatorPosition: employeeMeta?.supervisorPosition ?? null,

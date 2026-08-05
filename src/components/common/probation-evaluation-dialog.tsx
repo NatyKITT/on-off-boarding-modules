@@ -19,6 +19,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Textarea } from "@/components/ui/textarea"
 import {
   ProbationEvaluationForm,
   type ProbationEvaluationFormValues,
@@ -60,6 +63,7 @@ type ApiProbationResponse = {
     completedAt?: string | null
     data?: unknown
     revision?: RevisionMeta | null
+    tajemnikRequired?: boolean
 
     evaluatorName?: string | null
     evaluatorEmail?: string | null
@@ -93,6 +97,19 @@ type ApiProbationResponse = {
   currentUser?: {
     name: string | null
     email: string | null
+  }
+  tajemnik?: {
+    name: string | null
+    email: string | null
+    selfIsTajemnik: boolean
+    isCurrentUserTajemnik: boolean
+    review?: {
+      agreement?: "yes" | "no" | null
+      comment?: string | null
+      signedByName?: string | null
+      signedByEmail?: string | null
+      signedAt?: string | null
+    } | null
   }
 }
 
@@ -216,9 +233,18 @@ export function ProbationEvaluationDialog({
   const [savingMode, setSavingMode] = React.useState<
     ProbationEvaluationFormValues["submitMode"] | null
   >(null)
+  const [tajemnikAgreementEdit, setTajemnikAgreementEdit] = React.useState<
+    "yes" | "no" | ""
+  >("")
+  const [tajemnikCommentEdit, setTajemnikCommentEdit] = React.useState("")
 
   const role = session?.user?.role ?? "USER"
   const canManage = ["ADMIN", "HR", "IT"].includes(role)
+
+  React.useEffect(() => {
+    setTajemnikAgreementEdit(data?.tajemnik?.review?.agreement ?? "")
+    setTajemnikCommentEdit(data?.tajemnik?.review?.comment ?? "")
+  }, [data])
 
   const employeeMeta = React.useMemo(
     () => toEmployeeMeta(data, employeeName),
@@ -245,6 +271,14 @@ export function ProbationEvaluationDialog({
     locked ||
     unavailable ||
     (isCompleted && !revisionOpen)
+
+  const canEditTajemnikReview = Boolean(
+    canManage &&
+      revisionOpen &&
+      !saving &&
+      data?.request?.tajemnikRequired &&
+      data?.tajemnik?.review?.signedAt
+  )
 
   const loadData = React.useCallback(async () => {
     setLoading(true)
@@ -401,7 +435,15 @@ export function ProbationEvaluationDialog({
             "Content-Type": "application/json",
           },
           credentials: "include",
-          body: JSON.stringify(values),
+          body: JSON.stringify(
+            canEditTajemnikReview && values.submitMode === "revision"
+              ? {
+                  ...values,
+                  tajemnikAgreement: tajemnikAgreementEdit,
+                  tajemnikComment: tajemnikCommentEdit,
+                }
+              : values
+          ),
         }
       )
 
@@ -632,13 +674,11 @@ export function ProbationEvaluationDialog({
                 evaluatorName={
                   data.request.supervisorName ??
                   data.request.evaluatorName ??
-                  data.currentUser?.name ??
                   null
                 }
                 evaluatorEmail={
                   data.request.supervisorEmail ??
                   data.request.evaluatorEmail ??
-                  data.currentUser?.email ??
                   null
                 }
                 currentUserName={data.currentUser?.name ?? null}
@@ -648,6 +688,105 @@ export function ProbationEvaluationDialog({
                 onDirtyChange={handleDirtyChange}
                 onSubmitInternal={handleSave}
               />
+            )}
+
+            {data?.request?.tajemnikRequired && !loading && !error && (
+              <div className="rounded-md border bg-muted/20 p-4 text-sm">
+                <p className="font-medium">
+                  Vyjádření k vyhodnocení zkušební doby
+                  {data.tajemnik?.name ? ` – ${data.tajemnik.name}` : ""}
+                </p>
+
+                {canEditTajemnikReview ? (
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <Label className="mb-2 block text-sm font-medium">
+                        S doporučením
+                      </Label>
+                      <RadioGroup
+                        value={tajemnikAgreementEdit}
+                        onValueChange={(value) =>
+                          setTajemnikAgreementEdit(value as "yes" | "no")
+                        }
+                        className="flex flex-col gap-2"
+                        disabled={saving}
+                      >
+                        <div className="flex items-center gap-2">
+                          <RadioGroupItem
+                            value="yes"
+                            id="tajemnik-edit-agree-yes"
+                          />
+                          <Label
+                            htmlFor="tajemnik-edit-agree-yes"
+                            className="font-normal"
+                          >
+                            Souhlasí
+                          </Label>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <RadioGroupItem
+                            value="no"
+                            id="tajemnik-edit-agree-no"
+                          />
+                          <Label
+                            htmlFor="tajemnik-edit-agree-no"
+                            className="font-normal"
+                          >
+                            Nesouhlasí
+                          </Label>
+                        </div>
+                      </RadioGroup>
+                    </div>
+
+                    <div>
+                      <Label
+                        htmlFor="tajemnik-edit-comment"
+                        className="mb-2 block text-sm font-medium"
+                      >
+                        Komentář
+                      </Label>
+                      <Textarea
+                        id="tajemnik-edit-comment"
+                        value={tajemnikCommentEdit}
+                        onChange={(event) =>
+                          setTajemnikCommentEdit(event.target.value)
+                        }
+                        disabled={saving}
+                        className="resize-y"
+                      />
+                    </div>
+
+                    <p className="text-xs text-muted-foreground">
+                      Změna se uloží tlačítkem „Uložit změny“ ve formuláři výše
+                      a zapíše se do historie. Podpis tajemníka zůstane
+                      zachovaný.
+                    </p>
+                  </div>
+                ) : data.tajemnik?.review?.signedAt ? (
+                  <div className="mt-2 space-y-1">
+                    <p className="font-medium">
+                      {data.tajemnik.review.agreement === "no"
+                        ? "Nesouhlasí s doporučením"
+                        : "Souhlasí s doporučením"}
+                    </p>
+                    <p className="break-words text-xs text-muted-foreground">
+                      {data.tajemnik.review.signedByName ||
+                        data.tajemnik.review.signedByEmail}{" "}
+                      · podepsáno{" "}
+                      {formatDateTime(data.tajemnik.review.signedAt)}
+                    </p>
+                    {data.tajemnik.review.comment && (
+                      <p className="whitespace-pre-wrap text-xs text-muted-foreground">
+                        {data.tajemnik.review.comment}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Čeká na vyjádření tajemníka.
+                  </p>
+                )}
+              </div>
             )}
           </div>
         </DialogContent>

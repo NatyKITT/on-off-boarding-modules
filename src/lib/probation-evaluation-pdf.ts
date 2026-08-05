@@ -54,6 +54,7 @@ type ProbationPdfPayload = {
     evaluatorUnitName?: string | null
 
     recommendation?: boolean | string | null
+    tajemnikRequired?: boolean | null
     data?: unknown
   }
   onboarding: {
@@ -141,6 +142,17 @@ function getSignatureData(data: Record<string, unknown>) {
     signedByEmail: cleanText(signature.signedByEmail),
     signedAt: cleanText(signature.signedAt),
     signedOnBehalf: signature.signedOnBehalf === true,
+  }
+}
+
+function getTajemnikReviewData(data: Record<string, unknown>) {
+  const review = asRecord(data.tajemnikReview)
+
+  return {
+    agreement: normalizeRecommendation(review.agreement),
+    comment: cleanText(review.comment),
+    signedByName: cleanText(review.signedByName),
+    signedAt: cleanText(review.signedAt),
   }
 }
 
@@ -499,21 +511,14 @@ function drawSignatureBlock(args: {
   page: PDFPage
   fonts: PdfFontSet
   y: number
-  payload: ProbationPdfPayload
+  title: string
+  name: string
+  signedAt?: string | null
 }) {
-  const data = asRecord(args.payload.request.data)
-  const signature = getSignatureData(data)
-
   let activePage = args.page
   let y = args.y
 
-  const evaluatorName =
-    signature.signedByName ||
-    cleanText(args.payload.request.evaluatorName) ||
-    cleanText(args.payload.request.supervisorName) ||
-    "—"
-
-  const signedAt = formatCzDateTime(signature.signedAt)
+  const signedAt = formatCzDateTime(args.signedAt)
   const neededHeight = 58
 
   const ensured = ensureSpace({
@@ -527,18 +532,11 @@ function drawSignatureBlock(args: {
   activePage = ensured.page
   y = ensured.y
 
-  drawText(
-    activePage,
-    args.fonts.bold,
-    "Podpis hodnotitele",
-    CONTENT_LEFT,
-    y,
-    11
-  )
+  drawText(activePage, args.fonts.bold, args.title, CONTENT_LEFT, y, 11)
 
   y -= 18
 
-  drawText(activePage, args.fonts.regular, evaluatorName, CONTENT_LEFT, y, 9)
+  drawText(activePage, args.fonts.regular, args.name, CONTENT_LEFT, y, 9)
 
   y -= 12
 
@@ -644,16 +642,79 @@ export async function renderProbationEvaluationPdfBuffer(
     y = result.y
   }
 
+  const signature = getSignatureData(data)
+  const evaluatorName =
+    signature.signedByName ||
+    cleanText(payload.request.evaluatorName) ||
+    cleanText(payload.request.supervisorName) ||
+    "—"
+
   const signatureResult = drawSignatureBlock({
     pdf,
     page: activePage,
     fonts,
     y,
-    payload,
+    title: "Podpis hodnotitele",
+    name: evaluatorName,
+    signedAt: signature.signedAt,
   })
 
   activePage = signatureResult.page
   y = signatureResult.y
+
+  const tajemnikReview = getTajemnikReviewData(data)
+  const tajemnikRequired = payload.request.tajemnikRequired === true
+
+  if (!tajemnikRequired && tajemnikReview.agreement) {
+    const noteResult = drawSection({
+      pdf,
+      page: activePage,
+      fonts,
+      y,
+      title: "Stanovisko tajemníka",
+      text: "Vedoucí je zároveň tajemníkem – vyhodnocení potvrzeno i jako stanovisko tajemníka.",
+    })
+
+    activePage = noteResult.page
+    y = noteResult.y
+  } else if (tajemnikRequired && tajemnikReview.agreement) {
+    const agreementLabel =
+      tajemnikReview.agreement === "no"
+        ? "NESOUHLASÍM s výše uvedeným doporučením"
+        : "SOUHLASÍM s výše uvedeným doporučením"
+
+    const tajemnikText = [
+      agreementLabel,
+      tajemnikReview.comment ? `Komentář:\n${tajemnikReview.comment}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n")
+
+    const reviewResult = drawSection({
+      pdf,
+      page: activePage,
+      fonts,
+      y,
+      title: "Vyjádření tajemníka",
+      text: tajemnikText,
+    })
+
+    activePage = reviewResult.page
+    y = reviewResult.y
+
+    const tajemnikSignatureResult = drawSignatureBlock({
+      pdf,
+      page: activePage,
+      fonts,
+      y,
+      title: "Podpis tajemníka",
+      name: tajemnikReview.signedByName || "—",
+      signedAt: tajemnikReview.signedAt,
+    })
+
+    activePage = tajemnikSignatureResult.page
+    y = tajemnikSignatureResult.y
+  }
 
   if (y > 48) {
     drawText(

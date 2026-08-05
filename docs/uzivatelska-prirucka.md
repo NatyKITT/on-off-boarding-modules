@@ -62,6 +62,11 @@ administrátor roli ručně nezvýší (viz kapitola 3). Pokud se takový
 uživatel pokusí vstoupit do aplikace, uvidí stránku „Nemáte přístup do
 aplikace“ s pokynem kontaktovat administrátorku aplikace.
 
+Jméno a příjmení se při prvním přihlášení automaticky převezme z
+Google účtu. Administrátor je pak může u kteréhokoli uživatele
+v sekci *Administrace* kdykoli ručně doplnit nebo opravit (viz
+kapitola 3).
+
 ## 3. Role a oprávnění
 
 Roli přiděluje **administrátor** v sekci *Administrace*
@@ -187,6 +192,20 @@ odbor/oddělení a další identifikační údaje. Z detailu nástupu se dále
   pozvánku i upomínky a po vyplnění mohou formulář znovu odemknout
   k opravě.
 
+  Pokud nadřízený, který hodnocení vyplňuje, není zároveň tajemník
+  úřadu, po jeho odeslání se automaticky odešle e-mail s PDF a
+  odkazem i tajemníkovi – ten na stejném odkazu doplní souhlas nebo
+  nesouhlas s doporučením, případný komentář a podpis. Teprve po jeho
+  vyjádření jde finální PDF s oběma stanovisky na Personální oddělení
+  (pokud je nadřízený sám tajemníkem, nebo jde o nástup přímo na
+  pozici tajemníka, tento druhý krok odpadá). Tajemníka lze pro
+  testovací nebo přechodné účely ručně přepsat (jméno a e-mail) přímo
+  v detailu vyhodnocení zkušební doby, vedle údajů o nadřízeném –
+  nastavení je globální a platí okamžitě pro všechny nástupy, dokud se
+  nevrátí zpět na automatické dohledání. HR může po odemknutí
+  vyplněného formuláře upravit i stanovisko tajemníka; podpis a čas
+  podpisu přitom zůstávají zachované a změna se zapíše do historie.
+
 Pokud se k danému osobnímu číslu později objeví i odpovídající
 odchod, aplikace záznamy **automaticky propojí** – u nástupu se pak
 zobrazí informace o odchodu a případně se zastaví sledování zkušební
@@ -208,6 +227,16 @@ plánované a skutečné. Z detailu odchodu se dále řídí:
   Checklist se částečně vyplňuje interně (HR/IT), částečně jej
   vyplňuje a podepisuje sám odcházející zaměstnanec nebo jeho
   nadřízený prostřednictvím veřejného odkazu (kapitola 6).
+
+**Upomínky na blížící se konec pracovního poměru** – pokud má
+zaměstnanec **skutečný** (ne jen plánovaný) konec pracovního poměru a
+výstupní list ještě není kompletně podepsaný, aplikace automaticky:
+
+- 30, 14, 7 a 3 dny před koncem odešle e-mailem upomínku (zatím jen
+  na HR, ne zaměstnanci ani nadřízenému),
+- na stránce výstupního listu zobrazí barevný banner (žlutý do 7 dnů,
+  červený v posledním týdnu nebo po termínu),
+- každou odeslanou upomínku zapíše do historie výstupního listu.
 
 Stejně jako u nástupů platí automatické informační propojení podle
 osobního čísla s odpovídajícím nástupem.
@@ -266,7 +295,11 @@ záznam, na kterém nepotřebuje mít v aplikaci účet ani roli:
 - **Vyhodnocení zkušební doby**
   (`/vyhodnoceni-zkusebni-doby/[token]`) – nadřízený zde po
   přihlášení přes Google (ověřeném proti konkrétnímu zaměstnanci)
-  vyplní hodnocení zkušební doby.
+  vyplní hodnocení zkušební doby. Je-li potřeba i vyjádření
+  tajemníka, otevře se mu po odeslání stejný odkaz s doplňkovou
+  sekcí k vyjádření (souhlas/nesouhlas, komentář, podpis); ostatním
+  (včetně původního nadřízeného) se po odeslání zobrazí jen
+  potvrzení, ne obsah vyhodnocení.
 
 Tyto odkazy platí vždy jen pro daný záznam. Po vyplnění nebo podpisu
 je možné formulář v aplikaci znovu uzamknout, případně odemknout
@@ -276,8 +309,14 @@ k opravě.
 
 Ke každému nástupu, odchodu, změně i dokumentu aplikace vede historii
 – kdo, kdy a jakou akci provedl (vytvoření, úprava, smazání, obnovení,
-odeslání e-mailu apod.). Historii lze zobrazit přímo u konkrétního
-záznamu i souhrnně u reportů, tlačítkem „Historie“.
+odeslání e-mailu, upomínka, propojení se záznamem apod.). Historii lze
+zobrazit přímo u konkrétního záznamu i souhrnně u reportů, tlačítkem
+„Historie“.
+
+U seznamu nástupů, odchodů i změn je navíc samostatné tlačítko
+**„Smazané záznamy“**, které zobrazí jen smazané položky daného typu a
+umožní jejich obnovení – smazání tedy není nevratné, dokud záznam
+někdo trvale neodstraní přímo v databázi.
 
 ## 8. Slovníček pojmů
 
@@ -287,5 +326,8 @@ záznamu i souhrnně u reportů, tlačítkem „Historie“.
 | **Skutečný** nástup/odchod | Termín potvrzený jako reálně proběhlý |
 | **Exit checklist** | Strukturovaný výstupní proces při odchodu (majetek, agenda, střet zájmů, podpis) |
 | **Vyhodnocení zkušební doby** | Formulář hodnocení zaměstnance nadřízeným na konci zkušební doby |
+| **Vyjádření tajemníka** | Druhá fáze vyhodnocení zkušební doby – tajemník úřadu se souhlasem/nesouhlasem, komentářem a podpisem vyjádří k doporučení nadřízeného, pokud jím není sám |
 | **Zaměstnanecká změna** | Informační záznam o změně jména a/nebo pozice u stávajícího zaměstnance |
 | **Osobní číslo** | Identifikátor zaměstnance, podle kterého se automaticky propojují nástup a odchod |
+| **Upomínka na konec PP** | Automatická e-mailová upomínka pro HR 30/14/7/3 dny před skutečným koncem pracovního poměru, pokud výstupní list ještě není hotový |
+| **Smazané záznamy** | Přehled smazaných nástupů/odchodů/změn s možností obnovení |

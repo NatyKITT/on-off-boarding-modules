@@ -8,7 +8,7 @@ Dokument je určený pro převzetí, nasazení nebo kontrolu aplikace v jiném p
 
 ## 1. Shrnutí
 
-Aplikace používá cron endpointy pro automatické zpracování agendy zkušební doby a pro odesílání e-mailů z fronty.
+Aplikace používá cron endpointy pro automatické zpracování agendy zkušební doby, blížícího se konce pracovního poměru a pro odesílání e-mailů z fronty.
 
 Crony se nespouští samy od sebe jen tím, že existuje kód v repozitáři. Musí je volat externí plánovač, například:
 
@@ -22,10 +22,13 @@ Cron endpointy jsou chráněné přes `CRON_SECRET`. To znamená, že volající
 Zjednodušený tok:
 
 1. Cron `probation-notifications` projde nástupy a zkušební doby.
-2. Podle pravidel vytvoří e-mailové úlohy v tabulce `MailQueue`.
-3. Cron `mail-worker` zpracuje čekající položky z `MailQueue`.
-4. Mail worker odešle e-maily přes Resend.
-5. Stav odeslání nebo chyba se zapíše do databáze / historie.
+2. Cron `offboarding-notifications` projde skutečné odchody a blížící se konec pracovního poměru u nedokončených výstupních listů.
+3. Podle pravidel oba vytvoří e-mailové úlohy v tabulce `MailQueue`.
+4. Cron `mail-worker` zpracuje čekající položky z `MailQueue`.
+5. Mail worker odešle e-maily přes Resend.
+6. Stav odeslání nebo chyba se zapíše do databáze / historie.
+
+Oba kontrolní crony běží jen jednou denně, v 8:00 pražského času – viz kapitola 8.1 a 8.2 k tomu, proč mají v GitHub Actions dvě UTC schedule hodnoty.
 
 ---
 
@@ -51,7 +54,39 @@ Důležité: tento endpoint běžně e-maily přímo neposílá. Pouze připravu
 
 ---
 
-### 2.2 Mail worker
+### 2.2 Kontrola blížícího se konce pracovního poměru
+
+```txt
+GET /api/cron/offboarding-notifications
+```
+
+Tento endpoint kontroluje **skutečné** odchody (`actualEnd`, ne
+`plannedEnd`) a jejich výstupní list.
+
+Typicky zajišťuje:
+
+- dohledání skutečných odchodů, kterým se blíží konec pracovního
+  poměru za 30, 14, 7 nebo 3 dny,
+- u každého ověří, jestli je výstupní list (exit checklist) už
+  kompletně podepsaný – pokud ano, upomínka se nevytváří,
+- vytvoření jedné e-mailové úlohy pro dané okno (30/14/7/3 dny) a
+  daný odchod, nikdy duplicitně,
+- zápis události `DEADLINE_REMINDER_SENT` do historie výstupního
+  listu.
+
+Příjemci jsou zatím jen HR (`HR_EMAILS`) – žádný e-mail se zatím
+neposílá přímo zaměstnanci ani nadřízenému. Endpoint stejně jako
+`probation-notifications` e-maily přímo neposílá, pouze vytváří
+úlohy typu `NOTICE_WARNING` do `MailQueue`.
+
+Na stránce výstupního listu (`/odchody/[id]/vystupni-list`) se navíc
+nezávisle na cronu zobrazuje barevný banner (žlutý do 7 dnů, červený
+0–7 dnů nebo po termínu), pokud checklist ještě není kompletní – ten
+banner se počítá přímo při načtení stránky, ne z výsledku cronu.
+
+---
+
+### 2.3 Mail worker
 
 ```txt
 GET /api/cron/mail-worker
@@ -69,7 +104,7 @@ Typicky dělá:
 
 ---
 
-### 2.3 Obecný cron endpoint
+### 2.4 Obecný cron endpoint
 
 ```txt
 GET /api/cron
@@ -160,6 +195,8 @@ Crony pracují s databází.
 Prostředí musí mít správně nastavenou `DATABASE_URL` a databáze musí obsahovat aktuální migrace.
 
 Cron `probation-notifications` čte nástupy, zkušební dobu a stav vyhodnocení.
+
+Cron `offboarding-notifications` čte skutečné odchody, výstupní listy (exit checklist) a zapisuje do jejich historie.
 
 Cron `mail-worker` čte a aktualizuje `MailQueue`.
 
@@ -345,10 +382,10 @@ Workflow potom musí používat odpovídající názvy secrets.
 
 ### 8.1 Kontrola zkušebních dob
 
-Soubor například:
+Skutečný soubor v repozitáři:
 
 ```txt
-.github/workflows/probation-check.yml
+.github/workflows/probation-cron.yml
 ```
 
 Příklad:
@@ -358,7 +395,7 @@ name: Probation Check
 
 on:
   schedule:
-    - cron: "7 6 * * *"
+    - cron: "0 6,7 * * *"
   workflow_dispatch:
 
 jobs:
@@ -367,18 +404,57 @@ jobs:
     steps:
       - name: Call probation notifications cron
         run: |
-          curl -fsS "$APP_URL/api/cron/probation-notifications" \
+          curl -fsS -X POST "$APP_URL/api/cron/probation-notifications" \
             -H "Authorization: Bearer $CRON_SECRET"
         env:
           APP_URL: ${{ secrets.APP_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
 ```
 
-Poznámka: čas v GitHub Actions cron zápisu je v UTC.
+Poznámka: čas v GitHub Actions cron zápisu je v UTC a nezná časové
+pásmo. Endpoint má uvnitř běžet jen v 8:00 pražského času, proto se
+schedule spouští ve dvou UTC hodnotách najednou (`6,7`) – jedna
+odpovídá 8:00 v létě (CEST), druhá v zimě (CET). Endpoint
+(`isLocalHourNow(8)`) si podle skutečného pražského času sám vybere,
+který běh proběhne a který jen vrátí `status: "skipped"`. Bez
+parametru `force=true` se tak nikdy nespustí dvakrát za den.
 
 ---
 
-### 8.2 Mail worker
+### 8.2 Kontrola blížícího se konce pracovního poměru
+
+Skutečný soubor v repozitáři:
+
+```txt
+.github/workflows/offboarding-cron.yml
+```
+
+Stejná struktura a stejné DST zdůvodnění jako u 8.1, jiný endpoint:
+
+```yml
+name: Offboarding Check
+
+on:
+  schedule:
+    - cron: "0 6,7 * * *"
+  workflow_dispatch:
+
+jobs:
+  offboarding-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call offboarding notifications cron
+        run: |
+          curl -fsS -X POST "$APP_URL/api/cron/offboarding-notifications" \
+            -H "Authorization: Bearer $CRON_SECRET"
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+```
+
+---
+
+### 8.3 Mail worker
 
 Soubor například:
 
@@ -422,14 +498,21 @@ curl -fsS "https://url-aplikace.cz/api/cron/probation-notifications" \
   -H "Authorization: Bearer <CRON_SECRET>"
 ```
 
-### 9.2 Test mail workeru
+### 9.2 Test kontroly blížícího se konce pracovního poměru
+
+```bash
+curl -fsS "https://url-aplikace.cz/api/cron/offboarding-notifications" \
+  -H "Authorization: Bearer <CRON_SECRET>"
+```
+
+### 9.3 Test mail workeru
 
 ```bash
 curl -fsS "https://url-aplikace.cz/api/cron/mail-worker" \
   -H "Authorization: Bearer <CRON_SECRET>"
 ```
 
-### 9.3 Lokální test
+### 9.4 Lokální test
 
 V `.env.local` musí být například:
 
@@ -477,7 +560,19 @@ PROBATION_EVALUATION_REMINDER
 PROBATION_EVALUATION_HR_INFO
 PROBATION_EVALUATION_HR_MISSING_SUPERVISOR
 PROBATION_EVALUATION_HR_NOT_COMPLETED
+PROBATION_EVALUATION_UNLOCK_REMINDER
 ```
+
+Typ e-mailu pro blížící se konec pracovního poměru:
+
+```txt
+NOTICE_WARNING
+```
+
+Tento typ vytváří `offboarding-notifications` a zpracovává ho stejný
+`mail-worker` jako probation typy – payload obsahuje mimo jiné
+`recipients`, `employeeName`, `daysBeforeEnd`, `checklistLink`,
+`subject` a `intro`.
 
 Finální PDF vyplněného formuláře se neposílá přes běžnou frontu. Viz další kapitola.
 
@@ -567,9 +662,9 @@ Před spuštěním cronů v novém prostředí ověřit:
 - [ ] V GitHub Actions je nastavený stejný `CRON_SECRET`.
 - [ ] V GitHub Actions je nastavené správné `APP_URL`.
 - [ ] `APP_URL` ukazuje na běžící instanci aplikace.
-- [ ] Cron endpoint lze ručně zavolat přes `curl` s Authorization headerem.
+- [ ] Cron endpointy (`probation-notifications`, `offboarding-notifications`, `mail-worker`) lze ručně zavolat přes `curl` s Authorization headerem.
 - [ ] Je nastavená `DATABASE_URL`.
-- [ ] Jsou nasazené databázové migrace.
+- [ ] Jsou nasazené databázové migrace (včetně nových hodnot enumů, např. `DEADLINE_REMINDER_SENT`).
 - [ ] Je nastavený `RESEND_API_KEY`.
 - [ ] Je nastavený `EMAIL_FROM`.
 - [ ] Odesílací doména/adresa je ověřená v Resendu.
@@ -698,7 +793,9 @@ Krátké shrnutí pro správce nebo vedoucího:
 ```txt
 Crony v aplikaci nejsou spouštěné automaticky samotným Next.js kódem. Musí je volat externí plánovač, aktuálně ideálně GitHub Actions. Pro fungování je potřeba mít CRON_SECRET nastavený jak v běžící aplikaci, tak v GitHub Actions secrets. Hodnoty musí být stejné. GitHub dále potřebuje APP_URL, což je URL běžící instance aplikace.
 
-Cron probation-notifications pouze kontroluje zkušební doby a vytváří e-mailové úlohy do MailQueue. Samotné odesílání provádí cron mail-worker, který zpracovává MailQueue a posílá e-maily přes Resend.
+Cron probation-notifications pouze kontroluje zkušební doby a vytváří e-mailové úlohy do MailQueue. Cron offboarding-notifications stejným způsobem kontroluje skutečné odchody a blížící se konec pracovního poměru u nedokončených výstupních listů, zatím jen s upomínkami pro HR. Samotné odesílání obou provádí cron mail-worker, který zpracovává MailQueue a posílá e-maily přes Resend.
+
+Oba kontrolní crony mají v aplikaci běžet jen jednou denně v 8:00 pražského času, proto mají v GitHub Actions nastavené schedule na dvě UTC hodnoty (6 a 7) kvůli letnímu/zimnímu času – endpoint sám pozná, který běh je ten správný.
 
 Pro e-maily musí být v běžícím prostředí nastavený RESEND_API_KEY, EMAIL_FROM a příjemci, například HR_EMAILS. Pro DEV a PROD je doporučené mít oddělené APP_URL a CRON_SECRET.
 
@@ -712,9 +809,11 @@ Cron endpointy se neautorizují přes role HR/ADMIN v aplikaci, ale technicky p�
 Doporučené soubory:
 
 ```txt
-.github/workflows/probation-check.yml
+.github/workflows/probation-cron.yml
+.github/workflows/offboarding-cron.yml
 .github/workflows/mail-worker.yml
-docs/crony-a-emailova-fronta.md
+docs/cron-notification-full-version.md
+docs/cron-short-summary.md
 ```
 
 Doporučené dokumentovat:
@@ -731,6 +830,8 @@ Doporučené dokumentovat:
 ## 17. Rychlá odpověď na otázku „co to dělá?“
 
 Cron pro zkušební dobu automaticky hlídá blížící se konec zkušební doby u nástupů a připravuje e-mailové notifikace pro vedoucí nebo HR.
+
+Cron pro blížící se konec pracovního poměru automaticky hlídá skutečné odchody s nedokončeným výstupním listem a připravuje upomínky pro HR (30/14/7/3 dny předem).
 
 Mail worker následně bere připravené zprávy z e-mailové fronty a fyzicky je odesílá přes Resend.
 

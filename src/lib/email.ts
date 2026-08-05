@@ -1842,6 +1842,22 @@ export type SendProbationEvaluationPdfEmailParams = {
   filename: string
 }
 
+export type SendProbationEvaluationTajemnikReviewRequestEmailParams = {
+  to: string
+  employeeName: string
+  employeePersonalNumber?: string | null
+  employeePosition?: string | null
+  employeeDepartment?: string | null
+  employeeUnitName?: string | null
+  probationEndDate?: string | Date | null
+  recommendation?: string | null
+  evaluatorName?: string | null
+  evaluatorEmail?: string | null
+  evaluationLink: string
+  pdfBuffer: Buffer
+  filename: string
+}
+
 export type SendProbationEvaluationCompletedEmailParams = {
   to: string[]
   employeeName: string
@@ -2625,6 +2641,148 @@ export async function sendProbationEvaluationPdfEmail(
     args.evaluatorName ? `Hodnotil(a): ${args.evaluatorName}` : "",
     args.evaluatorEmail ? `E-mail hodnotitele: ${args.evaluatorEmail}` : "",
     args.message ? `Zpráva: ${args.message}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n")
+
+  await sendMail({
+    to: [args.to],
+    subject,
+    html,
+    text,
+    attachments: [
+      {
+        filename: args.filename,
+        content: args.pdfBuffer,
+        contentType: "application/pdf",
+      },
+    ],
+  })
+}
+
+export async function sendProbationEvaluationTajemnikReviewRequestEmail(
+  args: SendProbationEvaluationTajemnikReviewRequestEmailParams
+): Promise<void> {
+  const primary = "#00847C"
+  const bgLight = "#E5F5F2"
+  const subject = `Vyhodnocení zkušební doby – vyjádření tajemníka – ${args.employeeName}`
+
+  const html = `
+  <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+  <html xmlns="http://www.w3.org/1999/xhtml" lang="cs">
+    <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <meta name="color-scheme" content="light" />
+      <meta name="supported-color-schemes" content="light" />
+      <title>${escapeHtml(subject)}</title>
+      <style type="text/css">
+        body { margin: 0; padding: 0; }
+        table { border-collapse: collapse; }
+        ${EMAIL_GLOBAL_FONT_STYLE}
+      </style>
+    </head>
+
+    <body style="margin:0;padding:0;background-color:${bgLight};font-family:${EMAIL_FONT_FAMILY};">
+      <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
+        <tr>
+          <td align="center" style="padding:30px 10px;">
+            <table border="0" cellpadding="0" cellspacing="0" width="600"
+              bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
+              <tr bgcolor="${primary}">
+                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};border-radius:12px 12px 0 0;">
+                  <div style="color:#ffffff;font-size:12px;text-transform:uppercase;letter-spacing:2px;margin-bottom:10px;opacity:.9;">
+                    Zkušební doba<span style="opacity:.6;">&nbsp;·&nbsp;</span>Vyjádření tajemníka
+                  </div>
+                  <div style="color:#ffffff;font-size:20px;font-weight:bold;line-height:1.3;">
+                    Vyhodnocení zkušební doby${
+                      args.employeeName
+                        ? ` – ${escapeHtml(args.employeeName)}`
+                        : ""
+                    }
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="#ffffff" style="padding:26px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};">
+                  <p style="margin:0 0 16px 0;font-size:14px;color:#082B2A;">
+                    Dobrý den,
+                  </p>
+
+                  <p style="margin:0 0 18px 0;font-size:14px;color:#374151;line-height:1.6;">
+                    vedoucí vyplnil(a) formulář Vyhodnocení zkušební doby níže uvedeného zaměstnance. Vyplněný formulář naleznete v PDF příloze. Prosíme o vyjádření (souhlas/nesouhlas s doporučením) přes odkaz níže.
+                  </p>
+
+                  ${renderProbationInfoTable({
+                    primary,
+                    bgLight,
+                    employeeName: args.employeeName,
+                    employeePersonalNumber: args.employeePersonalNumber,
+                    employeePosition: args.employeePosition,
+                    employeeDepartment: args.employeeDepartment,
+                    employeeUnitName: args.employeeUnitName,
+                    probationEndDate: args.probationEndDate,
+                    recommendation: args.recommendation,
+                    evaluatorName: args.evaluatorName,
+                    evaluatorEmail: args.evaluatorEmail,
+                  })}
+
+                  ${wrapWithBottomSpacing(
+                    `
+                  <table border="0" cellpadding="0" cellspacing="0">
+                    <tr>
+                      <td bgcolor="${primary}" style="border-radius:6px;background-color:${primary};border:1px solid ${primary};">
+                        <a
+                          href="${escapeHtml(args.evaluationLink)}"
+                          style="display:inline-block;padding:12px 28px;color:#ffffff;font-family:${EMAIL_FONT_FAMILY};font-size:15px;font-weight:bold;text-decoration:none;border-radius:6px;"
+                        >
+                          Otevřít k vyjádření
+                        </a>
+                      </td>
+                    </tr>
+                  </table>
+                  `,
+                    24
+                  )}
+
+                  <p style="margin:0 0 4px 0;font-size:12px;color:#6b7280;">
+                    Pokud tlačítko nefunguje, zkopírujte tento odkaz do prohlížeče:
+                  </p>
+                  <p style="margin:0;word-break:break-all;">
+                    <a href="${escapeHtml(args.evaluationLink)}" style="font-family:monospace;font-size:12px;color:${primary};">
+                      ${escapeHtml(args.evaluationLink)}
+                    </a>
+                  </p>
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;">
+                  ${EMAIL_FOOTER_HTML}
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+  </html>`
+
+  const text = [
+    "Dobrý den,",
+    "",
+    "vedoucí vyplnil(a) formulář Vyhodnocení zkušební doby níže uvedeného zaměstnance. Vyplněný formulář naleznete v PDF příloze. Prosíme o vyjádření (souhlas/nesouhlas s doporučením) přes odkaz níže.",
+    "",
+    `Zaměstnanec: ${args.employeeName}`,
+    `Pozice: ${args.employeePosition || "—"}`,
+    `Odbor: ${args.employeeDepartment || "—"}`,
+    `Oddělení: ${args.employeeUnitName || "—"}`,
+    `Konec zkušební doby: ${fmtDate(args.probationEndDate)}`,
+    args.recommendation ? `Doporučení: ${args.recommendation}` : "",
+    args.evaluatorName ? `Hodnotil(a): ${args.evaluatorName}` : "",
+    args.evaluatorEmail ? `E-mail hodnotitele: ${args.evaluatorEmail}` : "",
+    `Odkaz: ${args.evaluationLink}`,
   ]
     .filter(Boolean)
     .join("\n")

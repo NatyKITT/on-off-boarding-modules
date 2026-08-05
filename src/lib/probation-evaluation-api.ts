@@ -8,13 +8,17 @@ import {
 import { z } from "zod"
 
 import { prisma } from "@/lib/db"
-import { sendProbationEvaluationPdfEmail } from "@/lib/email"
+import {
+  sendProbationEvaluationPdfEmail,
+  sendProbationEvaluationTajemnikReviewRequestEmail,
+} from "@/lib/email"
 import {
   buildLinkedOffboardingInfo,
   normalizePersonalNumber,
   pickMostRelevantOffboarding,
 } from "@/lib/employment-linking"
 import { getEmployees, type Employee } from "@/lib/eos-employees"
+import { buildPersonFullName } from "@/lib/person-snapshot"
 import { renderProbationEvaluationPdfBuffer } from "@/lib/probation-evaluation-pdf"
 import {
   addProbationEvent,
@@ -27,6 +31,7 @@ import {
   serializeProbationRequest,
   toDateIso,
 } from "@/lib/probation-evaluation-request"
+import { resolveTajemnik } from "@/lib/systemizace-superior"
 
 export type CurrentUser = {
   id?: string | null
@@ -63,7 +68,9 @@ export const probationSignatureSchema = z.object({
 
 export const probationSaveSchema = z
   .object({
-    submitMode: z.enum(["draft", "final", "revision"]).default("draft"),
+    submitMode: z
+      .enum(["draft", "final", "revision", "tajemnik"])
+      .default("draft"),
 
     workResults: z.string().trim().optional().default(""),
     workBehavior: z.string().trim().optional().default(""),
@@ -87,9 +94,39 @@ export const probationSaveSchema = z
     evaluatorUnitName: z.string().trim().nullable().optional(),
 
     signature: probationSignatureSchema.optional().default({}),
+
+    tajemnikAgreement: z
+      .union([z.enum(["yes", "no"]), z.literal("")])
+      .optional()
+      .default(""),
+    tajemnikComment: z.string().trim().optional(),
+    tajemnikSignature: probationSignatureSchema.optional().default({}),
   })
   .superRefine((values, ctx) => {
     if (values.submitMode === "draft") return
+
+    if (values.submitMode === "tajemnik") {
+      if (
+        values.tajemnikAgreement !== "yes" &&
+        values.tajemnikAgreement !== "no"
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["tajemnikAgreement"],
+          message: "Vyberte, zda s doporučením souhlasíte.",
+        })
+      }
+
+      if (!values.tajemnikSignature?.signedAt?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["tajemnikSignature"],
+          message: "Před odesláním je potřeba se podepsat.",
+        })
+      }
+
+      return
+    }
 
     if (values.workResults.trim().length < 10) {
       ctx.addIssue({
@@ -185,6 +222,21 @@ export function isProbationRevisionOpen(data: unknown) {
   const revision = getProbationRevisionRecord(existingData.revision)
 
   return revision.open === true
+}
+
+export type TajemnikReview = {
+  agreement?: "yes" | "no" | null
+  comment?: string | null
+  signedByName?: string | null
+  signedByEmail?: string | null
+  signedAt?: string | null
+  reviewedAt?: string | null
+}
+
+export function getTajemnikReview(data: unknown): TajemnikReview {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return {}
+
+  return data as TajemnikReview
 }
 
 export function getNumericId(value: string) {
@@ -366,6 +418,7 @@ export async function getProbationDetailByOnboardingId(onboardingId: number) {
           supervisorPosition: true,
           supervisorDepartment: true,
           supervisorUnitName: true,
+          supervisorPersonalNumber: true,
           deletedAt: true,
         },
       },
@@ -435,6 +488,7 @@ export async function getProbationDetailByToken(token: string) {
           supervisorPosition: true,
           supervisorDepartment: true,
           supervisorUnitName: true,
+          supervisorPersonalNumber: true,
           deletedAt: true,
         },
       },
@@ -849,6 +903,109 @@ async function buildResolvedSupervisorMeta(
   }
 }
 
+const TAJEMNIK_OVERRIDE_SETTING_KEY = "tajemnik_override"
+
+export async function getTajemnikOverride(): Promise<{
+  name: string | null
+  email: string | null
+}> {
+  const setting = await prisma.systemSettings.findUnique({
+    where: { key: TAJEMNIK_OVERRIDE_SETTING_KEY },
+  })
+
+  const value = (setting?.value ?? null) as {
+    name?: string | null
+    email?: string | null
+  } | null
+
+  return {
+    name: cleanText(value?.name) || null,
+    email: cleanEmail(value?.email) || null,
+  }
+}
+
+export async function setTajemnikOverride(args: {
+  name: string | null
+  email: string | null
+  updatedBy: string
+  client?: Prisma.TransactionClient
+}): Promise<void> {
+  const db = args.client ?? prisma
+  const email = cleanEmail(args.email)
+  const name = email ? cleanText(args.name) || null : null
+
+  await db.systemSettings.upsert({
+    where: { key: TAJEMNIK_OVERRIDE_SETTING_KEY },
+    update: {
+      value: { name, email },
+      updatedBy: args.updatedBy,
+      updatedAt: new Date(),
+    },
+    create: {
+      key: TAJEMNIK_OVERRIDE_SETTING_KEY,
+      value: { name, email },
+      updatedBy: args.updatedBy,
+    },
+  })
+}
+
+export async function resolveTajemnikContext(
+  request: ProbationDetail | PublicProbationDetail
+): Promise<{
+  tajemnikName: string | null
+  tajemnikEmail: string | null
+  selfIsTajemnik: boolean
+  isOverridden: boolean
+  overrideName: string | null
+  overrideEmail: string | null
+}> {
+  const override = await getTajemnikOverride()
+
+  let tajemnikName: string | null
+  let tajemnikEmail: string | null
+  let tajemnikPersonalNumber: string | null = null
+
+  if (override.email) {
+    tajemnikName = override.name
+    tajemnikEmail = override.email
+  } else {
+    const tajemnik = await resolveTajemnik()
+    tajemnikName = tajemnik ? buildPersonFullName(tajemnik) || null : null
+    tajemnikEmail = tajemnik?.email ?? null
+    tajemnikPersonalNumber = tajemnik?.personalNumber ?? null
+  }
+
+  const evalueePersonalNumber = normalizePersonalNumber(
+    request.onboarding.personalNumber
+  )
+  const supervisorPersonalNumber = normalizePersonalNumber(
+    request.onboarding.supervisorPersonalNumber
+  )
+  const normalizedTajemnikPersonalNumber = tajemnikPersonalNumber
+    ? normalizePersonalNumber(tajemnikPersonalNumber)
+    : ""
+
+  const evalueeIsTajemnik = Boolean(
+    normalizedTajemnikPersonalNumber &&
+      evalueePersonalNumber &&
+      normalizedTajemnikPersonalNumber === evalueePersonalNumber
+  )
+  const supervisorIsTajemnik = Boolean(
+    normalizedTajemnikPersonalNumber &&
+      supervisorPersonalNumber &&
+      normalizedTajemnikPersonalNumber === supervisorPersonalNumber
+  )
+
+  return {
+    tajemnikName,
+    tajemnikEmail,
+    isOverridden: Boolean(override.email),
+    overrideName: override.name,
+    overrideEmail: override.email,
+    selfIsTajemnik: evalueeIsTajemnik || supervisorIsTajemnik,
+  }
+}
+
 function getEvaluatorName(args: {
   parsed: ProbationSaveInput
   request: ProbationDetail | PublicProbationDetail
@@ -1072,6 +1229,9 @@ export async function buildResolvedProbationApiResponse(args: {
   const supervisor = await buildResolvedSupervisorMeta(request)
   const latestEvaluation = request.evaluations?.[0] ?? null
   const serializedRequest = serializeProbationRequest(request)
+  const tajemnikContext = await resolveTajemnikContext(request)
+  const tajemnikReview = getTajemnikReview(data.tajemnikReview)
+  const currentUserEmail = cleanEmail(currentUser.email)
 
   return {
     status: "success" as const,
@@ -1149,6 +1309,20 @@ export async function buildResolvedProbationApiResponse(args: {
       name: currentUser.name ?? null,
       email: currentUser.email ?? null,
     },
+    tajemnik: {
+      name: tajemnikContext.tajemnikName,
+      email: tajemnikContext.tajemnikEmail,
+      selfIsTajemnik: tajemnikContext.selfIsTajemnik,
+      isOverridden: tajemnikContext.isOverridden,
+      overrideName: tajemnikContext.overrideName,
+      overrideEmail: tajemnikContext.overrideEmail,
+      isCurrentUserTajemnik: Boolean(
+        tajemnikContext.tajemnikEmail &&
+          currentUserEmail &&
+          cleanEmail(tajemnikContext.tajemnikEmail) === currentUserEmail
+      ),
+      review: tajemnikReview,
+    },
   }
 }
 
@@ -1176,6 +1350,112 @@ function getSignedMeta(value: Prisma.InputJsonObject) {
   }
 }
 
+async function saveTajemnikReview(args: {
+  request: ProbationDetail | PublicProbationDetail
+  existingData: Record<string, unknown>
+  parsed: ProbationSaveInput
+  user: CurrentUser
+}) {
+  const { request, existingData, parsed, user } = args
+
+  if (request.status !== "COMPLETED") {
+    return {
+      ok: false as const,
+      response: jsonError("Vyhodnocení zatím není finálně vyplněné.", 409),
+    }
+  }
+
+  if (!request.tajemnikRequired) {
+    return {
+      ok: false as const,
+      response: jsonError(
+        "Pro toto vyhodnocení se vyjádření tajemníka nevyžaduje.",
+        409
+      ),
+    }
+  }
+
+  const existingReview = getTajemnikReview(existingData.tajemnikReview)
+
+  if (existingReview.signedAt) {
+    return {
+      ok: false as const,
+      response: jsonError("Tajemník už se k tomuto vyhodnocení vyjádřil.", 409),
+    }
+  }
+
+  const tajemnikContext = await resolveTajemnikContext(request)
+  const currentUserEmail = cleanEmail(user.email)
+  const isCurrentUserTajemnik = Boolean(
+    tajemnikContext.tajemnikEmail &&
+      currentUserEmail &&
+      cleanEmail(tajemnikContext.tajemnikEmail) === currentUserEmail
+  )
+
+  if (!isCurrentUserTajemnik) {
+    return {
+      ok: false as const,
+      response: jsonError(
+        "Tento krok může dokončit pouze tajemník úřadu.",
+        403
+      ),
+    }
+  }
+
+  const nowIso = new Date().toISOString()
+  const userKey = getUserKey({ id: user.id, email: user.email })
+  const userLabel = getUserLabel({ name: user.name, email: user.email })
+
+  const review: Prisma.InputJsonObject = {
+    agreement: parsed.tajemnikAgreement,
+    comment: cleanText(parsed.tajemnikComment) || null,
+    signedByName:
+      cleanText(parsed.tajemnikSignature?.signedByName) ||
+      cleanText(user.name) ||
+      cleanText(user.email),
+    signedByEmail:
+      cleanEmail(parsed.tajemnikSignature?.signedByEmail) ||
+      cleanEmail(user.email),
+    signedAt: cleanText(parsed.tajemnikSignature?.signedAt) || nowIso,
+    reviewedAt: nowIso,
+  }
+
+  const nextData: Prisma.InputJsonObject = {
+    ...(existingData as Prisma.InputJsonObject),
+    tajemnikReview: review,
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.probationEvaluationRequest.update({
+      where: { id: request.id },
+      data: { data: nextData },
+    })
+
+    await addProbationEvent(tx, {
+      requestId: request.id,
+      action: "TAJEMNIK_REVIEWED",
+      by: userKey,
+      byName: userLabel,
+      byEmail: user.email ?? null,
+      message:
+        parsed.tajemnikAgreement === "yes"
+          ? "Tajemník se k vyhodnocení vyjádřil - souhlasí s doporučením."
+          : "Tajemník se k vyhodnocení vyjádřil - nesouhlasí s doporučením.",
+      meta: {
+        agreement: parsed.tajemnikAgreement,
+        comment: review.comment,
+        signedByName: review.signedByName,
+        signedByEmail: review.signedByEmail,
+      },
+    })
+  })
+
+  return {
+    ok: true as const,
+    submitMode: "tajemnik" as const,
+  }
+}
+
 export async function saveProbationEvaluation(args: {
   request: ProbationDetail | PublicProbationDetail
   body: unknown
@@ -1198,7 +1478,7 @@ export async function saveProbationEvaluation(args: {
     }
   }
 
-  if (args.request.isLocked) {
+  if (args.request.isLocked && parsed.data.submitMode !== "tajemnik") {
     return {
       ok: false as const,
       response: jsonError("Formulář je uzamčený. Změny už nelze uložit.", 423),
@@ -1216,6 +1496,16 @@ export async function saveProbationEvaluation(args: {
   }
 
   const existingData = getJsonRecord(args.request.data)
+
+  if (parsed.data.submitMode === "tajemnik") {
+    return saveTajemnikReview({
+      request: args.request,
+      existingData,
+      parsed: parsed.data,
+      user: args.user,
+    })
+  }
+
   const previousRevision = getProbationRevisionRecord(existingData.revision)
   const revisionOpen = previousRevision.open === true
   const isCompletedRequest = args.request.status === "COMPLETED"
@@ -1349,8 +1639,31 @@ export async function saveProbationEvaluation(args: {
       count: nextRevisionCount,
     }
 
+    const existingTajemnikReview = getTajemnikReview(
+      existingData.tajemnikReview
+    )
+    const tajemnikReviewEditable =
+      args.source === "internal" &&
+      args.request.tajemnikRequired &&
+      Boolean(existingTajemnikReview.signedAt)
+    const tajemnikReviewEdited =
+      tajemnikReviewEditable &&
+      (parsed.data.tajemnikAgreement === "yes" ||
+        parsed.data.tajemnikAgreement === "no")
+
+    const nextTajemnikReview = tajemnikReviewEdited
+      ? {
+          ...existingTajemnikReview,
+          agreement: parsed.data.tajemnikAgreement,
+          comment: cleanText(parsed.data.tajemnikComment) || null,
+        }
+      : null
+
     const revisionData: Prisma.InputJsonObject = {
       ...(nextData as Prisma.InputJsonObject),
+      ...(nextTajemnikReview
+        ? { tajemnikReview: nextTajemnikReview as Prisma.InputJsonObject }
+        : {}),
       revision: nextRevision as Prisma.InputJsonObject,
     }
 
@@ -1391,7 +1704,9 @@ export async function saveProbationEvaluation(args: {
         byEmail: args.user.email ?? null,
         message:
           args.source === "internal"
-            ? "Vyhodnocení zkušební doby bylo interně upraveno."
+            ? tajemnikReviewEdited
+              ? "Vyhodnocení zkušební doby bylo interně upraveno včetně stanoviska tajemníka."
+              : "Vyhodnocení zkušební doby bylo interně upraveno."
             : "Vyhodnocení zkušební doby bylo upraveno přes veřejný odkaz.",
         meta: {
           source: args.source,
@@ -1403,6 +1718,9 @@ export async function saveProbationEvaluation(args: {
           signedByName: signedMeta.signedByName,
           signedByEmail: signedMeta.signedByEmail,
           revision: nextRevision,
+          ...(tajemnikReviewEdited
+            ? { tajemnikReviewEdited: true as const }
+            : {}),
         },
       })
     })
@@ -1411,6 +1729,27 @@ export async function saveProbationEvaluation(args: {
       ok: true as const,
       submitMode: "revision" as const,
     }
+  }
+
+  const tajemnikContext = await resolveTajemnikContext(args.request)
+
+  const tajemnikRequired = !tajemnikContext.selfIsTajemnik
+  const nowIsoForTajemnik = now.toISOString()
+
+  const finalData: Prisma.InputJsonObject = {
+    ...(nextData as Prisma.InputJsonObject),
+    ...(tajemnikContext.selfIsTajemnik
+      ? {
+          tajemnikReview: {
+            agreement: "yes",
+            comment: null,
+            signedByName: signedMeta.signedByName,
+            signedByEmail: signedMeta.signedByEmail,
+            signedAt: nowIsoForTajemnik,
+            reviewedAt: nowIsoForTajemnik,
+          } satisfies Prisma.InputJsonObject,
+        }
+      : {}),
   }
 
   await prisma.$transaction(async (tx) => {
@@ -1422,8 +1761,9 @@ export async function saveProbationEvaluation(args: {
         completedBy: userKey,
         completedByName: userLabel,
         completedByEmail: args.user.email ?? null,
-        data: nextData,
+        data: finalData,
         isLocked: true,
+        tajemnikRequired,
       },
     })
 
@@ -1466,6 +1806,8 @@ export async function saveProbationEvaluation(args: {
         recommendation: parsed.data.recommendation,
         signedByName: signedMeta.signedByName,
         signedByEmail: signedMeta.signedByEmail,
+        tajemnikRequired,
+        selfIsTajemnik: tajemnikContext.selfIsTajemnik,
       },
     })
   })
@@ -1473,6 +1815,9 @@ export async function saveProbationEvaluation(args: {
   return {
     ok: true as const,
     submitMode: "final" as const,
+    tajemnikRequired,
+    tajemnikName: tajemnikContext.tajemnikName,
+    tajemnikEmail: tajemnikContext.tajemnikEmail,
   }
 }
 
@@ -1572,11 +1917,27 @@ export async function buildEarlyExitNote(params: {
 export async function sendCompletedProbationPdfToHr(args: {
   request: ProbationDetail | PublicProbationDetail
   user: CurrentUser
-  mode?: "completed" | "revision"
+  mode?: "completed" | "revision" | "tajemnik"
+  tajemnikInfo?: {
+    required: boolean
+    name: string | null
+    agreement?: "yes" | "no" | null
+  }
 }) {
   const mode = args.mode ?? "completed"
   const isRevision = mode === "revision"
+  const isTajemnikMode = mode === "tajemnik"
   const hrRecipients = getHrRecipientsFromEnv()
+
+  const emailMessage = isTajemnikMode
+    ? `Tajemník${args.tajemnikInfo?.name ? ` (${args.tajemnikInfo.name})` : " úřadu"} se k vyhodnocení vyjádřil - ${
+        args.tajemnikInfo?.agreement === "no" ? "nesouhlasí" : "souhlasí"
+      } s doporučením. Aktuální PDF formulář s jeho stanoviskem je v příloze.`
+    : isRevision
+      ? "Formulář k vyhodnocení zkušební doby byl upraven. Aktuální PDF formulář je v příloze."
+      : args.tajemnikInfo?.required
+        ? `Formulář k vyhodnocení zkušební doby byl finálně vyplněn. PDF formulář je v příloze. Zároveň byl odeslán tajemníkovi${args.tajemnikInfo.name ? ` (${args.tajemnikInfo.name})` : ""} k vyjádření.`
+        : "Formulář k vyhodnocení zkušební doby byl finálně vyplněn. PDF formulář je v příloze."
 
   if (hrRecipients.length === 0) {
     await prisma.$transaction(async (tx) => {
@@ -1592,9 +1953,11 @@ export async function sendCompletedProbationPdfToHr(args: {
           email: args.user.email,
         }),
         byEmail: args.user.email ?? null,
-        message: isRevision
-          ? "Formulář byl upraven, ale e-mail pro Personální oddělení nebyl odeslán, protože nejsou nastavení příjemci."
-          : "Formulář byl finálně vyplněn, ale e-mail pro Personální oddělení nebyl odeslán, protože nejsou nastavení příjemci.",
+        message: isTajemnikMode
+          ? "Tajemník se vyjádřil, ale e-mail pro Personální oddělení nebyl odeslán, protože nejsou nastavení příjemci."
+          : isRevision
+            ? "Formulář byl upraven, ale e-mail pro Personální oddělení nebyl odeslán, protože nejsou nastavení příjemci."
+            : "Formulář byl finálně vyplněn, ale e-mail pro Personální oddělení nebyl odeslán, protože nejsou nastavení příjemci.",
         meta: {
           reason: "missing_hr_recipients",
           mode,
@@ -1638,9 +2001,7 @@ export async function sendCompletedProbationPdfToHr(args: {
           args.request.probationEnd ??
           args.request.onboarding.probationEnd ??
           null,
-        message: isRevision
-          ? "Formulář k vyhodnocení zkušební doby byl upraven. Aktuální PDF formulář je v příloze."
-          : "Formulář k vyhodnocení zkušební doby byl finálně vyplněn. PDF formulář je v příloze.",
+        message: emailMessage,
         sentByName: args.user.name ?? args.user.email ?? null,
         pdfBuffer,
         filename: `Vyhodnoceni-zkusebni-doby-${personalNumber}.pdf`,
@@ -1673,9 +2034,11 @@ export async function sendCompletedProbationPdfToHr(args: {
           email: args.user.email,
         }),
         byEmail: args.user.email ?? null,
-        message: isRevision
-          ? "Personálnímu oddělení bylo odesláno upravené vyhodnocení zkušební doby včetně nové PDF přílohy."
-          : "Personálnímu oddělení bylo odesláno finální vyhodnocení zkušební doby včetně PDF přílohy.",
+        message: isTajemnikMode
+          ? "Personálnímu oddělení bylo odesláno vyjádření tajemníka včetně aktuální PDF přílohy."
+          : isRevision
+            ? "Personálnímu oddělení bylo odesláno upravené vyhodnocení zkušební doby včetně nové PDF přílohy."
+            : "Personálnímu oddělení bylo odesláno finální vyhodnocení zkušební doby včetně PDF přílohy.",
         meta: {
           recipients: hrRecipients,
           employeeName,
@@ -1698,12 +2061,98 @@ export async function sendCompletedProbationPdfToHr(args: {
           email: args.user.email,
         }),
         byEmail: args.user.email ?? null,
-        message: isRevision
-          ? "Formulář byl upraven, ale e-mail s PDF pro Personální oddělení se nepodařilo odeslat."
-          : "Formulář byl finálně vyplněn, ale e-mail s PDF pro Personální oddělení se nepodařilo odeslat.",
+        message: isTajemnikMode
+          ? "Tajemník se vyjádřil, ale e-mail s PDF pro Personální oddělení se nepodařilo odeslat."
+          : isRevision
+            ? "Formulář byl upraven, ale e-mail s PDF pro Personální oddělení se nepodařilo odeslat."
+            : "Formulář byl finálně vyplněn, ale e-mail s PDF pro Personální oddělení se nepodařilo odeslat.",
         meta: {
           recipients: hrRecipients,
           mode,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      })
+    })
+  }
+}
+
+export async function sendTajemnikReviewRequestEmail(args: {
+  request: ProbationDetail | PublicProbationDetail
+  user: CurrentUser
+  tajemnikEmail: string
+  baseUrl: string
+}) {
+  const userKey = getUserKey({ id: args.user.id, email: args.user.email })
+  const userLabel = getUserLabel({
+    name: args.user.name,
+    email: args.user.email,
+  })
+
+  const payload = await buildResolvedProbationApiResponse({
+    request: args.request,
+    currentUser: args.user,
+  })
+
+  const earlyExitNote = await buildEarlyExitNote({
+    personalNumber: payload.onboarding.personalNumber,
+    probationEnd: payload.onboarding.probationEnd,
+  })
+
+  const pdfBuffer = await renderProbationEvaluationPdfBuffer({
+    ...payload,
+    onboarding: {
+      ...payload.onboarding,
+      earlyExitNote,
+    },
+  })
+
+  const employeeName = buildFullName(args.request.onboarding)
+  const personalNumber =
+    args.request.onboarding.personalNumber ?? String(args.request.onboardingId)
+  const evaluationLink = `${args.baseUrl}/vyhodnoceni-zkusebni-doby/${args.request.token}`
+
+  try {
+    await sendProbationEvaluationTajemnikReviewRequestEmail({
+      to: args.tajemnikEmail,
+      employeeName,
+      employeePersonalNumber: args.request.onboarding.personalNumber ?? null,
+      employeePosition: args.request.onboarding.positionName ?? null,
+      employeeDepartment: args.request.onboarding.department ?? null,
+      probationEndDate:
+        args.request.probationEnd ??
+        args.request.onboarding.probationEnd ??
+        null,
+      evaluationLink,
+      pdfBuffer,
+      filename: `Vyhodnoceni-zkusebni-doby-${personalNumber}.pdf`,
+    })
+
+    await prisma.$transaction(async (tx) => {
+      await addProbationEvent(tx, {
+        requestId: args.request.id,
+        action: "TAJEMNIK_REVIEW_SENT",
+        by: userKey,
+        byName: userLabel,
+        byEmail: args.user.email ?? null,
+        message: `Tajemníkovi byla odeslána žádost o vyjádření k vyhodnocení (${args.tajemnikEmail}).`,
+        meta: {
+          tajemnikEmail: args.tajemnikEmail,
+          employeeName,
+          personalNumber,
+        },
+      })
+    })
+  } catch (error) {
+    await prisma.$transaction(async (tx) => {
+      await addProbationEvent(tx, {
+        requestId: args.request.id,
+        action: "EMAIL_FAILED",
+        by: userKey,
+        byName: userLabel,
+        byEmail: args.user.email ?? null,
+        message: "Žádost o vyjádření se nepodařilo odeslat tajemníkovi.",
+        meta: {
+          tajemnikEmail: args.tajemnikEmail,
           error: error instanceof Error ? error.message : String(error),
         },
       })

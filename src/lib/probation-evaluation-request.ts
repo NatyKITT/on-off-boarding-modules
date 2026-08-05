@@ -666,6 +666,8 @@ type SerializableProbationRequest = {
   completedNotificationSentAt: Date | null
   completedNotificationSentBy: string | null
 
+  tajemnikRequired: boolean
+
   resetAt: Date | null
   resetBy: string | null
   resetByName: string | null
@@ -732,6 +734,8 @@ export function serializeProbationRequest(
 
     completedNotificationSentAt: toDateIso(request.completedNotificationSentAt),
     completedNotificationSentBy: request.completedNotificationSentBy,
+
+    tajemnikRequired: request.tajemnikRequired,
 
     resetAt: toDateIso(request.resetAt),
     resetBy: request.resetBy,

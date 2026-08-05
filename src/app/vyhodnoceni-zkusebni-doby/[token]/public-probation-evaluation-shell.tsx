@@ -4,10 +4,15 @@ import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { CheckCircle, Loader2, XCircle } from "lucide-react"
 
+import { Button } from "@/components/ui/button"
 import {
   ProbationEvaluationForm,
   type ProbationEvaluationFormValues,
 } from "@/components/forms/probation-evaluation-form"
+import {
+  TajemnikReviewForm,
+  type TajemnikReviewSubmitValues,
+} from "@/components/forms/tajemnik-review-form"
 
 type ProbationFormType = "REGULAR_EMPLOYEE" | "MANAGERIAL"
 
@@ -44,6 +49,7 @@ type ApiProbationResponse = {
     completedAt?: string | null
     data?: unknown
     revision?: RevisionMeta | null
+    tajemnikRequired?: boolean
 
     evaluatorName?: string | null
     evaluatorEmail?: string | null
@@ -77,6 +83,18 @@ type ApiProbationResponse = {
   currentUser?: {
     name: string | null
     email: string | null
+  }
+  tajemnik?: {
+    name: string | null
+    selfIsTajemnik: boolean
+    isCurrentUserTajemnik: boolean
+    review?: {
+      agreement?: "yes" | "no" | null
+      comment?: string | null
+      signedByName?: string | null
+      signedByEmail?: string | null
+      signedAt?: string | null
+    } | null
   }
 }
 
@@ -181,6 +199,8 @@ export function PublicProbationEvaluationShell({ token, employeeName }: Props) {
   const [savedMessage, setSavedMessage] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
   const [showLoginSuccess, setShowLoginSuccess] = useState(loginSuccess)
+  const [sendingPdf, setSendingPdf] = useState(false)
+  const [pdfSentMessage, setPdfSentMessage] = useState<string | null>(null)
 
   const publicApiUrl = `/api/nastupy/public/${encodeURIComponent(token)}`
 
@@ -210,7 +230,22 @@ export function PublicProbationEvaluationShell({ token, employeeName }: Props) {
     data?.request && employeeMeta && completed && revisionOpen && !unavailable
   )
 
-  const submittedAndClosed = completed && !revisionOpen
+  const tajemnikRequired = Boolean(data?.request?.tajemnikRequired)
+  const tajemnikReview = data?.tajemnik?.review ?? null
+  const isCurrentUserTajemnik = Boolean(data?.tajemnik?.isCurrentUserTajemnik)
+
+  const canShowTajemnikReview = Boolean(
+    data?.request &&
+      employeeMeta &&
+      completed &&
+      tajemnikRequired &&
+      !tajemnikReview?.signedAt &&
+      !unavailable &&
+      isCurrentUserTajemnik
+  )
+
+  const submittedAndClosed =
+    completed && !revisionOpen && !canShowTajemnikReview
 
   useEffect(() => {
     let cancelled = false
@@ -323,12 +358,17 @@ export function PublicProbationEvaluationShell({ token, employeeName }: Props) {
 
       setDirty(false)
 
+      const justSavedTajemnikRequired = Boolean(json?.request?.tajemnikRequired)
+      const justSavedTajemnikName = json?.tajemnik?.name
+
       setSavedMessage(
         values.submitMode === "draft"
           ? "Rozpracované vyhodnocení bylo uloženo. K formuláři se můžete vrátit přes stejný odkaz."
           : values.submitMode === "revision"
             ? "Změny ve vyhodnocení zkušební doby byly úspěšně uloženy a předány personálnímu oddělení. Tuto stránku můžete zavřít."
-            : "Vyhodnocení zkušební doby bylo úspěšně vyplněno a předáno personálnímu oddělení. Tuto stránku můžete zavřít."
+            : justSavedTajemnikRequired
+              ? `Vyhodnocení zkušební doby bylo úspěšně vyplněno. Bylo předáno personálnímu oddělení a k odsouhlasení tajemníkovi${justSavedTajemnikName ? ` (${justSavedTajemnikName})` : ""}. Tuto stránku můžete zavřít.`
+              : "Vyhodnocení zkušební doby bylo úspěšně vyplněno a předáno personálnímu oddělení. Tuto stránku můžete zavřít."
       )
     } catch (err) {
       setError(
@@ -336,6 +376,85 @@ export function PublicProbationEvaluationShell({ token, employeeName }: Props) {
       )
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function handleTajemnikSubmit(values: TajemnikReviewSubmitValues) {
+    if (submitting || unavailable) return
+
+    setSubmitting(true)
+    setError(null)
+    setSavedMessage(null)
+
+    try {
+      const res = await fetch(publicApiUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          submitMode: "tajemnik",
+          tajemnikAgreement: values.tajemnikAgreement,
+          tajemnikComment: values.tajemnikComment,
+          tajemnikSignature: values.tajemnikSignature,
+        }),
+      })
+
+      const json = (await res
+        .json()
+        .catch(() => null)) as ApiProbationResponse | null
+
+      if (!res.ok) {
+        throw new Error(
+          getErrorMessage(json, "Vyjádření se nepodařilo uložit.")
+        )
+      }
+
+      if (json?.request && json?.onboarding) {
+        setData(json)
+      }
+
+      setSavedMessage(
+        "Vaše vyjádření bylo úspěšně uloženo a předáno personálnímu oddělení. Stránku můžete zavřít, nebo si níže stáhněte PDF se svým podpisem, případně ho pošlete na svůj e-mail."
+      )
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Vyjádření se nepodařilo uložit."
+      )
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleSendPdfToSelf() {
+    if (sendingPdf) return
+
+    setSendingPdf(true)
+    setPdfSentMessage(null)
+    setError(null)
+
+    try {
+      const res = await fetch(publicApiUrl, {
+        method: "POST",
+        credentials: "include",
+      })
+
+      const json = (await res
+        .json()
+        .catch(() => null)) as ApiProbationResponse | null
+
+      if (!res.ok) {
+        throw new Error(getErrorMessage(json, "PDF se nepodařilo odeslat."))
+      }
+
+      setPdfSentMessage("PDF bylo odesláno na váš e-mail.")
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "PDF se nepodařilo odeslat."
+      )
+    } finally {
+      setSendingPdf(false)
     }
   }
 
@@ -383,12 +502,14 @@ export function PublicProbationEvaluationShell({ token, employeeName }: Props) {
               Vyhodnocení zkušební doby již bylo odesláno.
             </p>
             <p className="mt-1 text-green-700">
-              Formulář byl předán personálnímu oddělení. Tuto stránku můžete
-              zavřít.
+              {tajemnikRequired && !tajemnikReview?.signedAt
+                ? `Formulář byl předán personálnímu oddělení a k odsouhlasení tajemníkovi${data?.tajemnik?.name ? ` (${data.tajemnik.name})` : ""}.`
+                : "Formulář byl předán personálnímu oddělení."}{" "}
+              Tuto stránku můžete zavřít.
             </p>
             <p className="mt-2 text-xs text-green-700">
               V případě potřeby znovu editovat formulář se obraťte na personální
-              oddělení: Michaela Aronová.
+              oddělení.
             </p>
           </div>
         )}
@@ -448,13 +569,11 @@ export function PublicProbationEvaluationShell({ token, employeeName }: Props) {
               evaluatorName={
                 data.request.supervisorName ??
                 data.request.evaluatorName ??
-                data.currentUser?.name ??
                 null
               }
               evaluatorEmail={
                 data.request.supervisorEmail ??
                 data.request.evaluatorEmail ??
-                data.currentUser?.email ??
                 null
               }
               currentUserName={data.currentUser?.name ?? null}
@@ -465,6 +584,65 @@ export function PublicProbationEvaluationShell({ token, employeeName }: Props) {
               onSubmitPublic={handleSubmit}
             />
           )}
+
+        {canShowTajemnikReview && data?.request && !loading && !error && (
+          <TajemnikReviewForm
+            summary={{
+              workResults: getDataRecord(data.request.data)
+                .workResults as string,
+              workBehavior: getDataRecord(data.request.data)
+                .workBehavior as string,
+              socialSkills: getDataRecord(data.request.data)
+                .socialSkills as string,
+              skillsKnowledgeTraits: getDataRecord(data.request.data)
+                .skillsKnowledgeTraits as string,
+              recommendation:
+                getDataRecord(data.request.data).recommendation === "yes" ||
+                getDataRecord(data.request.data).recommendation === "no"
+                  ? (getDataRecord(data.request.data).recommendation as
+                      | "yes"
+                      | "no")
+                  : "",
+              reason: (getDataRecord(data.request.data).reason ??
+                getDataRecord(data.request.data).reasonIfNo ??
+                "") as string,
+              evaluatorName: data.request.evaluatorName ?? null,
+              evaluatorEmail: data.request.evaluatorEmail ?? null,
+            }}
+            canSubmit={isCurrentUserTajemnik}
+            currentUserName={data.currentUser?.name ?? ""}
+            currentUserEmail={data.currentUser?.email ?? ""}
+            onSubmit={handleTajemnikSubmit}
+          />
+        )}
+
+        {completed && isCurrentUserTajemnik && !loading && !error && (
+          <div className="flex flex-wrap items-center gap-2 rounded-md border bg-white px-4 py-3 text-sm">
+            <span className="text-muted-foreground">
+              PDF vyhodnocení zkušební doby:
+            </span>
+            <a
+              href={`${publicApiUrl}?format=pdf`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-9 items-center justify-center rounded-md border px-3 text-sm font-medium hover:bg-muted"
+            >
+              Stáhnout PDF
+            </a>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={sendingPdf}
+              onClick={() => void handleSendPdfToSelf()}
+            >
+              {sendingPdf ? "Odesílám…" : "Poslat PDF na můj e-mail"}
+            </Button>
+            {pdfSentMessage && (
+              <span className="text-xs text-green-700">{pdfSentMessage}</span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

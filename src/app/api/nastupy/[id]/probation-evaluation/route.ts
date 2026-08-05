@@ -2,14 +2,18 @@ import { NextResponse, type NextRequest } from "next/server"
 
 import {
   buildResolvedProbationApiResponse,
+  getAppBaseUrl,
+  getJsonRecord,
   getNumericId,
   getOrEnsureProbationDetail,
   getProbationDetailByOnboardingId,
+  getTajemnikReview,
   jsonError,
   requireInternalProbationRead,
   requireInternalProbationSave,
   saveProbationEvaluation,
   sendCompletedProbationPdfToHr,
+  sendTajemnikReviewRequestEmail,
 } from "@/lib/probation-evaluation-api"
 
 export const runtime = "nodejs"
@@ -111,7 +115,20 @@ export async function PUT(
         request: updated,
         user: authResult.user,
         mode: "completed",
+        tajemnikInfo: {
+          required: saved.tajemnikRequired,
+          name: saved.tajemnikName,
+        },
       })
+
+      if (saved.tajemnikRequired && saved.tajemnikEmail) {
+        await sendTajemnikReviewRequestEmail({
+          request: updated,
+          user: authResult.user,
+          tajemnikEmail: saved.tajemnikEmail,
+          baseUrl: getAppBaseUrl(req),
+        })
+      }
 
       updated = await getProbationDetailByOnboardingId(onboardingId)
 
@@ -128,6 +145,32 @@ export async function PUT(
         request: updated,
         user: authResult.user,
         mode: "revision",
+      })
+
+      updated = await getProbationDetailByOnboardingId(onboardingId)
+
+      if (!updated) {
+        return jsonError(
+          "Vyhodnocení se uložilo, ale nepodařilo se ho znovu načíst.",
+          500
+        )
+      }
+    }
+
+    if (saved.submitMode === "tajemnik") {
+      const tajemnikReview = getTajemnikReview(
+        getJsonRecord(updated.data).tajemnikReview
+      )
+
+      await sendCompletedProbationPdfToHr({
+        request: updated,
+        user: authResult.user,
+        mode: "tajemnik",
+        tajemnikInfo: {
+          required: true,
+          name: tajemnikReview.signedByName ?? null,
+          agreement: tajemnikReview.agreement ?? null,
+        },
       })
 
       updated = await getProbationDetailByOnboardingId(onboardingId)

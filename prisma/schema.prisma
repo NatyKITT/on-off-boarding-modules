@@ -209,6 +209,8 @@ enum ProbationEvaluationEventAction {
   PDF_DOWNLOADED
   UNLOCK_REMINDER_QUEUED
   UNLOCK_REMINDER_SENT
+  TAJEMNIK_REVIEW_SENT
+  TAJEMNIK_REVIEWED
 }
 
 enum ProbationEvaluationStatus {
@@ -923,6 +925,8 @@ model ProbationEvaluationRequest {
   completedByEmail            String?
   completedNotificationSentAt DateTime?
   completedNotificationSentBy String?
+
+  tajemnikRequired Boolean @default(false)
 
   resetAt     DateTime?
   resetBy     String?
