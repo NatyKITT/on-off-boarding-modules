@@ -64,40 +64,40 @@ aplikace“ s pokynem kontaktovat administrátorku aplikace.
 
 Jméno a příjmení se při prvním přihlášení automaticky převezme z
 Google účtu. Administrátor je pak může u kteréhokoli uživatele
-v sekci *Administrace* kdykoli ručně doplnit nebo opravit (viz
+v sekci _Administrace_ kdykoli ručně doplnit nebo opravit (viz
 kapitola 3).
 
 ## 3. Role a oprávnění
 
-Roli přiděluje **administrátor** v sekci *Administrace*
+Roli přiděluje **administrátor** v sekci _Administrace_
 (`/admin`, dostupná jen roli ADMIN). Aplikace rozlišuje pět rolí:
 
-| Role | Typický uživatel | Přístup do vnitřní aplikace |
-|---|---|---|
-| **ADMIN** | Správce aplikace | Ano – neomezený, včetně správy uživatelů a rolí |
-| **HR** | Personální oddělení | Ano – plný rozsah běžné agendy |
-| **IT** | IT oddělení | Ano – plný rozsah běžné agendy |
-| **READONLY** | Vedení, kontrolní role | Ano – jen prohlížení a odesílání reportů |
-| **USER** | Ostatní zaměstnanci | Ne – pouze veřejné odkazy zaslané e-mailem |
+| Role         | Typický uživatel       | Přístup do vnitřní aplikace                     |
+| ------------ | ---------------------- | ----------------------------------------------- |
+| **ADMIN**    | Správce aplikace       | Ano – neomezený, včetně správy uživatelů a rolí |
+| **HR**       | Personální oddělení    | Ano – plný rozsah běžné agendy                  |
+| **IT**       | IT oddělení            | Ano – plný rozsah běžné agendy                  |
+| **READONLY** | Vedení, kontrolní role | Ano – jen prohlížení a odesílání reportů        |
+| **USER**     | Ostatní zaměstnanci    | Ne – pouze veřejné odkazy zaslané e-mailem      |
 
 ### Přehled oprávnění podle modulů
 
 „Č“ = čtení/prohlížení, „Č + Z“ = čtení i zápis (vytváření, úpravy,
 odesílání e-mailů).
 
-| Modul | ADMIN | HR | IT | READONLY | USER |
-|---|---|---|---|---|---|
-| Přehled (kalendář) | Č + Z | Č + Z | Č + Z | Č | – |
-| Nástupy / Odchody | Č + Z | Č + Z | Č + Z | Č | – |
-| Zaměstnanecké změny | Č + Z | Č + Z | Č + Z | Č | – |
-| Interní dokumenty | Č + Z | Č + Z | Č + Z | – | – |
-| Vyhodnocení zkušební doby (interní správa) | Č + Z | Č + Z | Č + Z | – | – |
-| Exit checklist | Č + Z | Č + Z | Č + Z | Podpis | Podpis¹ |
-| E-mailové reporty (přehled, odeslání) | Č + Z | Č + Z | Č + Z | Č + Z | – |
-| Statistiky (prohlížení, export, odeslání PDF) | Č + Z | Č + Z | Č + Z | Č + Z | – |
-| Statistiky (uložení/smazání vlastního pohledu) | Č + Z | Č + Z | Č + Z | – | – |
-| Administrace (uživatelé a role) | Č + Z | – | – | – | – |
-| Nastavení | Č + Z | – | – | – | – |
+| Modul                                          | ADMIN | HR    | IT    | READONLY | USER    |
+| ---------------------------------------------- | ----- | ----- | ----- | -------- | ------- |
+| Přehled (kalendář)                             | Č + Z | Č + Z | Č + Z | Č        | –       |
+| Nástupy / Odchody                              | Č + Z | Č + Z | Č + Z | Č        | –       |
+| Zaměstnanecké změny                            | Č + Z | Č + Z | Č + Z | Č        | –       |
+| Interní dokumenty                              | Č + Z | Č + Z | Č + Z | –        | –       |
+| Vyhodnocení zkušební doby (interní správa)     | Č + Z | Č + Z | Č + Z | –        | –       |
+| Exit checklist                                 | Č + Z | Č + Z | Č + Z | Podpis   | Podpis¹ |
+| E-mailové reporty (přehled, odeslání)          | Č + Z | Č + Z | Č + Z | Č + Z    | –       |
+| Statistiky (prohlížení, export, odeslání PDF)  | Č + Z | Č + Z | Č + Z | Č + Z    | –       |
+| Statistiky (uložení/smazání vlastního pohledu) | Č + Z | Č + Z | Č + Z | –        | –       |
+| Administrace (uživatelé a role)                | Č + Z | –     | –     | –        | –       |
+| Nastavení                                      | Č + Z | –     | –     | –        | –       |
 
 ¹ Zaměstnanec/nadřízený bez role v aplikaci má k exit checklistu
 přístup pouze přes veřejný odkaz zaslaný e-mailem, ne přes vnitřní
@@ -121,43 +121,43 @@ aplikaci – viz kapitola 6.
 
 ### Přihlášení
 
-| Adresa | Popis | Přístup |
-|---|---|---|
-| `/signin` | Přihlášení přes Google | Veřejné |
+| Adresa       | Popis                           | Přístup                  |
+| ------------ | ------------------------------- | ------------------------ |
+| `/signin`    | Přihlášení přes Google          | Veřejné                  |
 | `/no-access` | Informace o chybějícím přístupu | Přihlášené účty bez role |
 
 ### Hlavní agenda
 
-| Adresa | Popis | Přístup |
-|---|---|---|
-| `/prehled` | Kalendářní přehled nástupů a odchodů, výchozí stránka po přihlášení | ADMIN, HR, IT, READONLY |
-| `/nastupy` | Seznam nástupů (plánované i skutečné) | ADMIN, HR, IT, READONLY |
-| `/nastupy/[id]` | Detail konkrétního nástupu | ADMIN, HR, IT, READONLY |
-| `/nastupy/[id]/editovat` | Úprava nástupu | ADMIN, HR, IT |
-| `/nastupy/[id]/vyhodnoceni-zkusebni-doby` | Interní správa vyhodnocení zkušební doby k danému nástupu | ADMIN, HR, IT |
-| `/odchody` | Seznam odchodů (plánované i skutečné) | ADMIN, HR, IT, READONLY |
-| `/odchody/[id]` | Detail konkrétního odchodu, včetně exit checklistu | ADMIN, HR, IT, READONLY |
-| `/odchody/[id]/editovat` | Úprava odchodu | ADMIN, HR, IT |
-| `/odchody/[id]/vystupni-list` | Výstupní list k odchodu | ADMIN, HR, IT, READONLY |
-| `/zmeny` | Seznam zaměstnaneckých změn | ADMIN, HR, IT, READONLY |
-| `/zmeny/[id]` | Detail konkrétní změny | ADMIN, HR, IT, READONLY |
-| `/zmeny/[id]/editovat` | Úprava změny | ADMIN, HR, IT |
-| `/dokumenty/internal/[id]` | Interní správa dokumentu (generování, zámek, odeslání) | ADMIN, HR, IT |
+| Adresa                                    | Popis                                                               | Přístup                 |
+| ----------------------------------------- | ------------------------------------------------------------------- | ----------------------- |
+| `/prehled`                                | Kalendářní přehled nástupů a odchodů, výchozí stránka po přihlášení | ADMIN, HR, IT, READONLY |
+| `/nastupy`                                | Seznam nástupů (plánované i skutečné)                               | ADMIN, HR, IT, READONLY |
+| `/nastupy/[id]`                           | Detail konkrétního nástupu                                          | ADMIN, HR, IT, READONLY |
+| `/nastupy/[id]/editovat`                  | Úprava nástupu                                                      | ADMIN, HR, IT           |
+| `/nastupy/[id]/vyhodnoceni-zkusebni-doby` | Interní správa vyhodnocení zkušební doby k danému nástupu           | ADMIN, HR, IT           |
+| `/odchody`                                | Seznam odchodů (plánované i skutečné)                               | ADMIN, HR, IT, READONLY |
+| `/odchody/[id]`                           | Detail konkrétního odchodu, včetně exit checklistu                  | ADMIN, HR, IT, READONLY |
+| `/odchody/[id]/editovat`                  | Úprava odchodu                                                      | ADMIN, HR, IT           |
+| `/odchody/[id]/vystupni-list`             | Výstupní list k odchodu                                             | ADMIN, HR, IT, READONLY |
+| `/zmeny`                                  | Seznam zaměstnaneckých změn                                         | ADMIN, HR, IT, READONLY |
+| `/zmeny/[id]`                             | Detail konkrétní změny                                              | ADMIN, HR, IT, READONLY |
+| `/zmeny/[id]/editovat`                    | Úprava změny                                                        | ADMIN, HR, IT           |
+| `/dokumenty/internal/[id]`                | Interní správa dokumentu (generování, zámek, odeslání)              | ADMIN, HR, IT           |
 
 ### Systém
 
-| Adresa | Popis | Přístup |
-|---|---|---|
+| Adresa        | Popis                                         | Přístup                 |
+| ------------- | --------------------------------------------- | ----------------------- |
 | `/statistiky` | Agregované ukazatele, grafy a vlastní pohledy | ADMIN, HR, IT, READONLY |
-| `/admin` | Správa uživatelů a jejich rolí | ADMIN |
-| `/nastaveni` | Základní nastavení účtu administrátora | ADMIN |
+| `/admin`      | Správa uživatelů a jejich rolí                | ADMIN                   |
+| `/nastaveni`  | Základní nastavení účtu administrátora        | ADMIN                   |
 
 ### Veřejné odkazy (bez přihlášení do vnitřní aplikace)
 
-| Adresa | Popis | Přístup |
-|---|---|---|
-| `/dokumenty/[hash]` | Vyplnění osobních dokumentů zaměstnancem | Odkaz z e-mailu |
-| `/odchody-public/[token]` | Vyplnění a podpis exit checklistu | Odkaz z e-mailu |
+| Adresa                               | Popis                                       | Přístup                             |
+| ------------------------------------ | ------------------------------------------- | ----------------------------------- |
+| `/dokumenty/[hash]`                  | Vyplnění osobních dokumentů zaměstnancem    | Odkaz z e-mailu                     |
+| `/odchody-public/[token]`            | Vyplnění a podpis exit checklistu           | Odkaz z e-mailu                     |
 | `/vyhodnoceni-zkusebni-doby/[token]` | Vyplnění hodnocení zkušební doby nadřízeným | Odkaz z e-mailu + Google přihlášení |
 
 Adresy ve tvaru `[id]`, `[hash]` a `[token]` jsou vždy vázané na
@@ -192,19 +192,43 @@ odbor/oddělení a další identifikační údaje. Z detailu nástupu se dále
   pozvánku i upomínky a po vyplnění mohou formulář znovu odemknout
   k opravě.
 
-  Pokud nadřízený, který hodnocení vyplňuje, není zároveň tajemník
-  úřadu, po jeho odeslání se automaticky odešle e-mail s PDF a
-  odkazem i tajemníkovi – ten na stejném odkazu doplní souhlas nebo
-  nesouhlas s doporučením, případný komentář a podpis. Teprve po jeho
-  vyjádření jde finální PDF s oběma stanovisky na Personální oddělení
-  (pokud je nadřízený sám tajemníkem, nebo jde o nástup přímo na
-  pozici tajemníka, tento druhý krok odpadá). Tajemníka lze pro
-  testovací nebo přechodné účely ručně přepsat (jméno a e-mail) přímo
-  v detailu vyhodnocení zkušební doby, vedle údajů o nadřízeném –
-  nastavení je globální a platí okamžitě pro všechny nástupy, dokud se
-  nevrátí zpět na automatické dohledání. HR může po odemknutí
-  vyplněného formuláře upravit i stanovisko tajemníka; podpis a čas
-  podpisu přitom zůstávají zachované a změna se zapíše do historie.
+  **Kdo dostane e-mail a kdy** (přehled pro HR):
+  1. HR odešle nadřízenému **pozvánku** k vyplnění (ručně, nebo ji
+     automaticky připraví cron podle blížícího se konce zkušební
+     doby). Dokud formulář není vyplněný, chodí nadřízenému
+     automaticky i **připomínky** a HR informace, pokud nadřízený
+     chybí nebo formulář stále není hotový.
+  2. Jakmile nadřízený formulář **finálně odešle**, HR ihned dostane
+     e-mail s vygenerovaným **PDF v příloze**.
+     - Pokud nadřízený **není** zároveň tajemník úřadu, dostane ve
+       stejnou chvíli e-mail i **tajemník** – PDF v příloze a odkaz
+       „Otevřít k vyjádření“ (stejný odkaz, jaký měl nadřízený). HR
+       e-mail v tomto případě navíc uvádí, že šlo i tajemníkovi.
+     - Pokud je nadřízený sám tajemníkem (nebo jde o nástup přímo na
+       pozici tajemníka), druhý krok odpadá – HR dostane jen tento
+       jeden e-mail a je hotovo.
+  3. Tajemník na svém odkaze vidí kompletní kontext (koho se
+     vyhodnocení týká) i vyplněné hodnocení nadřízeného, a odděleně
+     doplní souhlas nebo nesouhlas s doporučením, případný komentář a
+     podpis. Po odeslání:
+     - HR dostane **nový** e-mail s aktualizovaným PDF, ve kterém je
+       vidět **obojí stanovisko najednou** – doporučení nadřízeného
+       (ano/ne) i vyjádření tajemníka (souhlasí/nesouhlasí),
+     - **nadřízený**, který formulář původně vyplnil, dostane
+       samostatný e-mail s informací, že se tajemník vyjádřil a jak,
+       včetně finálního PDF v příloze – aby věděl, že proces je
+       u konce.
+  4. Pokud HR formulář znovu odemkne k opravě a někdo uloží revizi,
+     dostane HR znovu e-mail s aktuálním PDF; tajemníkovi ani
+     nadřízenému se v tomto kroku nic automaticky neposílá.
+
+  Tajemníka lze pro testovací nebo přechodné účely ručně přepsat
+  (jméno a e-mail) přímo v detailu vyhodnocení zkušební doby, vedle
+  údajů o nadřízeném – nastavení je globální a platí okamžitě pro
+  všechny nástupy, dokud se nevrátí zpět na automatické dohledání. HR
+  může po odemknutí vyplněného formuláře upravit i stanovisko
+  tajemníka; podpis a čas podpisu přitom zůstávají zachované a změna
+  se zapíše do historie.
 
 Pokud se k danému osobnímu číslu později objeví i odpovídající
 odchod, aplikace záznamy **automaticky propojí** – u nástupu se pak
@@ -315,10 +339,13 @@ záznam, na kterém nepotřebuje mít v aplikaci účet ani roli:
   (`/vyhodnoceni-zkusebni-doby/[token]`) – nadřízený zde po
   přihlášení přes Google (ověřeném proti konkrétnímu zaměstnanci)
   vyplní hodnocení zkušební doby. Je-li potřeba i vyjádření
-  tajemníka, otevře se mu po odeslání stejný odkaz s doplňkovou
-  sekcí k vyjádření (souhlas/nesouhlas, komentář, podpis); ostatním
-  (včetně původního nadřízeného) se po odeslání zobrazí jen
-  potvrzení, ne obsah vyhodnocení.
+  tajemníka, otevře se mu po odeslání stejný odkaz s hlavičkou
+  (koho se vyhodnocení týká), vyplněným hodnocením nadřízeného a
+  odděleným rámečkem pro jeho vlastní vyjádření (souhlas/nesouhlas,
+  komentář, podpis); ostatním (včetně původního nadřízeného) se po
+  odeslání zobrazí jen potvrzení, ne obsah vyhodnocení. Jakmile
+  tajemník své vyjádření odešle, dostane původní nadřízený e-mailem
+  informaci, že se tajemník vyjádřil.
 
 Tyto odkazy platí vždy jen pro daný záznam. Po vyplnění nebo podpisu
 je možné formulář v aplikaci znovu uzamknout, případně odemknout
@@ -339,14 +366,14 @@ někdo trvale neodstraní přímo v databázi.
 
 ## 8. Slovníček pojmů
 
-| Pojem | Význam |
-|---|---|
-| **Plánovaný** nástup/odchod | Termín, který se má stát podle plánu, dosud nepotvrzen |
-| **Skutečný** nástup/odchod | Termín potvrzený jako reálně proběhlý |
-| **Exit checklist** | Strukturovaný výstupní proces při odchodu (majetek, agenda, střet zájmů, podpis) |
-| **Vyhodnocení zkušební doby** | Formulář hodnocení zaměstnance nadřízeným na konci zkušební doby |
-| **Vyjádření tajemníka** | Druhá fáze vyhodnocení zkušební doby – tajemník úřadu se souhlasem/nesouhlasem, komentářem a podpisem vyjádří k doporučení nadřízeného, pokud jím není sám |
-| **Zaměstnanecká změna** | Informační záznam o změně jména a/nebo pozice u stávajícího zaměstnance |
-| **Osobní číslo** | Identifikátor zaměstnance, podle kterého se automaticky propojují nástup a odchod |
-| **Upomínka na konec PP** | Automatická e-mailová upomínka pro HR 30/14/7/3 dny před skutečným koncem pracovního poměru, pokud výstupní list ještě není hotový |
-| **Smazané záznamy** | Přehled smazaných nástupů/odchodů/změn s možností obnovení |
+| Pojem                         | Význam                                                                                                                                                     |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Plánovaný** nástup/odchod   | Termín, který se má stát podle plánu, dosud nepotvrzen                                                                                                     |
+| **Skutečný** nástup/odchod    | Termín potvrzený jako reálně proběhlý                                                                                                                      |
+| **Exit checklist**            | Strukturovaný výstupní proces při odchodu (majetek, agenda, střet zájmů, podpis)                                                                           |
+| **Vyhodnocení zkušební doby** | Formulář hodnocení zaměstnance nadřízeným na konci zkušební doby                                                                                           |
+| **Vyjádření tajemníka**       | Druhá fáze vyhodnocení zkušební doby – tajemník úřadu se souhlasem/nesouhlasem, komentářem a podpisem vyjádří k doporučení nadřízeného, pokud jím není sám |
+| **Zaměstnanecká změna**       | Informační záznam o změně jména a/nebo pozice u stávajícího zaměstnance                                                                                    |
+| **Osobní číslo**              | Identifikátor zaměstnance, podle kterého se automaticky propojují nástup a odchod                                                                          |
+| **Upomínka na konec PP**      | Automatická e-mailová upomínka pro HR 30/14/7/3 dny před skutečným koncem pracovního poměru, pokud výstupní list ještě není hotový                         |
+| **Smazané záznamy**           | Přehled smazaných nástupů/odchodů/změn s možností obnovení                                                                                                 |

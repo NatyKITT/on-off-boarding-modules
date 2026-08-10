@@ -473,12 +473,17 @@ export function ProbationEvaluationDialog({
       setDirty(false)
       setSaved(true)
 
+      const justSavedTajemnikRequired = Boolean(json?.request?.tajemnikRequired)
+      const justSavedTajemnikName = json?.tajemnik?.name
+
       setSavedMessage(
         values.submitMode === "draft"
           ? "Rozpracované vyhodnocení zkušební doby bylo uloženo. Formulář můžete později znovu otevřít a dokončit."
           : values.submitMode === "revision"
             ? "Změny ve vyhodnocení zkušební doby byly uloženy, zapsány do historie a aktuální PDF bylo znovu odesláno na Personální oddělení."
-            : "Finální vyhodnocení zkušební doby bylo uloženo a předáno Personálnímu oddělení."
+            : justSavedTajemnikRequired
+              ? `Finální vyhodnocení zkušební doby bylo uloženo. Bylo předáno Personálnímu oddělení a k odsouhlasení tajemníkovi${justSavedTajemnikName ? ` ${justSavedTajemnikName}` : ""}.`
+              : "Finální vyhodnocení zkušební doby bylo uloženo a předáno Personálnímu oddělení."
       )
 
       onSaved?.(values.submitMode)

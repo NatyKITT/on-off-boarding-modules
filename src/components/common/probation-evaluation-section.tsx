@@ -1061,8 +1061,8 @@ export function ProbationEvaluationSection({
       await refreshFromJsonOrReload(json)
 
       toast({
-        title: "Stanovisko zrušeno",
-        description: "Stanovisko tajemníka bylo zrušeno.",
+        title: "Vyjádření zrušeno",
+        description: "Vyjádření tajemníka bylo zrušeno.",
       })
     } catch (err) {
       const message =
@@ -1517,11 +1517,11 @@ export function ProbationEvaluationSection({
                         Boolean(tajemnikReview?.signedAt) &&
                         !request.completedNotificationSentAt
                       }
-                      label="Odesláno Personálnímu oddělení (finální)"
+                      label="Odesláno vedoucímu a Personálnímu oddělení"
                       description={
                         tajemnikReview?.signedAt &&
                         hrNotificationAtFormatted !== "—"
-                          ? hrNotificationAtFormatted
+                          ? `${hrNotificationAtFormatted} · info + finální PDF oběma`
                           : "Po vyjádření tajemníka"
                       }
                     />
@@ -1670,7 +1670,7 @@ export function ProbationEvaluationSection({
 
                 <DetailTile
                   icon={<UserRound className="size-3.5" />}
-                  label="Hodnotitel / podpis"
+                  label="Vedoucí / hodnotitel"
                   value={
                     <div className="space-y-1">
                       <div>
@@ -1700,7 +1700,7 @@ export function ProbationEvaluationSection({
                 {tajemnikRequired && (
                   <DetailTile
                     icon={<ShieldCheck className="size-3.5" />}
-                    label="Stanovisko tajemníka"
+                    label="Vyjádření tajemníka"
                     value={
                       tajemnikReview?.signedAt ? (
                         <div className="space-y-1">
@@ -1912,7 +1912,7 @@ export function ProbationEvaluationSection({
                     ) : (
                       <ShieldCheck className="size-4" />
                     )}
-                    Zrušit stanovisko tajemníka
+                    Zrušit vyjádření tajemníka
                   </Button>
                 )}
               </div>
@@ -2189,9 +2189,9 @@ export function ProbationEvaluationSection({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Zrušit stanovisko tajemníka?</AlertDialogTitle>
+            <AlertDialogTitle>Zrušit vyjádření tajemníka?</AlertDialogTitle>
             <AlertDialogDescription>
-              Stanovisko tajemníka (souhlas/nesouhlas, komentář a podpis) bude
+              Vyjádření tajemníka (souhlas/nesouhlas, komentář a podpis) bude
               odstraněno. Tajemník bude muset formulář znovu posoudit a vyjádřit
               se.
             </AlertDialogDescription>
@@ -2203,7 +2203,7 @@ export function ProbationEvaluationSection({
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={() => void handleClearTajemnikConfirmed()}
             >
-              Zrušit stanovisko
+              Zrušit vyjádření
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

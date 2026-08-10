@@ -653,7 +653,62 @@ Pokud je již dokončený formulář otevřený k úpravě:
 - aktuální PDF se znovu odešle HR,
 - změna se zapíše do historie.
 
-### 11.4 Dokončení výstupního listu (exit checklist)
+### 11.4 Vyjádření tajemníka – kompletní přehled, kdo dostane co a kdy
+
+Pokud vedoucí, který vyhodnocení zkušební doby vyplňuje, **není sám
+tajemník úřadu** (podle EOS, případně podle ručního přepisu tajemníka
+v nastavení), přidává se k finálnímu vyhodnocení druhá fáze. Vše níže
+se odesílá **přímo při dané akci, mimo `MailQueue`** – stejně jako
+finální PDF v kapitole 11.2.
+
+**Krok 1 – vedoucí odešle finální vyhodnocení**
+
+| Komu             | Co dostane                                                                                                                                                           | Kdy                                                                           |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| HR (`HR_EMAILS`) | E-mail s vygenerovaným PDF v příloze. Pokud je potřeba vyjádření tajemníka, text navíc uvádí, že vyhodnocení bylo zároveň odesláno tajemníkovi (jménem) k vyjádření. | Ihned po finálním uložení vedoucím                                            |
+| Tajemník úřadu   | E-mail s PDF v příloze a odkazem „Otevřít k vyjádření“ na stejný veřejný token, jaký měl vedoucí.                                                                    | Ihned po finálním uložení vedoucím (jen pokud je vyjádření tajemníka potřeba) |
+
+Pokud je vedoucí sám tajemníkem, tento krok 2 se přeskočí – HR dostane
+jen běžný e-mail z kroku 1, PDF neobsahuje druhou sekci.
+
+**Krok 2 – tajemník odešle své vyjádření (souhlas/nesouhlas, komentář, podpis)**
+
+| Komu                            | Co dostane                                                                                                                                                                                               | Kdy                                    |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| HR (`HR_EMAILS`)                | Nový e-mail s aktualizovaným PDF (obsahuje i sekci „Vyjádření tajemníka“). V textu e-mailu jsou **obě stanoviska najednou** – doporučení vedoucího (ANO/NE) i vyjádření tajemníka (souhlasí/nesouhlasí). | Ihned po odeslání vyjádření tajemníkem |
+| Vedoucí, který formulář vyplnil | Samostatný e-mail s informací, že se tajemník vyjádřil a jestli souhlasí, nebo nesouhlasí, včetně finálního PDF v příloze.                                                                               | Ihned po odeslání vyjádření tajemníkem |
+
+Pokud u odchozího/vedoucího chybí e-mail (`supervisorEmail`), tento
+druhý e-mail se přeskočí – posílá se jen HR e-mail s PDF.
+
+**Krok 3 – revize (HR formulář znovu odemkne, někdo ho upraví)**
+
+| Komu             | Co dostane                                     | Kdy                     |
+| ---------------- | ---------------------------------------------- | ----------------------- |
+| HR (`HR_EMAILS`) | Nový e-mail s aktuálním PDF po uložení revize. | Ihned po uložení revize |
+
+Revize sama o sobě neposílá nic tajemníkovi ani vedoucímu – jen HR.
+
+**Informační tabulka v e-mailech.** Všechny e-maily v krocích 1–3
+(pozvánka, připomínka, HR upomínka, PDF pro HR, žádost tajemníkovi,
+notifikace vedoucímu) mají ve své informační tabulce na konci řádek
+„Vedoucí / hodnotitel“ a „E-mail vedoucího“ – jméno a e-mail toho, kdo
+formulář vyplnil.
+
+**PDF.** Doporučení vedoucího odboru (ANO/NE, důvod) a vyjádření
+tajemníka (souhlasí/nesouhlasí, komentář) jsou v PDF každé ve vlastním
+ohraničeném rámečku, s podpisem a časem podpisu vpravo. Pokud vyjádření
+tajemníka není potřeba, PDF obsahuje jen první rámeček.
+
+**Kde se dá zjistit, co a komu bylo odesláno.** Historie vyhodnocení
+zkušební doby (`ProbationEvaluationEvent`, akce
+`TAJEMNIK_REVIEW_SENT` / `TAJEMNIK_REVIEWED` / `HR_INFO_SENT` /
+`EMAIL_FAILED`) – zobrazuje se přímo u detailu vyhodnocení v interní
+aplikaci.
+
+---
+
+### 11.5 Dokončení výstupního listu (exit checklist)
 
 Stejný princip – mimo `MailQueue`, přímo v okamžiku dokončení – platí
 i pro výstupní list. Jakmile podepíší všechny tři strany (zaměstnanec,
@@ -887,4 +942,3 @@ Cron pro blížící se konec pracovního poměru automaticky hlídá skutečné
 Mail worker následně bere připravené zprávy z e-mailové fronty a fyzicky je odesílá přes Resend.
 
 Finálně vyplněné hodnocení zkušební doby se řeší samostatně: při finálním uložení se vygeneruje PDF a odešle se HR.
-

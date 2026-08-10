@@ -102,6 +102,29 @@ function formatName(
   return parts.join(" ")
 }
 
+const CZECH_TITLE_WORDS =
+  /^(ing|mgr|bc|mudr|judr|phdr|rndr|doc|prof|mba|dis|csc|ph\.d)\.?$/i
+
+function guessCzechSurnameIsFemale(displayName?: string | null): boolean {
+  const parts = (displayName ?? "")
+    .trim()
+    .split(/\s+/)
+    .filter((part) => part && !CZECH_TITLE_WORDS.test(part.replace(/\.$/, "")))
+
+  const surname = parts[parts.length - 1] ?? ""
+
+  return /á$/i.test(surname)
+}
+
+export function genderedPastVerb(
+  displayName: string | null | undefined,
+  maleForm: string,
+  femaleForm: string
+): string {
+  if (!displayName?.trim()) return `${maleForm}(a)`
+  return guessCzechSurnameIsFemale(displayName) ? femaleForm : maleForm
+}
+
 function fmtDate(d: string | Date | null | undefined): string {
   if (!d) return "—"
 
@@ -1831,9 +1854,12 @@ export type SendProbationEvaluationPdfEmailParams = {
   employeeDepartment?: string | null
   employeeUnitName?: string | null
   probationEndDate?: string | Date | null
+  supervisorName?: string | null
+  supervisorEmail?: string | null
   recommendation?: string | null
   evaluatorName?: string | null
   evaluatorEmail?: string | null
+  intro?: string | null
   message?: string | null
   sentByName?: string | null
   pdfBuffer: Buffer
@@ -1848,12 +1874,30 @@ export type SendProbationEvaluationTajemnikReviewRequestEmailParams = {
   employeeDepartment?: string | null
   employeeUnitName?: string | null
   probationEndDate?: string | Date | null
+  supervisorName?: string | null
+  supervisorEmail?: string | null
   recommendation?: string | null
   evaluatorName?: string | null
   evaluatorEmail?: string | null
   evaluationLink: string
   pdfBuffer: Buffer
   filename: string
+}
+
+export type SendTajemnikReviewCompletedToSupervisorEmailParams = {
+  to: string
+  employeeName: string
+  employeePersonalNumber?: string | null
+  employeePosition?: string | null
+  employeeDepartment?: string | null
+  employeeUnitName?: string | null
+  probationEndDate?: string | Date | null
+  supervisorName?: string | null
+  supervisorEmail?: string | null
+  tajemnikName?: string | null
+  tajemnikAgreement: "yes" | "no"
+  pdfBuffer?: Buffer | null
+  pdfFilename?: string | null
 }
 
 export type SendProbationEvaluationCompletedEmailParams = {
@@ -2588,7 +2632,10 @@ export async function sendProbationEvaluationPdfEmail(
                   </p>
 
                   <p style="margin:0 0 18px 0;font-size:14px;color:#374151;line-height:1.6;">
-                    Personální oddělení vám zasílá PDF přílohu formuláře Vyhodnocení zkušební doby níže uvedeného zaměstnance.
+                    ${escapeHtml(
+                      args.intro?.trim() ||
+                        "Personální oddělení vám zasílá PDF přílohu formuláře Vyhodnocení zkušební doby níže uvedeného zaměstnance."
+                    )}
                   </p>
 
                   ${renderProbationInfoTable({
@@ -2600,6 +2647,8 @@ export async function sendProbationEvaluationPdfEmail(
                     employeeDepartment: args.employeeDepartment,
                     employeeUnitName: args.employeeUnitName,
                     probationEndDate: args.probationEndDate,
+                    supervisorName: args.supervisorName,
+                    supervisorEmail: args.supervisorEmail,
                     recommendation: args.recommendation,
                     evaluatorName: args.evaluatorName,
                     evaluatorEmail: args.evaluatorEmail,
@@ -2628,13 +2677,16 @@ export async function sendProbationEvaluationPdfEmail(
   const text = [
     "Dobrý den,",
     "",
-    "Personální oddělení vám zasílá PDF přílohu formuláře Vyhodnocení zkušební doby níže uvedeného zaměstnance.",
+    args.intro?.trim() ||
+      "Personální oddělení vám zasílá PDF přílohu formuláře Vyhodnocení zkušební doby níže uvedeného zaměstnance.",
     "",
     `Zaměstnanec: ${args.employeeName}`,
     `Pozice: ${args.employeePosition || "—"}`,
     `Odbor: ${args.employeeDepartment || "—"}`,
     `Oddělení: ${args.employeeUnitName || "—"}`,
     `Konec zkušební doby: ${fmtDate(args.probationEndDate)}`,
+    args.supervisorName ? `Vedoucí / hodnotitel: ${args.supervisorName}` : "",
+    args.supervisorEmail ? `E-mail vedoucího: ${args.supervisorEmail}` : "",
     args.recommendation ? `Doporučení: ${args.recommendation}` : "",
     args.evaluatorName ? `Hodnotil(a): ${args.evaluatorName}` : "",
     args.evaluatorEmail ? `E-mail hodnotitele: ${args.evaluatorEmail}` : "",
@@ -2664,6 +2716,11 @@ export async function sendProbationEvaluationTajemnikReviewRequestEmail(
   const primary = "#00847C"
   const bgLight = "#E5F5F2"
   const subject = `Vyhodnocení zkušební doby – vyjádření tajemníka – ${args.employeeName}`
+  const supervisorVerb = genderedPastVerb(
+    args.supervisorName || args.evaluatorName,
+    "vyplnil",
+    "vyplnila"
+  )
 
   const html = `
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
@@ -2709,7 +2766,7 @@ export async function sendProbationEvaluationTajemnikReviewRequestEmail(
                   </p>
 
                   <p style="margin:0 0 18px 0;font-size:14px;color:#374151;line-height:1.6;">
-                    vedoucí vyplnil(a) formulář Vyhodnocení zkušební doby níže uvedeného zaměstnance. Vyplněný formulář naleznete v PDF příloze. Prosíme o vyjádření (souhlas/nesouhlas s doporučením) přes odkaz níže.
+                    vedoucí odboru ${supervisorVerb} formulář Vyhodnocení zkušební doby níže uvedeného zaměstnance. Vyplněný formulář naleznete v PDF příloze. Prosíme o vyjádření (souhlas/nesouhlas s doporučením) přes odkaz níže.
                   </p>
 
                   ${renderProbationInfoTable({
@@ -2721,6 +2778,8 @@ export async function sendProbationEvaluationTajemnikReviewRequestEmail(
                     employeeDepartment: args.employeeDepartment,
                     employeeUnitName: args.employeeUnitName,
                     probationEndDate: args.probationEndDate,
+                    supervisorName: args.supervisorName,
+                    supervisorEmail: args.supervisorEmail,
                     recommendation: args.recommendation,
                     evaluatorName: args.evaluatorName,
                     evaluatorEmail: args.evaluatorEmail,
@@ -2770,13 +2829,15 @@ export async function sendProbationEvaluationTajemnikReviewRequestEmail(
   const text = [
     "Dobrý den,",
     "",
-    "vedoucí vyplnil(a) formulář Vyhodnocení zkušební doby níže uvedeného zaměstnance. Vyplněný formulář naleznete v PDF příloze. Prosíme o vyjádření (souhlas/nesouhlas s doporučením) přes odkaz níže.",
+    `vedoucí odboru ${supervisorVerb} formulář Vyhodnocení zkušební doby níže uvedeného zaměstnance. Vyplněný formulář naleznete v PDF příloze. Prosíme o vyjádření (souhlas/nesouhlas s doporučením) přes odkaz níže.`,
     "",
     `Zaměstnanec: ${args.employeeName}`,
     `Pozice: ${args.employeePosition || "—"}`,
     `Odbor: ${args.employeeDepartment || "—"}`,
     `Oddělení: ${args.employeeUnitName || "—"}`,
     `Konec zkušební doby: ${fmtDate(args.probationEndDate)}`,
+    args.supervisorName ? `Vedoucí / hodnotitel: ${args.supervisorName}` : "",
+    args.supervisorEmail ? `E-mail vedoucího: ${args.supervisorEmail}` : "",
     args.recommendation ? `Doporučení: ${args.recommendation}` : "",
     args.evaluatorName ? `Hodnotil(a): ${args.evaluatorName}` : "",
     args.evaluatorEmail ? `E-mail hodnotitele: ${args.evaluatorEmail}` : "",
@@ -2797,6 +2858,134 @@ export async function sendProbationEvaluationTajemnikReviewRequestEmail(
         contentType: "application/pdf",
       },
     ],
+  })
+}
+
+export async function sendTajemnikReviewCompletedToSupervisorEmail(
+  args: SendTajemnikReviewCompletedToSupervisorEmailParams
+): Promise<void> {
+  const primary = "#00847C"
+  const bgLight = "#E5F5F2"
+  const tajemnikVerb = genderedPastVerb(
+    args.tajemnikName,
+    "vyjádřil",
+    "vyjádřila"
+  )
+  const subject = `Vyhodnocení zkušební doby – tajemník se ${tajemnikVerb} – ${args.employeeName}`
+
+  const agreementText =
+    args.tajemnikAgreement === "no"
+      ? "nesouhlasí s Vaším doporučením"
+      : "souhlasí s Vaším doporučením"
+
+  const intro = `tajemník${args.tajemnikName ? ` ${args.tajemnikName}` : " úřadu"} se ${tajemnikVerb} k Vámi vyplněnému vyhodnocení zkušební doby níže uvedeného zaměstnance – ${agreementText}. Vyhodnocení bylo v této podobě předáno Personálnímu oddělení k založení${args.pdfBuffer ? ", finální PDF naleznete v příloze" : ""}.`
+
+  const html = `
+  <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+  <html xmlns="http://www.w3.org/1999/xhtml" lang="cs">
+    <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <meta name="color-scheme" content="light" />
+      <meta name="supported-color-schemes" content="light" />
+      <title>${escapeHtml(subject)}</title>
+      <style type="text/css">
+        body { margin: 0; padding: 0; }
+        table { border-collapse: collapse; }
+        ${EMAIL_GLOBAL_FONT_STYLE}
+      </style>
+    </head>
+
+    <body style="margin:0;padding:0;background-color:${bgLight};font-family:${EMAIL_FONT_FAMILY};">
+      <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
+        <tr>
+          <td align="center" style="padding:30px 10px;">
+            <table border="0" cellpadding="0" cellspacing="0" width="600"
+              bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
+              <tr bgcolor="${primary}">
+                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};border-radius:12px 12px 0 0;">
+                  <div style="color:#ffffff;font-size:12px;text-transform:uppercase;letter-spacing:2px;margin-bottom:10px;opacity:.9;">
+                    Zkušební doba<span style="opacity:.6;">&nbsp;·&nbsp;</span>Vyjádření tajemníka
+                  </div>
+                  <div style="color:#ffffff;font-size:20px;font-weight:bold;line-height:1.3;">
+                    Vyhodnocení zkušební doby${
+                      args.employeeName
+                        ? ` – ${escapeHtml(args.employeeName)}`
+                        : ""
+                    }
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="#ffffff" style="padding:26px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};">
+                  <p style="margin:0 0 16px 0;font-size:14px;color:#082B2A;">
+                    Dobrý den,
+                  </p>
+
+                  <p style="margin:0 0 18px 0;font-size:14px;color:#374151;line-height:1.6;">
+                    ${escapeHtml(intro)}
+                  </p>
+
+                  ${renderProbationInfoTable({
+                    primary,
+                    bgLight,
+                    employeeName: args.employeeName,
+                    employeePersonalNumber: args.employeePersonalNumber,
+                    employeePosition: args.employeePosition,
+                    employeeDepartment: args.employeeDepartment,
+                    employeeUnitName: args.employeeUnitName,
+                    probationEndDate: args.probationEndDate,
+                    supervisorName: args.supervisorName,
+                    supervisorEmail: args.supervisorEmail,
+                  })}
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;">
+                  ${EMAIL_FOOTER_HTML}
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+  </html>`
+
+  const text = [
+    "Dobrý den,",
+    "",
+    intro,
+    "",
+    `Zaměstnanec: ${args.employeeName}`,
+    `Pozice: ${args.employeePosition || "—"}`,
+    `Odbor: ${args.employeeDepartment || "—"}`,
+    `Oddělení: ${args.employeeUnitName || "—"}`,
+    `Konec zkušební doby: ${fmtDate(args.probationEndDate)}`,
+    args.supervisorName ? `Vedoucí / hodnotitel: ${args.supervisorName}` : "",
+    args.supervisorEmail ? `E-mail vedoucího: ${args.supervisorEmail}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n")
+
+  await sendMail({
+    to: [args.to],
+    subject,
+    html,
+    text,
+    ...(args.pdfBuffer
+      ? {
+          attachments: [
+            {
+              filename: args.pdfFilename || "Vyhodnoceni-zkusebni-doby.pdf",
+              content: args.pdfBuffer,
+              contentType: "application/pdf",
+            },
+          ],
+        }
+      : {}),
   })
 }
 

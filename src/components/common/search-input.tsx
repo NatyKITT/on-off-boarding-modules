@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Search } from "lucide-react"
+import { Search, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
@@ -26,9 +26,21 @@ export function SearchInput({
       <Input
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className={cn("pl-9", className)}
+        className={cn("pl-9", value ? "pr-8" : "", className)}
         {...props}
       />
+      {value && (
+        <button
+          type="button"
+          title="Vymazat vyhledávání"
+          aria-label="Vymazat vyhledávání"
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm text-muted-foreground hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => onChange("")}
+        >
+          <X className="size-4" />
+        </button>
+      )}
     </div>
   )
 }

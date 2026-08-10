@@ -314,6 +314,14 @@ Při finálním uložení vyhodnocení aplikace:
 
 Rozpracované uložení formuláře pouze uloží data. Nemá spouštět odeslání e-mailu ani zobrazovat hlášku, že e-mail byl odeslán.
 
+Pokud vedoucí, který formulář vyplňuje, není sám tajemník úřadu, navazuje druhá fáze – vyjádření tajemníka. Kdo dostane co a kdy (vše mimo `MailQueue`, odesláno přímo v okamžiku dané akce):
+
+1. Vedoucí odešle finální vyhodnocení → HR dostane PDF e-mailem (+ info, že šlo i tajemníkovi), tajemník dostane PDF a odkaz k vyjádření.
+2. Tajemník odešle své vyjádření → HR dostane nový PDF e-mail s **oběma** stanovisky (vedoucí ANO/NE + tajemník souhlasí/nesouhlasí) a **vedoucí dostane samostatný e-mail**, že se tajemník vyjádřil.
+3. HR odemkne a někdo upraví (revize) → HR dostane nový PDF e-mail; tajemníkovi ani vedoucímu se nic neposílá.
+
+Podrobný přehled „kdo/co/kdy“ je v `docs/cron-notification-full-version.md`, kapitola 11.4.
+
 Stejný princip (mimo mail queue, přímo v okamžiku dokončení) platí i pro **výstupní list**: jakmile podepíší všechny strany (zaměstnanec, vedoucí, vydávající), aplikace ve stejném požadavku:
 
 - pošle HR e-mail s PDF podepsaného výstupního listu v příloze (příloha se negeneruje, jen když dokončení proběhlo z veřejného odkazu bez dostatečného oprávnění – pak e-mail obsahuje aspoň odkaz),

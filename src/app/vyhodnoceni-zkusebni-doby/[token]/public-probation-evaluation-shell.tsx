@@ -112,6 +112,24 @@ function getDataRecord(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>
 }
 
+function getEvaluatorSignature(value: unknown): {
+  signedByName: string | null
+  signedAt: string | null
+} | null {
+  const signature = getDataRecord(value).signature
+
+  if (!signature || typeof signature !== "object" || Array.isArray(signature))
+    return null
+
+  const record = signature as Record<string, unknown>
+
+  return {
+    signedByName:
+      typeof record.signedByName === "string" ? record.signedByName : null,
+    signedAt: typeof record.signedAt === "string" ? record.signedAt : null,
+  }
+}
+
 function getRevisionMeta(value: unknown): RevisionMeta {
   const data = getDataRecord(value)
   const revision = data.revision
@@ -367,7 +385,7 @@ export function PublicProbationEvaluationShell({ token, employeeName }: Props) {
           : values.submitMode === "revision"
             ? "Změny ve vyhodnocení zkušební doby byly úspěšně uloženy a předány personálnímu oddělení. Tuto stránku můžete zavřít."
             : justSavedTajemnikRequired
-              ? `Vyhodnocení zkušební doby bylo úspěšně vyplněno. Bylo předáno personálnímu oddělení a k odsouhlasení tajemníkovi${justSavedTajemnikName ? ` (${justSavedTajemnikName})` : ""}. Tuto stránku můžete zavřít.`
+              ? `Vyhodnocení zkušební doby bylo úspěšně vyplněno. Bylo předáno personálnímu oddělení a k odsouhlasení tajemníkovi${justSavedTajemnikName ? ` ${justSavedTajemnikName}` : ""}. Tuto stránku můžete zavřít.`
               : "Vyhodnocení zkušební doby bylo úspěšně vyplněno a předáno personálnímu oddělení. Tuto stránku můžete zavřít."
       )
     } catch (err) {
@@ -416,7 +434,7 @@ export function PublicProbationEvaluationShell({ token, employeeName }: Props) {
       }
 
       setSavedMessage(
-        "Vaše vyjádření bylo úspěšně uloženo a předáno personálnímu oddělení. Stránku můžete zavřít, nebo si níže stáhněte PDF se svým podpisem, případně ho pošlete na svůj e-mail."
+        "Vaše vyjádření bylo úspěšně uloženo. Informace o vyplnění vyhodnocení byla zaslána na Personální oddělení k založení a e-mailem i vedoucímu, který vyhodnocení vyplnil. Stránku můžete zavřít, nebo si níže stáhněte PDF se svým podpisem, případně ho pošlete na svůj e-mail."
       )
     } catch (err) {
       setError(
@@ -503,7 +521,7 @@ export function PublicProbationEvaluationShell({ token, employeeName }: Props) {
             </p>
             <p className="mt-1 text-green-700">
               {tajemnikRequired && !tajemnikReview?.signedAt
-                ? `Formulář byl předán personálnímu oddělení a k odsouhlasení tajemníkovi${data?.tajemnik?.name ? ` (${data.tajemnik.name})` : ""}.`
+                ? `Formulář byl předán personálnímu oddělení a k odsouhlasení tajemníkovi${data?.tajemnik?.name ? ` ${data.tajemnik.name}` : ""}.`
                 : "Formulář byl předán personálnímu oddělení."}{" "}
               Tuto stránku můžete zavřít.
             </p>
@@ -608,7 +626,13 @@ export function PublicProbationEvaluationShell({ token, employeeName }: Props) {
                 "") as string,
               evaluatorName: data.request.evaluatorName ?? null,
               evaluatorEmail: data.request.evaluatorEmail ?? null,
+              evaluatorSignedByName:
+                getEvaluatorSignature(data.request.data)?.signedByName ?? null,
+              evaluatorSignedAt:
+                getEvaluatorSignature(data.request.data)?.signedAt ?? null,
             }}
+            employeeMeta={employeeMeta}
+            formType={data.request.formType}
             canSubmit={isCurrentUserTajemnik}
             currentUserName={data.currentUser?.name ?? ""}
             currentUserEmail={data.currentUser?.email ?? ""}

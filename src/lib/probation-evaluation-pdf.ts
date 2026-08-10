@@ -308,6 +308,7 @@ function ensureSpace(args: {
   fonts: PdfFontSet
   y: number
   needed: number
+  withTitle?: boolean
 }) {
   if (args.y - args.needed >= 48) {
     return {
@@ -317,6 +318,14 @@ function ensureSpace(args: {
   }
 
   const page = createBlankPage(args.pdf)
+
+  if (args.withTitle === false) {
+    return {
+      page,
+      y: cv(54),
+    }
+  }
+
   drawPageTitle(page, args.fonts, "Vyhodnocení zkušební doby")
 
   return {
@@ -506,60 +515,133 @@ function drawHeader(
   })
 }
 
-function drawSignatureBlock(args: {
+const BOX_PADDING = 12
+const BOX_COLUMN_GAP = 16
+const BOX_TITLE_HEIGHT = 28
+const BOX_GAP_AFTER = 14
+const BOX_LEFT_LINE_HEIGHT = 14
+const BOX_RIGHT_LINE_HEIGHT = 12.5
+const BOX_SIGNATURE_LABEL_GAP = 17
+
+function drawBoxedRecommendationSection(args: {
   pdf: PDFDocument
   page: PDFPage
   fonts: PdfFontSet
   y: number
-  title: string
-  name: string
+  boxTitle: string
+  leftText: string
+  signatureLabel: string
+  signatureName: string
   signedAt?: string | null
-}) {
-  let activePage = args.page
-  let y = args.y
+}): { page: PDFPage; y: number } {
+  const innerWidth = CONTENT_WIDTH - BOX_PADDING * 2
+  const leftWidth = Math.round((innerWidth - BOX_COLUMN_GAP) * 0.6)
+  const rightWidth = innerWidth - BOX_COLUMN_GAP - leftWidth
 
-  const signedAt = formatCzDateTime(args.signedAt)
-  const neededHeight = 58
+  const leftLines = wrapText(
+    args.leftText || "—",
+    args.fonts.regular,
+    GENERATED_TEXT_SIZE,
+    leftWidth
+  )
+
+  const signedAtLabel = formatCzDateTime(args.signedAt)
+
+  const signatureNameLines = wrapText(
+    args.signatureName || "—",
+    args.fonts.regular,
+    9,
+    rightWidth
+  )
+
+  const disclaimerLines = wrapText(
+    "Elektronicky podepsáno v aplikaci On-Off-Boarding ÚMČ Praha 6.",
+    args.fonts.regular,
+    7,
+    rightWidth
+  )
+
+  const rightLines = [
+    ...signatureNameLines.map((text) => ({ text, size: 9 })),
+    ...(signedAtLabel ? [{ text: signedAtLabel, size: 9 }] : []),
+    ...disclaimerLines.map((text) => ({ text, size: 7 })),
+  ]
+
+  const leftBlockHeight = Math.max(1, leftLines.length) * BOX_LEFT_LINE_HEIGHT
+  const rightBlockHeight =
+    BOX_SIGNATURE_LABEL_GAP + rightLines.length * BOX_RIGHT_LINE_HEIGHT
+  const contentHeight = Math.max(leftBlockHeight, rightBlockHeight)
+  const totalHeight = BOX_PADDING * 2 + BOX_TITLE_HEIGHT + contentHeight
 
   const ensured = ensureSpace({
     pdf: args.pdf,
-    page: activePage,
+    page: args.page,
     fonts: args.fonts,
-    y,
-    needed: neededHeight,
+    y: args.y,
+    needed: totalHeight + BOX_GAP_AFTER,
+    withTitle: false,
   })
 
-  activePage = ensured.page
-  y = ensured.y
+  const activePage = ensured.page
+  const boxTop = ensured.y
+  const boxBottom = boxTop - totalHeight
 
-  drawText(activePage, args.fonts.bold, args.title, CONTENT_LEFT, y, 11)
-
-  y -= 18
-
-  drawText(activePage, args.fonts.regular, args.name, CONTENT_LEFT, y, 9)
-
-  y -= 12
-
-  if (signedAt) {
-    drawText(activePage, args.fonts.regular, signedAt, CONTENT_LEFT, y, 9)
-
-    y -= 12
-  }
+  activePage.drawRectangle({
+    x: CONTENT_LEFT,
+    y: boxBottom,
+    width: CONTENT_WIDTH,
+    height: totalHeight,
+    borderColor: rgb(0.6, 0.6, 0.6),
+    borderWidth: 1,
+  })
 
   drawText(
     activePage,
-    args.fonts.regular,
-    "Elektronicky podepsáno v aplikaci On-Off-Boarding ÚMČ Praha 6.",
-    CONTENT_LEFT,
-    y,
-    7
+    args.fonts.bold,
+    args.boxTitle,
+    CONTENT_LEFT + BOX_PADDING,
+    boxTop - BOX_PADDING - 9,
+    11
   )
 
-  y -= 20
+  const columnTop = boxTop - BOX_PADDING - BOX_TITLE_HEIGHT
+
+  let leftY = columnTop
+  for (const line of leftLines) {
+    if (line) {
+      drawText(
+        activePage,
+        args.fonts.regular,
+        line,
+        CONTENT_LEFT + BOX_PADDING,
+        leftY,
+        GENERATED_TEXT_SIZE
+      )
+    }
+    leftY -= BOX_LEFT_LINE_HEIGHT
+  }
+
+  const rightX = CONTENT_LEFT + BOX_PADDING + leftWidth + BOX_COLUMN_GAP
+  let rightY = columnTop
+
+  drawText(activePage, args.fonts.bold, args.signatureLabel, rightX, rightY, 9)
+  rightY -= BOX_SIGNATURE_LABEL_GAP
+
+  for (const line of rightLines) {
+    drawText(
+      activePage,
+      args.fonts.regular,
+      line.text,
+      rightX,
+      rightY,
+      line.size
+    )
+    rightY -= BOX_RIGHT_LINE_HEIGHT
+  }
 
   return {
     page: activePage,
-    y,
+    y: boxBottom - BOX_GAP_AFTER,
   }
 }
 
@@ -586,7 +668,7 @@ export async function renderProbationEvaluationPdfBuffer(
 
   const recommendationText = [
     recommendationLabel(recommendationValue),
-    reason ? `Důvod:\n${reason}` : "",
+    reason ? `\nDůvod:\n${reason}` : "",
   ]
     .filter(Boolean)
     .join("\n")
@@ -622,10 +704,6 @@ export async function renderProbationEvaluationPdfBuffer(
       title: "4. Dovednosti, znalosti a vlastnosti",
       text: cleanText(data.skillsKnowledgeTraits),
     },
-    {
-      title: "Doporučení k pokračování pracovního poměru",
-      text: recommendationText,
-    },
   ]
 
   for (const section of sections) {
@@ -649,18 +727,20 @@ export async function renderProbationEvaluationPdfBuffer(
     cleanText(payload.request.supervisorName) ||
     "—"
 
-  const signatureResult = drawSignatureBlock({
+  const recommendationResult = drawBoxedRecommendationSection({
     pdf,
     page: activePage,
     fonts,
     y,
-    title: "Podpis hodnotitele",
-    name: evaluatorName,
+    boxTitle: "Doporučení vedoucího odboru k pokračování pracovního poměru",
+    leftText: recommendationText,
+    signatureLabel: "Podpis vedoucího",
+    signatureName: evaluatorName,
     signedAt: signature.signedAt,
   })
 
-  activePage = signatureResult.page
-  y = signatureResult.y
+  activePage = recommendationResult.page
+  y = recommendationResult.y
 
   const tajemnikReview = getTajemnikReviewData(data)
   const tajemnikRequired = payload.request.tajemnikRequired === true
@@ -685,35 +765,25 @@ export async function renderProbationEvaluationPdfBuffer(
 
     const tajemnikText = [
       agreementLabel,
-      tajemnikReview.comment ? `Komentář:\n${tajemnikReview.comment}` : "",
+      tajemnikReview.comment ? `\nKomentář:\n${tajemnikReview.comment}` : "",
     ]
       .filter(Boolean)
       .join("\n")
 
-    const reviewResult = drawSection({
+    const tajemnikBoxResult = drawBoxedRecommendationSection({
       pdf,
       page: activePage,
       fonts,
       y,
-      title: "Vyjádření tajemníka",
-      text: tajemnikText,
-    })
-
-    activePage = reviewResult.page
-    y = reviewResult.y
-
-    const tajemnikSignatureResult = drawSignatureBlock({
-      pdf,
-      page: activePage,
-      fonts,
-      y,
-      title: "Podpis tajemníka",
-      name: tajemnikReview.signedByName || "—",
+      boxTitle: "Vyjádření tajemníka",
+      leftText: tajemnikText,
+      signatureLabel: "Podpis tajemníka",
+      signatureName: tajemnikReview.signedByName || "—",
       signedAt: tajemnikReview.signedAt,
     })
 
-    activePage = tajemnikSignatureResult.page
-    y = tajemnikSignatureResult.y
+    activePage = tajemnikBoxResult.page
+    y = tajemnikBoxResult.y
   }
 
   if (y > 48) {

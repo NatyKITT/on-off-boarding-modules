@@ -9,8 +9,10 @@ import { z } from "zod"
 
 import { prisma } from "@/lib/db"
 import {
+  genderedPastVerb,
   sendProbationEvaluationPdfEmail,
   sendProbationEvaluationTajemnikReviewRequestEmail,
+  sendTajemnikReviewCompletedToSupervisorEmail,
 } from "@/lib/email"
 import {
   buildLinkedOffboardingInfo,
@@ -1929,15 +1931,48 @@ export async function sendCompletedProbationPdfToHr(args: {
   const isTajemnikMode = mode === "tajemnik"
   const hrRecipients = getHrRecipientsFromEnv()
 
-  const emailMessage = isTajemnikMode
-    ? `Tajemník${args.tajemnikInfo?.name ? ` (${args.tajemnikInfo.name})` : " úřadu"} se k vyhodnocení vyjádřil - ${
-        args.tajemnikInfo?.agreement === "no" ? "nesouhlasí" : "souhlasí"
-      } s doporučením. Aktuální PDF formulář s jeho stanoviskem je v příloze.`
+  const vedouciRecommendation = args.request.evaluations?.[0]?.recommendation
+  const vedouciRecommendationLabel =
+    vedouciRecommendation === true
+      ? "ANO"
+      : vedouciRecommendation === false
+        ? "NE"
+        : "bez stanoviska"
+
+  const evaluatorDisplayName =
+    args.request.evaluations?.[0]?.evaluatorName ||
+    args.request.supervisorName ||
+    null
+
+  const evaluatorVerb = genderedPastVerb(
+    evaluatorDisplayName,
+    "vyplnil",
+    "vyplnila"
+  )
+  const evaluatorRecommendVerb = genderedPastVerb(
+    evaluatorDisplayName,
+    "doporučil",
+    "doporučila"
+  )
+  const tajemnikVerb = genderedPastVerb(
+    args.tajemnikInfo?.name,
+    "vyplnil",
+    "vyplnila"
+  )
+
+  const emailIntro = isTajemnikMode
+    ? `tajemník${args.tajemnikInfo?.name ? ` ${args.tajemnikInfo.name}` : " úřadu"} ${tajemnikVerb} finální vyjádření k vyhodnocení zkušební doby níže uvedeného zaměstnance. Aktuální PDF formulář naleznete v příloze.`
     : isRevision
-      ? "Formulář k vyhodnocení zkušební doby byl upraven. Aktuální PDF formulář je v příloze."
-      : args.tajemnikInfo?.required
-        ? `Formulář k vyhodnocení zkušební doby byl finálně vyplněn. PDF formulář je v příloze. Zároveň byl odeslán tajemníkovi${args.tajemnikInfo.name ? ` (${args.tajemnikInfo.name})` : ""} k vyjádření.`
-        : "Formulář k vyhodnocení zkušební doby byl finálně vyplněn. PDF formulář je v příloze."
+      ? "Formulář k vyhodnocení zkušební doby byl upraven. Aktuální PDF formulář naleznete v příloze."
+      : `Vedoucí odboru${evaluatorDisplayName ? ` ${evaluatorDisplayName}` : ""} ${evaluatorVerb} formulář Vyhodnocení zkušební doby níže uvedeného zaměstnance. Vyplněný formulář naleznete v PDF příloze.`
+
+  const emailMessage = isTajemnikMode
+    ? `Vedoucí odboru ${evaluatorRecommendVerb} pokračování pracovního poměru: ${vedouciRecommendationLabel}. Tajemník se k vyhodnocení vyjádřil - ${
+        args.tajemnikInfo?.agreement === "no" ? "nesouhlasí" : "souhlasí"
+      } s doporučením.`
+    : !isRevision && args.tajemnikInfo?.required
+      ? `Zároveň bylo zasláno tajemníkovi${args.tajemnikInfo.name ? ` ${args.tajemnikInfo.name}` : ""} k vyjádření.`
+      : null
 
   if (hrRecipients.length === 0) {
     await prisma.$transaction(async (tx) => {
@@ -2001,11 +2036,58 @@ export async function sendCompletedProbationPdfToHr(args: {
           args.request.probationEnd ??
           args.request.onboarding.probationEnd ??
           null,
+        supervisorName: args.request.supervisorName ?? null,
+        supervisorEmail: args.request.supervisorEmail ?? null,
+        intro: emailIntro,
         message: emailMessage,
         sentByName: args.user.name ?? args.user.email ?? null,
         pdfBuffer,
         filename: `Vyhodnoceni-zkusebni-doby-${personalNumber}.pdf`,
       })
+    }
+
+    const supervisorEmail = args.request.supervisorEmail
+    if (isTajemnikMode && supervisorEmail) {
+      try {
+        await sendTajemnikReviewCompletedToSupervisorEmail({
+          to: supervisorEmail,
+          employeeName,
+          employeePersonalNumber:
+            args.request.onboarding.personalNumber ?? null,
+          employeePosition: args.request.onboarding.positionName ?? null,
+          employeeDepartment: args.request.onboarding.department ?? null,
+          probationEndDate:
+            args.request.probationEnd ??
+            args.request.onboarding.probationEnd ??
+            null,
+          supervisorName: args.request.supervisorName ?? null,
+          supervisorEmail,
+          tajemnikName: args.tajemnikInfo?.name ?? null,
+          tajemnikAgreement:
+            args.tajemnikInfo?.agreement === "no" ? "no" : "yes",
+          pdfBuffer,
+          pdfFilename: `Vyhodnoceni-zkusebni-doby-${personalNumber}.pdf`,
+        })
+      } catch (error) {
+        await prisma.$transaction(async (tx) => {
+          await addProbationEvent(tx, {
+            requestId: args.request.id,
+            action: "EMAIL_FAILED",
+            by: getUserKey({ id: args.user.id, email: args.user.email }),
+            byName: getUserLabel({
+              name: args.user.name,
+              email: args.user.email,
+            }),
+            byEmail: args.user.email ?? null,
+            message:
+              "Vedoucímu se nepodařilo odeslat upozornění, že se tajemník vyjádřil.",
+            meta: {
+              supervisorEmail,
+              error: error instanceof Error ? error.message : String(error),
+            },
+          })
+        })
+      }
     }
 
     await prisma.$transaction(async (tx) => {
@@ -2035,7 +2117,7 @@ export async function sendCompletedProbationPdfToHr(args: {
         }),
         byEmail: args.user.email ?? null,
         message: isTajemnikMode
-          ? "Personálnímu oddělení bylo odesláno vyjádření tajemníka včetně aktuální PDF přílohy."
+          ? `Personálnímu oddělení bylo odesláno vyjádření tajemníka včetně aktuální PDF přílohy.${supervisorEmail ? " Vedoucí byl(a) o vyjádření tajemníka informován(a) e-mailem." : ""}`
           : isRevision
             ? "Personálnímu oddělení bylo odesláno upravené vyhodnocení zkušební doby včetně nové PDF přílohy."
             : "Personálnímu oddělení bylo odesláno finální vyhodnocení zkušební doby včetně PDF přílohy.",
@@ -2122,6 +2204,8 @@ export async function sendTajemnikReviewRequestEmail(args: {
         args.request.probationEnd ??
         args.request.onboarding.probationEnd ??
         null,
+      supervisorName: args.request.supervisorName ?? null,
+      supervisorEmail: args.request.supervisorEmail ?? null,
       evaluationLink,
       pdfBuffer,
       filename: `Vyhodnoceni-zkusebni-doby-${personalNumber}.pdf`,
