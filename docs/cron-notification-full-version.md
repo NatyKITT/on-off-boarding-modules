@@ -63,21 +63,41 @@ GET /api/cron/offboarding-notifications
 Tento endpoint kontroluje **skutečné** odchody (`actualEnd`, ne
 `plannedEnd`) a jejich výstupní list.
 
-Typicky zajišťuje:
+Řeší dva samostatné typy připomínek, oba v okamžicích 30, 14, 7, 3, 2
+a 1 den před koncem, vždy nejvýš jednou za dané okno a daný odchod:
 
-- dohledání skutečných odchodů, kterým se blíží konec pracovního
-  poměru za 30, 14, 7 nebo 3 dny,
+**A) Souhrnná připomínka pro HR** (typ úlohy `NOTICE_WARNING`,
+funkce `queueExitChecklistReminders`):
+
+- dohledá skutečné odchody, kterým se blíží konec pracovního poměru,
 - u každého ověří, jestli je výstupní list (exit checklist) už
   kompletně podepsaný – pokud ano, upomínka se nevytváří,
-- vytvoření jedné e-mailové úlohy pro dané okno (30/14/7/3 dny) a
-  daný odchod, nikdy duplicitně,
+- zjistí, jestli už byla k tomuto odchodu vůbec odeslána pozvánka
+  k podpisu (kontrola v `EmailHistory`), a podle toho zvolí text:
+  - pozvánka ještě neodešla → HR se vyzve, ať ji odešle
+    ("Nutno odeslat pozvánku k podpisu výstupního listu…"),
+  - pozvánka už odešla, ale list není hotový → HR se jen informuje,
+    že list stále čeká na podpis,
+- příjemci jsou `HR_EMAILS`,
 - zápis události `DEADLINE_REMINDER_SENT` do historie výstupního
   listu.
 
-Příjemci jsou zatím jen HR (`HR_EMAILS`) – žádný e-mail se zatím
-neposílá přímo zaměstnanci ani nadřízenému. Endpoint stejně jako
-`probation-notifications` e-maily přímo neposílá, pouze vytváří
-úlohy typu `NOTICE_WARNING` do `MailQueue`.
+**B) Cílená připomínka konkrétním lidem** (typ úlohy
+`EXIT_SIGNATURE_INVITE`, funkce `queueExitChecklistSignatureReminders`):
+
+- pro každý nedokončený odchod zvlášť zkontroluje zaměstnance a
+  vedoucího – komu z nich ještě chybí podpis,
+- připomínku pošle **jen** tomu, komu HR pozvánku k podpisu už dříve
+  skutečně odeslala (opět kontrola v `EmailHistory`) – cron tedy
+  nikoho nezve poprvé sám od sebe, jen připomíná už pozvaným,
+- e-mail vede na stejný veřejný odkaz (`/odchody-public/[token]`),
+  jaký dostali v původní pozvánce,
+- zápis události `SIGNATURE_INVITE_SENT` do historie výstupního
+  listu, s metadaty o roli (zaměstnanec/vedoucí) a počtu dní.
+
+Endpoint stejně jako `probation-notifications` e-maily přímo
+neposílá, pouze vytváří úlohy do `MailQueue` (`NOTICE_WARNING` a
+`EXIT_SIGNATURE_INVITE`).
 
 Na stránce výstupního listu (`/odchody/[id]/vystupni-list`) se navíc
 nezávisle na cronu zobrazuje barevný banner (žlutý do 7 dnů, červený
@@ -196,7 +216,7 @@ Prostředí musí mít správně nastavenou `DATABASE_URL` a databáze musí obs
 
 Cron `probation-notifications` čte nástupy, zkušební dobu a stav vyhodnocení.
 
-Cron `offboarding-notifications` čte skutečné odchody, výstupní listy (exit checklist) a zapisuje do jejich historie.
+Cron `offboarding-notifications` čte skutečné odchody, výstupní listy (exit checklist), historii e-mailů (`EmailHistory` – kvůli ověření, komu už HR pozvánku k podpisu odeslala) a zapisuje do historie výstupního listu.
 
 Cron `mail-worker` čte a aktualizuje `MailQueue`.
 
@@ -563,16 +583,25 @@ PROBATION_EVALUATION_HR_NOT_COMPLETED
 PROBATION_EVALUATION_UNLOCK_REMINDER
 ```
 
-Typ e-mailu pro blížící se konec pracovního poměru:
+Typy e-mailů pro blížící se konec pracovního poměru:
 
 ```txt
 NOTICE_WARNING
+EXIT_SIGNATURE_INVITE
 ```
 
-Tento typ vytváří `offboarding-notifications` a zpracovává ho stejný
-`mail-worker` jako probation typy – payload obsahuje mimo jiné
-`recipients`, `employeeName`, `daysBeforeEnd`, `checklistLink`,
-`subject` a `intro`.
+Oba typy vytváří `offboarding-notifications` a zpracovává je stejný
+`mail-worker` jako probation typy.
+
+- `NOTICE_WARNING` – souhrnná připomínka pro HR. Payload obsahuje
+  mimo jiné `recipients`, `employeeName`, `daysBeforeEnd`,
+  `checklistLink`, `subject` a `intro`.
+- `EXIT_SIGNATURE_INVITE` – cílená připomínka konkrétnímu člověku
+  (zaměstnanci nebo vedoucímu), který ještě nepodepsal. Payload
+  obsahuje `to`, `employeeName`, `employeePosition`,
+  `employeeDepartment`, `employmentEndDate` a `signUrl` – zpracovává
+  se stejnou funkcí jako ruční pozvánka k podpisu
+  (`sendSignatureInviteEmail`), jen ho místo HR založí cron.
 
 Finální PDF vyplněného formuláře se neposílá přes běžnou frontu. Viz další kapitola.
 
@@ -623,6 +652,28 @@ Pokud je již dokončený formulář otevřený k úpravě:
 - vygeneruje se nové PDF,
 - aktuální PDF se znovu odešle HR,
 - změna se zapíše do historie.
+
+### 11.4 Dokončení výstupního listu (exit checklist)
+
+Stejný princip – mimo `MailQueue`, přímo v okamžiku dokončení – platí
+i pro výstupní list. Jakmile podepíší všechny tři strany (zaměstnanec,
+vedoucí, vydávající), aplikace ve stejném požadavku (ať už přišel
+z interní aplikace, nebo z veřejného odkazu):
+
+1. detekuje dokončení (`getExitChecklistCompletionState`),
+2. zkusí vygenerovat PDF aktuálního výstupního listu
+   (`tryFetchExitChecklistPdfBuffer`) – funguje spolehlivě, když
+   dokončení proběhlo z interní aplikace (má potřebnou roli); pokud
+   dokončil zaměstnanec přes veřejný odkaz bez interní role, generování
+   PDF se přeskočí a e-mail obsahuje jen odkaz,
+3. pošle HR e-mail (`sendExitChecklistCompletedEmail`) s PDF v příloze,
+   pokud se ho podařilo vygenerovat,
+4. pošle samostatný informační e-mail odcházejícímu zaměstnanci
+   (`sendExitChecklistCompletedToEmployeeEmail`) na `off.userEmail`,
+   pokud je vyplněný – informuje ho, že výstupní list je podepsaný a
+   má se dostavit na Personální oddělení pro zápočtový list,
+5. zapíše `completedNotificationSentAt` a související metadata do
+   hlavičky výstupního listu, aby se e-maily neposlaly opakovaně.
 
 ---
 
@@ -793,7 +844,7 @@ Krátké shrnutí pro správce nebo vedoucího:
 ```txt
 Crony v aplikaci nejsou spouštěné automaticky samotným Next.js kódem. Musí je volat externí plánovač, aktuálně ideálně GitHub Actions. Pro fungování je potřeba mít CRON_SECRET nastavený jak v běžící aplikaci, tak v GitHub Actions secrets. Hodnoty musí být stejné. GitHub dále potřebuje APP_URL, což je URL běžící instance aplikace.
 
-Cron probation-notifications pouze kontroluje zkušební doby a vytváří e-mailové úlohy do MailQueue. Cron offboarding-notifications stejným způsobem kontroluje skutečné odchody a blížící se konec pracovního poměru u nedokončených výstupních listů, zatím jen s upomínkami pro HR. Samotné odesílání obou provádí cron mail-worker, který zpracovává MailQueue a posílá e-maily přes Resend.
+Cron probation-notifications pouze kontroluje zkušební doby a vytváří e-mailové úlohy do MailQueue. Cron offboarding-notifications stejným způsobem kontroluje skutečné odchody a blížící se konec pracovního poměru u nedokončených výstupních listů – posílá souhrnnou upomínku pro HR (jestli je potřeba poslat pozvánku, nebo jen upozornit, že list není hotový) i cílenou připomínku přímo konkrétnímu zaměstnanci nebo vedoucímu, který ještě nepodepsal, ale jen tomu, komu HR pozvánku už dříve skutečně odeslala. Samotné odesílání obou provádí cron mail-worker, který zpracovává MailQueue a posílá e-maily přes Resend.
 
 Oba kontrolní crony mají v aplikaci běžet jen jednou denně v 8:00 pražského času, proto mají v GitHub Actions nastavené schedule na dvě UTC hodnoty (6 a 7) kvůli letnímu/zimnímu času – endpoint sám pozná, který běh je ten správný.
 

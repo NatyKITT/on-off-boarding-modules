@@ -1,8 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { auth } from "@/auth"
-import { ChecklistResolution, Prisma } from "@prisma/client"
-
-import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
 
 import { prisma } from "@/lib/db"
 import {
@@ -10,6 +7,7 @@ import {
   sendBehalfSignatureEmail,
   sendSignatureInviteEmail,
 } from "@/lib/email"
+import { getOrCreateChecklist } from "@/lib/exit-checklist"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
 import { canAdminExitChecklist } from "@/lib/rbac"
 
@@ -142,27 +140,15 @@ export async function POST(
   let checklist = offboarding.exitChecklist
 
   if (!checklist) {
-    checklist = await prisma.exitChecklist.create({
-      data: {
-        offboardingId: offboarding.id,
-        header: {
-          employeeName,
-          personalNumber: offboarding.personalNumber ?? null,
-          department: offboarding.department,
-          unitName: offboarding.unitName,
-          employmentEndDate: endDate?.toISOString() ?? new Date().toISOString(),
-        } as Prisma.InputJsonObject,
-        items: {
-          create: EXIT_CHECKLIST_ROWS.map((row, index) => ({
-            key: row.key,
-            department: row.organization,
-            label: row.obligation,
-            order: index,
-            resolution: ChecklistResolution.NOT_APPLICABLE,
-          })),
-        },
-      },
-    })
+    const ensured = await getOrCreateChecklist(offboarding.id)
+    checklist = ensured?.checklist ?? null
+  }
+
+  if (!checklist) {
+    return NextResponse.json(
+      { error: "Výstupní list se nepodařilo vytvořit." },
+      { status: 500 }
+    )
   }
 
   if (!checklist.publicToken) {
@@ -173,8 +159,6 @@ export async function POST(
   }
 
   const signUrl = `${getAppBaseUrl(req)}/odchody-public/${checklist.publicToken}`
-  const sentByName =
-    session.user.name ?? session.user.email ?? "Personální oddělení"
 
   try {
     if (isBehalf) {
@@ -196,7 +180,6 @@ export async function POST(
         employeePosition: offboarding.positionName ?? "",
         employeeDepartment: offboarding.department ?? "",
         employmentEndDate,
-        sentByName,
         signUrl,
       })
     }

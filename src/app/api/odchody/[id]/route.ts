@@ -69,6 +69,15 @@ const updateSchema = z.object({
   department: z.string().optional(),
   unitName: z.string().optional(),
 
+  supervisorName: z.union([z.string(), z.null()]).optional(),
+  supervisorEmail: z
+    .preprocess(emptyStringToNull, z.string().email().nullable())
+    .optional(),
+  supervisorPosition: z.union([z.string(), z.null()]).optional(),
+  supervisorDepartment: z.union([z.string(), z.null()]).optional(),
+  supervisorUnitName: z.union([z.string(), z.null()]).optional(),
+  supervisorManualOverride: z.boolean().optional(),
+
   plannedEnd: nullableDate,
   actualEnd: nullableDate,
   noticeEnd: nullableDate,

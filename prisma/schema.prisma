@@ -441,6 +441,19 @@ model EmployeeOffboarding {
   noticeEnd      DateTime?
   hasCustomDates Boolean           @default(false)
 
+  supervisorSource         PersonSource?
+  supervisorManualOverride Boolean       @default(false)
+  supervisorGid            String?
+  supervisorTitleBefore    String?
+  supervisorName           String?
+  supervisorSurname        String?
+  supervisorTitleAfter     String?
+  supervisorEmail          String?
+  supervisorPosition       String?
+  supervisorDepartment     String?
+  supervisorUnitName       String?
+  supervisorPersonalNumber String?
+
   probationStopDecision   ProbationStopDecision?
   probationStopDecisionAt DateTime?
   probationStopDecisionBy String?
@@ -459,6 +472,8 @@ model EmployeeOffboarding {
   @@index([deletedAt, plannedEnd])
   @@index([personalNumber])
   @@index([noticeEnd])
+  @@index([supervisorEmail])
+  @@index([supervisorPersonalNumber])
 }
 
 model EmployeeChange {

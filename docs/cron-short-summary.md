@@ -11,7 +11,7 @@ Crony se nespouští automaticky jen tím, že je kód v GitHubu. Musí je volat
 Základní tok:
 
 1. Cron `probation-notifications` projde nástupy a konce zkušebních dob.
-2. Cron `offboarding-notifications` projde **skutečné** odchody a blížící se konec pracovního poměru u nedokončených výstupních listů.
+2. Cron `offboarding-notifications` projde **skutečné** odchody a blížící se konec pracovního poměru u nedokončených výstupních listů – jak souhrnně pro HR, tak cíleně pro konkrétní lidi, kteří ještě nepodepsali.
 3. Podle pravidel oba vytvoří e-mailové úlohy v `MailQueue`.
 4. Cron `mail-worker` zpracuje čekající položky z `MailQueue`.
 5. E-maily se odešlou přes Resend.
@@ -37,7 +37,12 @@ Důležité: tento endpoint běžně e-maily přímo neposílá, pouze vytvář�
 GET /api/cron/offboarding-notifications
 ```
 
-Slouží ke kontrole **skutečných** odchodů (ne plánovaných), kterým se blíží konec pracovního poměru a jejich výstupní list ještě není kompletně podepsaný. Připomínky se posílají 30, 14, 7 a 3 dny před koncem, vždy jen jednou za dané okno. Zatím jde jen o informaci pro HR (`HR_EMAILS`), ne o e-mail zaměstnanci nebo nadřízenému.
+Slouží ke kontrole **skutečných** odchodů (ne plánovaných), kterým se blíží konec pracovního poměru a jejich výstupní list ještě není kompletně podepsaný. Řeší dva typy připomínek, obě v okamžicích 30, 14, 7, 3, 2 a 1 den před koncem, vždy jen jednou za dané okno:
+
+1. **Souhrnná připomínka pro HR** (`HR_EMAILS`) – pokud výstupní list ještě není hotový. Text se liší podle toho, jestli už byla vůbec odeslána pozvánka k podpisu:
+   - Pokud ne → HR se vyzve, ať pozvánku odešle.
+   - Pokud ano, ale někdo ještě nepodepsal → HR se jen informuje, že list stále není kompletní.
+2. **Cílená připomínka konkrétním lidem** (zaměstnanec / vedoucí) – posílá se přímo tomu, kdo ještě nepodepsal, na stejný odkaz, jaký dostal v pozvánce. Posílá se **jen** tomu, komu HR pozvánku k podpisu už dříve skutečně odeslala (ověřuje se v historii e-mailů) – cron nikoho nezve poprvé sám od sebe.
 
 Stejně jako u `probation-notifications`: endpoint přímo neposílá e-maily, pouze vytváří úlohy typu `NOTICE_WARNING` do `MailQueue`.
 
@@ -308,6 +313,12 @@ Při finálním uložení vyhodnocení aplikace:
 - zapíše informaci do historie vyhodnocení.
 
 Rozpracované uložení formuláře pouze uloží data. Nemá spouštět odeslání e-mailu ani zobrazovat hlášku, že e-mail byl odeslán.
+
+Stejný princip (mimo mail queue, přímo v okamžiku dokončení) platí i pro **výstupní list**: jakmile podepíší všechny strany (zaměstnanec, vedoucí, vydávající), aplikace ve stejném požadavku:
+
+- pošle HR e-mail s PDF podepsaného výstupního listu v příloze (příloha se negeneruje, jen když dokončení proběhlo z veřejného odkazu bez dostatečného oprávnění – pak e-mail obsahuje aspoň odkaz),
+- pošle samostatný informační e-mail odcházejícímu zaměstnanci, že má výstupní list podepsaný a má se dostavit na Personální oddělení pro zápočtový list,
+- zapíše obojí do historie výstupního listu.
 
 ## 10. Nejčastější problémy
 

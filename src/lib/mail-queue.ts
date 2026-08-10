@@ -8,6 +8,7 @@ import { prisma } from "@/lib/db"
 import {
   sendExitChecklistDueSoonReminderEmail,
   sendQueuedProbationEmail,
+  sendSignatureInviteEmail,
   type ProbationMailQueuePayload,
 } from "@/lib/email"
 import { addProbationEvent } from "@/lib/probation-evaluation-request"
@@ -22,6 +23,7 @@ const PROBATION_MAIL_JOB_TYPES: MailJobType[] = [
   "PROBATION_EVALUATION_HR_NOT_COMPLETED",
   "PROBATION_EVALUATION_UNLOCK_REMINDER",
   "NOTICE_WARNING",
+  "EXIT_SIGNATURE_INVITE",
 ]
 
 function asPayload(value: unknown): QueuePayload {
@@ -119,6 +121,17 @@ function toExitChecklistReminderPayload(payload: QueuePayload) {
     checklistLink: asStr(payload.checklistLink),
     subject: asStr(payload.subject),
     intro: asStr(payload.intro),
+  }
+}
+
+function toExitSignatureReminderPayload(payload: QueuePayload) {
+  return {
+    to: asStr(payload.to) ?? "",
+    employeeName: asStr(payload.employeeName) ?? "",
+    employeePosition: asStr(payload.employeePosition),
+    employeeDepartment: asStr(payload.employeeDepartment),
+    employmentEndDate: asStr(payload.employmentEndDate),
+    signUrl: asStr(payload.signUrl) ?? "",
   }
 }
 
@@ -321,6 +334,11 @@ async function processJob(job: MailQueue) {
     await sendExitChecklistDueSoonReminderEmail(
       toExitChecklistReminderPayload(payload)
     )
+    return
+  }
+
+  if (job.type === "EXIT_SIGNATURE_INVITE") {
+    await sendSignatureInviteEmail(toExitSignatureReminderPayload(payload))
     return
   }
 

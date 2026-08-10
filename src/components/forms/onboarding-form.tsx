@@ -585,7 +585,7 @@ const baseSchema = z.object({
   titleAfter: z.string().optional(),
   email: z.string().email("Neplatný e-mail").min(1, "E-mail je povinný"),
 
-  positionNum: z.string().trim().min(1, "Číslo pozice je povinné"),
+  positionNum: z.string().trim().min(1, "Číslo funkce je povinné"),
   positionName: z.string().trim().min(1, "Název pozice je povinný"),
   department: z.string().trim().min(1, "Odbor je povinný"),
   unitName: z.string().trim().min(1, "Oddělení je povinné"),

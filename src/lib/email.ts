@@ -511,7 +511,7 @@ function renderNastupyOdchodyTablePlanned(
 
           <th align="left"
               style="padding: 13px; width: 105px; font-weight: 600; text-transform: uppercase; font-size:11px; color: #ffffff;">
-            Číslo pozice
+            Číslo funkce
           </th>
 
           <th align="left"
@@ -997,7 +997,7 @@ function renderEmployeeChangeTable(
               ? `<th align="left" style="padding:13px;width:55px;font-size:11px;text-transform:uppercase;color:#ffffff;">Osobní číslo</th>`
               : ""
           }
-          <th align="left" style="padding:13px;width:60px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:nowrap;">Číslo pozice</th>
+          <th align="left" style="padding:13px;width:60px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:nowrap;">Číslo funkce</th>
           <th align="left" style="padding:13px;width:65px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:normal;">Typ změny</th>
           <th align="left" style="padding:13px;width:280px;font-size:11px;text-transform:uppercase;color:#ffffff;">Změna</th>
           <th align="left" style="padding:13px;width:65px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:nowrap;">Účinnost</th>
@@ -1510,7 +1510,6 @@ type SendSignatureInviteEmailParams = {
   employeePosition?: string | null
   employeeDepartment?: string | null
   employmentEndDate?: string | Date | null
-  sentByName: string
   signUrl: string
 }
 
@@ -1520,7 +1519,6 @@ export async function sendSignatureInviteEmail({
   employeePosition,
   employeeDepartment,
   employmentEndDate,
-  sentByName,
   signUrl,
 }: SendSignatureInviteEmailParams): Promise<void> {
   const primary = "#00847C"
@@ -1592,7 +1590,7 @@ export async function sendSignatureInviteEmail({
                   </p>
 
                   <p class="intro-text" style="margin:0 0 16px 0;color:#374151;">
-                    <strong>${escapeHtml(sentByName)}</strong> vám zaslal(a) pozvánku k elektronickému podpisu výstupního listu zaměstnance/zaměstnankyně:
+                    Personální oddělení vám zaslalo pozvánku k elektronickému podpisu výstupního listu zaměstnance/zaměstnankyně:
                   </p>
 
                   ${renderExitChecklistInfoTable({
@@ -1661,7 +1659,7 @@ export async function sendSignatureInviteEmail({
   const text = [
     greeting,
     "",
-    `${sentByName} vám zaslal(a) pozvánku k elektronickému podpisu výstupního listu.`,
+    "Personální oddělení vám zaslalo pozvánku k elektronickému podpisu výstupního listu.",
     "",
     `Zaměstnanec: ${employeeName}`,
     `Pozice: ${employeePosition || "—"}`,
@@ -3104,7 +3102,6 @@ type SendHandoverRecipientEmailParams = {
   employeeDepartment: string
   employmentEndDate: string
   option3Reason?: string | null
-  sentByName?: string | null
 }
 
 export async function sendHandoverRecipientEmail({
@@ -3114,7 +3111,6 @@ export async function sendHandoverRecipientEmail({
   employeeDepartment,
   employmentEndDate,
   option3Reason,
-  sentByName,
 }: SendHandoverRecipientEmailParams): Promise<void> {
   const primary = "#00847C"
   const bgLight = "#E5F5F2"
@@ -3124,10 +3120,6 @@ export async function sendHandoverRecipientEmail({
   const reasonText = option3Reason?.trim()
     ? option3Reason.trim()
     : "dle údajů uvedených ve výstupním listu"
-
-  const senderText = sentByName?.trim()
-    ? ` Informaci odeslal(a): ${sentByName.trim()}.`
-    : ""
 
   const html = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml" lang="cs">
@@ -3233,12 +3225,6 @@ export async function sendHandoverRecipientEmail({
                 se řídí interním postupem.
               </p>
 
-              ${
-                senderText
-                  ? `<p style="margin:0 0 12px 0;font-size:13px;color:#6b7280;line-height:1.5;">${senderText}</p>`
-                  : ""
-              }
-
               <p style="margin:0;font-size:13px;color:#6b7280;">
                 Zpráva byla odeslána prostřednictvím aplikace On-Off-Boarding ÚMČ Praha&nbsp;6.
               </p>
@@ -3271,7 +3257,6 @@ export async function sendHandoverRecipientEmail({
     "",
     "Prosíme, ověřte si v rámci svého odboru nebo s příslušným vedoucím, jaké konkrétní dokumenty nebo agenda se vás týkají.",
     "Tento e-mail slouží jako informativní oznámení k výstupnímu listu.",
-    sentByName?.trim() ? `Informaci odeslal(a): ${sentByName.trim()}.` : "",
     "",
     "Prosíme, neodpovídejte na tento e-mail.",
   ]
@@ -3289,6 +3274,9 @@ type SendExitChecklistCompletedEmailParams = {
   employmentEndDate?: string | Date | null
   completedByName?: string | null
   checklistUrl: string
+  pdfBuffer?: Buffer | null
+  pdfFilename?: string | null
+  employeeNotified?: boolean
 }
 
 export async function sendExitChecklistCompletedEmail({
@@ -3299,6 +3287,9 @@ export async function sendExitChecklistCompletedEmail({
   employmentEndDate,
   completedByName,
   checklistUrl,
+  pdfBuffer,
+  pdfFilename,
+  employeeNotified,
 }: SendExitChecklistCompletedEmailParams): Promise<void> {
   const primary = "#00847C"
   const bgLight = "#E5F5F2"
@@ -3352,7 +3343,16 @@ export async function sendExitChecklistCompletedEmail({
                   <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 18px 0;">
                     <tr>
                       <td bgcolor="${bgLight}" style="padding:12px 16px;border:1px solid #d9ece7;border-radius:8px;font-size:13px;color:#0B4A46;line-height:1.5;">
-                        Nezapomeňte prosím zaslat podepsanou PDF verzi výstupního listu danému zaměstnanci/zaměstnankyni.
+                        ${
+                          pdfBuffer
+                            ? "V příloze najdete podepsané PDF výstupního listu."
+                            : "Nezapomeňte prosím zaslat podepsanou PDF verzi výstupního listu danému zaměstnanci/zaměstnankyni."
+                        }
+                        ${
+                          employeeNotified
+                            ? " Zaměstnanci/zaměstnankyni byla automaticky zaslána informace o dokončení a výzva k vyzvednutí zápočtového listu."
+                            : ""
+                        }
                       </td>
                     </tr>
                   </table>
@@ -3416,7 +3416,12 @@ export async function sendExitChecklistCompletedEmail({
   const text = [
     `výstupní list je kompletně vyplněn – ${employeeName}`,
     "",
-    "Nezapomeňte prosím zaslat podepsanou PDF verzi výstupního listu danému zaměstnanci/zaměstnankyni.",
+    pdfBuffer
+      ? "V příloze najdete podepsané PDF výstupního listu."
+      : "Nezapomeňte prosím zaslat podepsanou PDF verzi výstupního listu danému zaměstnanci/zaměstnankyni.",
+    employeeNotified
+      ? "Zaměstnanci/zaměstnankyni byla automaticky zaslána informace o dokončení a výzva k vyzvednutí zápočtového listu."
+      : "",
     "",
     `Zaměstnanec: ${employeeName}`,
     `Pozice: ${employeePosition || "—"}`,
@@ -3429,7 +3434,103 @@ export async function sendExitChecklistCompletedEmail({
     .filter(Boolean)
     .join("\n")
 
-  await sendMail({ to, subject, html, text })
+  await sendMail({
+    to,
+    subject,
+    html,
+    text,
+    attachments:
+      pdfBuffer && pdfFilename
+        ? [
+            {
+              filename: pdfFilename,
+              content: pdfBuffer,
+              contentType: "application/pdf",
+            },
+          ]
+        : undefined,
+  })
+}
+
+type SendExitChecklistCompletedToEmployeeEmailParams = {
+  to: string
+  employeeName: string
+}
+
+export async function sendExitChecklistCompletedToEmployeeEmail({
+  to,
+  employeeName,
+}: SendExitChecklistCompletedToEmployeeEmailParams): Promise<void> {
+  const primary = "#00847C"
+  const bgLight = "#E5F5F2"
+  const subject = "Váš výstupní list je podepsán"
+
+  const html = `
+  <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+  <html xmlns="http://www.w3.org/1999/xhtml" lang="cs">
+    <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <meta name="color-scheme" content="light" />
+      <meta name="supported-color-schemes" content="light" />
+      <title>${escapeHtml(subject)}</title>
+      <style type="text/css">
+        body { margin: 0; padding: 0; }
+        table { border-collapse: collapse; }
+        ${EMAIL_GLOBAL_FONT_STYLE}
+      </style>
+    </head>
+
+    <body style="margin:0;padding:0;background-color:${bgLight};font-family:${EMAIL_FONT_FAMILY};">
+      <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
+        <tr>
+          <td align="center" style="padding:30px 10px;">
+            <table border="0" cellpadding="0" cellspacing="0" width="600"
+              bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
+              <tr bgcolor="${primary}">
+                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};border-radius:12px 12px 0 0;">
+                  <div style="color:#ffffff;font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:.9;">
+                    Výstupní list
+                  </div>
+                  <div style="color:#ffffff;font-size:22px;font-weight:bold;line-height:1.2;">
+                    Váš výstupní list je podepsán
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="#ffffff" style="padding:26px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};">
+                  <p style="margin:0 0 16px 0;font-size:14px;color:#082B2A;">
+                    Dobrý den${employeeName ? ` ${escapeHtml(employeeName)}` : ""},
+                  </p>
+
+                  <p style="margin:0 0 18px 0;font-size:14px;color:#374151;line-height:1.6;">
+                    Váš výstupní list byl kompletně vyplněn a podepsán všemi
+                    zúčastněnými stranami. Pro vyzvednutí zápočtového listu se
+                    prosím dostavte na Personální oddělení.
+                  </p>
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;">
+                  ${EMAIL_FOOTER_HTML}
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+  </html>`
+
+  const text = [
+    "Dobrý den,",
+    "",
+    "Váš výstupní list byl kompletně vyplněn a podepsán všemi zúčastněnými stranami. Pro vyzvednutí zápočtového listu se prosím dostavte na Personální oddělení.",
+  ].join("\n")
+
+  await sendMail({ to: [to], subject, html, text })
 }
 
 type SendExitChecklistPdfEmailParams = {
@@ -3439,7 +3540,6 @@ type SendExitChecklistPdfEmailParams = {
   employeeDepartment?: string | null
   employmentEndDate?: string | Date | null
   message?: string | null
-  sentByName?: string | null
   pdfBuffer: Buffer
   filename: string
 }
@@ -3451,7 +3551,6 @@ export async function sendExitChecklistPdfEmail({
   employeeDepartment,
   employmentEndDate,
   message,
-  sentByName,
   pdfBuffer,
   filename,
 }: SendExitChecklistPdfEmailParams): Promise<void> {
@@ -3519,11 +3618,6 @@ export async function sendExitChecklistPdfEmail({
                       : ""
                   }
 
-                  ${
-                    sentByName?.trim()
-                      ? `<p style="margin:0 0 12px 0;font-size:13px;color:#6b7280;line-height:1.5;">Odeslal(a): ${escapeHtml(sentByName.trim())}</p>`
-                      : ""
-                  }
                   </td>
               </tr>
 
@@ -3549,7 +3643,6 @@ export async function sendExitChecklistPdfEmail({
     `Odbor: ${employeeDepartment || "—"}`,
     `Datum odchodu: ${fmtDate(employmentEndDate)}`,
     message ? `Zpráva: ${message}` : "",
-    sentByName ? `Odeslal(a): ${sentByName}` : "",
   ]
     .filter(Boolean)
     .join("\n")

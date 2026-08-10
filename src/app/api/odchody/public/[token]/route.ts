@@ -14,6 +14,7 @@ import { prisma } from "@/lib/db"
 import {
   getHrRecipientsFromEnv,
   sendExitChecklistCompletedEmail,
+  sendExitChecklistCompletedToEmployeeEmail,
 } from "@/lib/email"
 import {
   assetLabel,
@@ -24,12 +25,14 @@ import {
   mapToExitChecklistData,
   preserveHandoverSendMetadata,
   resolutionLabel,
+  sanitizeExitChecklistFilename,
   sanitizeHandoverForJson,
   sanitizeIsoDate,
   sanitizeSignaturesForJson,
   sanitizeSignatureValueForJson,
   sanitizeText,
   trackSignatureChange,
+  tryFetchExitChecklistPdfBuffer,
 } from "@/lib/exit-checklist"
 import { getExitChecklistCompletionState } from "@/lib/exit-checklist-completion"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
@@ -744,6 +747,31 @@ export async function PUT(
 
       if (recipients.length > 0 && baseUrl) {
         try {
+          const pdfBuffer = await tryFetchExitChecklistPdfBuffer({
+            cookie: req.headers.get("cookie") ?? "",
+            baseUrl,
+            offboardingId: checklist.offboardingId,
+          })
+
+          const employeeEmail =
+            updatedChecklist.offboarding.userEmail?.trim() || null
+          let employeeNotified = false
+
+          if (employeeEmail) {
+            try {
+              await sendExitChecklistCompletedToEmployeeEmail({
+                to: employeeEmail,
+                employeeName: data.employeeName,
+              })
+              employeeNotified = true
+            } catch (employeeEmailError) {
+              console.warn(
+                "[EXIT-CHECKLIST PUBLIC PUT] Informační e-mail zaměstnanci se nepodařilo odeslat:",
+                employeeEmailError
+              )
+            }
+          }
+
           await sendExitChecklistCompletedEmail({
             to: recipients,
             employeeName: data.employeeName,
@@ -757,6 +785,11 @@ export async function PUT(
               data.employmentEndDate,
             completedByName: user.name ?? user.email ?? null,
             checklistUrl: `${baseUrl}/odchody/${checklist.offboardingId}/vystupni-list`,
+            pdfBuffer,
+            pdfFilename: pdfBuffer
+              ? `Vystupni-list-${sanitizeExitChecklistFilename(data.employeeName || String(checklist.offboardingId))}.pdf`
+              : null,
+            employeeNotified,
           })
 
           const completedAt = new Date().toISOString()

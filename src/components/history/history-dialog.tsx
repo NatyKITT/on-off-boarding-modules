@@ -47,7 +47,7 @@ const CZ_FIELD_LABEL: Record<string, string> = {
   name: "Jméno",
   surname: "Příjmení",
   titleAfter: "Titul za",
-  positionNum: "Číslo pozice",
+  positionNum: "Číslo funkce",
   positionName: "Pozice",
   positionType: "Typ pozice",
   department: "Odbor",

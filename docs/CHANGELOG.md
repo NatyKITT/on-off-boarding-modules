@@ -2,6 +2,45 @@
 
 Historie významných změn v aplikaci On-Off-Boarding Modul. Nejnovější verze nahoře.
 
+## 0.6.0 – 2026-08-10
+
+### Nové funkce
+- **Vedoucí oddělení u odchodu** – automaticky se dohledává podle čísla funkce (stejný mechanismus jako u nástupu), ve formuláři odchodu jde ručně přepsat nebo znovu dohledat tlačítkem "Obnovit dle pozice". Výstupní list (exit checklist) si při založení vedoucího automaticky přebírá z tohoto pole, místo aby zůstával prázdný.
+- **PDF v e-mailu HR o dokončení výstupního listu** – jakmile podepíšou zaměstnanec, vedoucí i vydávající, e-mail HR o dokončení teď obsahuje rovnou podepsané PDF v příloze (dřív jen odkaz).
+- **Informační e-mail odcházejícímu zaměstnanci** – po dokončení výstupního listu automaticky dostane e-mail, že je podepsaný a má se dostavit na Personální oddělení pro zápočtový list.
+- **Cílené připomínky k podpisu výstupního listu** – nový cron mechanismus (30/14/7/3/2/1 den před koncem) posílá připomínku přímo tomu, kdo ještě nepodepsal (zaměstnanci nebo vedoucímu) – ale jen tomu, komu HR pozvánku k podpisu už dříve skutečně odeslala.
+- **Rozšířená souhrnná upomínka pro HR** – existující upomínka (dřív 30/14/7/3 dny) nově běží i na 2 a 1 den před koncem a text se liší podle toho, jestli už vůbec byla odeslána pozvánka k podpisu ("nutno odeslat pozvánku" vs. "list stále čeká na podpis").
+- **Pozice ve výstupním listu** – v hlavičce výstupního listu (interní zobrazení) přibyl název pozice a číslo funkce zaměstnance.
+
+### Opravy
+- Odstraněno zbytečné potvrzovací okénko při výběru zaměstnance z EOS ve formuláři odchodu – klik na osobu ji rovnou vybere.
+- Opravena chyba "controlled/uncontrolled input" ve formuláři odchodu (chybějící výchozí hodnoty u nových polí vedoucího).
+- `getOrCreateChecklist` je teď odolný vůči souběhu dvou současných požadavků (dřív mohl spadnout na unique constraint, když se výstupní list zakládal poprvé).
+- Sjednocena velikost ikony fajfky u tlačítek "Podepsat"/"Podepsat v zastoupení" napříč výstupním listem (chyběla třída `shrink-0`, ikona se v užších tlačítkách mohla vizuálně zmenšit).
+
+---
+
+## Deployment checklist k verzi 0.6.0
+
+### DEV
+
+- [ ] Migrace `prisma migrate deploy` už byla na DEV aplikovaná – zkontrolovat, že je vše v pořádku (`prisma migrate status` by mělo hlásit "up to date", `/odchody` i výstupní listy fungují). Pokud by se přesto něco neshodovalo, lze `prisma migrate deploy` bez obav spustit znovu.
+
+### PRODUKCE
+
+- [ ] **Musí se nasadit** – spustit `prisma migrate status`, ověřit skutečný stav a pak `prisma migrate deploy`. Nové migrace od poslední produkční verze (celkem 4):
+  - `20260805110209_add_tajemnik_review`
+  - `20260805170857_add_tajemnik_override`
+  - `20260805215217_remove_tajemnik_override_columns`
+  - `20260810111116_add_offboarding_supervisor`
+- [ ] Po migraci spustit `prisma generate` a restartovat/redeploy aplikaci, ať běží s aktuálním Prisma Clientem.
+- [ ] Žádné nové proměnné prostředí ani npm závislosti nejsou potřeba.
+- [ ] Po nasazení ručně ověřit na jednom testovacím odchodu:
+  - auto-vyplnění vedoucího ve formuláři odchodu,
+  - založení výstupního listu (vedoucí se do něj přenese automaticky),
+  - dokončení výstupního listu (PDF v e-mailu HR, informační e-mail zaměstnanci),
+  - cron `offboarding-notifications` doběhne bez chyby (ideálně ručně přes `?force=true`).
+
 ## 0.5.0 – 2026-08-06
 
 ### Nové funkce

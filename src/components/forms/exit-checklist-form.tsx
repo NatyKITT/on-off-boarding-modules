@@ -925,6 +925,8 @@ export function ExitChecklistForm({
       personalNumber: initialData.personalNumber,
       department: initialData.department,
       unitName: initialData.unitName,
+      positionNum: initialData.positionNum ?? null,
+      positionName: initialData.positionName ?? null,
       employmentEndDate: initialData.employmentEndDate,
       employeeEmail: initialData.employeeEmail ?? null,
     }),
@@ -2093,6 +2095,19 @@ export function ExitChecklistForm({
             </div>
           </div>
 
+          <div className="grid gap-2 md:grid-cols-[1.5fr,1fr]">
+            <div>
+              <span className="font-medium text-muted-foreground">Pozice:</span>{" "}
+              {header.positionName || "–"}
+            </div>
+            <div>
+              <span className="font-medium text-muted-foreground">
+                Číslo funkce:
+              </span>{" "}
+              {header.positionNum || "–"}
+            </div>
+          </div>
+
           {isInternalMode && !isLocked && (
             <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
               <Checkbox
@@ -2268,7 +2283,7 @@ export function ExitChecklistForm({
                         className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs"
                         onClick={() => signHeaderSignature("manager")}
                       >
-                        <Check className="size-3" /> Podepsat
+                        <Check className="size-3 shrink-0" /> Podepsat
                       </Button>
 
                       <Button
@@ -2278,7 +2293,8 @@ export function ExitChecklistForm({
                         className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs text-muted-foreground"
                         onClick={() => signHeaderSignatureBehalf("manager")}
                       >
-                        <Check className="size-3" /> Podepsat v zastoupení
+                        <Check className="size-3 shrink-0" /> Podepsat v
+                        zastoupení
                       </Button>
                     </>
                   )}
@@ -2396,7 +2412,7 @@ export function ExitChecklistForm({
                             className="h-7 gap-1 whitespace-nowrap px-2 text-xs"
                             onClick={() => signRow(item.key)}
                           >
-                            <Check className="size-3" /> Podepsat
+                            <Check className="size-3 shrink-0" /> Podepsat
                           </Button>
 
                           <Button
@@ -2406,7 +2422,7 @@ export function ExitChecklistForm({
                             className="h-7 gap-1 whitespace-nowrap px-2 text-xs text-muted-foreground"
                             onClick={() => signRowOnBehalf(item.key)}
                           >
-                            <Check className="size-3" /> Podepsat
+                            <Check className="size-3 shrink-0" /> Podepsat
                             v&nbsp;zastoupení
                           </Button>
                         </>
@@ -3351,7 +3367,7 @@ export function ExitChecklistForm({
                             className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs"
                             onClick={() => signHandoverManagerSignature(false)}
                           >
-                            <Check className="size-3" /> Podepsat
+                            <Check className="size-3 shrink-0" /> Podepsat
                           </Button>
 
                           <Button
@@ -3361,7 +3377,8 @@ export function ExitChecklistForm({
                             className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs text-muted-foreground"
                             onClick={() => signHandoverManagerSignature(true)}
                           >
-                            <Check className="size-3" /> Podepsat v zastoupení
+                            <Check className="size-3 shrink-0" /> Podepsat v
+                            zastoupení
                           </Button>
                         </>
                       )}

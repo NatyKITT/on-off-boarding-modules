@@ -215,25 +215,44 @@ nástupem a odchodem nepřepisují.
 ### 5.3 Odchody
 
 Obdoba nástupů pro ukončení pracovního poměru, opět odděleně
-plánované a skutečné. Z detailu odchodu se dále řídí:
+plánované a skutečné. Vedoucí oddělení se u odchodu dohledává
+automaticky podle čísla funkce (stejný mechanismus jako u nástupu) a
+lze ho ručně přepsat nebo znovu dohledat tlačítkem "Obnovit dle
+pozice" – poslední zadaná hodnota se vždy uloží a použije i ve
+výstupním listu. Z detailu odchodu se dále řídí:
 
-- **Výstupní list** – souhrnný dokument k odchodu.
+- **Výstupní list** – souhrnný dokument k odchodu, včetně pozice,
+  čísla funkce a odboru zaměstnance.
 - **Exit checklist** – strukturovaný výstupní proces se sekcemi:
   - vrácení majetku a vybavení,
   - předání agendy (komu a co),
   - střet zájmů,
-  - podpis nadřízeného.
+  - podpis zaměstnance, vedoucího a vydávajícího.
 
   Checklist se částečně vyplňuje interně (HR/IT), částečně jej
   vyplňuje a podepisuje sám odcházející zaměstnanec nebo jeho
-  nadřízený prostřednictvím veřejného odkazu (kapitola 6).
+  vedoucí prostřednictvím veřejného odkazu (kapitola 6). Jméno a
+  e-mail vedoucího se do checklistu při jeho založení automaticky
+  přebírá z odchodu.
+
+  Jakmile podepíšou všichni tři (zaměstnanec, vedoucí, vydávající),
+  aplikace automaticky pošle HR e-mail s PDF podepsaného výstupního
+  listu v příloze a samostatný informační e-mail odcházejícímu
+  zaměstnanci, že má výstupní list podepsaný a má se dostavit na
+  Personální oddělení pro zápočtový list.
 
 **Upomínky na blížící se konec pracovního poměru** – pokud má
 zaměstnanec **skutečný** (ne jen plánovaný) konec pracovního poměru a
-výstupní list ještě není kompletně podepsaný, aplikace automaticky:
+výstupní list ještě není kompletně podepsaný, aplikace automaticky
+30, 14, 7, 3, 2 a 1 den před koncem:
 
-- 30, 14, 7 a 3 dny před koncem odešle e-mailem upomínku (zatím jen
-  na HR, ne zaměstnanci ani nadřízenému),
+- pošle **HR** souhrnnou upomínku – text se liší podle toho, jestli
+  už byla vůbec odeslána pozvánka k podpisu (pokud ne, HR se vyzve,
+  ať ji odešle; pokud ano, jen se připomene, že list stále čeká na
+  podpis),
+- pošle **cílenou připomínku přímo tomu, kdo ještě nepodepsal**
+  (zaměstnanci nebo vedoucímu) – ale jen tomu, komu HR pozvánku
+  k podpisu už dříve skutečně odeslala; nikoho se tím nezve poprvé,
 - na stránce výstupního listu zobrazí barevný banner (žlutý do 7 dnů,
   červený v posledním týdnu nebo po termínu),
 - každou odeslanou upomínku zapíše do historie výstupního listu.

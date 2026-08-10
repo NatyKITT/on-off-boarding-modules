@@ -22,6 +22,11 @@ type OffRow = {
   unitName: string
   positionNum: string | null
   positionName: string
+  supervisorName?: string | null
+  supervisorEmail?: string | null
+  supervisorPosition?: string | null
+  supervisorDepartment?: string | null
+  supervisorUnitName?: string | null
   plannedEnd: string
   actualEnd?: string | null
   noticeEnd?: string | null
@@ -199,6 +204,11 @@ export default function OffboardingEditPage({ params }: PageProps) {
                 positionName: row.positionName || undefined,
                 department: row.department || undefined,
                 unitName: row.unitName || undefined,
+                supervisorName: row.supervisorName ?? "",
+                supervisorEmail: row.supervisorEmail ?? "",
+                supervisorPosition: row.supervisorPosition ?? "",
+                supervisorDepartment: row.supervisorDepartment ?? "",
+                supervisorUnitName: row.supervisorUnitName ?? "",
                 plannedEnd: row.plannedEnd
                   ? row.plannedEnd.slice(0, 10)
                   : undefined,

@@ -50,6 +50,7 @@ export function buildHeaderFromOff(off: EmployeeOffboarding) {
     personalNumber: off.personalNumber ?? null,
     department: off.department,
     unitName: off.unitName,
+    positionName: off.positionName ?? null,
     employmentEndDate: endDate
       ? new Date(endDate).toISOString()
       : new Date().toISOString(),
@@ -722,6 +723,7 @@ export function mapToExitChecklistData(
     publicToken: checklist.publicToken,
     conflictOfInterest: Boolean(headerData.conflictOfInterest),
     positionNum: off.positionNum ?? null,
+    positionName: header.positionName,
 
     employeeName: header.employeeName,
     personalNumber: header.personalNumber,
@@ -768,7 +770,10 @@ export async function getOrCreateChecklist(offboardingId: number) {
   if (!off.exitChecklist) {
     const header: Record<string, unknown> = buildHeaderFromOff(off)
 
-    if (off.positionNum) {
+    if (off.supervisorName || off.supervisorEmail) {
+      if (off.supervisorName) header.managerName = off.supervisorName
+      if (off.supervisorEmail) header.managerEmail = off.supervisorEmail
+    } else if (off.positionNum) {
       const resolved = await resolveSupervisorFromPositionNum(off.positionNum)
 
       if (resolved?.snapshot) {
@@ -785,28 +790,53 @@ export async function getOrCreateChecklist(offboardingId: number) {
       }
     }
 
-    const created = await prisma.exitChecklist.create({
-      data: {
-        offboardingId,
-        header: header as Prisma.InputJsonObject,
-        items: {
-          create: EXIT_CHECKLIST_ROWS.map((row, index) => ({
-            key: row.key,
-            department: row.organization,
-            label: row.obligation,
-            order: index,
-            resolution: ChecklistResolution.NOT_APPLICABLE,
-          })),
+    try {
+      const created = await prisma.exitChecklist.create({
+        data: {
+          offboardingId,
+          header: header as Prisma.InputJsonObject,
+          items: {
+            create: EXIT_CHECKLIST_ROWS.map((row, index) => ({
+              key: row.key,
+              department: row.organization,
+              label: row.obligation,
+              order: index,
+              resolution: ChecklistResolution.NOT_APPLICABLE,
+            })),
+          },
         },
-      },
-      include: {
-        items: true,
-        assets: true,
-        offboarding: true,
-      },
-    })
+        include: {
+          items: true,
+          assets: true,
+          offboarding: true,
+        },
+      })
 
-    return { off, checklist: created }
+      return { off, checklist: created }
+    } catch (error) {
+      // Souběžný požadavek mezitím checklist už založil (unique constraint
+      // na offboardingId) - dohledáme ten, co vytvořil jako první.
+      const isUniqueConstraintError =
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        (error as { code?: string }).code === "P2002"
+
+      if (!isUniqueConstraintError) throw error
+
+      const existing = await prisma.exitChecklist.findUnique({
+        where: { offboardingId },
+        include: {
+          items: true,
+          assets: true,
+          offboarding: true,
+        },
+      })
+
+      if (!existing) throw error
+
+      return { off, checklist: existing }
+    }
   }
 
   return {
@@ -829,4 +859,48 @@ export async function getChecklistByPublicToken(token: string) {
 export function isPraha6OrKitt6(email?: string | null) {
   const domain = (email ?? "").split("@")[1]?.toLowerCase() ?? ""
   return domain === "praha6.cz" || domain === "kitt6.cz"
+}
+
+export function sanitizeExitChecklistFilename(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^\w.-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+}
+
+// Zkusí vygenerovat PDF výstupního listu přeposláním cookie aktuálního
+// požadavku na interní PDF endpoint - ten vyžaduje interní roli
+// (ADMIN/HR/IT/READONLY). Pokud dokončení přišlo od zaměstnance přes veřejný
+// odkaz (role USER), PDF endpoint vrátí 403 a přiložení se přeskočí - odkaz
+// na výstupní list v e-mailu zůstává vždy funkční fallback.
+export async function tryFetchExitChecklistPdfBuffer(args: {
+  cookie: string
+  baseUrl: string
+  offboardingId: number
+}): Promise<Buffer | null> {
+  try {
+    const res = await fetch(
+      `${args.baseUrl}/api/odchody/${args.offboardingId}/vystupni-list`,
+      {
+        cache: "no-store",
+        headers: {
+          cookie: args.cookie,
+          "x-internal-fetch": "1",
+        },
+      }
+    )
+
+    if (!res.ok) return null
+
+    const arrayBuffer = await res.arrayBuffer()
+    return Buffer.from(arrayBuffer)
+  } catch (error) {
+    console.warn(
+      "[exit-checklist] PDF výstupního listu se nepodařilo vygenerovat pro přílohu:",
+      error
+    )
+    return null
+  }
 }

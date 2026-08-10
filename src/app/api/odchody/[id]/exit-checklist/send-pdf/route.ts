@@ -145,7 +145,6 @@ export async function POST(
       .join(" – "),
     employmentEndDate,
     message,
-    sentByName: session.user.name ?? session.user.email ?? null,
     pdfBuffer,
     filename: `Vystupni-list-${sanitizeFilename(employeeName || String(offboardingId))}.pdf`,
   })

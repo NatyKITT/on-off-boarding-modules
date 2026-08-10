@@ -11,11 +11,16 @@ import {
   pickMostRelevantOnboarding,
 } from "@/lib/employment-linking"
 import {
+  normalizePersonSnapshot,
+  toSupervisorFields,
+} from "@/lib/person-snapshot"
+import {
   getUserKey,
   getUserLabel,
   syncLinkedProbationAfterOffboardingDecision,
 } from "@/lib/probation-evaluation-request"
 import { canReadOffboarding, canWriteOffboarding } from "@/lib/rbac"
+import { resolveSupervisorFromPositionNum } from "@/lib/systemizace-superior"
 
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
@@ -45,6 +50,15 @@ const base = z.object({
   positionName: z.string().optional(),
   department: z.string().optional(),
   unitName: z.string().optional(),
+
+  supervisorName: z.union([z.string(), z.null()]).optional(),
+  supervisorEmail: z
+    .preprocess(emptyToUndefined, z.string().email())
+    .optional()
+    .nullable(),
+  supervisorPosition: z.union([z.string(), z.null()]).optional(),
+  supervisorDepartment: z.union([z.string(), z.null()]).optional(),
+  supervisorUnitName: z.union([z.string(), z.null()]).optional(),
 
   notes: z.union([z.string(), z.null()]).optional(),
   noticeEnd: z.preprocess(emptyToUndefined, z.coerce.date()).optional(),
@@ -76,6 +90,56 @@ const createActualSchema = base.extend({
     })
   ),
 })
+
+function createEmptySupervisorOverrideFields() {
+  return {
+    supervisorManualOverride: true,
+    supervisorSource: null,
+    supervisorGid: null,
+    supervisorTitleBefore: null,
+    supervisorName: null,
+    supervisorSurname: null,
+    supervisorTitleAfter: null,
+    supervisorEmail: null,
+    supervisorPosition: null,
+    supervisorDepartment: null,
+    supervisorUnitName: null,
+    supervisorPersonalNumber: null,
+  }
+}
+
+async function buildOffboardingSupervisorFields(
+  data: z.infer<typeof base>,
+  manualOverride: boolean
+) {
+  if (manualOverride) {
+    const hasSnapshot =
+      data.supervisorName ||
+      data.supervisorEmail ||
+      data.supervisorPosition ||
+      data.supervisorDepartment ||
+      data.supervisorUnitName
+
+    if (!hasSnapshot) return createEmptySupervisorOverrideFields()
+
+    const snapshot = normalizePersonSnapshot(
+      {
+        source: "MANUAL" as const,
+        name: data.supervisorName ?? null,
+        email: data.supervisorEmail ?? null,
+        position: data.supervisorPosition ?? null,
+        department: data.supervisorDepartment ?? null,
+        unitName: data.supervisorUnitName ?? null,
+      },
+      "MANUAL"
+    )
+
+    return toSupervisorFields(snapshot, true)
+  }
+
+  const resolved = await resolveSupervisorFromPositionNum(data.positionNum)
+  return resolved?.fields ?? {}
+}
 
 type OffboardingRecord = Awaited<
   ReturnType<typeof prisma.employeeOffboarding.findMany>
@@ -399,12 +463,17 @@ export async function POST(request: NextRequest) {
 
   try {
     const raw = await request.json()
+    const hasManualSupervisorOverride = raw.supervisorManualOverride === true
     const isActual =
       raw.actualEnd != null && String(raw.actualEnd).trim() !== ""
 
     if (isActual) {
       const data = createActualSchema.parse(raw)
       const planned = data.plannedEnd ?? data.actualEnd
+      const supervisorFields = await buildOffboardingSupervisorFields(
+        data,
+        hasManualSupervisorOverride
+      )
 
       const pendingProbation = await findActiveProbationOnboarding(
         data.personalNumber,
@@ -446,6 +515,7 @@ export async function POST(request: NextRequest) {
             positionName: data.positionName ?? "",
             department: data.department ?? "",
             unitName: data.unitName ?? "",
+            ...supervisorFields,
 
             userEmail: data.userEmail ?? null,
             userName: data.userName ?? null,
@@ -519,6 +589,10 @@ export async function POST(request: NextRequest) {
     }
 
     const data = createPlannedSchema.parse(raw)
+    const supervisorFields = await buildOffboardingSupervisorFields(
+      data,
+      hasManualSupervisorOverride
+    )
 
     const pendingProbation = await findActiveProbationOnboarding(
       data.personalNumber,
@@ -560,6 +634,7 @@ export async function POST(request: NextRequest) {
           positionName: data.positionName ?? "",
           department: data.department ?? "",
           unitName: data.unitName ?? "",
+          ...supervisorFields,
 
           userEmail: data.userEmail ?? null,
           userName: data.userName ?? null,

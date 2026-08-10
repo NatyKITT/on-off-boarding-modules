@@ -550,7 +550,6 @@ export async function POST(
             sanitizeText(handover?.option3Reason) ||
             sanitizeText(existingHandover.option3Reason) ||
             null,
-          sentByName,
         })
       )
     )

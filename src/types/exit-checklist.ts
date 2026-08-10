@@ -112,6 +112,7 @@ export interface ExitChecklistData {
   department: string
   unitName: string
   positionNum?: string | null
+  positionName?: string | null
   employmentEndDate: string
   lockedAt: string | null
   employeeEmail?: string | null

@@ -1,10 +1,10 @@
 "use client"
 
 import * as React from "react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { addMonths, format, subMonths } from "date-fns"
-import { AlertCircle, Calendar, Trash2, User } from "lucide-react"
+import { AlertCircle, Calendar, RefreshCcw, Trash2, User } from "lucide-react"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 
@@ -65,6 +65,11 @@ export type FormValues = {
   noticeEnd?: string
   noticeMonths?: number
   hasCustomDates?: boolean
+  supervisorName?: string
+  supervisorEmail?: string
+  supervisorPosition?: string
+  supervisorDepartment?: string
+  supervisorUnitName?: string
 }
 
 type Props = {
@@ -115,10 +120,19 @@ const baseSchema = z.object({
   titleAfter: z.string().optional(),
   personalNumber: z.string().trim().min(1, "Osobní číslo je povinné"),
   userEmail: z.string().email("Neplatný e-mail").or(z.literal("")).optional(),
-  positionNum: z.string().trim().min(1, "Číslo pozice je povinné"),
+  positionNum: z.string().trim().min(1, "Číslo funkce je povinné"),
   positionName: z.string().trim().min(1, "Název pozice je povinný"),
   department: z.string().trim().min(1, "Odbor je povinný"),
   unitName: z.string().trim().min(1, "Oddělení je povinné"),
+  supervisorName: z.string().optional(),
+  supervisorEmail: z
+    .string()
+    .email("Neplatný e-mail")
+    .or(z.literal(""))
+    .optional(),
+  supervisorPosition: z.string().optional(),
+  supervisorDepartment: z.string().optional(),
+  supervisorUnitName: z.string().optional(),
   noticeFiled: z.string().trim().min(1, "Datum podání výpovědi je povinné"),
   plannedEnd: z
     .string()
@@ -137,6 +151,38 @@ const baseSchema = z.object({
   notes: z.string().optional(),
   status: z.enum(["NEW", "IN_PROGRESS", "COMPLETED"]).optional(),
 })
+
+type SupervisorApiResponse = {
+  supervisor?: {
+    titleBefore?: string | null
+    name?: string | null
+    surname?: string | null
+    titleAfter?: string | null
+    fullName?: string | null
+    email?: string | null
+    position?: string | null
+    department?: string | null
+    unitName?: string | null
+  }
+}
+
+function buildSupervisorFullName(
+  supervisor?: SupervisorApiResponse["supervisor"]
+): string {
+  if (!supervisor) return ""
+  if (supervisor.fullName) return supervisor.fullName
+
+  return [
+    supervisor.titleBefore,
+    supervisor.name,
+    supervisor.surname,
+    supervisor.titleAfter,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
 
 export function OffboardingFormUnified({
   id,
@@ -168,6 +214,12 @@ export function OffboardingFormUnified({
     Boolean(isEdit || initial?.personalNumber?.trim())
   )
   const [manualData, setManualData] = useState<boolean>(false)
+  const [supervisorManuallyChanged, setSupervisorManuallyChanged] =
+    useState(false)
+  const [isSupervisorLoading, setIsSupervisorLoading] = useState(false)
+  const [supervisorLoadError, setSupervisorLoadError] = useState<string | null>(
+    null
+  )
   const [manualDates, setManualDates] = useState<boolean>(
     () => inferredManualFlag
   )
@@ -203,6 +255,11 @@ export function OffboardingFormUnified({
       positionName: "",
       department: "",
       unitName: "",
+      supervisorName: "",
+      supervisorEmail: "",
+      supervisorPosition: "",
+      supervisorDepartment: "",
+      supervisorUnitName: "",
       noticeFiled: "",
       plannedEnd: "",
       actualEnd: "",
@@ -308,6 +365,110 @@ export function OffboardingFormUnified({
     if (ok) form.clearErrors("personalNumber")
   }, [watchPersonal, form, isEdit])
 
+  const loadSupervisorForPosition = useCallback(
+    async (positionNum: string, options?: { force?: boolean }) => {
+      const trimmed = positionNum.trim()
+
+      if (!trimmed) {
+        setSupervisorLoadError(null)
+        return
+      }
+
+      if (supervisorManuallyChanged && !options?.force) {
+        return
+      }
+
+      setIsSupervisorLoading(true)
+      setSupervisorLoadError(null)
+
+      try {
+        const res = await fetch(
+          `/api/systemizace/superior?positionNum=${encodeURIComponent(trimmed)}`,
+          { cache: "no-store" }
+        )
+
+        if (!res.ok) {
+          form.setValue("supervisorName", "", { shouldValidate: true })
+          form.setValue("supervisorEmail", "", { shouldValidate: true })
+          form.setValue("supervisorPosition", "", { shouldValidate: false })
+          form.setValue("supervisorDepartment", "", { shouldValidate: false })
+          form.setValue("supervisorUnitName", "", { shouldValidate: false })
+          setSupervisorLoadError("Vedoucí nebyl pro tuto pozici nalezen.")
+          return
+        }
+
+        const json = (await res
+          .json()
+          .catch(() => null)) as SupervisorApiResponse | null
+        const supervisor = json?.supervisor
+        const fullName = buildSupervisorFullName(supervisor)
+
+        form.setValue("supervisorName", fullName, {
+          shouldDirty: false,
+          shouldValidate: true,
+        })
+        form.setValue("supervisorEmail", supervisor?.email ?? "", {
+          shouldDirty: false,
+          shouldValidate: true,
+        })
+        form.setValue("supervisorPosition", supervisor?.position ?? "", {
+          shouldDirty: false,
+          shouldValidate: false,
+        })
+        form.setValue("supervisorDepartment", supervisor?.department ?? "", {
+          shouldDirty: false,
+          shouldValidate: false,
+        })
+        form.setValue("supervisorUnitName", supervisor?.unitName ?? "", {
+          shouldDirty: false,
+          shouldValidate: false,
+        })
+        setSupervisorLoadError(null)
+      } catch {
+        setSupervisorLoadError("Nepodařilo se načíst vedoucího.")
+      } finally {
+        setIsSupervisorLoading(false)
+      }
+    },
+    [form, supervisorManuallyChanged]
+  )
+
+  const watchOffboardingPositionNum = form.watch("positionNum")
+  const previousAutoSupervisorPositionRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!watchOffboardingPositionNum) return
+
+    if (
+      previousAutoSupervisorPositionRef.current === watchOffboardingPositionNum
+    )
+      return
+    previousAutoSupervisorPositionRef.current = watchOffboardingPositionNum
+
+    if (
+      Boolean(id) &&
+      !supervisorManuallyChanged &&
+      form.getValues("supervisorName")
+    ) {
+      return
+    }
+
+    void loadSupervisorForPosition(watchOffboardingPositionNum)
+  }, [
+    form,
+    id,
+    loadSupervisorForPosition,
+    supervisorManuallyChanged,
+    watchOffboardingPositionNum,
+  ])
+
+  const restoreSupervisorFromPosition = () => {
+    const currentPositionNum = form.getValues("positionNum")
+    if (!currentPositionNum) return
+    setSupervisorManuallyChanged(false)
+    void loadSupervisorForPosition(currentPositionNum, { force: true })
+  }
+
   const endField: "plannedEnd" | "actualEnd" = isActualMode
     ? "actualEnd"
     : "plannedEnd"
@@ -403,6 +564,15 @@ export function OffboardingFormUnified({
       }
     }
 
+    const shouldSaveSupervisorSnapshot = Boolean(
+      supervisorManuallyChanged ||
+        values.supervisorName?.trim() ||
+        values.supervisorEmail?.trim() ||
+        values.supervisorPosition?.trim() ||
+        values.supervisorDepartment?.trim() ||
+        values.supervisorUnitName?.trim()
+    )
+
     const body = {
       ...values,
       personalNumber: ensure(
@@ -425,6 +595,23 @@ export function OffboardingFormUnified({
       noticeEnd: values.noticeFiled || undefined,
       noticeMonths,
       hasCustomDates: manualDates,
+
+      supervisorManualOverride: shouldSaveSupervisorSnapshot,
+      supervisorName: shouldSaveSupervisorSnapshot
+        ? nullIfEmpty(values.supervisorName)
+        : undefined,
+      supervisorEmail: shouldSaveSupervisorSnapshot
+        ? nullIfEmpty(values.supervisorEmail)
+        : undefined,
+      supervisorPosition: shouldSaveSupervisorSnapshot
+        ? nullIfEmpty(values.supervisorPosition)
+        : undefined,
+      supervisorDepartment: shouldSaveSupervisorSnapshot
+        ? nullIfEmpty(values.supervisorDepartment)
+        : undefined,
+      supervisorUnitName: shouldSaveSupervisorSnapshot
+        ? nullIfEmpty(values.supervisorUnitName)
+        : undefined,
 
       ...(probationStopDecision ? { probationStopDecision } : {}),
     }
@@ -612,7 +799,6 @@ export function OffboardingFormUnified({
                     placeholder="Vyberte zaměstnance…"
                     fetchLimit={500}
                     excludePersonalNumbers={excludePersonalNumbers}
-                    confirmBeforeApply
                     onSelect={async () => {
                       if (!form.getValues("personalNumber")?.trim()) {
                         form.setValue(
@@ -722,7 +908,7 @@ export function OffboardingFormUnified({
                   ["name", "Jméno *"],
                   ["surname", "Příjmení *"],
                   ["titleAfter", "Titul za"],
-                  ["positionNum", "Číslo pozice *"],
+                  ["positionNum", "Číslo funkce *"],
                   ["positionName", "Pozice *"],
                   ["department", "Odbor *"],
                   ["unitName", "Oddělení *"],
@@ -770,6 +956,119 @@ export function OffboardingFormUnified({
                   />
                 )
               })}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-l-4 border-l-[#00847C]">
+          <CardHeader>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <User className="size-5" /> Vedoucí oddělení
+                </CardTitle>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Načítá se automaticky podle čísla funkce, ale lze ho změnit.
+                </p>
+              </div>
+
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={restoreSupervisorFromPosition}
+                disabled={!form.getValues("positionNum") || isSupervisorLoading}
+              >
+                <RefreshCcw className="mr-2 size-4" />
+                Obnovit dle pozice
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {isSupervisorLoading && (
+              <Alert>
+                <AlertDescription>
+                  Načítám vedoucího podle pozice…
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {!isSupervisorLoading && supervisorLoadError && (
+              <Alert>
+                <AlertDescription>{supervisorLoadError}</AlertDescription>
+              </Alert>
+            )}
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <FormField
+                name="supervisorName"
+                control={form.control}
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Jméno vedoucího</FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        placeholder="Např. Bc. Jana Nováková"
+                        className={focusRing}
+                        onChange={(e) => {
+                          setSupervisorManuallyChanged(true)
+                          form.setValue("supervisorPosition", "", {
+                            shouldDirty: true,
+                            shouldValidate: false,
+                          })
+                          form.setValue("supervisorDepartment", "", {
+                            shouldDirty: true,
+                            shouldValidate: false,
+                          })
+                          form.setValue("supervisorUnitName", "", {
+                            shouldDirty: true,
+                            shouldValidate: false,
+                          })
+                          field.onChange(e)
+                        }}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                name="supervisorEmail"
+                control={form.control}
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>E-mail vedoucího</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="email"
+                        autoComplete="off"
+                        {...field}
+                        placeholder="vedouci@praha6.cz"
+                        className={focusRing}
+                        onChange={(e) => {
+                          setSupervisorManuallyChanged(true)
+                          form.setValue("supervisorPosition", "", {
+                            shouldDirty: true,
+                            shouldValidate: false,
+                          })
+                          form.setValue("supervisorDepartment", "", {
+                            shouldDirty: true,
+                            shouldValidate: false,
+                          })
+                          form.setValue("supervisorUnitName", "", {
+                            shouldDirty: true,
+                            shouldValidate: false,
+                          })
+                          field.onChange(e)
+                        }}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
             </div>
           </CardContent>
         </Card>

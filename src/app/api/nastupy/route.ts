@@ -56,7 +56,7 @@ const base = z.object({
     .nullable(),
   phone: z.union([z.string(), z.null()]).optional(),
 
-  positionNum: z.string().min(1, "Číslo pozice je povinné"),
+  positionNum: z.string().min(1, "Číslo funkce je povinné"),
   positionName: z.string().optional(),
   department: z.string().optional(),
   unitName: z.string().optional(),
@@ -177,7 +177,9 @@ function groupByPersonalNumber<T extends LinkablePersonalNumber>(rows: T[]) {
 }
 
 function isResolvableUserId(value: string | null | undefined): value is string {
-  return typeof value === "string" && value.startsWith("cm") && value.length > 20
+  return (
+    typeof value === "string" && value.startsWith("cm") && value.length > 20
+  )
 }
 
 /**
@@ -187,9 +189,7 @@ function isResolvableUserId(value: string | null | undefined): value is string {
 async function resolveCancelledByNames(
   cancelledByValues: Array<string | null | undefined>
 ): Promise<Map<string, string>> {
-  const ids = Array.from(
-    new Set(cancelledByValues.filter(isResolvableUserId))
-  )
+  const ids = Array.from(new Set(cancelledByValues.filter(isResolvableUserId)))
 
   if (ids.length === 0) return new Map()
 
