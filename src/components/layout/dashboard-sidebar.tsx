@@ -51,8 +51,8 @@ export function DashboardSidebar({
 
   return (
     <TooltipProvider delayDuration={0}>
-      <div className="sticky top-0 h-full">
-        <ScrollArea className="h-full overflow-y-auto border-r">
+      <div className="sticky top-0 h-screen">
+        <ScrollArea className="h-screen overflow-y-auto border-r">
           <aside
             className={cn(
               isSidebarExpanded ? "w-[220px] xl:w-[260px]" : "w-[68px]",

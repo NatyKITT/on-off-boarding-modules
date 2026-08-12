@@ -2,6 +2,62 @@
 
 Historie významných změn v aplikaci On-Off-Boarding Modul. Nejnovější verze nahoře.
 
+## 0.9.0 – 2026-08-12
+
+### Nové funkce
+
+- **Historie i pro vyhodnocení zkušební doby** – v přehledu Dokumentů má teď tlačítko "Historie" i vyhodnocení zkušební doby, stejně jako to dřív měly jen nástupní dokumenty a výstupní list.
+- **Hromadné stažení/odeslání dokumentů jedné osoby** – v přehledu Dokumentů po rozkliknutí konkrétního člověka jde tlačítkem stáhnout najednou všechny jeho dostupné dokumenty, nebo je všechny najednou poslat na jeden zadaný e-mail.
+- **"Rozbalit vše" / "Sbalit vše"** u Nástupů a Odchodů v přehledu Dokumentů – rychlé rozbalení nebo sbalení všech roků a měsíců v dané sekci najednou.
+- **Seznam nepodepsaných v souhrnné upomínce pro HR** – e-mail s upomínkou na blížící se konec pracovního poměru (30/14/7/3/2/1 den) teď u odchodů, kde už HR aspoň jednou odeslala "Odeslat všem k podpisu", obsahuje i konkrétní seznam jmen a e-mailů, kdo přesně ještě nepodepsal – nejen obecnou informaci, že list není hotový. Zapisuje se i do historie výstupního listu.
+
+### Opravy
+
+- Opraveno nefunkční scrollování myší v okně "Smazané záznamy".
+- Vyhledávání v přehledu Dokumentů teď nalezenou osobu i s jejími dokumenty rovnou zobrazí, i když je "schovaná" v jinak sbaleném roku/měsíci – dřív bylo potřeba k ní ručně proklikat.
+- Sekce v postranním menu nad Dokumenty přejmenována ze "Systém" na "Nástroje" (obsahuje Dokumenty, Statistiky, Nastavení).
+- Opravena produkční chyba buildu `ESLint: Error while loading rule 'tailwindcss/enforces-negative-arbitrary-values': Could not resolve tailwindcss` – `tailwindcss` a `eslint-plugin-tailwindcss` byly jen mezi vývojářskými závislostmi, přesunuty mezi běžné závislosti, aby byly k dispozici i při produkčním buildu.
+
+Tato verze nepřidává žádnou novou databázovou migraci ani proměnnou prostředí.
+
+---
+
+## Deployment checklist k verzi 0.9.0
+
+- [ ] **Žádná nová migrace.** Stačí nasadit kód a restartovat/redeploy aplikaci.
+- [ ] Před buildem spustit `pnpm install` (ne jen `--prod`), aby se přesun `tailwindcss`/`eslint-plugin-tailwindcss` v `package.json` promítl i do `pnpm-lock.yaml` na serveru.
+- [ ] Po nasazení zkusit produkční build (`pnpm run build`) a ověřit, že už nepadá na chybě `Could not resolve tailwindcss`.
+
+## 0.8.0 – 2026-08-12
+
+### Nové funkce
+
+- **Cron pro odchody nově sleduje plánované, ne skutečné odchody** – dokud je odchod jen plánovaný (`plannedEnd`, bez vyplněného `actualEnd`), automatizace kolem výstupního listu (souhrnná i cílená připomínka k podpisu) běží. Jakmile se odchod potvrdí jako skutečný, cron ho od té chvíle úplně přeskočí – opačná logika než u nástupů/zkušební doby.
+- **Zapamatovaná skupina příjemců k podpisu výstupního listu** – při každém kliknutí na "Odeslat všem k podpisu" se aktuální (po úpravách) skupina lidí uloží u daného odchodu (`ExitChecklist.header.signatureRecipients`) a nahradí předchozí. Cílené cronové připomínky (14/7/3/2/1 den před koncem) se od té chvíle vždy počítají podle této uložené skupiny a posílají jen těm, kdo ještě nepodepsali – skupina se tak může lišit odchod od odchodu a lze ji kdykoliv upravit (přidat/odebrat příjemce) novým odesláním.
+- **Tituly ve jménech a podpisech** – sdílené funkce pro sestavení celého jména (e-maily, PDF, reporty) nově vkládají čárku před titul za jménem ("Jan Novák, MBA" místo "Jan Novák MBA"). Klikací podpisy (výstupní list, vyhodnocení zkušební doby, vyjádření tajemníka) nově dotahují titul před/za jménem přihlášeného uživatele z jeho profilu, místo holého jména bez titulů.
+- **Vážený pane tajemníku** – e-mail se žádostí o vyjádření zaslaný tajemníkovi nově oslovuje jménem ("Vážený pane tajemníku, [jméno],") místo obecného "Dobrý den".
+- **Staticky viditelný sloupec "Zaměstnanec"** v tabulkách nástupů, odchodů i zaměstnaneckých změn – při horizontálním scrollování na akční tlačítka zůstává jméno zaměstnance vždy vidět.
+
+### Opravy
+
+- Formuláře nástupu a odchodu už neztrácí rozepsaná data při náhodném kliknutí mimo dialog – zavírání dialogu kliknutím na pozadí je vypnuté, zavřít lze jen tlačítkem.
+- Opraveno chybné automatické zobrazení vyhodnocení pro tajemníka i v případě, kdy shodou okolností sedí jen e-mail, ale ne jméno – nově se ověřuje shoda e-mailu **i** jména. Případ, kdy je vedoucí odboru zároveň tajemníkem, se nadále vyhodnocuje jen jednou (žádné zdvojené schvalování ani e-mail navíc).
+- "Tajemník" jako název funkce zůstává v e-mailech vždy v mužském tvaru ("tajemník se vyjádřil") bez ohledu na jméno konkrétní osoby – narozdíl od "vedoucí", kde se tvar řídí rodem konkrétní osoby.
+- Sjednoceno pojmenování "Vedoucí odboru" (dřív na jednom místě formuláře odchodu a v dokumentaci ještě "Vedoucí oddělení").
+- GitHub Actions "Mail Worker" už nepadá na e-mailu, který se jen dočasně nepodařilo odeslat a bude automaticky zopakován – workflow nově hlídá jen definitivně selhané joby (po vyčerpání všech pokusů), ne každý jednotlivý neúspěšný pokus.
+
+Tato verze nepřidává žádnou novou databázovou migraci – nové pole `signatureRecipients` využívá existující flexibilní `Json` sloupec `ExitChecklist.header` (stejný vzor jako `handoverRecipients`).
+
+---
+
+## Deployment checklist k verzi 0.8.0
+
+- [ ] **Žádná nová migrace.** Stačí nasadit kód a restartovat/redeploy aplikaci.
+- [ ] Žádné nové proměnné prostředí ani npm závislosti nejsou potřeba.
+- [ ] Po nasazení ověřit na jednom testovacím **plánovaném** odchodu (bez `actualEnd`): cron (`/api/cron/offboarding-notifications?force=true`) vytvoří upomínku; jakmile se doplní `actualEnd`, stejný cron už žádnou novou upomínku nevytvoří.
+- [ ] V dialogu "Odeslat všem k podpisu" ověřit, že po odebrání/přidání příjemce a opětovném odeslání se v `ExitChecklist.header.signatureRecipients` uloží přesně nový seznam.
+- [ ] Ověřit, že uživatel s vyplněnými tituly v profilu (`User.titleBefore`/`titleAfter`) má tituly (s čárkou před titulem za jménem) v podpisu i navazujícím e-mailu.
+
 ## 0.7.0 – 2026-08-10
 
 ### Nové funkce
@@ -40,7 +96,7 @@ Tato verze nepřidává žádnou novou databázovou migraci – jde jen o úprav
 
 ### Nové funkce
 
-- **Vedoucí oddělení u odchodu** – automaticky se dohledává podle čísla funkce (stejný mechanismus jako u nástupu), ve formuláři odchodu jde ručně přepsat nebo znovu dohledat tlačítkem "Obnovit dle pozice". Výstupní list (exit checklist) si při založení vedoucího automaticky přebírá z tohoto pole, místo aby zůstával prázdný.
+- **Vedoucí odboru u odchodu** – automaticky se dohledává podle čísla funkce (stejný mechanismus jako u nástupu), ve formuláři odchodu jde ručně přepsat nebo znovu dohledat tlačítkem "Obnovit dle pozice". Výstupní list (exit checklist) si při založení vedoucího automaticky přebírá z tohoto pole, místo aby zůstával prázdný.
 - **PDF v e-mailu HR o dokončení výstupního listu** – jakmile podepíšou zaměstnanec, vedoucí i vydávající, e-mail HR o dokončení teď obsahuje rovnou podepsané PDF v příloze (dřív jen odkaz).
 - **Informační e-mail odcházejícímu zaměstnanci** – po dokončení výstupního listu automaticky dostane e-mail, že je podepsaný a má se dostavit na Personální oddělení pro zápočtový list.
 - **Cílené připomínky k podpisu výstupního listu** – nový cron mechanismus (30/14/7/3/2/1 den před koncem) posílá připomínku přímo tomu, kdo ještě nepodepsal (zaměstnanci nebo vedoucímu) – ale jen tomu, komu HR pozvánku k podpisu už dříve skutečně odeslala.

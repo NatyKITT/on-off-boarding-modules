@@ -130,4 +130,14 @@ export interface ExitChecklistData {
   assets: ExitAssetItem[]
   handover?: HandoverAgendaData
   signatures?: ExitChecklistSignatures
+
+  signatureRecipients?: ExitChecklistSignatureRecipient[]
+  signatureRecipientsSentAt?: string | null
+  signatureRecipientsSentByName?: string | null
+  signatureRecipientsSentByEmail?: string | null
+}
+
+export interface ExitChecklistSignatureRecipient {
+  name: string
+  email: string
 }

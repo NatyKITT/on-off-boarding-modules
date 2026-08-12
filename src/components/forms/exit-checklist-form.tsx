@@ -31,6 +31,7 @@ import type {
 } from "@/types/exit-checklist"
 import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
 
+import { useSignatureName } from "@/hooks/use-signature-name"
 import { exitChecklistEventActionLabel } from "@/lib/exit-checklist-event-labels"
 
 import {
@@ -941,7 +942,7 @@ export function ExitChecklistForm({
     [header.employmentEndDate]
   )
 
-  const currentUserName = session?.user?.name ?? ""
+  const currentUserName = useSignatureName()
   const currentUserEmail = session?.user?.email ?? ""
   const currentUserEmailNormalized = normalizeEmail(currentUserEmail)
 

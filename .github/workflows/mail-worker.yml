@@ -66,18 +66,20 @@ jobs:
           PROCESSED="$(echo "$RESPONSE" | jq -r '.processed // 0')"
           SUCCEEDED="$(echo "$RESPONSE" | jq -r '.succeeded // 0')"
           FAILED="$(echo "$RESPONSE" | jq -r '.failed // 0')"
+          PERMANENTLY_FAILED="$(echo "$RESPONSE" | jq -r '.permanentlyFailed // 0')"
 
           echo "Processed: $PROCESSED"
           echo "Succeeded: $SUCCEEDED"
-          echo "Failed: $FAILED"
+          echo "Failed (will retry): $FAILED"
+          echo "Permanently failed (retries exhausted): $PERMANENTLY_FAILED"
 
-          if ! [[ "$FAILED" =~ ^[0-9]+$ ]]; then
-            echo "Error: Mail worker returned invalid failed count: $FAILED"
+          if ! [[ "$PERMANENTLY_FAILED" =~ ^[0-9]+$ ]]; then
+            echo "Error: Mail worker returned invalid permanentlyFailed count: $PERMANENTLY_FAILED"
             exit 1
           fi
 
-          if [ "$FAILED" -gt 0 ]; then
-            echo "Error: Mail worker finished with failed jobs: $FAILED"
+          if [ "$PERMANENTLY_FAILED" -gt 0 ]; then
+            echo "Error: Mail worker finished with permanently failed jobs: $PERMANENTLY_FAILED"
             exit 1
           fi
 

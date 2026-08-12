@@ -10,6 +10,7 @@ import type {
   ExitAssetItem,
   ExitChecklistData,
   ExitChecklistItem,
+  ExitChecklistSignatureRecipient,
   ExitChecklistSignatures,
   ExitChecklistSignatureValue,
   HandoverAgendaData,
@@ -671,6 +672,22 @@ export function sanitizeSignaturesForResponse(
   }
 }
 
+export function sanitizeSignatureRecipientsForResponse(
+  value: unknown
+): ExitChecklistSignatureRecipient[] {
+  if (!Array.isArray(value)) return []
+
+  return value
+    .filter((item): item is Record<string, unknown> => {
+      return Boolean(item) && typeof item === "object"
+    })
+    .map((item) => ({
+      name: sanitizeText(item.name),
+      email: normalizeEmail(item.email),
+    }))
+    .filter((item) => item.name && item.email)
+}
+
 export function mapToExitChecklistData(
   off: EmployeeOffboarding,
   checklist: {
@@ -716,6 +733,9 @@ export function mapToExitChecklistData(
   const handover = sanitizeHandoverForResponse(headerData.handover)
   const signatures = sanitizeSignaturesForResponse(headerData.signatures)
   const completionMetadata = getCompletionMetadataForResponse(headerData)
+  const signatureRecipients = sanitizeSignatureRecipientsForResponse(
+    headerData.signatureRecipients
+  )
 
   return {
     id: checklist.id,
@@ -748,6 +768,17 @@ export function mapToExitChecklistData(
     assets,
     handover,
     signatures,
+
+    signatureRecipients,
+    signatureRecipientsSentAt: sanitizeNullableText(
+      headerData.signatureRecipientsSentAt
+    ),
+    signatureRecipientsSentByName: sanitizeNullableText(
+      headerData.signatureRecipientsSentByName
+    ),
+    signatureRecipientsSentByEmail: sanitizeNullableText(
+      headerData.signatureRecipientsSentByEmail
+    ),
   }
 }
 

@@ -16,6 +16,11 @@ import {
 
 import { useCurrentRole } from "@/hooks/use-current-role"
 import { useToast } from "@/hooks/use-toast"
+import {
+  documentEventActionLabel,
+  ONBOARDING_TYPES,
+  typeLabel,
+} from "@/lib/employment-documents"
 import { canEditInternalApp } from "@/lib/rbac"
 
 import {
@@ -42,24 +47,6 @@ import { Input } from "@/components/ui/input"
 import { DocumentHistoryDialog } from "@/components/history/document-history-dialog"
 
 import { ProbationEvaluationSection } from "./probation-evaluation-section"
-
-const DOCUMENT_EVENT_ACTION_LABEL: Record<string, string> = {
-  CREATED: "Vytvořeno",
-  SENT: "Odkaz odeslán",
-  PDF_SENT: "PDF odesláno e-mailem",
-  FILLED: "Vyplněno zaměstnancem",
-  EDITED: "Upraveno interně",
-  LOCKED: "Uzamčeno",
-  UNLOCKED: "Odemčeno",
-  RESET: "Data vymazána",
-  REGENERATED: "Odkaz obnoven",
-  PDF_DOWNLOADED: "PDF staženo",
-  EMAIL_FAILED: "Odeslání e-mailu selhalo",
-}
-
-function documentEventActionLabel(action: string) {
-  return DOCUMENT_EVENT_ACTION_LABEL[action] ?? action
-}
 
 type EmploymentDocumentLite = {
   id: number
@@ -89,26 +76,7 @@ type EmployeeDocumentsDialogProps = {
 
 type ActiveTab = "onboarding" | "probation"
 
-const ONBOARDING_TYPES: EmploymentDocumentType[] = [
-  "AFFIDAVIT",
-  "PERSONAL_QUESTIONNAIRE",
-  "PAYROLL_INFO",
-]
-
 const ALL_TYPES: EmploymentDocumentType[] = [...ONBOARDING_TYPES]
-
-function typeLabel(type: EmploymentDocumentType) {
-  switch (type) {
-    case "AFFIDAVIT":
-      return "Čestné prohlášení"
-    case "PERSONAL_QUESTIONNAIRE":
-      return "Osobní dotazník"
-    case "PAYROLL_INFO":
-      return "Dotazník pro vedení mzdové agendy"
-    default:
-      return type
-  }
-}
 
 function statusLabel(status: DocumentStatus) {
   switch (status) {

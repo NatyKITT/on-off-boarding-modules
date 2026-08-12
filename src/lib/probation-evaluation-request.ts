@@ -15,6 +15,7 @@ import {
   pickMostRelevantOffboarding,
   shouldSkipProbationEvaluation,
 } from "@/lib/employment-linking"
+import { joinNameWithTitles } from "@/lib/format-name"
 
 const managerialKeywords = [
   "vedení",
@@ -122,11 +123,7 @@ export function buildFullName(person: {
   surname: string
   titleAfter?: string | null
 }) {
-  return [person.titleBefore, person.name, person.surname, person.titleAfter]
-    .filter(Boolean)
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim()
+  return joinNameWithTitles(person).replace(/\s+/g, " ").trim()
 }
 
 export function getSupervisorFullName(person: {
@@ -135,14 +132,12 @@ export function getSupervisorFullName(person: {
   supervisorSurname?: string | null
   supervisorTitleAfter?: string | null
 }) {
-  return [
-    person.supervisorTitleBefore,
-    person.supervisorName,
-    person.supervisorSurname,
-    person.supervisorTitleAfter,
-  ]
-    .filter(Boolean)
-    .join(" ")
+  return joinNameWithTitles({
+    titleBefore: person.supervisorTitleBefore,
+    name: person.supervisorName,
+    surname: person.supervisorSurname,
+    titleAfter: person.supervisorTitleAfter,
+  })
     .replace(/\s+/g, " ")
     .trim()
 }

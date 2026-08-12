@@ -765,6 +765,27 @@ function samePersonBySavedEvaluatorData(args: {
   return false
 }
 
+function isSameTajemnikPerson(args: {
+  tajemnikName: string | null
+  tajemnikEmail: string | null
+  candidateName?: string | null
+  candidateEmail?: string | null
+}): boolean {
+  const tajemnikEmail = cleanEmail(args.tajemnikEmail)
+  const candidateEmail = cleanEmail(args.candidateEmail)
+
+  if (!tajemnikEmail || !candidateEmail || tajemnikEmail !== candidateEmail) {
+    return false
+  }
+
+  const tajemnikName = normalizeCompare(stripCommonTitles(args.tajemnikName))
+  const candidateName = normalizeCompare(stripCommonTitles(args.candidateName))
+
+  return Boolean(
+    tajemnikName && candidateName && tajemnikName === candidateName
+  )
+}
+
 function supervisorBaseMeta(
   request: ProbationDetail | PublicProbationDetail
 ): SupervisorMeta {
@@ -1233,7 +1254,6 @@ export async function buildResolvedProbationApiResponse(args: {
   const serializedRequest = serializeProbationRequest(request)
   const tajemnikContext = await resolveTajemnikContext(request)
   const tajemnikReview = getTajemnikReview(data.tajemnikReview)
-  const currentUserEmail = cleanEmail(currentUser.email)
 
   return {
     status: "success" as const,
@@ -1318,11 +1338,12 @@ export async function buildResolvedProbationApiResponse(args: {
       isOverridden: tajemnikContext.isOverridden,
       overrideName: tajemnikContext.overrideName,
       overrideEmail: tajemnikContext.overrideEmail,
-      isCurrentUserTajemnik: Boolean(
-        tajemnikContext.tajemnikEmail &&
-          currentUserEmail &&
-          cleanEmail(tajemnikContext.tajemnikEmail) === currentUserEmail
-      ),
+      isCurrentUserTajemnik: isSameTajemnikPerson({
+        tajemnikName: tajemnikContext.tajemnikName,
+        tajemnikEmail: tajemnikContext.tajemnikEmail,
+        candidateName: currentUser.name,
+        candidateEmail: currentUser.email,
+      }),
       review: tajemnikReview,
     },
   }
@@ -1387,12 +1408,12 @@ async function saveTajemnikReview(args: {
   }
 
   const tajemnikContext = await resolveTajemnikContext(request)
-  const currentUserEmail = cleanEmail(user.email)
-  const isCurrentUserTajemnik = Boolean(
-    tajemnikContext.tajemnikEmail &&
-      currentUserEmail &&
-      cleanEmail(tajemnikContext.tajemnikEmail) === currentUserEmail
-  )
+  const isCurrentUserTajemnik = isSameTajemnikPerson({
+    tajemnikName: tajemnikContext.tajemnikName,
+    tajemnikEmail: tajemnikContext.tajemnikEmail,
+    candidateName: user.name,
+    candidateEmail: user.email,
+  })
 
   if (!isCurrentUserTajemnik) {
     return {
@@ -1954,14 +1975,8 @@ export async function sendCompletedProbationPdfToHr(args: {
     "doporučil",
     "doporučila"
   )
-  const tajemnikVerb = genderedPastVerb(
-    args.tajemnikInfo?.name,
-    "vyplnil",
-    "vyplnila"
-  )
-
   const emailIntro = isTajemnikMode
-    ? `tajemník${args.tajemnikInfo?.name ? ` ${args.tajemnikInfo.name}` : " úřadu"} ${tajemnikVerb} finální vyjádření k vyhodnocení zkušební doby níže uvedeného zaměstnance. Aktuální PDF formulář naleznete v příloze.`
+    ? `tajemník${args.tajemnikInfo?.name ? ` ${args.tajemnikInfo.name}` : " úřadu"} vyplnil finální vyjádření k vyhodnocení zkušební doby níže uvedeného zaměstnance. Aktuální PDF formulář naleznete v příloze.`
     : isRevision
       ? "Formulář k vyhodnocení zkušební doby byl upraven. Aktuální PDF formulář naleznete v příloze."
       : `Vedoucí odboru${evaluatorDisplayName ? ` ${evaluatorDisplayName}` : ""} ${evaluatorVerb} formulář Vyhodnocení zkušební doby níže uvedeného zaměstnance. Vyplněný formulář naleznete v PDF příloze.`
@@ -2162,6 +2177,7 @@ export async function sendTajemnikReviewRequestEmail(args: {
   request: ProbationDetail | PublicProbationDetail
   user: CurrentUser
   tajemnikEmail: string
+  tajemnikName?: string | null
   baseUrl: string
 }) {
   const userKey = getUserKey({ id: args.user.id, email: args.user.email })
@@ -2196,6 +2212,7 @@ export async function sendTajemnikReviewRequestEmail(args: {
   try {
     await sendProbationEvaluationTajemnikReviewRequestEmail({
       to: args.tajemnikEmail,
+      tajemnikName: args.tajemnikName ?? null,
       employeeName,
       employeePersonalNumber: args.request.onboarding.personalNumber ?? null,
       employeePosition: args.request.onboarding.positionName ?? null,

@@ -29,6 +29,7 @@ async function runMailWorker(req: NextRequest) {
       processed: result.processed,
       succeeded: result.succeeded,
       failed: result.failed,
+      permanentlyFailed: result.permanentlyFailed,
     })
   } catch (error) {
     console.error("[CRON_MAIL_WORKER_ERROR]", error)
@@ -39,6 +40,7 @@ async function runMailWorker(req: NextRequest) {
         processed: 0,
         succeeded: 0,
         failed: 0,
+        permanentlyFailed: 0,
         message: "Mail worker failed.",
         error: error instanceof Error ? error.message : String(error),
       },

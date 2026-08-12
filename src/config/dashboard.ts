@@ -18,8 +18,14 @@ export const sidebarLinks: SidebarNavItem[] = [
     ],
   },
   {
-    title: "Systém",
+    title: "Nástroje",
     items: [
+      {
+        href: "/dokumenty",
+        icon: "fileText",
+        title: "Dokumenty",
+        authorizeOnly: [Role.ADMIN, Role.HR, Role.IT],
+      },
       { href: "/statistiky", icon: "lineChart", title: "Statistiky" },
       {
         href: "/nastaveni",

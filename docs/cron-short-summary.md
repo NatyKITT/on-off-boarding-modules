@@ -11,7 +11,7 @@ Crony se nespouští automaticky jen tím, že je kód v GitHubu. Musí je volat
 Základní tok:
 
 1. Cron `probation-notifications` projde nástupy a konce zkušebních dob.
-2. Cron `offboarding-notifications` projde **skutečné** odchody a blížící se konec pracovního poměru u nedokončených výstupních listů – jak souhrnně pro HR, tak cíleně pro konkrétní lidi, kteří ještě nepodepsali.
+2. Cron `offboarding-notifications` projde **plánované** odchody (dosud bez potvrzeného skutečného konce) a blížící se konec pracovního poměru u nedokončených výstupních listů – jak souhrnně pro HR, tak cíleně pro konkrétní lidi ze skupiny naposledy uložené přes „Odeslat všem k podpisu", kteří ještě nepodepsali.
 3. Podle pravidel oba vytvoří e-mailové úlohy v `MailQueue`.
 4. Cron `mail-worker` zpracuje čekající položky z `MailQueue`.
 5. E-maily se odešlou přes Resend.
@@ -37,12 +37,12 @@ Důležité: tento endpoint běžně e-maily přímo neposílá, pouze vytvář�
 GET /api/cron/offboarding-notifications
 ```
 
-Slouží ke kontrole **skutečných** odchodů (ne plánovaných), kterým se blíží konec pracovního poměru a jejich výstupní list ještě není kompletně podepsaný. Řeší dva typy připomínek, obě v okamžicích 30, 14, 7, 3, 2 a 1 den před koncem, vždy jen jednou za dané okno:
+Slouží ke kontrole **plánovaných** odchodů (dosud bez potvrzeného skutečného konce), kterým se blíží konec pracovního poměru a jejich výstupní list ještě není kompletně podepsaný. Jakmile se odchod potvrdí jako skutečný (vyplní se `actualEnd`), cron ho od té chvíle úplně přeskočí. Řeší dva typy připomínek, obě v okamžicích 30, 14, 7, 3, 2 a 1 den před koncem, vždy jen jednou za dané okno:
 
-1. **Souhrnná připomínka pro HR** (`HR_EMAILS`) – pokud výstupní list ještě není hotový. Text se liší podle toho, jestli už byla vůbec odeslána pozvánka k podpisu:
+1. **Souhrnná připomínka pro HR** (`HR_EMAILS`) – pokud výstupní list ještě není hotový. Text se liší podle toho, jestli už HR vůbec jednou kliknula „Odeslat všem k podpisu":
    - Pokud ne → HR se vyzve, ať pozvánku odešle.
-   - Pokud ano, ale někdo ještě nepodepsal → HR se jen informuje, že list stále není kompletní.
-2. **Cílená připomínka konkrétním lidem** (zaměstnanec / vedoucí) – posílá se přímo tomu, kdo ještě nepodepsal, na stejný odkaz, jaký dostal v pozvánce. Posílá se **jen** tomu, komu HR pozvánku k podpisu už dříve skutečně odeslala (ověřuje se v historii e-mailů) – cron nikoho nezve poprvé sám od sebe.
+   - Pokud ano, ale někdo ještě nepodepsal → HR se jen informuje, že list stále není kompletní, a e-mail obsahuje i konkrétní seznam jmen a e-mailů, kdo ještě nepodepsal.
+2. **Cílená připomínka konkrétním lidem** – posílá se přímo každému příjemci ze skupiny naposledy uložené přes „Odeslat všem k podpisu" (`ExitChecklist.header.signatureRecipients`), kdo ještě nepodepsal, na stejný odkaz, jaký dostal v pozvánce. Skupina se pro každý odchod může lišit (zaměstnanec, vedoucí i libovolní další signatáři) a cron ji vždy počítá podle posledního uloženého stavu – jakmile HR někoho odebere nebo přidá a znovu klikne „Odeslat všem", připomínky se od té chvíle řídí novým seznamem. Cron nikoho nezve poprvé sám od sebe.
 
 Stejně jako u `probation-notifications`: endpoint přímo neposílá e-maily, pouze vytváří úlohy typu `NOTICE_WARNING` do `MailQueue`.
 

@@ -326,7 +326,11 @@ export function DeletedRecordsDialog({
             </Alert>
           )}
 
-          <ScrollArea className="max-h-[60vh]">
+          <ScrollArea
+            className="max-h-[60vh]"
+            data-lenis-prevent=""
+            onWheelCapture={(event) => event.stopPropagation()}
+          >
             {loading ? (
               <div className="flex items-center justify-center py-8">
                 <div className="size-8 animate-spin rounded-full border-b-2 border-current" />

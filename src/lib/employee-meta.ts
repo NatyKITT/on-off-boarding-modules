@@ -1,3 +1,5 @@
+import { joinNameWithTitles } from "@/lib/format-name"
+
 export type EmployeeMeta = {
   fullName?: string
   position?: string
@@ -20,11 +22,7 @@ type OnboardingLike = {
 }
 
 export function buildEmployeeMeta(onb: OnboardingLike): EmployeeMeta {
-  const fullName = [onb.titleBefore, onb.name, onb.surname, onb.titleAfter]
-    .filter(Boolean)
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim()
+  const fullName = joinNameWithTitles(onb).replace(/\s+/g, " ").trim()
 
   const unitName = (onb.unitName ?? undefined)?.trim() || undefined
   const department = (onb.department ?? undefined)?.trim() || undefined

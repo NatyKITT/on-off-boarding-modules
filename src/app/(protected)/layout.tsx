@@ -29,9 +29,13 @@ export default async function Dashboard({ children }: ProtectedLayoutProps) {
   const filteredLinks = sidebarLinks
     .map((section) => ({
       ...section,
-      items: section.items.filter(
-        ({ authorizeOnly }) => !authorizeOnly || authorizeOnly === user.role
-      ),
+      items: section.items.filter(({ authorizeOnly }) => {
+        if (!authorizeOnly) return true
+
+        return Array.isArray(authorizeOnly)
+          ? authorizeOnly.includes(user.role)
+          : authorizeOnly === user.role
+      }),
     }))
     .filter((section) => section.items.length > 0)
 

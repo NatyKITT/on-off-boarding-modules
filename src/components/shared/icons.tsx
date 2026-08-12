@@ -51,6 +51,7 @@ export const Icons = {
   copy: Copy,
   dashboard: LayoutPanelLeft,
   ellipsis: MoreVertical,
+  fileText: FileText,
   google: ({ ...props }: LucideProps) => (
     <svg
       aria-hidden="true"

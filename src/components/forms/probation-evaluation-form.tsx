@@ -10,6 +10,8 @@ import { useSession } from "next-auth/react"
 import { useForm, type DefaultValues } from "react-hook-form"
 import { z } from "zod"
 
+import { useSignatureName } from "@/hooks/use-signature-name"
+
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -589,7 +591,10 @@ export function ProbationEvaluationForm({
 
   const watchRecommendation = form.watch("recommendation")
 
+  const signatureName = useSignatureName()
+
   const resolvedCurrentUserName =
+    signatureName?.trim() ||
     currentUserName?.trim() ||
     session?.user?.name?.trim() ||
     currentUserEmail?.trim() ||

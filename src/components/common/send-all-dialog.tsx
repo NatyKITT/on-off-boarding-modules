@@ -221,6 +221,20 @@ export function SendAllDialog({
       })
     )
 
+    await fetch(
+      `/api/odchody/${offboardingId}/exit-checklist/signature-recipients`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipients: recipients.map((r) => ({
+            name: r.name,
+            email: r.email,
+          })),
+        }),
+      }
+    ).catch(() => null)
+
     setSending(false)
     setDone(true)
   }

@@ -19,13 +19,13 @@ export type NavItem = {
   badge?: number
   disabled?: boolean
   external?: boolean
-  authorizeOnly?: Role
+  authorizeOnly?: Role | Role[]
   icon?: keyof typeof Icons
 }
 
 export type SidebarNavItem = {
   title: string
   items: NavItem[]
-  authorizeOnly?: Role
+  authorizeOnly?: Role | Role[]
   icon?: keyof typeof Icons
 }

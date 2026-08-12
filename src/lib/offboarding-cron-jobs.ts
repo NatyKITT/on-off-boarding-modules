@@ -3,6 +3,10 @@ import type { MailJobStatus } from "@prisma/client"
 import { addDays, startOfDay } from "date-fns"
 
 import type { ExitChecklistData } from "@/types/exit-checklist"
+import {
+  EXIT_CHECKLIST_SIGNATORIES,
+  LAW_SIGNATORY,
+} from "@/config/exit-checklist-signatories"
 
 import { prisma } from "@/lib/db"
 import {
@@ -19,12 +23,6 @@ import {
 
 type ReminderDay = 30 | 14 | 7 | 3 | 2 | 1
 type SignatureReminderDay = 14 | 7 | 3 | 2 | 1
-type SignerRole = "employee" | "manager"
-
-const SIGNATURE_REMINDER_ROLE_LABEL: Record<SignerRole, string> = {
-  employee: "zaměstnanec",
-  manager: "vedoucí",
-}
 
 type DeadlineReminderKind =
   | "30_DAYS_BEFORE_END"
@@ -192,7 +190,8 @@ async function queueExitChecklistReminders(args: {
   const candidates = await prisma.employeeOffboarding.findMany({
     where: {
       deletedAt: null,
-      actualEnd: args.effectiveEndFilter,
+      actualEnd: null,
+      plannedEnd: args.effectiveEndFilter,
     },
     select: { id: true },
   })
@@ -234,7 +233,17 @@ async function queueExitChecklistReminders(args: {
     const employeeName = buildFullName(off)
     const effectiveEnd = off.actualEnd ?? off.plannedEnd
     const checklistLink = `${args.baseUrl}/odchody/${off.id}/vystupni-list`
-    const hasInvite = await hasAnySignatureInviteBeenSent(off.id)
+    const hasInvite = Boolean(data.signatureRecipientsSentAt)
+
+    const pendingSigners = hasInvite
+      ? (data.signatureRecipients ?? [])
+          .filter(
+            (recipient) =>
+              !resolveSignatureRecipientStatus(data, off.userEmail, recipient)
+                .hasSigned
+          )
+          .map((recipient) => `${recipient.name} (${recipient.email})`)
+      : []
 
     const job = await prisma.mailQueue.create({
       data: {
@@ -258,6 +267,7 @@ async function queueExitChecklistReminders(args: {
             daysBeforeEnd: args.daysBeforeEnd,
             hasInvite,
           }),
+          pendingSigners,
           reminderKind,
           daysBeforeEnd: args.daysBeforeEnd,
           createdBy: "system-cron",
@@ -293,6 +303,7 @@ async function queueExitChecklistReminders(args: {
         hasInvite,
         mailQueueId: job.id,
         recipients: args.hrRecipients,
+        pendingSigners,
       },
     })
 
@@ -307,7 +318,7 @@ async function queueExitChecklistReminders(args: {
 
 async function existsOffboardingSignatureReminderJob(args: {
   offboardingId: number
-  role: SignerRole
+  email: string
   daysBeforeEnd: SignatureReminderDay
 }) {
   const jobs = await prisma.mailQueue.findMany({
@@ -322,7 +333,9 @@ async function existsOffboardingSignatureReminderJob(args: {
   return jobs.some((job) => {
     const payload = getPayloadRecord(job.payload)
 
-    if (asString(payload.reminderRole) !== args.role) return false
+    if (asString(payload.to)?.trim().toLowerCase() !== args.email) {
+      return false
+    }
     if (asNumber(payload.daysBeforeEnd) !== args.daysBeforeEnd) return false
 
     return isSameOffboardingPayload({
@@ -332,57 +345,60 @@ async function existsOffboardingSignatureReminderJob(args: {
   })
 }
 
-const INVITE_EMAIL_TYPES = [
-  "EXIT_CHECKLIST_SIGNATURE_INVITE",
-  "EXIT_CHECKLIST_BEHALF_SIGNATURE",
-] as const
+function resolveSignatureRecipientStatus(
+  data: ExitChecklistData,
+  employeeEmail: string | null,
+  recipient: { name: string; email: string }
+): { hasSigned: boolean; label: string } {
+  const email = recipient.email.trim().toLowerCase()
 
-async function hasAnySignatureInviteBeenSent(offboardingId: number) {
-  const count = await prisma.emailHistory.count({
-    where: {
-      offboardingEmployeeId: offboardingId,
-      emailType: { in: [...INVITE_EMAIL_TYPES] },
-      status: { in: ["SENT", "QUEUED", "PROCESSING"] },
-    },
-  })
+  if (employeeEmail && email === employeeEmail.trim().toLowerCase()) {
+    return {
+      hasSigned: Boolean(data.signatures?.employee?.signedAt),
+      label: "zaměstnanec",
+    }
+  }
 
-  return count > 0
-}
+  if (data.managerEmail && email === data.managerEmail.trim().toLowerCase()) {
+    return {
+      hasSigned: Boolean(data.signatures?.manager?.signedAt),
+      label: "vedoucí",
+    }
+  }
 
-// Připomínka se posílá jen tomu, komu HR pozvánku k podpisu už skutečně
-// odeslala (má o tom záznam v historii e-mailů) - cron nikoho nezve poprvé
-// sám od sebe.
-async function wasInvitedToSignExitChecklist(args: {
-  offboardingId: number
-  email: string
-}) {
-  const history = await prisma.emailHistory.findMany({
-    where: {
-      offboardingEmployeeId: args.offboardingId,
-      emailType: { in: [...INVITE_EMAIL_TYPES] },
-      status: { in: ["SENT", "QUEUED", "PROCESSING"] },
-    },
-    select: { recipients: true },
-    take: 200,
-  })
-
-  const normalizedEmail = args.email.trim().toLowerCase()
-
-  return history.some((entry) => {
-    const recipients = Array.isArray(entry.recipients) ? entry.recipients : []
-
-    return recipients.some(
-      (recipient) =>
-        typeof recipient === "string" &&
-        recipient.trim().toLowerCase() === normalizedEmail
+  const knownSignatory =
+    EXIT_CHECKLIST_SIGNATORIES.find((signatory) =>
+      signatory.emails.some(
+        (signatoryEmail) => signatoryEmail.toLowerCase() === email
+      )
+    ) ??
+    (LAW_SIGNATORY.emails.some(
+      (signatoryEmail) => signatoryEmail.toLowerCase() === email
     )
-  })
+      ? LAW_SIGNATORY
+      : null)
+
+  if (knownSignatory) {
+    const relevantRowKeys = knownSignatory.rowKeys.filter(
+      (key) => key !== "lawInfo" || data.conflictOfInterest
+    )
+
+    return {
+      hasSigned: relevantRowKeys.every((key) =>
+        Boolean(data.items.find((item) => item.key === key)?.signedAt)
+      ),
+      label: knownSignatory.name,
+    }
+  }
+
+  return { hasSigned: false, label: recipient.name }
 }
 
 // Cílené připomínky - na rozdíl od výše (queueExitChecklistReminders, jde
-// vždy jen na HR souhrnně) se posílají přímo tomu, kdo ještě konkrétně
-// nepodepsal (zaměstnanec / vedoucí), na stejný veřejný odkaz jako dostal
-// při pozvánce.
+// vždy jen na HR souhrnně) se posílají přímo těm, kdo ještě konkrétně
+// nepodepsali (přesně skupina, kterou HR naposledy odeslala přes "Odeslat
+// všem k podpisu" - uložená v data.signatureRecipients), na stejný
+// veřejný odkaz, jaký dostali při pozvánce.
 async function queueExitChecklistSignatureReminders(args: {
   daysBeforeEnd: SignatureReminderDay
   effectiveEndFilter: { lte: Date; gt?: Date; gte?: Date }
@@ -392,7 +408,8 @@ async function queueExitChecklistSignatureReminders(args: {
   const candidates = await prisma.employeeOffboarding.findMany({
     where: {
       deletedAt: null,
-      actualEnd: args.effectiveEndFilter,
+      actualEnd: null,
+      plannedEnd: args.effectiveEndFilter,
     },
     select: { id: true },
   })
@@ -411,47 +428,34 @@ async function queueExitChecklistSignatureReminders(args: {
     const data: ExitChecklistData = mapToExitChecklistData(off, checklist)
 
     if (getExitChecklistCompletionState(data).isComplete) continue
+    if (!data.signatureRecipients?.length) continue
 
     const employeeName = buildFullName(off)
     const effectiveEnd = off.actualEnd ?? off.plannedEnd
     const signUrl = `${args.baseUrl}/odchody-public/${checklist.publicToken}`
 
-    const targets: Array<{ role: SignerRole; email: string | null }> = [
-      { role: "employee", email: off.userEmail?.trim() || null },
-      { role: "manager", email: data.managerEmail?.trim() || null },
-    ]
+    for (const recipient of data.signatureRecipients) {
+      const email = recipient.email.trim().toLowerCase()
 
-    for (const target of targets) {
-      if (data.signatures?.[target.role]?.signedAt) continue
+      if (!email) continue
 
-      if (!target.email) {
-        args.notifications.push(
-          `sig_reminder_${args.daysBeforeEnd}d_${target.role}_skipped_no_email:${off.id}`
-        )
-        continue
-      }
+      const { hasSigned, label } = resolveSignatureRecipientStatus(
+        data,
+        off.userEmail,
+        recipient
+      )
 
-      const wasInvited = await wasInvitedToSignExitChecklist({
-        offboardingId: off.id,
-        email: target.email,
-      })
-
-      if (!wasInvited) {
-        args.notifications.push(
-          `sig_reminder_${args.daysBeforeEnd}d_${target.role}_skipped_not_invited:${off.id}`
-        )
-        continue
-      }
+      if (hasSigned) continue
 
       const alreadyQueued = await existsOffboardingSignatureReminderJob({
         offboardingId: off.id,
-        role: target.role,
+        email,
         daysBeforeEnd: args.daysBeforeEnd,
       })
 
       if (alreadyQueued) {
         args.notifications.push(
-          `sig_reminder_${args.daysBeforeEnd}d_${target.role}_already_active:${off.id}`
+          `sig_reminder_${args.daysBeforeEnd}d_already_active:${off.id}:${email}`
         )
         continue
       }
@@ -460,14 +464,14 @@ async function queueExitChecklistSignatureReminders(args: {
         data: {
           type: "EXIT_SIGNATURE_INVITE",
           payload: {
-            to: target.email,
+            to: email,
             offboardingId: off.id,
             employeeName,
             employeePosition: off.positionName,
             employeeDepartment: off.department,
             employmentEndDate: effectiveEnd?.toISOString() ?? null,
             signUrl,
-            reminderRole: target.role,
+            reminderRole: label,
             daysBeforeEnd: args.daysBeforeEnd,
             createdBy: "system-cron",
             createdByName: "Systémový cron",
@@ -483,18 +487,18 @@ async function queueExitChecklistSignatureReminders(args: {
         action: "SIGNATURE_INVITE_SENT",
         by: "system-cron",
         byName: "Systémový cron",
-        message: `Automatická připomínka podpisu (${SIGNATURE_REMINDER_ROLE_LABEL[target.role]}) – zbývá ${args.daysBeforeEnd} ${args.daysBeforeEnd === 1 ? "den" : "dny"} do konce pracovního poměru.`,
+        message: `Automatická připomínka podpisu (${label}) – zbývá ${args.daysBeforeEnd} ${args.daysBeforeEnd === 1 ? "den" : "dny"} do konce pracovního poměru.`,
         meta: {
-          reminderRole: target.role,
+          reminderRole: label,
           daysBeforeEnd: args.daysBeforeEnd,
           mailQueueId: job.id,
-          recipient: target.email,
+          recipient: email,
         },
       })
 
       queued += 1
       args.notifications.push(
-        `sig_reminder_${args.daysBeforeEnd}d_${target.role}_queued:${off.id}:${job.id}`
+        `sig_reminder_${args.daysBeforeEnd}d_queued:${off.id}:${job.id}`
       )
     }
   }

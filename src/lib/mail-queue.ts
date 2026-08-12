@@ -59,6 +59,14 @@ function asStrArr(value: unknown): string[] {
   return []
 }
 
+function asDisplayStrArr(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean)
+}
+
 function asNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value
@@ -121,6 +129,7 @@ function toExitChecklistReminderPayload(payload: QueuePayload) {
     checklistLink: asStr(payload.checklistLink),
     subject: asStr(payload.subject),
     intro: asStr(payload.intro),
+    pendingSigners: asDisplayStrArr(payload.pendingSigners),
   }
 }
 
@@ -325,6 +334,8 @@ async function failJob(job: MailQueue, error: unknown) {
       error: message,
     })
   }
+
+  return { canRetry }
 }
 
 async function processJob(job: MailQueue) {
@@ -350,7 +361,12 @@ async function processJob(job: MailQueue) {
 
 export async function processMailQueueBatch(opts?: {
   batchSize?: number
-}): Promise<{ processed: number; succeeded: number; failed: number }> {
+}): Promise<{
+  processed: number
+  succeeded: number
+  failed: number
+  permanentlyFailed: number
+}> {
   const batchSize = opts?.batchSize ?? 20
   const now = new Date()
 
@@ -368,6 +384,7 @@ export async function processMailQueueBatch(opts?: {
 
   let succeeded = 0
   let failed = 0
+  let permanentlyFailed = 0
   let processed = 0
 
   for (const job of jobs) {
@@ -391,8 +408,9 @@ export async function processMailQueueBatch(opts?: {
       await finishJob(job)
       succeeded++
     } catch (error) {
-      await failJob(job, error)
+      const { canRetry } = await failJob(job, error)
       failed++
+      if (!canRetry) permanentlyFailed++
     }
   }
 
@@ -400,5 +418,6 @@ export async function processMailQueueBatch(opts?: {
     processed,
     succeeded,
     failed,
+    permanentlyFailed,
   }
 }

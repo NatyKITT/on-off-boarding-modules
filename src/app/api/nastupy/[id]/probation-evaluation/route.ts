@@ -126,6 +126,7 @@ export async function PUT(
           request: updated,
           user: authResult.user,
           tajemnikEmail: saved.tajemnikEmail,
+          tajemnikName: saved.tajemnikName,
           baseUrl: getAppBaseUrl(req),
         })
       }

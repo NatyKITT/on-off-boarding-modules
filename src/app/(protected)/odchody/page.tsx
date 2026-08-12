@@ -626,7 +626,7 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
           : undefined
       }
     >
-      <TableCell className="w-[240px]">
+      <TableCell className="sticky left-0 z-10 w-[240px] border-r bg-background">
         <div className="flex items-center gap-2">
           <User className="size-4 shrink-0 text-muted-foreground" />
           <div className="flex flex-col">
@@ -1681,7 +1681,10 @@ export default function OffboardingPage() {
                 Přidat plánovaný odchod
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
+            <DialogContent
+              className="max-h-[90vh] max-w-5xl overflow-y-auto p-0"
+              onInteractOutside={(event) => event.preventDefault()}
+            >
               <DialogTitle className="px-6 pt-6">
                 Nový plánovaný odchod
               </DialogTitle>
@@ -1833,7 +1836,7 @@ export default function OffboardingPage() {
                                       <Table className="w-max min-w-[1440px]">
                                         <TableHeader>
                                           <TableRow>
-                                            <TableHead className="w-[240px]">
+                                            <TableHead className="sticky left-0 z-10 w-[240px] border-r bg-background">
                                               Zaměstnanec
                                             </TableHead>
                                             <TableHead className="w-[240px]">
@@ -1934,7 +1937,10 @@ export default function OffboardingPage() {
                 Přidat skutečný odchod
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
+            <DialogContent
+              className="max-h-[90vh] max-w-5xl overflow-y-auto p-0"
+              onInteractOutside={(event) => event.preventDefault()}
+            >
               <DialogTitle className="px-6 pt-6">Skutečný odchod</DialogTitle>
               <div className="p-6">
                 <OffboardingFormUnified
@@ -2084,7 +2090,7 @@ export default function OffboardingPage() {
                                       <Table className="w-max min-w-[1440px]">
                                         <TableHeader>
                                           <TableRow>
-                                            <TableHead className="w-[240px]">
+                                            <TableHead className="sticky left-0 z-10 w-[240px] border-r bg-background">
                                               Zaměstnanec
                                             </TableHead>
                                             <TableHead className="w-[240px]">
@@ -2704,7 +2710,10 @@ export default function OffboardingPage() {
       </Dialog>
 
       <Dialog open={openEdit} onOpenChange={setOpenEdit}>
-        <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
+        <DialogContent
+          className="max-h-[90vh] max-w-5xl overflow-y-auto p-0"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
           <DialogTitle className="px-6 pt-6">Upravit záznam</DialogTitle>
           <div className="p-6">
             {editLoading ? (

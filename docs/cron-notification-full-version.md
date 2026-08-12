@@ -22,7 +22,7 @@ Cron endpointy jsou chráněné přes `CRON_SECRET`. To znamená, že volající
 Zjednodušený tok:
 
 1. Cron `probation-notifications` projde nástupy a zkušební doby.
-2. Cron `offboarding-notifications` projde skutečné odchody a blížící se konec pracovního poměru u nedokončených výstupních listů.
+2. Cron `offboarding-notifications` projde plánované odchody (dosud bez potvrzeného skutečného konce) a blížící se konec pracovního poměru u nedokončených výstupních listů.
 3. Podle pravidel oba vytvoří e-mailové úlohy v tabulce `MailQueue`.
 4. Cron `mail-worker` zpracuje čekající položky z `MailQueue`.
 5. Mail worker odešle e-maily přes Resend.
@@ -60,40 +60,56 @@ Důležité: tento endpoint běžně e-maily přímo neposílá. Pouze připravu
 GET /api/cron/offboarding-notifications
 ```
 
-Tento endpoint kontroluje **skutečné** odchody (`actualEnd`, ne
-`plannedEnd`) a jejich výstupní list.
+Tento endpoint kontroluje **plánované** odchody (`plannedEnd`), u
+kterých ještě **není** vyplněné skutečné datum konce (`actualEnd`
+musí být `null`). Jakmile se odchod potvrdí jako skutečný
+(`actualEnd` se vyplní), cron ho od té chvíle úplně přeskočí – jakmile
+člověk skutečně odešel, další upomínky na podpis výstupního listu už
+nemají smysl. Je to záměrně opačná logika než u nástupů (tam se
+zkušební doba řeší až po potvrzení skutečného nástupu).
 
 Řeší dva samostatné typy připomínek, oba v okamžicích 30, 14, 7, 3, 2
-a 1 den před koncem, vždy nejvýš jednou za dané okno a daný odchod:
+a 1 den před (plánovaným) koncem, vždy nejvýš jednou za dané okno a
+daný odchod:
 
 **A) Souhrnná připomínka pro HR** (typ úlohy `NOTICE_WARNING`,
 funkce `queueExitChecklistReminders`):
 
-- dohledá skutečné odchody, kterým se blíží konec pracovního poměru,
+- dohledá plánované odchody (bez `actualEnd`), kterým se blíží
+  plánovaný konec pracovního poměru,
 - u každého ověří, jestli je výstupní list (exit checklist) už
   kompletně podepsaný – pokud ano, upomínka se nevytváří,
-- zjistí, jestli už byla k tomuto odchodu vůbec odeslána pozvánka
-  k podpisu (kontrola v `EmailHistory`), a podle toho zvolí text:
-  - pozvánka ještě neodešla → HR se vyzve, ať ji odešle
+- zjistí, jestli HR už vůbec jednou kliknula "Odeslat všem k podpisu"
+  (viz níže) – podle toho zvolí text:
+  - ještě neodeslala → HR se vyzve, ať pozvánky odešle
     ("Nutno odeslat pozvánku k podpisu výstupního listu…"),
-  - pozvánka už odešla, ale list není hotový → HR se jen informuje,
-    že list stále čeká na podpis,
+  - už odeslala, ale list není hotový → HR se jen informuje,
+    že list stále čeká na podpis, a e-mail navíc obsahuje seznam
+    „Ještě nepodepsali" – jména a e-maily konkrétních lidí ze
+    signatureRecipients roster, kteří ještě nepodepsali (počítá se
+    stejnou logikou jako u cílených připomínek v bodě B),
 - příjemci jsou `HR_EMAILS`,
 - zápis události `DEADLINE_REMINDER_SENT` do historie výstupního
-  listu.
+  listu, včetně `meta.pendingSigners` se stejným seznamem.
 
 **B) Cílená připomínka konkrétním lidem** (typ úlohy
 `EXIT_SIGNATURE_INVITE`, funkce `queueExitChecklistSignatureReminders`):
 
-- pro každý nedokončený odchod zvlášť zkontroluje zaměstnance a
-  vedoucího – komu z nich ještě chybí podpis,
-- připomínku pošle **jen** tomu, komu HR pozvánku k podpisu už dříve
-  skutečně odeslala (opět kontrola v `EmailHistory`) – cron tedy
-  nikoho nezve poprvé sám od sebe, jen připomíná už pozvaným,
+- pro každý nedokončený odchod se podívá na **uloženou skupinu
+  příjemců** (`ExitChecklist.header.signatureRecipients`) – tedy
+  přesně ten seznam lidí, který HR naposledy poslala přes dialog
+  "Odeslat všem k podpisu" (viz kapitola 11.6). Skupina se přepíše
+  pokaždé, když HR znovu odešle (někoho odebere/přidá) – cron proto
+  vždy reaguje na aktuální stav, ne na historii všech dřívějších
+  odeslání,
+- u každého člověka ze skupiny zjistí, jestli má ještě co podepsat:
+  zaměstnanec/vedoucí podle hlavičkového podpisu, funkční signatáři
+  (SNEO, spisová služba, mzdová účtárna...) podle svých konkrétních
+  řádků výstupního listu, ostatní obecně podle celkové kompletnosti,
 - e-mail vede na stejný veřejný odkaz (`/odchody-public/[token]`),
   jaký dostali v původní pozvánce,
 - zápis události `SIGNATURE_INVITE_SENT` do historie výstupního
-  listu, s metadaty o roli (zaměstnanec/vedoucí) a počtu dní.
+  listu, s metadaty o tom, komu a kolik dní před koncem se poslalo.
 
 Endpoint stejně jako `probation-notifications` e-maily přímo
 neposílá, pouze vytváří úlohy do `MailQueue` (`NOTICE_WARNING` a
@@ -216,7 +232,7 @@ Prostředí musí mít správně nastavenou `DATABASE_URL` a databáze musí obs
 
 Cron `probation-notifications` čte nástupy, zkušební dobu a stav vyhodnocení.
 
-Cron `offboarding-notifications` čte skutečné odchody, výstupní listy (exit checklist), historii e-mailů (`EmailHistory` – kvůli ověření, komu už HR pozvánku k podpisu odeslala) a zapisuje do historie výstupního listu.
+Cron `offboarding-notifications` čte plánované odchody (bez potvrzeného skutečného konce) a výstupní listy (exit checklist) – včetně uložené skupiny příjemců k podpisu (`ExitChecklist.header.signatureRecipients`) – a zapisuje do historie výstupního listu.
 
 Cron `mail-worker` čte a aktualizuje `MailQueue`.
 
@@ -732,6 +748,31 @@ z interní aplikace, nebo z veřejného odkazu):
 
 ---
 
+### 11.6 Skupina příjemců k podpisu výstupního listu
+
+Dialog "Odeslat všem k podpisu" (`SendAllDialog`,
+`/odchody/[id]/vystupni-list`) umožňuje HR poslat pozvánku k podpisu
+libovolné skupině lidí najednou – typicky zaměstnanci, vedoucímu a
+funkčním signatářům (SNEO, spisová služba, mzdová účtárna, právní
+odbor...), případně ručně přidaným lidem. HR může kohokoli před
+odesláním z návrhu odebrat nebo přidat dalšího.
+
+Jakmile HR klikne "Odeslat všem", aplikace:
+
+1. odešle pozvánku (`POST /api/odchody/[id]/exit-checklist/invite`)
+   každému v seznamu zvlášť,
+2. **uloží přesně tento finální seznam** (po úpravách) přes
+   `POST /api/odchody/[id]/exit-checklist/signature-recipients` do
+   `ExitChecklist.header.signatureRecipients` – **nahrazuje** předchozí
+   uložený seznam, nesčítá se s ním.
+
+Tahle uložená skupina je jediný zdroj pravdy pro cílené cronové
+připomínky (kapitola 2.2, bod B) – když HR příště někoho odebere a
+někoho přidá a znovu odešle, příští běh cronu už reaguje přesně na
+nový seznam, ne na ten předchozí.
+
+---
+
 ## 12. Jak ověřit nastavení v GitHubu
 
 V repozitáři:
@@ -899,7 +940,7 @@ Krátké shrnutí pro správce nebo vedoucího:
 ```txt
 Crony v aplikaci nejsou spouštěné automaticky samotným Next.js kódem. Musí je volat externí plánovač, aktuálně ideálně GitHub Actions. Pro fungování je potřeba mít CRON_SECRET nastavený jak v běžící aplikaci, tak v GitHub Actions secrets. Hodnoty musí být stejné. GitHub dále potřebuje APP_URL, což je URL běžící instance aplikace.
 
-Cron probation-notifications pouze kontroluje zkušební doby a vytváří e-mailové úlohy do MailQueue. Cron offboarding-notifications stejným způsobem kontroluje skutečné odchody a blížící se konec pracovního poměru u nedokončených výstupních listů – posílá souhrnnou upomínku pro HR (jestli je potřeba poslat pozvánku, nebo jen upozornit, že list není hotový) i cílenou připomínku přímo konkrétnímu zaměstnanci nebo vedoucímu, který ještě nepodepsal, ale jen tomu, komu HR pozvánku už dříve skutečně odeslala. Samotné odesílání obou provádí cron mail-worker, který zpracovává MailQueue a posílá e-maily přes Resend.
+Cron probation-notifications pouze kontroluje zkušební doby a vytváří e-mailové úlohy do MailQueue. Cron offboarding-notifications stejným způsobem kontroluje plánované odchody (dosud bez potvrzeného skutečného konce) a blížící se konec pracovního poměru u nedokončených výstupních listů – posílá souhrnnou upomínku pro HR (jestli je potřeba poslat pozvánku, nebo jen upozornit, že list není hotový) i cílenou připomínku přímo konkrétnímu příjemci ze skupiny naposledy uložené přes „Odeslat všem k podpisu“, který ještě nepodepsal. Samotné odesílání obou provádí cron mail-worker, který zpracovává MailQueue a posílá e-maily přes Resend.
 
 Oba kontrolní crony mají v aplikaci běžet jen jednou denně v 8:00 pražského času, proto mají v GitHub Actions nastavené schedule na dvě UTC hodnoty (6 a 7) kvůli letnímu/zimnímu času – endpoint sám pozná, který běh je ten správný.
 
@@ -937,7 +978,7 @@ Doporučené dokumentovat:
 
 Cron pro zkušební dobu automaticky hlídá blížící se konec zkušební doby u nástupů a připravuje e-mailové notifikace pro vedoucí nebo HR.
 
-Cron pro blížící se konec pracovního poměru automaticky hlídá skutečné odchody s nedokončeným výstupním listem a připravuje upomínky pro HR (30/14/7/3 dny předem).
+Cron pro blížící se konec pracovního poměru automaticky hlídá plánované odchody (dosud bez potvrzeného skutečného konce) s nedokončeným výstupním listem a připravuje upomínky pro HR (30/14/7/3 dny předem) i cílené připomínky konkrétním příjemcům ze skupiny „Odeslat všem k podpisu" (14/7/3/2/1 den předem), kteří ještě nepodepsali.
 
 Mail worker následně bere připravené zprávy z e-mailové fronty a fyzicky je odesílá přes Resend.
 

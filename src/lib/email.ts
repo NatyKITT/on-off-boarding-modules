@@ -5,6 +5,7 @@ import { Resend } from "resend"
 
 import { formatDayCountCs } from "@/lib/dates"
 import { prisma } from "@/lib/db"
+import { joinNameWithTitles } from "@/lib/format-name"
 
 const resend = process.env.RESEND_API_KEY
   ? new Resend(process.env.RESEND_API_KEY)
@@ -95,11 +96,7 @@ export function getHrRecipientsFromEnv(): string[] {
 function formatName(
   r: Pick<EmailRecord, "name" | "surname" | "titleBefore" | "titleAfter">
 ): string {
-  const parts: string[] = []
-  if (r.titleBefore) parts.push(r.titleBefore)
-  parts.push(r.name, r.surname)
-  if (r.titleAfter) parts.push(r.titleAfter)
-  return parts.join(" ")
+  return joinNameWithTitles(r)
 }
 
 const CZECH_TITLE_WORDS =
@@ -1868,6 +1865,7 @@ export type SendProbationEvaluationPdfEmailParams = {
 
 export type SendProbationEvaluationTajemnikReviewRequestEmailParams = {
   to: string
+  tajemnikName?: string | null
   employeeName: string
   employeePersonalNumber?: string | null
   employeePosition?: string | null
@@ -2424,8 +2422,10 @@ export async function sendExitChecklistDueSoonReminderEmail(args: {
   checklistLink?: string | null
   subject?: string | null
   intro?: string | null
+  pendingSigners?: string[] | null
 }): Promise<void> {
   const recipients = normalizeEmailList(args.to)
+  const pendingSigners = (args.pendingSigners ?? []).filter(Boolean)
 
   if (!recipients.length) {
     throw new Error("Chybí příjemce e-mailu.")
@@ -2506,6 +2506,24 @@ export async function sendExitChecklistDueSoonReminderEmail(args: {
                   ${infoTable}
 
                   ${
+                    pendingSigners.length > 0
+                      ? wrapWithBottomSpacing(
+                          `
+                    <p style="margin:0 0 6px 0;font-size:13px;font-weight:bold;color:#082B2A;">
+                      Ještě nepodepsali (${pendingSigners.length}):
+                    </p>
+                    <ul style="margin:0;padding-left:18px;font-size:13px;color:#374151;line-height:1.6;">
+                      ${pendingSigners
+                        .map((signer) => `<li>${escapeHtml(signer)}</li>`)
+                        .join("")}
+                    </ul>
+                    `,
+                          18
+                        )
+                      : ""
+                  }
+
+                  ${
                     checklistLink
                       ? `
                     ${wrapWithBottomSpacing(
@@ -2568,6 +2586,13 @@ export async function sendExitChecklistDueSoonReminderEmail(args: {
       ? `Konec pracovního poměru: ${fmtDate(args.employmentEndDate)}`
       : "",
     `Zbývá: ${daysLabel}`,
+    pendingSigners.length > 0
+      ? [
+          "",
+          `Ještě nepodepsali (${pendingSigners.length}):`,
+          ...pendingSigners.map((signer) => `- ${signer}`),
+        ].join("\n")
+      : "",
     checklistLink ? `Odkaz: ${checklistLink}` : "",
   ]
     .filter(Boolean)
@@ -2721,6 +2746,9 @@ export async function sendProbationEvaluationTajemnikReviewRequestEmail(
     "vyplnil",
     "vyplnila"
   )
+  const greeting = args.tajemnikName
+    ? `Vážený pane tajemníku, ${args.tajemnikName},`
+    : "Vážený pane tajemníku,"
 
   const html = `
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
@@ -2762,7 +2790,7 @@ export async function sendProbationEvaluationTajemnikReviewRequestEmail(
               <tr>
                 <td bgcolor="#ffffff" style="padding:26px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};">
                   <p style="margin:0 0 16px 0;font-size:14px;color:#082B2A;">
-                    Dobrý den,
+                    ${escapeHtml(greeting)}
                   </p>
 
                   <p style="margin:0 0 18px 0;font-size:14px;color:#374151;line-height:1.6;">
@@ -2827,7 +2855,7 @@ export async function sendProbationEvaluationTajemnikReviewRequestEmail(
   </html>`
 
   const text = [
-    "Dobrý den,",
+    greeting,
     "",
     `vedoucí odboru ${supervisorVerb} formulář Vyhodnocení zkušební doby níže uvedeného zaměstnance. Vyplněný formulář naleznete v PDF příloze. Prosíme o vyjádření (souhlas/nesouhlas s doporučením) přes odkaz níže.`,
     "",
@@ -2866,19 +2894,14 @@ export async function sendTajemnikReviewCompletedToSupervisorEmail(
 ): Promise<void> {
   const primary = "#00847C"
   const bgLight = "#E5F5F2"
-  const tajemnikVerb = genderedPastVerb(
-    args.tajemnikName,
-    "vyjádřil",
-    "vyjádřila"
-  )
-  const subject = `Vyhodnocení zkušební doby – tajemník se ${tajemnikVerb} – ${args.employeeName}`
+  const subject = `Vyhodnocení zkušební doby – tajemník se vyjádřil – ${args.employeeName}`
 
   const agreementText =
     args.tajemnikAgreement === "no"
       ? "nesouhlasí s Vaším doporučením"
       : "souhlasí s Vaším doporučením"
 
-  const intro = `tajemník${args.tajemnikName ? ` ${args.tajemnikName}` : " úřadu"} se ${tajemnikVerb} k Vámi vyplněnému vyhodnocení zkušební doby níže uvedeného zaměstnance – ${agreementText}. Vyhodnocení bylo v této podobě předáno Personálnímu oddělení k založení${args.pdfBuffer ? ", finální PDF naleznete v příloze" : ""}.`
+  const intro = `tajemník${args.tajemnikName ? ` ${args.tajemnikName}` : " úřadu"} se vyjádřil k Vámi vyplněnému vyhodnocení zkušební doby níže uvedeného zaměstnance – ${agreementText}. Vyhodnocení bylo v této podobě předáno Personálnímu oddělení k založení${args.pdfBuffer ? ", finální PDF naleznete v příloze" : ""}.`
 
   const html = `
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">

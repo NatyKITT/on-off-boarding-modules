@@ -965,7 +965,7 @@ export function OffboardingFormUnified({
             <div className="flex items-center justify-between gap-3">
               <div>
                 <CardTitle className="flex items-center gap-2">
-                  <User className="size-5" /> Vedoucí oddělení
+                  <User className="size-5" /> Vedoucí odboru
                 </CardTitle>
                 <p className="mt-1 text-sm text-muted-foreground">
                   Načítá se automaticky podle čísla funkce, ale lze ho změnit.

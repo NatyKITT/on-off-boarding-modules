@@ -987,7 +987,7 @@ export default function EmployeeChangesPage() {
             : undefined
         }
       >
-        <TableCell className="w-[210px] min-w-[210px] align-top">
+        <TableCell className="sticky left-0 z-10 w-[210px] min-w-[210px] border-r bg-background align-top">
           <div className="flex items-start gap-2">
             <User className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0">
@@ -1288,7 +1288,10 @@ export default function EmployeeChangesPage() {
                   </Button>
                 </DialogTrigger>
 
-                <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
+                <DialogContent
+                  className="max-h-[90vh] max-w-5xl overflow-y-auto p-0"
+                  onInteractOutside={(event) => event.preventDefault()}
+                >
                   <DialogTitle className="px-6 pt-6">
                     Přidat novou změnu
                   </DialogTitle>
@@ -1452,7 +1455,7 @@ export default function EmployeeChangesPage() {
                                           >
                                             <TableHeader>
                                               <TableRow>
-                                                <TableHead className="w-[210px] min-w-[210px]">
+                                                <TableHead className="sticky left-0 z-10 w-[210px] min-w-[210px] border-r bg-background">
                                                   Zaměstnanec
                                                 </TableHead>
                                                 <TableHead className="w-[280px] min-w-[280px]">
@@ -1522,7 +1525,10 @@ export default function EmployeeChangesPage() {
           if (open && positions.length === 0) void loadPositions()
         }}
       >
-        <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
+        <DialogContent
+          className="max-h-[90vh] max-w-5xl overflow-y-auto p-0"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
           <DialogTitle className="px-6 pt-6">Upravit změnu</DialogTitle>
           <div className="p-6">
             {loadingPositions ? (

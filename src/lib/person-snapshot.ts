@@ -1,5 +1,6 @@
 import type { Employee } from "@/lib/eos-employees"
 import type { EosSuperior } from "@/lib/eos-superior"
+import { joinNameWithTitles } from "@/lib/format-name"
 
 export type PersonSourceValue = "USER" | "EOS" | "MANUAL"
 
@@ -23,16 +24,7 @@ const emptyToNull = (value?: string | null) => {
 }
 
 export function buildPersonFullName(person: Partial<PersonSnapshot>): string {
-  return [
-    person.titleBefore ?? "",
-    person.name ?? "",
-    person.surname ?? "",
-    person.titleAfter ?? "",
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim()
+  return joinNameWithTitles(person).replace(/\s+/g, " ").trim()
 }
 
 export function snapshotFromEmployee(

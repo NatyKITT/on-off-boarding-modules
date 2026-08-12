@@ -1927,7 +1927,7 @@ export default function OnboardingPage() {
               : undefined
           }
         >
-          <TableCell className="w-[220px] min-w-[220px]">
+          <TableCell className="sticky left-0 z-10 w-[220px] min-w-[220px] border-r bg-background">
             <div className="flex items-start gap-2">
               <User className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
               <div className="min-w-0">
@@ -2080,7 +2080,7 @@ export default function OnboardingPage() {
             : undefined
         }
       >
-        <TableCell className="w-[220px] min-w-[220px]">
+        <TableCell className="sticky left-0 z-10 w-[220px] min-w-[220px] border-r bg-background">
           <div className="flex items-start gap-2">
             <User className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0">
@@ -2411,7 +2411,10 @@ export default function OnboardingPage() {
               </Button>
             </DialogTrigger>
 
-            <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
+            <DialogContent
+              className="max-h-[90vh] max-w-5xl overflow-y-auto p-0"
+              onInteractOutside={(event) => event.preventDefault()}
+            >
               <DialogTitle className="px-6 pt-6">
                 Nový plánovaný nástup
               </DialogTitle>
@@ -2574,7 +2577,7 @@ export default function OnboardingPage() {
                                       >
                                         <TableHeader>
                                           <TableRow>
-                                            <TableHead className="w-[220px] min-w-[220px]">
+                                            <TableHead className="sticky left-0 z-10 w-[220px] min-w-[220px] border-r bg-background">
                                               Zaměstnanec
                                             </TableHead>
                                             <TableHead className="w-[220px] min-w-[220px]">
@@ -2661,7 +2664,10 @@ export default function OnboardingPage() {
               </Button>
             </DialogTrigger>
 
-            <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
+            <DialogContent
+              className="max-h-[90vh] max-w-5xl overflow-y-auto p-0"
+              onInteractOutside={(event) => event.preventDefault()}
+            >
               <DialogTitle className="px-6 pt-6">Skutečný nástup</DialogTitle>
               <div className="p-6">
                 {loadingPositions ? (
@@ -2822,7 +2828,7 @@ export default function OnboardingPage() {
                                       >
                                         <TableHeader>
                                           <TableRow>
-                                            <TableHead className="w-[220px] min-w-[220px]">
+                                            <TableHead className="sticky left-0 z-10 w-[220px] min-w-[220px] border-r bg-background">
                                               Zaměstnanec
                                             </TableHead>
                                             <TableHead className="w-[220px] min-w-[220px]">
@@ -3011,7 +3017,7 @@ export default function OnboardingPage() {
                                       >
                                         <TableHeader>
                                           <TableRow>
-                                            <TableHead className="w-[220px] min-w-[220px]">
+                                            <TableHead className="sticky left-0 z-10 w-[220px] min-w-[220px] border-r bg-background">
                                               Zaměstnanec
                                             </TableHead>
                                             <TableHead className="w-[220px] min-w-[220px]">
@@ -3936,7 +3942,10 @@ export default function OnboardingPage() {
           }
         }}
       >
-        <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto p-0">
+        <DialogContent
+          className="max-h-[90vh] max-w-5xl overflow-y-auto p-0"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
           <DialogTitle className="px-6 pt-6">Upravit záznam</DialogTitle>
           <div className="p-6">
             {loadingPositions ? (

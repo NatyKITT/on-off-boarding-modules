@@ -2,7 +2,7 @@
   "private": true,
   "name": "On-Off-Boarding-Module",
   "description": "",
-  "version": "0.7.0",
+  "version": "0.9.0",
   "type": "module",
   "scripts": {
     "dev": "next dev -p 3001",
@@ -24,9 +24,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "next lint",
     "lint:fix": "next lint --fix",
-    "email:process": "curl -X GET http://localhost:3001/api/cron/mail-worker",
-    "probation:check": "curl -X GET \"http://localhost:3001/api/cron/probation-notifications?force=true\"",
-    "offboarding:check": "curl -X GET \"http://localhost:3001/api/cron/offboarding-notifications?force=true\""
+    "email:process": "curl -X GET -H \"x-cron-secret: $CRON_SECRET\" http://localhost:3001/api/cron/mail-worker",
+    "probation:check": "curl -X GET -H \"x-cron-secret: $CRON_SECRET\" \"http://localhost:3001/api/cron/probation-notifications?force=true\"",
+    "offboarding:check": "curl -X GET -H \"x-cron-secret: $CRON_SECRET\" \"http://localhost:3001/api/cron/offboarding-notifications?force=true\""
   },
   "dependencies": {
     "@auth/core": "0.30.0",
@@ -80,6 +80,7 @@
     "date-fns": "^3.6.0",
     "dayjs": "^1.11.13",
     "dotenv": "^16.4.5",
+    "eslint-plugin-tailwindcss": "^3.15.1",
     "framer-motion": "^11.1.9",
     "jsonwebtoken": "^9.0.3",
     "lenis": "^1.3.17",
@@ -103,6 +104,7 @@
     "resend": "^3.2.0",
     "sonner": "^2.0.6",
     "tailwind-merge": "^2.3.0",
+    "tailwindcss": "^3.4.3",
     "tailwindcss-animate": "^1.0.7",
     "vaul": "^1.1.2",
     "ws": "^8.17.0",
@@ -129,7 +131,6 @@
     "eslint": "^8.57.1",
     "eslint-config-next": "14.2.35",
     "eslint-config-prettier": "^9.1.0",
-    "eslint-plugin-tailwindcss": "^3.15.1",
     "postcss": "^8.4.38",
     "prettier": "^3.2.5",
     "prettier-plugin-tailwindcss": "^0.5.14",

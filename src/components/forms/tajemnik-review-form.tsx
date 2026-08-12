@@ -5,6 +5,8 @@ import { useState } from "react"
 import type { ProbationFormType } from "@prisma/client"
 import { Check, Undo2 } from "lucide-react"
 
+import { useSignatureName } from "@/hooks/use-signature-name"
+
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -128,6 +130,9 @@ export function TajemnikReviewForm({
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
+  const signatureName = useSignatureName()
+  const resolvedCurrentUserName = signatureName || currentUserName
+
   const isSigned = Boolean(signedAt)
 
   function sign() {
@@ -161,7 +166,7 @@ export function TajemnikReviewForm({
         tajemnikAgreement: agreement,
         tajemnikComment: comment.trim(),
         tajemnikSignature: {
-          signedByName: currentUserName || currentUserEmail || null,
+          signedByName: resolvedCurrentUserName || currentUserEmail || null,
           signedByEmail: currentUserEmail || null,
           signedAt,
         },
@@ -392,7 +397,7 @@ export function TajemnikReviewForm({
               {isSigned ? (
                 <div className="rounded-md bg-muted/50 px-3 py-2 text-sm">
                   <div className="font-medium">
-                    {currentUserName || currentUserEmail}
+                    {resolvedCurrentUserName || currentUserEmail}
                   </div>
                   <div className="text-xs text-muted-foreground">
                     {fmtDateTime(signedAt)}
