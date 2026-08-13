@@ -259,7 +259,10 @@ export function SendAllDialog({
         </Button>
       </DialogTrigger>
 
-      <DialogContent className="flex max-h-[90svh] w-full max-w-2xl flex-col gap-0 overflow-hidden p-0">
+      <DialogContent
+        className="flex max-h-[90svh] w-full max-w-2xl flex-col gap-0 overflow-hidden p-0"
+        onInteractOutside={(event) => event.preventDefault()}
+      >
         <div className="shrink-0 border-b px-5 py-4">
           <DialogTitle className="flex items-center gap-2 text-base font-semibold">
             <Mail className="size-5 shrink-0" />

@@ -696,6 +696,46 @@ const ONBOARDING_CANCELLED_COLUMNS: ColumnDef<OnboardingReportRow>[] = [
   },
 ]
 
+const OFFBOARDING_CANCELLED_COLUMNS: ColumnDef<OffboardingReportRow>[] = [
+  {
+    label: "Zaměstnanec",
+    weight: 18,
+    cell: (row) =>
+      stackCell(
+        row.fullName,
+        row.personalNumber ? `č. ${row.personalNumber}` : null
+      ),
+  },
+  {
+    label: "Pozice",
+    weight: 15,
+    wrap: true,
+    cell: (row) => stackCell(row.positionName, row.positionNum),
+  },
+  {
+    label: "Odbor / Oddělení",
+    weight: 15,
+    wrap: true,
+    cell: (row) => stackCell(row.department, row.unitName),
+  },
+  {
+    label: "Důvod zrušení",
+    weight: 20,
+    wrap: true,
+    cell: (row) => row.cancelReason?.trim() || "—",
+  },
+  {
+    label: "Zrušeno",
+    weight: 15,
+    cell: (row) => stackCell(formatDate(row.cancelledAt), row.cancelledBy),
+  },
+  {
+    label: "Kontakt",
+    weight: 17,
+    cell: (row) => stackCell(row.userEmail, row.userName),
+  },
+]
+
 function getOffboardingColumns(
   includeDocuments: boolean
 ): ColumnDef<OffboardingReportRow>[] {
@@ -797,7 +837,8 @@ function sectionSortWeight(section: ReportSection): [number, number, string] {
     return [0, statusWeight, section.month]
   }
   if (section.module === "odchod") {
-    const statusWeight = section.status === "planned" ? 0 : 1
+    const statusWeight =
+      section.status === "planned" ? 0 : section.status === "actual" ? 1 : 2
     return [1, statusWeight, section.month]
   }
   return [2, 0, section.month]
@@ -820,7 +861,13 @@ function groupTitle(section: ReportSection): string {
     return `Nástupy – ${label}`
   }
   if (section.module === "odchod") {
-    return `Odchody – ${section.status === "planned" ? "Plánované" : "Skutečné"}`
+    const label =
+      section.status === "planned"
+        ? "Plánované"
+        : section.status === "actual"
+          ? "Skutečné"
+          : "Neuskutečněné"
+    return `Odchody – ${label}`
   }
   return "Zaměstnanecké změny"
 }
@@ -977,12 +1024,17 @@ export async function renderPdfReportBuffer(
       page = result.page
       y = result.y
     } else if (section.module === "odchod") {
+      const columns =
+        section.status === "cancelled"
+          ? OFFBOARDING_CANCELLED_COLUMNS
+          : getOffboardingColumns(section.includeDocuments)
+
       const result = drawTable({
         pdf,
         page,
         fonts,
         y,
-        columns: getOffboardingColumns(section.includeDocuments),
+        columns,
         rows: section.rows,
         continuationTitle,
       })

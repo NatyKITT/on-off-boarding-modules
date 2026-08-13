@@ -72,7 +72,10 @@ export function DocumentHistoryDialog({
         )}
       </DialogTrigger>
 
-      <DialogContent className="flex max-h-[90svh] w-[calc(100vw-2rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0">
+      <DialogContent
+        className="flex max-h-[90svh] w-[calc(100vw-2rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0"
+        onInteractOutside={(event) => event.preventDefault()}
+      >
         <DialogHeader className="shrink-0 border-b p-4 sm:px-6">
           <DialogTitle className="flex items-center gap-2">
             <HistoryIcon className="size-5 shrink-0" />

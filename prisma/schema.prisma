@@ -27,6 +27,7 @@ enum OffboardingStatus {
   NEW
   IN_PROGRESS
   COMPLETED
+  CANCELLED
 }
 
 enum PersonSource {
@@ -440,6 +441,10 @@ model EmployeeOffboarding {
   noticeMonths   Int?              @default(2)
   noticeEnd      DateTime?
   hasCustomDates Boolean           @default(false)
+
+  cancelledAt  DateTime?
+  cancelledBy  String?
+  cancelReason String?
 
   supervisorSource         PersonSource?
   supervisorManualOverride Boolean       @default(false)

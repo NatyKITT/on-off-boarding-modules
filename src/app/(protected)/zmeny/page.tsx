@@ -24,7 +24,6 @@ import { type Position } from "@/types/position"
 import { useIsReadonly } from "@/hooks/use-current-role"
 import { useDismissableHighlight } from "@/hooks/use-dismissable-highlight"
 import { useFacetedFilter } from "@/hooks/use-faceted-filter"
-import { useSessionStorageState } from "@/hooks/use-session-storage-state"
 import { useTextFilter } from "@/hooks/use-text-filter"
 import {
   buildDistinctOptions,
@@ -489,19 +488,10 @@ export default function EmployeeChangesPage() {
   const [openEdit, setOpenEdit] = useState(false)
   const [editRow, setEditRow] = useState<ChangeRow | null>(null)
 
-  const [monthFilter, setMonthFilter] = useSessionStorageState(
-    "zmeny:monthFilter",
-    ""
-  )
+  const [monthFilter, setMonthFilter] = useState("")
 
-  const [expandedYears, setExpandedYears] = useSessionStorageState<string[]>(
-    "zmeny:expandedYears",
-    []
-  )
-  const [expandedMonths, setExpandedMonths] = useSessionStorageState<string[]>(
-    "zmeny:expandedMonths",
-    []
-  )
+  const [expandedYears, setExpandedYears] = useState<string[]>([])
+  const [expandedMonths, setExpandedMonths] = useState<string[]>([])
 
   const [successModal, setSuccessModal] = useState({
     open: false,
@@ -620,9 +610,7 @@ export default function EmployeeChangesPage() {
     []
   )
 
-  const { query, setQuery, filterRows } = useTextFilter(getSearchableText, {
-    persistKey: "zmeny:searchQuery",
-  })
+  const { query, setQuery, filterRows } = useTextFilter(getSearchableText)
 
   const dateFilteredRows = useMemo(() => {
     if (!monthFilter) return activeRows
@@ -654,9 +642,7 @@ export default function EmployeeChangesPage() {
     clearAll: clearAllFacetFilters,
     filteredRows,
     availableValues,
-  } = useFacetedFilter<ChangeRow, ChangeFacetKey>(searchedRows, changeFacets, {
-    persistKey: "zmeny:facetFilters",
-  })
+  } = useFacetedFilter<ChangeRow, ChangeFacetKey>(searchedRows, changeFacets)
 
   const departmentOptionsAll = useMemo(
     () =>
@@ -1275,7 +1261,6 @@ export default function EmployeeChangesPage() {
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             {!isReadonly && (
               <Dialog
-                modal={false}
                 open={openNew}
                 onOpenChange={(open) => {
                   setOpenNew(open)
@@ -1289,14 +1274,18 @@ export default function EmployeeChangesPage() {
                 </DialogTrigger>
 
                 <DialogContent
-                  className="max-h-[90vh] max-w-5xl overflow-y-auto p-0"
+                  className="flex max-h-[90vh] max-w-5xl flex-col gap-0 overflow-hidden p-0"
                   onInteractOutside={(event) => event.preventDefault()}
                 >
-                  <DialogTitle className="px-6 pt-6">
+                  <DialogTitle className="shrink-0 border-b px-6 py-4">
                     Přidat novou změnu
                   </DialogTitle>
 
-                  <div className="p-6">
+                  <div
+                    className="min-h-0 flex-1 overflow-y-auto p-6"
+                    data-lenis-prevent=""
+                    onWheelCapture={(event) => event.stopPropagation()}
+                  >
                     {loadingPositions ? (
                       <div className="flex items-center justify-center py-8">
                         <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
@@ -1517,7 +1506,6 @@ export default function EmployeeChangesPage() {
       )}
 
       <Dialog
-        modal={false}
         open={openEdit}
         onOpenChange={(open) => {
           setOpenEdit(open)
@@ -1526,11 +1514,17 @@ export default function EmployeeChangesPage() {
         }}
       >
         <DialogContent
-          className="max-h-[90vh] max-w-5xl overflow-y-auto p-0"
+          className="flex max-h-[90vh] max-w-5xl flex-col gap-0 overflow-hidden p-0"
           onInteractOutside={(event) => event.preventDefault()}
         >
-          <DialogTitle className="px-6 pt-6">Upravit změnu</DialogTitle>
-          <div className="p-6">
+          <DialogTitle className="shrink-0 border-b px-6 py-4">
+            Upravit změnu
+          </DialogTitle>
+          <div
+            className="min-h-0 flex-1 overflow-y-auto p-6"
+            data-lenis-prevent=""
+            onWheelCapture={(event) => event.stopPropagation()}
+          >
             {loadingPositions ? (
               <div className="flex items-center justify-center py-8">
                 <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
@@ -1565,7 +1559,10 @@ export default function EmployeeChangesPage() {
         open={linkDialog.open}
         onOpenChange={(open) => setLinkDialog((prev) => ({ ...prev, open }))}
       >
-        <DialogContent className="max-w-lg">
+        <DialogContent
+          className="max-w-lg"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
           <DialogHeader>
             <div className="flex items-center gap-3">
               <div className="flex size-10 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/20">
@@ -1687,7 +1684,10 @@ export default function EmployeeChangesPage() {
         open={deleteDialog.open}
         onOpenChange={(open) => setDeleteDialog((prev) => ({ ...prev, open }))}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent
+          className="max-w-md"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
           <DialogHeader>
             <div className="flex items-center gap-3">
               <div className="flex size-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/20">

@@ -156,7 +156,10 @@ export function StatistikyExportDialog({
           Export
         </Button>
       </DialogTrigger>
-      <DialogContent className="w-[calc(100vw-2rem)] max-w-lg">
+      <DialogContent
+        className="w-[calc(100vw-2rem)] max-w-lg"
+        onInteractOutside={(event) => event.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle>Export statistik</DialogTitle>
         </DialogHeader>

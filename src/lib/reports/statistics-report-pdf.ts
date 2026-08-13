@@ -450,6 +450,10 @@ export async function renderStatisticsPdfBuffer(args: {
         label: "Neuskutečněné nástupy",
         value: String(kpis.onboardingsCancelledTotal),
       },
+      {
+        label: "Neuskutečněné odchody",
+        value: String(kpis.offboardingsCancelledTotal),
+      },
     ])
   }
 

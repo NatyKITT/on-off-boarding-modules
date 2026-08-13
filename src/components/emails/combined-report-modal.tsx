@@ -783,6 +783,7 @@ export function CombinedReportModal({
         <DialogContent
           className="flex max-h-[88svh] w-full max-w-6xl flex-col gap-0 p-0 sm:max-h-[90svh]"
           style={{ overscrollBehavior: "contain" }}
+          onInteractOutside={(event) => event.preventDefault()}
         >
           <DialogHeader className="shrink-0 border-b p-3 sm:p-4 sm:px-6">
             <DialogTitle>Měsíční report – {monthsLabel}</DialogTitle>

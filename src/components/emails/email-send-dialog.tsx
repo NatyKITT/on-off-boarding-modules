@@ -123,7 +123,10 @@ export function EmailSendDialog({
       <DialogTrigger asChild>
         {trigger ?? <Button variant="outline">Odeslat e-mail</Button>}
       </DialogTrigger>
-      <DialogContent className="max-w-md">
+      <DialogContent
+        className="max-w-md"
+        onInteractOutside={(event) => event.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle>
             {mode === "row"

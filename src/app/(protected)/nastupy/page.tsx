@@ -31,7 +31,6 @@ import { type Position } from "@/types/position"
 import { useIsReadonly } from "@/hooks/use-current-role"
 import { useDismissableHighlight } from "@/hooks/use-dismissable-highlight"
 import { useFacetedFilter } from "@/hooks/use-faceted-filter"
-import { useSessionStorageState } from "@/hooks/use-session-storage-state"
 import { useTextFilter } from "@/hooks/use-text-filter"
 import {
   EMPTY_DAY_RANGE,
@@ -440,7 +439,10 @@ function EmployeeChangeInfoButton({
         </Button>
       </DialogTrigger>
 
-      <DialogContent className="max-w-2xl">
+      <DialogContent
+        className="max-w-2xl"
+        onInteractOutside={(event) => event.preventDefault()}
+      >
         <DialogHeader>
           <div className="flex items-center gap-3">
             <div className="flex size-10 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/20">
@@ -860,19 +862,18 @@ export default function OnboardingPage() {
     message: "",
   })
 
-  const [expandedPlannedYears, setExpandedPlannedYears] =
-    useSessionStorageState<string[]>("nastupy:expandedPlannedYears", [])
-  const [expandedPlannedMonths, setExpandedPlannedMonths] =
-    useSessionStorageState<string[]>("nastupy:expandedPlannedMonths", [])
-  const [expandedActualYears, setExpandedActualYears] = useSessionStorageState<
+  const [expandedPlannedYears, setExpandedPlannedYears] = useState<string[]>([])
+  const [expandedPlannedMonths, setExpandedPlannedMonths] = useState<string[]>(
+    []
+  )
+  const [expandedActualYears, setExpandedActualYears] = useState<string[]>([])
+  const [expandedActualMonths, setExpandedActualMonths] = useState<string[]>([])
+  const [expandedCancelledYears, setExpandedCancelledYears] = useState<
     string[]
-  >("nastupy:expandedActualYears", [])
-  const [expandedActualMonths, setExpandedActualMonths] =
-    useSessionStorageState<string[]>("nastupy:expandedActualMonths", [])
-  const [expandedCancelledYears, setExpandedCancelledYears] =
-    useSessionStorageState<string[]>("nastupy:expandedCancelledYears", [])
-  const [expandedCancelledMonths, setExpandedCancelledMonths] =
-    useSessionStorageState<string[]>("nastupy:expandedCancelledMonths", [])
+  >([])
+  const [expandedCancelledMonths, setExpandedCancelledMonths] = useState<
+    string[]
+  >([])
 
   const [personalMeta, setPersonalMeta] = useState<
     PersonalNumberMeta | undefined
@@ -889,10 +890,7 @@ export default function OnboardingPage() {
 
   const currentMonth = format(new Date(), "yyyy-MM")
 
-  const [arrivalDateFilter, setArrivalDateFilter] = useSessionStorageState(
-    "nastupy:dateFilter",
-    ""
-  )
+  const [arrivalDateFilter, setArrivalDateFilter] = useState("")
   const [probationPresets, setProbationPresets] = useState<string[]>([])
   const [probationDayRange, setProbationDayRange] =
     useState<DayRangeValue>(EMPTY_DAY_RANGE)
@@ -1017,9 +1015,7 @@ export default function OnboardingPage() {
     query: searchQuery,
     setQuery: setSearchQuery,
     filterRows,
-  } = useTextFilter(getArrivalSearchableText, {
-    persistKey: "nastupy:searchQuery",
-  })
+  } = useTextFilter(getArrivalSearchableText)
 
   const allArrivals = useMemo(
     () => [...planned, ...actual, ...cancelled],
@@ -1097,8 +1093,7 @@ export default function OnboardingPage() {
     availableValues,
   } = useFacetedFilter<Arrival, ArrivalFacetKey>(
     searchedArrivals,
-    arrivalFacets,
-    { persistKey: "nastupy:facetFilters" }
+    arrivalFacets
   )
 
   const handleStatusFilterChange = React.useCallback(
@@ -2412,13 +2407,17 @@ export default function OnboardingPage() {
             </DialogTrigger>
 
             <DialogContent
-              className="max-h-[90vh] max-w-5xl overflow-y-auto p-0"
+              className="flex max-h-[90vh] max-w-5xl flex-col gap-0 overflow-hidden p-0"
               onInteractOutside={(event) => event.preventDefault()}
             >
-              <DialogTitle className="px-6 pt-6">
+              <DialogTitle className="shrink-0 border-b px-6 py-4">
                 Nový plánovaný nástup
               </DialogTitle>
-              <div className="p-6">
+              <div
+                className="min-h-0 flex-1 overflow-y-auto p-6"
+                data-lenis-prevent=""
+                onWheelCapture={(event) => event.stopPropagation()}
+              >
                 {loadingPositions ? (
                   <div className="flex items-center justify-center py-8">
                     <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
@@ -2665,11 +2664,17 @@ export default function OnboardingPage() {
             </DialogTrigger>
 
             <DialogContent
-              className="max-h-[90vh] max-w-5xl overflow-y-auto p-0"
+              className="flex max-h-[90vh] max-w-5xl flex-col gap-0 overflow-hidden p-0"
               onInteractOutside={(event) => event.preventDefault()}
             >
-              <DialogTitle className="px-6 pt-6">Skutečný nástup</DialogTitle>
-              <div className="p-6">
+              <DialogTitle className="shrink-0 border-b px-6 py-4">
+                Skutečný nástup
+              </DialogTitle>
+              <div
+                className="min-h-0 flex-1 overflow-y-auto p-6"
+                data-lenis-prevent=""
+                onWheelCapture={(event) => event.stopPropagation()}
+              >
                 {loadingPositions ? (
                   <div className="flex items-center justify-center py-8">
                     <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
@@ -3410,7 +3415,10 @@ export default function OnboardingPage() {
           }
         }}
       >
-        <DialogContent className="max-w-3xl p-0">
+        <DialogContent
+          className="max-w-3xl p-0"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
           <DialogTitle className="px-6 pt-6">
             Potvrdit skutečný nástup
           </DialogTitle>
@@ -3543,7 +3551,10 @@ export default function OnboardingPage() {
         open={revertDialog.open}
         onOpenChange={(open) => setRevertDialog((prev) => ({ ...prev, open }))}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent
+          className="max-w-md"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
           <DialogHeader>
             <div className="flex items-center gap-3">
               <div className="flex size-10 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-900/20">
@@ -3620,7 +3631,10 @@ export default function OnboardingPage() {
         open={cancelDialog.open}
         onOpenChange={(open) => setCancelDialog((prev) => ({ ...prev, open }))}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent
+          className="max-w-md"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
           <DialogHeader>
             <div className="flex items-center gap-3">
               <div className="flex size-10 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-900/20">
@@ -3745,7 +3759,10 @@ export default function OnboardingPage() {
           setRestoreCancelledDialog((prev) => ({ ...prev, open }))
         }
       >
-        <DialogContent className="max-w-md">
+        <DialogContent
+          className="max-w-md"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
           <DialogHeader>
             <div className="flex items-center gap-3">
               <div className="flex size-10 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/20">
@@ -3845,7 +3862,10 @@ export default function OnboardingPage() {
         open={deleteDialog.open}
         onOpenChange={(open) => setDeleteDialog((prev) => ({ ...prev, open }))}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent
+          className="max-w-md"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
           <DialogHeader>
             <div className="flex items-center gap-3">
               <div className="flex size-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/20">
@@ -3943,11 +3963,17 @@ export default function OnboardingPage() {
         }}
       >
         <DialogContent
-          className="max-h-[90vh] max-w-5xl overflow-y-auto p-0"
+          className="flex max-h-[90vh] max-w-5xl flex-col gap-0 overflow-hidden p-0"
           onInteractOutside={(event) => event.preventDefault()}
         >
-          <DialogTitle className="px-6 pt-6">Upravit záznam</DialogTitle>
-          <div className="p-6">
+          <DialogTitle className="shrink-0 border-b px-6 py-4">
+            Upravit záznam
+          </DialogTitle>
+          <div
+            className="min-h-0 flex-1 overflow-y-auto p-6"
+            data-lenis-prevent=""
+            onWheelCapture={(event) => event.stopPropagation()}
+          >
             {loadingPositions ? (
               <div className="flex items-center justify-center py-8">
                 <div className="size-8 animate-spin rounded-full border-b-2 border-current" />

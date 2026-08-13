@@ -53,10 +53,16 @@ export function KpiCards({ kpis, year }: Props) {
       icon: XCircle,
       onClick: () => router.push(`/nastupy?statYear=${year}&status=cancelled`),
     },
+    {
+      label: "Neuskutečněné odchody",
+      value: kpis.offboardingsCancelledTotal,
+      icon: XCircle,
+      onClick: () => router.push(`/odchody?statYear=${year}&status=cancelled`),
+    },
   ]
 
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
       {cards.map((card) => {
         const Icon = card.icon
         const clickable = Boolean(card.onClick)

@@ -16,12 +16,12 @@ import {
 } from "lucide-react"
 
 import { useFacetedFilter } from "@/hooks/use-faceted-filter"
-import { useSessionStorageState } from "@/hooks/use-session-storage-state"
 import { useTextFilter } from "@/hooks/use-text-filter"
 import {
   buildDistinctOptions,
   filterAvailableOptions,
 } from "@/lib/filter-options"
+import { cn } from "@/lib/utils"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -31,6 +31,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ActiveFilterChips } from "@/components/common/active-filter-chips"
 import { ListPageSkeleton } from "@/components/common/list-page-skeleton"
 import { MultiSelectFilter } from "@/components/common/multi-select-filter"
@@ -39,7 +40,12 @@ import { SearchInput } from "@/components/common/search-input"
 import { DocumentRow, PersonBulkActions } from "./document-row"
 import type { PersonRow } from "./types"
 
-type FacetKey = "kind" | "department" | "recordStatus" | "rowStatus"
+type FacetKey =
+  | "kind"
+  | "department"
+  | "recordStatus"
+  | "rowStatus"
+  | "sendStatus"
 
 const KIND_LABEL: Record<PersonRow["kind"], string> = {
   onboarding: "Nástup",
@@ -58,6 +64,13 @@ const ROW_STATUS_OPTIONS = [
   { value: "missing", label: "Nevyplněno" },
 ]
 
+const SEND_STATUS_OPTIONS = [
+  { value: "not_created", label: "Nevytvořeno" },
+  { value: "not_sent", label: "Neodesláno" },
+  { value: "sent_pending", label: "Odesláno, nevyplněno" },
+  { value: "completed", label: "Vyplněno" },
+]
+
 function recordStatus(row: PersonRow): "planned" | "actual" | "cancelled" {
   if (row.cancelledAt) return "cancelled"
   return row.actualDate ? "actual" : "planned"
@@ -73,8 +86,34 @@ function rowStatus(row: PersonRow): "complete" | "partial" | "missing" {
   return "partial"
 }
 
+function documentSendStatus(
+  doc: PersonRow["documents"][number]
+): "not_created" | "not_sent" | "sent_pending" | "completed" {
+  if (doc.status === "not_created") return "not_created"
+  if (doc.status === "completed") return "completed"
+  if (doc.note === "Zatím neodesláno") return "not_sent"
+  return "sent_pending"
+}
+
 function relevantDate(row: PersonRow) {
   return row.actualDate ?? row.plannedDate
+}
+
+function personCardTint(
+  kind: PersonRow["kind"],
+  status: "planned" | "actual" | "cancelled"
+) {
+  if (status === "cancelled") return "bg-muted/40"
+
+  if (kind === "onboarding") {
+    return status === "actual"
+      ? "bg-green-50/70 dark:bg-green-950/20"
+      : "bg-blue-50/70 dark:bg-blue-950/20"
+  }
+
+  return status === "actual"
+    ? "bg-red-50/70 dark:bg-red-950/20"
+    : "bg-orange-50/70 dark:bg-orange-950/20"
 }
 
 function groupByYearMonth(rows: PersonRow[]) {
@@ -110,7 +149,12 @@ function PersonRowCard({
   ).length
 
   return (
-    <Card className={status === "cancelled" ? "opacity-60" : undefined}>
+    <Card
+      className={cn(
+        personCardTint(row.kind, status),
+        status === "cancelled" && "opacity-60"
+      )}
+    >
       <CardContent className="p-0">
         <Collapsible open={expanded}>
           <CollapsibleTrigger
@@ -163,25 +207,16 @@ function PersonRowCard({
 }
 
 function KindSection({
-  kind,
   rows,
   isFiltering,
 }: {
-  kind: PersonRow["kind"]
   rows: PersonRow[]
   isFiltering: boolean
 }) {
-  const storageKey = `dokumenty-expanded-${kind}`
   const currentYear = String(new Date().getFullYear())
 
-  const [expandedYears, setExpandedYears] = useSessionStorageState<string[]>(
-    storageKey + "-years",
-    [currentYear]
-  )
-  const [expandedMonths, setExpandedMonths] = useSessionStorageState<string[]>(
-    storageKey + "-months",
-    []
-  )
+  const [expandedYears, setExpandedYears] = useState<string[]>([currentYear])
+  const [expandedMonths, setExpandedMonths] = useState<string[]>([])
 
   const grouped = useMemo(() => groupByYearMonth(rows), [rows])
   const years = useMemo(
@@ -193,49 +228,50 @@ function KindSection({
     [years, grouped]
   )
 
-  if (rows.length === 0) return null
+  const allExpanded =
+    years.length > 0 &&
+    years.every((year) => expandedYears.includes(year)) &&
+    allMonths.every((month) => expandedMonths.includes(month))
+
+  if (rows.length === 0) {
+    return (
+      <p className="py-6 text-center text-sm text-muted-foreground">
+        {isFiltering
+          ? "Žádné záznamy tady neodpovídají zadaným filtrům."
+          : "Žádné záznamy."}
+      </p>
+    )
+  }
 
   return (
     <section className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        {kind === "onboarding" ? (
-          <UserPlus className="size-5 text-primary" />
-        ) : (
-          <UserMinus className="size-5 text-primary" />
-        )}
-        <h2 className="text-lg font-semibold">
-          {kind === "onboarding" ? "Nástupy" : "Odchody"}
-        </h2>
-        <Badge variant="secondary">{rows.length}</Badge>
+        <span className="text-sm text-muted-foreground">
+          {rows.length} {rows.length === 1 ? "záznam" : "záznamů"}
+        </span>
 
-        <div className="ml-auto flex items-center gap-1">
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-7 gap-1 text-xs text-muted-foreground"
-            onClick={() => {
-              setExpandedYears(years)
-              setExpandedMonths(allMonths)
-            }}
-          >
-            <ChevronsDown className="size-3.5" />
-            Rozbalit vše
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-7 gap-1 text-xs text-muted-foreground"
-            onClick={() => {
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="ml-auto h-7 gap-1 text-xs text-muted-foreground"
+          onClick={() => {
+            if (allExpanded) {
               setExpandedYears([])
               setExpandedMonths([])
-            }}
-          >
+            } else {
+              setExpandedYears(years)
+              setExpandedMonths(allMonths)
+            }
+          }}
+        >
+          {allExpanded ? (
             <ChevronsUp className="size-3.5" />
-            Sbalit vše
-          </Button>
-        </div>
+          ) : (
+            <ChevronsDown className="size-3.5" />
+          )}
+          {allExpanded ? "Sbalit vše" : "Rozbalit vše"}
+        </Button>
       </div>
 
       <div className="space-y-2">
@@ -246,29 +282,61 @@ function KindSection({
             (sum, list) => sum + list.length,
             0
           )
+          const yearMonths = Array.from(months.keys())
+          const allYearMonthsExpanded =
+            yearMonths.length > 0 &&
+            yearMonths.every((month) => expandedMonths.includes(month))
 
           return (
             <Collapsible key={year} open={isYearExpanded}>
-              <CollapsibleTrigger
-                onClick={() =>
-                  setExpandedYears((prev) =>
-                    prev.includes(year)
-                      ? prev.filter((y) => y !== year)
-                      : [...prev, year]
-                  )
-                }
-                className="flex w-full min-w-0 items-center gap-2 rounded-lg bg-muted/50 p-3 transition-colors hover:bg-muted"
-              >
-                {isYearExpanded ? (
-                  <ChevronDown className="size-5" />
-                ) : (
-                  <ChevronRight className="size-5" />
-                )}
-                <span className="text-lg font-semibold">{year}</span>
-                <Badge variant="secondary" className="ml-auto">
-                  {yearTotal}
-                </Badge>
-              </CollapsibleTrigger>
+              <div className="flex w-full min-w-0 items-center gap-2 rounded-lg bg-muted/50 p-3 transition-colors hover:bg-muted">
+                <CollapsibleTrigger
+                  onClick={() =>
+                    setExpandedYears((prev) =>
+                      prev.includes(year)
+                        ? prev.filter((y) => y !== year)
+                        : [...prev, year]
+                    )
+                  }
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                >
+                  {isYearExpanded ? (
+                    <ChevronDown className="size-5 shrink-0" />
+                  ) : (
+                    <ChevronRight className="size-5 shrink-0" />
+                  )}
+                  <span className="text-lg font-semibold">{year}</span>
+                  <Badge variant="secondary">{yearTotal}</Badge>
+                </CollapsibleTrigger>
+
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 shrink-0 gap-1 text-xs text-muted-foreground"
+                  onClick={() => {
+                    if (allYearMonthsExpanded) {
+                      setExpandedMonths((prev) =>
+                        prev.filter((month) => !yearMonths.includes(month))
+                      )
+                    } else {
+                      setExpandedMonths((prev) =>
+                        Array.from(new Set([...prev, ...yearMonths]))
+                      )
+                      setExpandedYears((prev) =>
+                        prev.includes(year) ? prev : [...prev, year]
+                      )
+                    }
+                  }}
+                >
+                  {allYearMonthsExpanded ? (
+                    <ChevronsUp className="size-3.5" />
+                  ) : (
+                    <ChevronsDown className="size-3.5" />
+                  )}
+                  {allYearMonthsExpanded ? "Sbalit měsíce" : "Rozbalit měsíce"}
+                </Button>
+              </div>
 
               <CollapsibleContent className="mt-2 space-y-3">
                 {Array.from(months.keys())
@@ -366,10 +434,12 @@ export function DocumentsOverviewClient() {
     query: searchQuery,
     setQuery: setSearchQuery,
     filterRows,
-  } = useTextFilter<PersonRow>(
-    (row) => [row.fullName, row.personalNumber, row.department, row.unitName],
-    { persistKey: "dokumenty-search" }
-  )
+  } = useTextFilter<PersonRow>((row) => [
+    row.fullName,
+    row.personalNumber,
+    row.department,
+    row.unitName,
+  ])
 
   const searchedRows = useMemo(() => filterRows(rows), [filterRows, rows])
 
@@ -379,16 +449,13 @@ export function DocumentsOverviewClient() {
     clearAll: clearAllFacets,
     filteredRows,
     availableValues,
-  } = useFacetedFilter<PersonRow, FacetKey>(
-    searchedRows,
-    {
-      kind: (row) => [KIND_LABEL[row.kind]],
-      department: (row) => [row.department],
-      recordStatus: (row) => [recordStatus(row)],
-      rowStatus: (row) => [rowStatus(row)],
-    },
-    { persistKey: "dokumenty-facets" }
-  )
+  } = useFacetedFilter<PersonRow, FacetKey>(searchedRows, {
+    kind: (row) => [KIND_LABEL[row.kind]],
+    department: (row) => [row.department],
+    recordStatus: (row) => [recordStatus(row)],
+    rowStatus: (row) => [rowStatus(row)],
+    sendStatus: (row) => row.documents.map((doc) => documentSendStatus(doc)),
+  })
 
   const kindOptions = useMemo(
     () => [
@@ -421,6 +488,10 @@ export function DocumentsOverviewClient() {
   const isFiltering =
     searchQuery.trim().length > 0 ||
     Object.values(facetFilters).some((values) => values.length > 0)
+
+  const [activeKind, setActiveKind] = useState<"onboarding" | "offboarding">(
+    "onboarding"
+  )
 
   return (
     <div className="flex size-full min-h-0 min-w-0 flex-col gap-4 overflow-x-hidden px-3 pb-8 sm:px-4 lg:px-8">
@@ -477,6 +548,14 @@ export function DocumentsOverviewClient() {
                 options={ROW_STATUS_OPTIONS}
                 selected={facetFilters.rowStatus}
                 onChange={(values) => setFacetFilter("rowStatus", values)}
+                searchPlaceholder="Hledat stav…"
+                emptyText="Nic nenalezeno."
+              />
+              <MultiSelectFilter
+                label="Stav odeslání"
+                options={SEND_STATUS_OPTIONS}
+                selected={facetFilters.sendStatus}
+                onChange={(values) => setFacetFilter("sendStatus", values)}
                 searchPlaceholder="Hledat stav…"
                 emptyText="Nic nenalezeno."
               />
@@ -540,6 +619,21 @@ export function DocumentsOverviewClient() {
                       facetFilters.rowStatus.filter((v) => v !== value)
                     ),
                 },
+                {
+                  key: "sendStatus",
+                  label: "Stav odeslání",
+                  values: facetFilters.sendStatus.map((value) => ({
+                    value,
+                    label:
+                      SEND_STATUS_OPTIONS.find((o) => o.value === value)
+                        ?.label ?? value,
+                  })),
+                  onRemove: (value) =>
+                    setFacetFilter(
+                      "sendStatus",
+                      facetFilters.sendStatus.filter((v) => v !== value)
+                    ),
+                },
               ]}
               onClearAll={clearAllFacets}
             />
@@ -552,18 +646,39 @@ export function DocumentsOverviewClient() {
               Žádné záznamy neodpovídají zadaným filtrům.
             </p>
           ) : (
-            <div className="space-y-6">
-              <KindSection
-                kind="onboarding"
-                rows={onboardingRows}
-                isFiltering={isFiltering}
-              />
-              <KindSection
-                kind="offboarding"
-                rows={offboardingRows}
-                isFiltering={isFiltering}
-              />
-            </div>
+            <Tabs
+              value={activeKind}
+              onValueChange={(value) =>
+                setActiveKind(value as "onboarding" | "offboarding")
+              }
+            >
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger
+                  value="onboarding"
+                  className="flex items-center gap-2"
+                >
+                  <UserPlus className="size-4" />
+                  Nástupy
+                  <Badge variant="secondary">{onboardingRows.length}</Badge>
+                </TabsTrigger>
+                <TabsTrigger
+                  value="offboarding"
+                  className="flex items-center gap-2"
+                >
+                  <UserMinus className="size-4" />
+                  Odchody
+                  <Badge variant="secondary">{offboardingRows.length}</Badge>
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="onboarding" className="mt-4">
+                <KindSection rows={onboardingRows} isFiltering={isFiltering} />
+              </TabsContent>
+
+              <TabsContent value="offboarding" className="mt-4">
+                <KindSection rows={offboardingRows} isFiltering={isFiltering} />
+              </TabsContent>
+            </Tabs>
           )}
         </>
       )}

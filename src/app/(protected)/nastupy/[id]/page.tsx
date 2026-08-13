@@ -484,7 +484,10 @@ export default function OnboardingDetailPage({ params }: PageProps) {
           if (!open && !deleting) setDeleteConfirmOpen(false)
         }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent
+          className="max-w-md"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
           <DialogTitle>Smazat záznam</DialogTitle>
 
           <div className="space-y-2 py-2 text-sm text-muted-foreground">
@@ -535,7 +538,10 @@ export default function OnboardingDetailPage({ params }: PageProps) {
             setDecisionDialog({ open: false, decision: null, note: "" })
         }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent
+          className="max-w-md"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
           <DialogTitle>
             {decisionDialog.decision === "KEEP"
               ? "Znovu aktivovat zkušební dobu?"

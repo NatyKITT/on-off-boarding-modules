@@ -26,7 +26,6 @@ import { useSession } from "next-auth/react"
 
 import { useDismissableHighlight } from "@/hooks/use-dismissable-highlight"
 import { useFacetedFilter } from "@/hooks/use-faceted-filter"
-import { useSessionStorageState } from "@/hooks/use-session-storage-state"
 import { useTextFilter } from "@/hooks/use-text-filter"
 import {
   EMPTY_DAY_RANGE,
@@ -74,6 +73,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Textarea } from "@/components/ui/textarea"
 import { ActiveFilterChips } from "@/components/common/active-filter-chips"
 import { ExitChecklistDialog } from "@/components/common/exit-checklist-dialog"
 import { LinkedRecordInfoButton } from "@/components/common/linked-record-info-button"
@@ -153,8 +153,12 @@ type Departure = {
   userEmail?: string | null
   userName?: string | null
   notes?: string | null
-  status?: "NEW" | "IN_PROGRESS" | "COMPLETED"
+  status?: "NEW" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED"
   probationStopDecision?: "STOP" | "KEEP" | null
+
+  cancelledAt?: string | null
+  cancelledBy?: string | null
+  cancelReason?: string | null
 
   linkedOnboarding?: LinkedOnboardingInfo | null
 }
@@ -272,12 +276,13 @@ type DepartureFacetKey = "status" | "department" | "unitName" | "position"
 const DEPARTURE_STATUS_OPTIONS: MultiSelectOption[] = [
   { value: "planned", label: "Plánované" },
   { value: "actual", label: "Skutečné" },
-  { value: "both", label: "Obojí" },
+  { value: "cancelled", label: "Neuskutečněné" },
+  { value: "all", label: "Vše" },
 ]
 
 const DEPARTURE_PROGRESS_OPTIONS: MultiSelectOption[] = [
   { value: "ACTIVE", label: "Aktivní / běžící" },
-  { value: "OVERDUE", label: "Již odešel / po termínu" },
+  { value: "OVERDUE", label: "Po termínu, nepotvrzeno" },
   { value: "TODAY", label: "Dnes (0 dní)" },
   { value: "WITHIN_7", label: "Do 7 dnů" },
   { value: "WITHIN_30", label: "Do 30 dnů" },
@@ -286,21 +291,33 @@ const DEPARTURE_PROGRESS_OPTIONS: MultiSelectOption[] = [
   { value: "LATER", label: "Více než 4 měsíce" },
 ]
 
-function departureStatus(departure: Departure): "planned" | "actual" {
+function departureStatus(
+  departure: Departure
+): "planned" | "actual" | "cancelled" {
+  if (departure.cancelledAt) return "cancelled"
+
   return departure.actualEnd ? "actual" : "planned"
 }
 
 function departureTargetDate(departure: Departure): string | null | undefined {
-  return departureStatus(departure) === "planned"
-    ? departure.plannedEnd
-    : departure.actualEnd
+  const status = departureStatus(departure)
+  if (status === "cancelled") return departure.plannedEnd
+
+  return status === "planned" ? departure.plannedEnd : departure.actualEnd
 }
 
 function departureProgressTags(departure: Departure): string[] {
+  if (departureStatus(departure) === "cancelled") return []
+
   const bucket = getDateProgressBucket(departureTargetDate(departure))
   if (!bucket) return []
 
-  if (bucket === "OVERDUE") return ["OVERDUE"]
+  // "Po termínu" má smysl jen u dosud nepotvrzených plánovaných odchodů –
+  // skutečný odchod má datum v minulosti vždy a "po termínu" by tam
+  // zavádějícím způsobem naznačovalo, že něco nestíhá.
+  if (bucket === "OVERDUE") {
+    return departureStatus(departure) === "planned" ? ["OVERDUE"] : []
+  }
 
   return [bucket, "ACTIVE"]
 }
@@ -331,7 +348,10 @@ function EmployeeChangeInfoButton({
         </Button>
       </DialogTrigger>
 
-      <DialogContent className="max-w-2xl">
+      <DialogContent
+        className="max-w-2xl"
+        onInteractOutside={(event) => event.preventDefault()}
+      >
         <DialogHeader>
           <div className="flex items-center gap-3">
             <div className="flex size-10 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/20">
@@ -581,13 +601,15 @@ function getAllYearsAndMonths(grouped: GroupedData): {
 
 interface DepartureTableRowProps {
   departure: Departure
-  variant: "planned" | "actual"
+  variant: "planned" | "actual" | "cancelled"
   canManage: boolean
   canOpenExitChecklist: boolean
   isReadonly: boolean
   onEdit: () => void
   onConfirm?: () => void
   onRevert?: () => void
+  onCancel?: () => void
+  onRestore?: () => void
   onDelete: () => void
   onOpenExitChecklist: () => void
   relatedChanges: EmployeeChangeInfo[]
@@ -604,6 +626,8 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
   onConfirm,
   onDelete,
   onRevert,
+  onCancel,
+  onRestore,
   onOpenExitChecklist,
   relatedChanges,
   highlighted,
@@ -616,6 +640,156 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
   ]
     .filter(Boolean)
     .join(" ")
+
+  if (variant === "cancelled") {
+    return (
+      <TableRow
+        id={`departure-row-${departure.id}`}
+        className={
+          highlighted
+            ? "bg-amber-50 ring-2 ring-inset ring-amber-400 dark:bg-amber-950/30"
+            : undefined
+        }
+      >
+        <TableCell className="sticky left-0 z-10 w-[240px] border-r bg-background">
+          <div className="flex items-center gap-2">
+            <User className="size-4 shrink-0 text-muted-foreground" />
+            <div className="flex flex-col">
+              <span className="font-medium">{fullName}</span>
+              {departure.personalNumber && (
+                <span className="font-mono text-xs text-muted-foreground">
+                  #{departure.personalNumber}
+                </span>
+              )}
+            </div>
+          </div>
+        </TableCell>
+
+        <TableCell className="w-[240px]">
+          <div className="flex flex-col">
+            <span
+              className="text-sm font-medium"
+              title={departure.positionName}
+            >
+              {departure.positionName}
+            </span>
+            <span className="font-mono text-xs text-muted-foreground">
+              {departure.positionNum}
+            </span>
+          </div>
+        </TableCell>
+
+        <TableCell className="w-[240px]">
+          <div className="flex flex-col">
+            <span className="text-sm font-medium" title={departure.department}>
+              {departure.department}
+            </span>
+            <span
+              className="text-xs text-muted-foreground"
+              title={departure.unitName}
+            >
+              {departure.unitName}
+            </span>
+          </div>
+        </TableCell>
+
+        <TableCell className="w-[200px]">
+          <span className="text-sm italic text-muted-foreground">
+            {departure.cancelReason || "–"}
+          </span>
+        </TableCell>
+
+        <TableCell className="w-[160px] whitespace-nowrap">
+          {departure.cancelledAt && (
+            <div className="flex flex-col">
+              <span className="text-sm">
+                {format(new Date(departure.cancelledAt), "d.M.yyyy")}
+              </span>
+              {departure.cancelledBy && (
+                <span
+                  className="truncate text-xs text-muted-foreground"
+                  title={departure.cancelledBy}
+                >
+                  {departure.cancelledBy}
+                </span>
+              )}
+            </div>
+          )}
+        </TableCell>
+
+        <TableCell className="w-[180px]">
+          <div className="flex flex-col">
+            <span
+              className="truncate text-sm"
+              title={departure.userEmail || undefined}
+            >
+              {departure.userEmail ?? "–"}
+            </span>
+            {departure.userName && (
+              <span className="font-mono text-xs text-muted-foreground">
+                {departure.userName}
+              </span>
+            )}
+          </div>
+        </TableCell>
+
+        <TableCell className="w-[280px] whitespace-nowrap text-right">
+          <div className="flex justify-end gap-1">
+            <EmployeeChangeInfoButton
+              changes={relatedChanges}
+              employeeName={fullName}
+            />
+
+            <LinkedRecordInfoButton
+              employeeName={fullName}
+              onboarding={departure.linkedOnboarding}
+              probationStopDecision={departure.probationStopDecision}
+              sourceCancelled
+            />
+
+            <HistoryDialog
+              id={departure.id}
+              kind="offboarding"
+              trigger={
+                <Button size="sm" variant="outline" title="Historie změn">
+                  <HistoryIcon className="size-4" />
+                </Button>
+              }
+            />
+
+            {!isReadonly && onRestore && (
+              <Button
+                size="sm"
+                variant="default"
+                onClick={onRestore}
+                disabled={!canManage}
+                title="Obnovit odchod"
+                className="inline-flex items-center justify-center gap-1 whitespace-nowrap bg-green-600 text-white hover:bg-green-700"
+              >
+                <RotateCcw className="size-4" />
+                <span className="hidden sm:inline">
+                  Vrátit do {departure.actualEnd ? "skutečných" : "plánovaných"}
+                </span>
+              </Button>
+            )}
+
+            {!isReadonly && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onDelete}
+                disabled={!canManage}
+                title="Smazat záznam"
+                className="text-red-600 hover:bg-red-50 hover:text-red-700"
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            )}
+          </div>
+        </TableCell>
+      </TableRow>
+    )
+  }
 
   return (
     <TableRow
@@ -793,6 +967,20 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
             </Button>
           ) : null}
 
+          {!isReadonly && onCancel && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onCancel}
+              disabled={!canManage}
+              title="Odchod se neuskutečnil"
+              className="inline-flex items-center justify-center gap-1 text-orange-600 hover:bg-orange-50 hover:text-orange-700 dark:hover:bg-orange-950"
+            >
+              <XCircle className="size-4" />
+              <span className="hidden sm:inline">Neuskutečnil se</span>
+            </Button>
+          )}
+
           <HistoryDialog
             id={departure.id}
             kind="offboarding"
@@ -828,6 +1016,7 @@ export default function OffboardingPage() {
 
   const [planned, setPlanned] = useState<Departure[]>([])
   const [actual, setActual] = useState<Departure[]>([])
+  const [cancelled, setCancelled] = useState<Departure[]>([])
   const [employeeChanges, setEmployeeChanges] = useState<EmployeeChangeInfo[]>(
     []
   )
@@ -861,15 +1050,32 @@ export default function OffboardingPage() {
     loading: boolean
   }>({ open: false, departure: null, relatedChanges: [], loading: false })
 
-  const [expandedPlannedYears, setExpandedPlannedYears] =
-    useSessionStorageState<string[]>("odchody:expandedPlannedYears", [])
-  const [expandedPlannedMonths, setExpandedPlannedMonths] =
-    useSessionStorageState<string[]>("odchody:expandedPlannedMonths", [])
-  const [expandedActualYears, setExpandedActualYears] = useSessionStorageState<
+  const [cancelDialog, setCancelDialog] = useState<{
+    open: boolean
+    departure: Departure | null
+    loading: boolean
+    reason: string
+  }>({ open: false, departure: null, loading: false, reason: "" })
+
+  const [restoreCancelledDialog, setRestoreCancelledDialog] = useState<{
+    open: boolean
+    departure: Departure | null
+    loading: boolean
+    targetType: "planned" | "actual" | null
+  }>({ open: false, departure: null, loading: false, targetType: null })
+
+  const [expandedPlannedYears, setExpandedPlannedYears] = useState<string[]>([])
+  const [expandedPlannedMonths, setExpandedPlannedMonths] = useState<string[]>(
+    []
+  )
+  const [expandedActualYears, setExpandedActualYears] = useState<string[]>([])
+  const [expandedActualMonths, setExpandedActualMonths] = useState<string[]>([])
+  const [expandedCancelledYears, setExpandedCancelledYears] = useState<
     string[]
-  >("odchody:expandedActualYears", [])
-  const [expandedActualMonths, setExpandedActualMonths] =
-    useSessionStorageState<string[]>("odchody:expandedActualMonths", [])
+  >([])
+  const [expandedCancelledMonths, setExpandedCancelledMonths] = useState<
+    string[]
+  >([])
 
   const [successModal, setSuccessModal] = useState({
     open: false,
@@ -889,13 +1095,17 @@ export default function OffboardingPage() {
   const qpMode = sp.get("new") as "create-planned" | "create-actual" | null
   const qpDate = sp.get("date") || undefined
   const qpHighlightId = sp.get("highlight")
-  const qpHighlightStatus = sp.get("status") as "planned" | "actual" | null
+  const qpHighlightStatus = sp.get("status") as
+    | "planned"
+    | "actual"
+    | "cancelled"
+    | null
 
   const [highlightedDepartureId, setHighlightedDepartureId] = useState<
     number | null
   >(null)
   const [highlightedDepartureVariant, setHighlightedDepartureVariant] =
-    useState<"planned" | "actual" | null>(null)
+    useState<"planned" | "actual" | "cancelled" | null>(null)
 
   const currentMonth = format(new Date(), "yyyy-MM")
 
@@ -920,17 +1130,14 @@ export default function OffboardingPage() {
     [planned, actual]
   )
 
-  const [departureDateFilter, setDepartureDateFilter] = useSessionStorageState(
-    "odchody:dateFilter",
-    ""
-  )
+  const [departureDateFilter, setDepartureDateFilter] = useState("")
   const [departurePresets, setDeparturePresets] = useState<string[]>([])
   const [departureDayRange, setDepartureDayRange] =
     useState<DayRangeValue>(EMPTY_DAY_RANGE)
 
   const allDepartures = useMemo(
-    () => [...planned, ...actual],
-    [planned, actual]
+    () => [...planned, ...actual, ...cancelled],
+    [planned, actual, cancelled]
   )
 
   const reload = React.useCallback(async () => {
@@ -951,11 +1158,13 @@ export default function OffboardingPage() {
 
       if (offJson?.status === "success" && Array.isArray(offJson.data)) {
         const rows = offJson.data as Departure[]
-        setPlanned(rows.filter((e) => !e.actualEnd))
-        setActual(rows.filter((e) => e.actualEnd))
+        setPlanned(rows.filter((e) => !e.actualEnd && !e.cancelledAt))
+        setActual(rows.filter((e) => e.actualEnd && !e.cancelledAt))
+        setCancelled(rows.filter((e) => e.cancelledAt))
       } else {
         setPlanned([])
         setActual([])
+        setCancelled([])
       }
 
       if (changesRes.ok) {
@@ -968,6 +1177,7 @@ export default function OffboardingPage() {
       showError("Chyba při načítání", "Nepodařilo se načíst data")
       setPlanned([])
       setActual([])
+      setCancelled([])
       setEmployeeChanges([])
     } finally {
       setLoading(false)
@@ -1046,9 +1256,7 @@ export default function OffboardingPage() {
     query: searchQuery,
     setQuery: setSearchQuery,
     filterRows,
-  } = useTextFilter(getDepartureSearchableText, {
-    persistKey: "odchody:searchQuery",
-  })
+  } = useTextFilter(getDepartureSearchableText)
 
   const dateFilteredDepartures = useMemo(() => {
     const hasProgressFilter =
@@ -1089,7 +1297,7 @@ export default function OffboardingPage() {
 
   const departureFacets = useMemo(
     () => ({
-      status: (departure: Departure) => [departureStatus(departure), "both"],
+      status: (departure: Departure) => [departureStatus(departure), "all"],
       department: (departure: Departure) => [departure.department],
       unitName: (departure: Departure) => [departure.unitName],
       position: (departure: Departure) => [departure.positionName],
@@ -1105,8 +1313,7 @@ export default function OffboardingPage() {
     availableValues,
   } = useFacetedFilter<Departure, DepartureFacetKey>(
     searchedDepartures,
-    departureFacets,
-    { persistKey: "odchody:facetFilters" }
+    departureFacets
   )
 
   const handleStatusFilterChange = React.useCallback(
@@ -1114,14 +1321,14 @@ export default function OffboardingPage() {
       const prevSet = new Set(facetFilters.status)
       const addedValue = nextValues.find((value) => !prevSet.has(value))
 
-      if (addedValue === "both") {
-        setFacetFilter("status", ["both"])
+      if (addedValue === "all") {
+        setFacetFilter("status", ["all"])
         return
       }
 
       setFacetFilter(
         "status",
-        nextValues.filter((value) => value !== "both")
+        nextValues.filter((value) => value !== "all")
       )
     },
     [facetFilters.status, setFacetFilter]
@@ -1134,6 +1341,11 @@ export default function OffboardingPage() {
 
   const filteredActual = useMemo(
     () => facetedDepartures.filter((d) => departureStatus(d) === "actual"),
+    [facetedDepartures]
+  )
+
+  const filteredCancelled = useMemo(
+    () => facetedDepartures.filter((d) => departureStatus(d) === "cancelled"),
     [facetedDepartures]
   )
 
@@ -1154,16 +1366,20 @@ export default function OffboardingPage() {
   // (or show them combined) instead of silently sitting on an empty tab.
   const displayStatuses = useMemo(() => {
     if (facetFilters.status.length > 0) {
-      return facetFilters.status.includes("both")
-        ? (["planned", "actual"] as const)
-        : (facetFilters.status as Array<"planned" | "actual">)
+      if (facetFilters.status.includes("all")) {
+        return ["planned", "actual", "cancelled"] as Array<
+          "planned" | "actual" | "cancelled"
+        >
+      }
+      return facetFilters.status as Array<"planned" | "actual" | "cancelled">
     }
 
     if (!isAnyNonStatusFilterActive) return []
 
-    const nonEmpty: Array<"planned" | "actual"> = []
+    const nonEmpty: Array<"planned" | "actual" | "cancelled"> = []
     if (filteredPlanned.length > 0) nonEmpty.push("planned")
     if (filteredActual.length > 0) nonEmpty.push("actual")
+    if (filteredCancelled.length > 0) nonEmpty.push("cancelled")
 
     return nonEmpty
   }, [
@@ -1171,11 +1387,14 @@ export default function OffboardingPage() {
     isAnyNonStatusFilterActive,
     filteredPlanned,
     filteredActual,
+    filteredCancelled,
   ])
 
   const isCombinedStatusMode = displayStatuses.length >= 2
 
-  const [activeTab, setActiveTab] = useState<"planned" | "actual">("planned")
+  const [activeTab, setActiveTab] = useState<
+    "planned" | "actual" | "cancelled"
+  >("planned")
 
   useEffect(() => {
     if (displayStatuses.length === 1) {
@@ -1227,8 +1446,14 @@ export default function OffboardingPage() {
     [filteredActual]
   )
 
+  const cancelledGrouped = useMemo(
+    () => groupByYearAndMonth(filteredCancelled, "plannedEnd"),
+    [filteredCancelled]
+  )
+
   const plannedExpandInitRef = React.useRef(false)
   const actualExpandInitRef = React.useRef(false)
+  const cancelledExpandInitRef = React.useRef(false)
 
   useEffect(() => {
     if (!plannedExpandInitRef.current) {
@@ -1284,6 +1509,39 @@ export default function OffboardingPage() {
     setExpandedActualMonths,
   ])
 
+  useEffect(() => {
+    if (!cancelledExpandInitRef.current) {
+      cancelledExpandInitRef.current = true
+      if (
+        expandedCancelledYears.length > 0 ||
+        expandedCancelledMonths.length > 0
+      ) {
+        return
+      }
+    }
+
+    if (isAnyFilterActive) {
+      const { years, months } = getAllYearsAndMonths(cancelledGrouped)
+      setExpandedCancelledYears(years)
+      setExpandedCancelledMonths(months)
+      return
+    }
+
+    const { year, month } = getLatestYearAndMonth(
+      filteredCancelled,
+      "plannedEnd"
+    )
+    setExpandedCancelledYears(year ? [year] : [])
+    setExpandedCancelledMonths(month ? [month] : [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    filteredCancelled,
+    cancelledGrouped,
+    isAnyFilterActive,
+    setExpandedCancelledYears,
+    setExpandedCancelledMonths,
+  ])
+
   const appliedHighlightRef = React.useRef<string | null>(null)
   const previousHighlightIdRef = React.useRef<string | null>(null)
 
@@ -1302,6 +1560,10 @@ export default function OffboardingPage() {
         const { year, month } = getLatestYearAndMonth(actual, "actualEnd")
         setExpandedActualYears(year ? [year] : [])
         setExpandedActualMonths(month ? [month] : [])
+      } else if (highlightedDepartureVariant === "cancelled") {
+        const { year, month } = getLatestYearAndMonth(cancelled, "plannedEnd")
+        setExpandedCancelledYears(year ? [year] : [])
+        setExpandedCancelledMonths(month ? [month] : [])
       }
     }
 
@@ -1314,10 +1576,13 @@ export default function OffboardingPage() {
     highlightedDepartureVariant,
     planned,
     actual,
+    cancelled,
     setExpandedPlannedYears,
     setExpandedPlannedMonths,
     setExpandedActualYears,
     setExpandedActualMonths,
+    setExpandedCancelledYears,
+    setExpandedCancelledMonths,
   ])
 
   useEffect(() => {
@@ -1347,28 +1612,37 @@ export default function OffboardingPage() {
   ])
 
   const expandVariant = React.useCallback(
-    (variant: "planned" | "actual") => {
+    (variant: "planned" | "actual" | "cancelled") => {
       if (variant === "planned") {
         const { years, months } = getAllYearsAndMonths(
           groupByYearAndMonth(planned, "plannedEnd")
         )
         setExpandedPlannedYears(years)
         setExpandedPlannedMonths(months)
-      } else {
+      } else if (variant === "actual") {
         const { years, months } = getAllYearsAndMonths(
           groupByYearAndMonth(actual, "actualEnd")
         )
         setExpandedActualYears(years)
         setExpandedActualMonths(months)
+      } else {
+        const { years, months } = getAllYearsAndMonths(
+          groupByYearAndMonth(cancelled, "plannedEnd")
+        )
+        setExpandedCancelledYears(years)
+        setExpandedCancelledMonths(months)
       }
     },
     [
       planned,
       actual,
+      cancelled,
       setExpandedPlannedYears,
       setExpandedPlannedMonths,
       setExpandedActualYears,
       setExpandedActualMonths,
+      setExpandedCancelledYears,
+      setExpandedCancelledMonths,
     ]
   )
 
@@ -1475,6 +1749,18 @@ export default function OffboardingPage() {
     )
   }
 
+  const toggleCancelledYear = (year: string) => {
+    setExpandedCancelledYears((prev) =>
+      prev.includes(year) ? prev.filter((y) => y !== year) : [...prev, year]
+    )
+  }
+
+  const toggleCancelledMonth = (month: string) => {
+    setExpandedCancelledMonths((prev) =>
+      prev.includes(month) ? prev.filter((m) => m !== month) : [...prev, month]
+    )
+  }
+
   function openActualDialogFromPlanned(row: Departure) {
     if (!canManageOffboarding) return
     setActiveRow(row)
@@ -1557,6 +1843,90 @@ export default function OffboardingPage() {
         error instanceof Error ? error.message : "Vrácení se nezdařilo"
       )
       setRevertDialog((prev) => ({ ...prev, loading: false }))
+    }
+  }
+
+  async function handleCancel() {
+    const departure = cancelDialog.departure
+    const reason = cancelDialog.reason.trim()
+
+    if (!departure) return
+
+    setCancelDialog((prev) => ({ ...prev, loading: true }))
+
+    try {
+      const response = await fetch(`/api/odchody/${departure.id}/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null)
+        throw new Error(errorData?.message ?? "Zrušení se nezdařilo")
+      }
+
+      setCancelDialog({
+        open: false,
+        departure: null,
+        loading: false,
+        reason: "",
+      })
+      showSuccess(
+        "Odchod zrušen",
+        `Záznam "${departure.name} ${departure.surname}" byl přesunut do neuskutečněných.`
+      )
+      await reload()
+    } catch (error) {
+      console.error("Error cancelling departure:", error)
+      showError(
+        "Chyba při rušení",
+        error instanceof Error ? error.message : "Zrušení se nezdařilo"
+      )
+      setCancelDialog((prev) => ({ ...prev, loading: false }))
+    }
+  }
+
+  async function handleRestoreCancelled() {
+    const departure = restoreCancelledDialog.departure
+
+    if (!departure) return
+
+    setRestoreCancelledDialog((prev) => ({ ...prev, loading: true }))
+
+    try {
+      const response = await fetch(
+        `/api/odchody/${departure.id}/restore-cancelled`,
+        {
+          method: "POST",
+        }
+      )
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null)
+        throw new Error(errorData?.message ?? "Obnovení se nezdařilo")
+      }
+
+      setRestoreCancelledDialog({
+        open: false,
+        departure: null,
+        loading: false,
+        targetType: null,
+      })
+
+      const wasActual = Boolean(departure.actualEnd)
+      showSuccess(
+        "Odchod obnoven",
+        `Záznam "${departure.name} ${departure.surname}" byl obnoven do ${wasActual ? "skutečných" : "plánovaných"}.`
+      )
+      await reload()
+    } catch (error) {
+      console.error("Error restoring cancelled departure:", error)
+      showError(
+        "Chyba při obnovování",
+        error instanceof Error ? error.message : "Obnovení se nezdařilo"
+      )
+      setRestoreCancelledDialog((prev) => ({ ...prev, loading: false }))
     }
   }
 
@@ -1682,13 +2052,17 @@ export default function OffboardingPage() {
               </Button>
             </DialogTrigger>
             <DialogContent
-              className="max-h-[90vh] max-w-5xl overflow-y-auto p-0"
+              className="flex max-h-[90vh] max-w-5xl flex-col gap-0 overflow-hidden p-0"
               onInteractOutside={(event) => event.preventDefault()}
             >
-              <DialogTitle className="px-6 pt-6">
+              <DialogTitle className="shrink-0 border-b px-6 py-4">
                 Nový plánovaný odchod
               </DialogTitle>
-              <div className="p-6">
+              <div
+                className="min-h-0 flex-1 overflow-y-auto p-6"
+                data-lenis-prevent=""
+                onWheelCapture={(event) => event.stopPropagation()}
+              >
                 <OffboardingFormUnified
                   mode="create-planned"
                   prefillDate={qpDate}
@@ -1833,7 +2207,10 @@ export default function OffboardingPage() {
                                 <CardContent className="min-w-0 p-0">
                                   <div className="w-full max-w-full overflow-x-auto overflow-y-hidden [-webkit-overflow-scrolling:touch] [overscroll-behavior-x:contain] [touch-action:pan-x]">
                                     <div className="inline-block min-w-full pr-6">
-                                      <Table className="w-max min-w-[1440px]">
+                                      <Table
+                                        disableWrapperScroll
+                                        className="w-max min-w-[1440px]"
+                                      >
                                         <TableHeader>
                                           <TableRow>
                                             <TableHead className="sticky left-0 z-10 w-[240px] border-r bg-background">
@@ -1878,6 +2255,14 @@ export default function OffboardingPage() {
                                               }
                                               onConfirm={() =>
                                                 openActualDialogFromPlanned(e)
+                                              }
+                                              onCancel={() =>
+                                                setCancelDialog({
+                                                  open: true,
+                                                  departure: e,
+                                                  loading: false,
+                                                  reason: "",
+                                                })
                                               }
                                               onDelete={() =>
                                                 void handleDelete(e)
@@ -1938,11 +2323,17 @@ export default function OffboardingPage() {
               </Button>
             </DialogTrigger>
             <DialogContent
-              className="max-h-[90vh] max-w-5xl overflow-y-auto p-0"
+              className="flex max-h-[90vh] max-w-5xl flex-col gap-0 overflow-hidden p-0"
               onInteractOutside={(event) => event.preventDefault()}
             >
-              <DialogTitle className="px-6 pt-6">Skutečný odchod</DialogTitle>
-              <div className="p-6">
+              <DialogTitle className="shrink-0 border-b px-6 py-4">
+                Skutečný odchod
+              </DialogTitle>
+              <div
+                className="min-h-0 flex-1 overflow-y-auto p-6"
+                data-lenis-prevent=""
+                onWheelCapture={(event) => event.stopPropagation()}
+              >
                 <OffboardingFormUnified
                   mode="create-actual"
                   prefillDate={qpDate}
@@ -2087,7 +2478,10 @@ export default function OffboardingPage() {
                                 <CardContent className="min-w-0 p-0">
                                   <div className="w-full max-w-full overflow-x-auto overflow-y-hidden [-webkit-overflow-scrolling:touch] [overscroll-behavior-x:contain] [touch-action:pan-x]">
                                     <div className="inline-block min-w-full pr-6">
-                                      <Table className="w-max min-w-[1440px]">
+                                      <Table
+                                        disableWrapperScroll
+                                        className="w-max min-w-[1440px]"
+                                      >
                                         <TableHeader>
                                           <TableRow>
                                             <TableHead className="sticky left-0 z-10 w-[240px] border-r bg-background">
@@ -2134,6 +2528,14 @@ export default function OffboardingPage() {
                                                   loading: false,
                                                 })
                                               }
+                                              onCancel={() =>
+                                                setCancelDialog({
+                                                  open: true,
+                                                  departure: e,
+                                                  loading: false,
+                                                  reason: "",
+                                                })
+                                              }
                                               onDelete={() =>
                                                 void handleDelete(e)
                                               }
@@ -2177,6 +2579,201 @@ export default function OffboardingPage() {
             context="odchody"
             defaultMonth={currentMonth}
           />
+        </div>
+      )}
+    </>
+  )
+
+  const cancelledSectionContent = (
+    <>
+      {loading ? (
+        <div className="flex items-center justify-center py-8">
+          <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
+          <span className="ml-2 text-muted-foreground">Načítám data...</span>
+        </div>
+      ) : Object.keys(cancelledGrouped).length === 0 ? (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-12">
+            <XCircle className="mb-4 size-12 text-muted-foreground" />
+            <p className="text-lg font-medium text-muted-foreground">
+              Žádné neuskutečněné odchody
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Všichni zaměstnanci odešli podle plánu
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-4 pb-6">
+          {Object.keys(cancelledGrouped)
+            .sort((a, b) => parseInt(b) - parseInt(a))
+            .map((year) => {
+              const yearData = cancelledGrouped[year]
+              const isYearExpanded = expandedCancelledYears.includes(year)
+              const yearTotal = Object.values(yearData).reduce(
+                (sum, arr) => sum + arr.length,
+                0
+              )
+              const yearMonthKeys = Object.keys(yearData)
+              const allMonthsExpanded = yearMonthKeys.every((month) =>
+                expandedCancelledMonths.includes(month)
+              )
+
+              return (
+                <Collapsible key={year} open={isYearExpanded}>
+                  <div className="flex w-full items-center gap-2 rounded-lg bg-muted/50 p-3 transition-colors hover:bg-muted">
+                    <CollapsibleTrigger
+                      onClick={() => toggleCancelledYear(year)}
+                      className="flex flex-1 items-center gap-2"
+                    >
+                      {isYearExpanded ? (
+                        <ChevronDown className="size-5" />
+                      ) : (
+                        <ChevronRight className="size-5" />
+                      )}
+                      <span className="text-lg font-semibold">{year}</span>
+                    </CollapsibleTrigger>
+
+                    <Badge variant="secondary">{yearTotal}</Badge>
+
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setExpandedCancelledMonths((prev) =>
+                          allMonthsExpanded
+                            ? prev.filter(
+                                (month) => !yearMonthKeys.includes(month)
+                              )
+                            : Array.from(new Set([...prev, ...yearMonthKeys]))
+                        )
+
+                        if (!allMonthsExpanded) {
+                          setExpandedCancelledYears((prev) =>
+                            prev.includes(year) ? prev : [...prev, year]
+                          )
+                        }
+                      }}
+                    >
+                      {allMonthsExpanded ? "Sbalit vše" : "Zobrazit vše"}
+                    </Button>
+                  </div>
+
+                  <CollapsibleContent className="mt-2 space-y-3">
+                    {Object.keys(yearData)
+                      .sort((a, b) => b.localeCompare(a))
+                      .map((month) => {
+                        const monthData = yearData[month]
+                        const isMonthExpanded =
+                          expandedCancelledMonths.includes(month)
+
+                        return (
+                          <Collapsible key={month} open={isMonthExpanded}>
+                            <CollapsibleTrigger
+                              onClick={() => toggleCancelledMonth(month)}
+                              className="flex w-full items-center gap-2 rounded-lg bg-gray-100 p-2 transition-colors hover:bg-gray-200 dark:bg-gray-800/50 dark:hover:bg-gray-800/70"
+                            >
+                              {isMonthExpanded ? (
+                                <ChevronDown className="size-4" />
+                              ) : (
+                                <ChevronRight className="size-4" />
+                              )}
+                              <XCircle className="size-4 text-gray-600" />
+                              <span className="font-medium">
+                                {format(new Date(month + "-01"), "LLLL yyyy", {
+                                  locale: cs,
+                                })}
+                              </span>
+                              <Badge variant="outline" className="ml-auto">
+                                {monthData.length}
+                              </Badge>
+                            </CollapsibleTrigger>
+
+                            <CollapsibleContent className="mt-2">
+                              <Card className="w-full min-w-0 overflow-hidden opacity-60">
+                                <CardContent className="min-w-0 p-0">
+                                  <div className="w-full max-w-full overflow-x-auto overflow-y-hidden [-webkit-overflow-scrolling:touch] [overscroll-behavior-x:contain] [touch-action:pan-x]">
+                                    <div className="inline-block min-w-full pr-6">
+                                      <Table
+                                        disableWrapperScroll
+                                        className="w-max min-w-[1540px]"
+                                      >
+                                        <TableHeader>
+                                          <TableRow>
+                                            <TableHead className="sticky left-0 z-10 w-[240px] border-r bg-background">
+                                              Zaměstnanec
+                                            </TableHead>
+                                            <TableHead className="w-[240px]">
+                                              Pozice
+                                            </TableHead>
+                                            <TableHead className="w-[240px]">
+                                              Odbor / Oddělení
+                                            </TableHead>
+                                            <TableHead className="w-[200px]">
+                                              Důvod zrušení
+                                            </TableHead>
+                                            <TableHead className="w-[160px]">
+                                              Zrušeno
+                                            </TableHead>
+                                            <TableHead className="w-[180px]">
+                                              Kontakt
+                                            </TableHead>
+                                            <TableHead className="w-[280px] whitespace-nowrap text-right">
+                                              Akce
+                                            </TableHead>
+                                          </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                          {monthData.map((e) => (
+                                            <DepartureTableRow
+                                              key={e.id}
+                                              departure={e}
+                                              variant="cancelled"
+                                              canManage={canManageOffboarding}
+                                              canOpenExitChecklist={false}
+                                              isReadonly={isReadonly}
+                                              onEdit={() => {}}
+                                              onRestore={() =>
+                                                setRestoreCancelledDialog({
+                                                  open: true,
+                                                  departure: e,
+                                                  loading: false,
+                                                  targetType: e.actualEnd
+                                                    ? "actual"
+                                                    : "planned",
+                                                })
+                                              }
+                                              onDelete={() =>
+                                                void handleDelete(e)
+                                              }
+                                              onOpenExitChecklist={() => {}}
+                                              relatedChanges={
+                                                e.personalNumber?.trim()
+                                                  ? (employeeChangesByPersonalNumber.get(
+                                                      e.personalNumber.trim()
+                                                    ) ?? [])
+                                                  : []
+                                              }
+                                              highlighted={
+                                                e.id === highlightedDepartureId
+                                              }
+                                            />
+                                          ))}
+                                        </TableBody>
+                                      </Table>
+                                    </div>
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            </CollapsibleContent>
+                          </Collapsible>
+                        )
+                      })}
+                  </CollapsibleContent>
+                </Collapsible>
+              )
+            })}
         </div>
       )}
     </>
@@ -2380,15 +2977,25 @@ export default function OffboardingPage() {
                   {actualSectionContent}
                 </section>
               )}
+
+              {displayStatuses.includes("cancelled") && (
+                <section className="flex min-h-0 flex-col gap-3">
+                  <h2 className="flex items-center gap-2 text-lg font-semibold">
+                    <XCircle className="size-4" />
+                    Neuskutečněné
+                  </h2>
+                  {cancelledSectionContent}
+                </section>
+              )}
             </div>
           ) : (
             <Tabs
               value={activeTab}
               onValueChange={(value) =>
-                setActiveTab(value as "planned" | "actual")
+                setActiveTab(value as "planned" | "actual" | "cancelled")
               }
             >
-              <TabsList className="grid w-full grid-cols-2">
+              <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger
                   value="planned"
                   className="flex items-center gap-2"
@@ -2400,6 +3007,13 @@ export default function OffboardingPage() {
                   <User className="size-4" />
                   Skutečné
                 </TabsTrigger>
+                <TabsTrigger
+                  value="cancelled"
+                  className="flex items-center gap-2"
+                >
+                  <XCircle className="size-4" />
+                  Neuskutečněné
+                </TabsTrigger>
               </TabsList>
 
               <TabsContent value="planned" className="mt-4 space-y-4">
@@ -2408,6 +3022,10 @@ export default function OffboardingPage() {
 
               <TabsContent value="actual" className="mt-4 space-y-4">
                 {actualSectionContent}
+              </TabsContent>
+
+              <TabsContent value="cancelled" className="mt-4 space-y-4">
+                {cancelledSectionContent}
               </TabsContent>
             </Tabs>
           )}
@@ -2424,7 +3042,10 @@ export default function OffboardingPage() {
           }
         }}
       >
-        <DialogContent className="max-w-3xl p-0">
+        <DialogContent
+          className="max-w-3xl p-0"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
           <DialogTitle className="px-6 pt-6">
             Potvrdit skutečný odchod
           </DialogTitle>
@@ -2553,7 +3174,10 @@ export default function OffboardingPage() {
         open={revertDialog.open}
         onOpenChange={(open) => setRevertDialog((prev) => ({ ...prev, open }))}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent
+          className="max-w-md"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
           <DialogHeader>
             <div className="flex items-center gap-3">
               <div className="flex size-10 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-900/20">
@@ -2615,10 +3239,240 @@ export default function OffboardingPage() {
       </Dialog>
 
       <Dialog
+        open={cancelDialog.open}
+        onOpenChange={(open) => setCancelDialog((prev) => ({ ...prev, open }))}
+      >
+        <DialogContent
+          className="max-w-md"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex size-10 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-900/20">
+                <XCircle className="size-5 text-orange-600 dark:text-orange-400" />
+              </div>
+              <div>
+                <DialogTitle>Odchod se neuskutečnil</DialogTitle>
+                {cancelDialog.departure && (
+                  <DialogDescription className="font-medium">
+                    {[
+                      cancelDialog.departure.titleBefore,
+                      cancelDialog.departure.name,
+                      cancelDialog.departure.surname,
+                      cancelDialog.departure.titleAfter,
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                  </DialogDescription>
+                )}
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div>
+              <label
+                htmlFor="cancel-reason"
+                className="mb-2 block text-sm font-medium"
+              >
+                Důvod zrušení odchodu (nepovinné)
+              </label>
+              <Textarea
+                id="cancel-reason"
+                value={cancelDialog.reason}
+                onChange={(e) =>
+                  setCancelDialog((prev) => ({
+                    ...prev,
+                    reason: e.target.value,
+                  }))
+                }
+                placeholder="např. Zaměstnanec zůstal, přešel na jiné oddělení..."
+                rows={3}
+                className="w-full"
+              />
+            </div>
+
+            {cancelDialog.departure?.linkedOnboarding && (
+              <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground">
+                <p className="font-medium text-foreground">
+                  {cancelDialog.departure.linkedOnboarding.label}
+                </p>
+                <p className="mt-0.5">
+                  Propojení s tímto nástupem zůstane jen jako informační
+                  poznámka, dokud bude odchod mezi neuskutečněnými.
+                </p>
+              </div>
+            )}
+
+            {(() => {
+              const count = cancelDialog.departure?.personalNumber?.trim()
+                ? (employeeChangesByPersonalNumber.get(
+                    cancelDialog.departure.personalNumber.trim()
+                  )?.length ?? 0)
+                : 0
+
+              return count > 0 ? (
+                <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground">
+                  <p className="font-medium text-foreground">
+                    Propojené změny ({count})
+                  </p>
+                  <p className="mt-0.5">
+                    K tomuto osobnímu číslu existují zaměstnanecké změny – jde
+                    jen o informační vazbu.
+                  </p>
+                </div>
+              ) : null
+            })()}
+
+            <p className="text-sm text-muted-foreground">
+              Tento záznam bude přesunut do sekce &quot;Neuskutečněné
+              odchody&quot;.
+            </p>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() =>
+                setCancelDialog({
+                  open: false,
+                  departure: null,
+                  loading: false,
+                  reason: "",
+                })
+              }
+              disabled={cancelDialog.loading}
+            >
+              Zrušit
+            </Button>
+            <Button
+              variant="default"
+              onClick={handleCancel}
+              disabled={cancelDialog.loading || isReadonly}
+              className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700"
+            >
+              {cancelDialog.loading && (
+                <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              )}
+              Přesunout do neuskutečněných
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={restoreCancelledDialog.open}
+        onOpenChange={(open) =>
+          setRestoreCancelledDialog((prev) => ({ ...prev, open }))
+        }
+      >
+        <DialogContent
+          className="max-w-md"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex size-10 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/20">
+                <RotateCcw className="size-5 text-green-600 dark:text-green-400" />
+              </div>
+              <div>
+                <DialogTitle>Obnovit odchod</DialogTitle>
+                {restoreCancelledDialog.departure && (
+                  <DialogDescription className="font-medium">
+                    {[
+                      restoreCancelledDialog.departure.titleBefore,
+                      restoreCancelledDialog.departure.name,
+                      restoreCancelledDialog.departure.surname,
+                      restoreCancelledDialog.departure.titleAfter,
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                  </DialogDescription>
+                )}
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="space-y-3 py-4">
+            <p className="text-sm text-muted-foreground">
+              Chcete obnovit tento odchod zpět do{" "}
+              {restoreCancelledDialog.targetType === "actual"
+                ? "skutečných"
+                : "plánovaných"}{" "}
+              odchodů?
+            </p>
+
+            {restoreCancelledDialog.departure?.linkedOnboarding && (
+              <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground">
+                <p className="font-medium text-foreground">
+                  {restoreCancelledDialog.departure.linkedOnboarding.label}
+                </p>
+                <p className="mt-0.5">
+                  Propojení s tímto nástupem se znovu aktivuje.
+                </p>
+              </div>
+            )}
+
+            {(() => {
+              const count =
+                restoreCancelledDialog.departure?.personalNumber?.trim()
+                  ? (employeeChangesByPersonalNumber.get(
+                      restoreCancelledDialog.departure.personalNumber.trim()
+                    )?.length ?? 0)
+                  : 0
+
+              return count > 0 ? (
+                <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground">
+                  <p className="font-medium text-foreground">
+                    Propojené změny ({count})
+                  </p>
+                  <p className="mt-0.5">
+                    K tomuto osobnímu číslu existují zaměstnanecké změny – jde
+                    jen o informační vazbu.
+                  </p>
+                </div>
+              ) : null
+            })()}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() =>
+                setRestoreCancelledDialog({
+                  open: false,
+                  departure: null,
+                  loading: false,
+                  targetType: null,
+                })
+              }
+              disabled={restoreCancelledDialog.loading}
+            >
+              Zrušit
+            </Button>
+            <Button
+              variant="default"
+              onClick={handleRestoreCancelled}
+              disabled={restoreCancelledDialog.loading || isReadonly}
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700"
+            >
+              {restoreCancelledDialog.loading && (
+                <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              )}
+              Obnovit
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
         open={deleteDialog.open}
         onOpenChange={(open) => setDeleteDialog((prev) => ({ ...prev, open }))}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent
+          className="max-w-md"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
           <DialogHeader>
             <div className="flex items-center gap-3">
               <div className="flex size-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/20">
@@ -2711,11 +3565,17 @@ export default function OffboardingPage() {
 
       <Dialog open={openEdit} onOpenChange={setOpenEdit}>
         <DialogContent
-          className="max-h-[90vh] max-w-5xl overflow-y-auto p-0"
+          className="flex max-h-[90vh] max-w-5xl flex-col gap-0 overflow-hidden p-0"
           onInteractOutside={(event) => event.preventDefault()}
         >
-          <DialogTitle className="px-6 pt-6">Upravit záznam</DialogTitle>
-          <div className="p-6">
+          <DialogTitle className="shrink-0 border-b px-6 py-4">
+            Upravit záznam
+          </DialogTitle>
+          <div
+            className="min-h-0 flex-1 overflow-y-auto p-6"
+            data-lenis-prevent=""
+            onWheelCapture={(event) => event.stopPropagation()}
+          >
             {editLoading ? (
               <div className="flex items-center justify-center py-8">
                 <div className="size-8 animate-spin rounded-full border-b-2 border-current" />

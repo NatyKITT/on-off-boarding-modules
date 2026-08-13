@@ -360,6 +360,28 @@ plánovaný a je čas věci stihnout podepsat.
 Stejně jako u nástupů platí automatické informační propojení podle
 osobního čísla s odpovídajícím nástupem.
 
+**Neuskutečněný odchod** – pokud se plánovaný nebo i skutečně potvrzený
+odchod nakonec nestane (zaměstnanec zůstal, přešel na jiné oddělení
+apod.), tlačítkem **„Neuskutečnil se"** u daného záznamu se odchod
+přesune do samostatné sekce/záložky **„Neuskutečněné"**. Důvod zrušení
+je možné (ale není povinné) vyplnit. Zrušený záznam:
+
+- zmizí z aktivních filtrů plánovaných i skutečných odchodů a ze
+  statistik,
+- zůstává evidovaný v záložce „Neuskutečněné" i s uvedeným důvodem,
+  kým a kdy byl zrušen,
+- jde kdykoliv tlačítkem **„Vrátit"** obnovit zpět tam, kde byl (do
+  plánovaných, nebo do skutečných, pokud už měl vyplněné skutečné
+  datum odchodu) – i opakovaně tam a zpět, každá změna se zapisuje
+  do historie záznamu.
+
+Filtr „Stav" u Odchodů nabízí stejné možnosti jako u Nástupů:
+Plánované, Skutečné, Neuskutečněné a Vše.
+
+Neuskutečněné odchody jde stejně jako u nástupů nově zahrnout i do
+okna "Generovat PDF report" a mají v sekci Statistiky (kapitola 5.5)
+vlastní KPI kartu.
+
 ### 5.4 Zaměstnanecké změny
 
 **Jak založit změnu:** v menu **Změny** → nový záznam → zvolit typ
@@ -409,25 +431,41 @@ kapitola 3).
 Stránka **Dokumenty** (`/dokumenty`) ukazuje jedním pohledem, jak na
 tom je s dokumenty každý člověk v aplikaci – nástupní dokumenty,
 vyhodnocení zkušební doby i výstupní list, seřazené podle roku, měsíce
-a osoby.
+a osoby. Nástupy a Odchody jsou přepínatelné jako dvě záložky vedle
+sebe (ne pod sebou), aby se v dlouhém seznamu dalo rychleji
+orientovat.
 
 - **Hledání a filtry** – vyhledávací pole hledá podle jména, osobního
   čísla, odboru i oddělení; k dispozici jsou i filtry na typ
-  (nástup/odchod), odbor, stav záznamu (plánovaný/skutečný/zrušený) a
-  stav dokumentů (vyplněno vše/rozpracováno/nevyplněno). Jakmile něco
+  (nástup/odchod), odbor, stav záznamu (plánovaný/skutečný/zrušený),
+  stav dokumentů (vyplněno vše/rozpracováno/nevyplněno) a **stav
+  odeslání** (nevytvořeno/neodesláno/odesláno-nevyplněno/vyplněno) –
+  ten poslední se hodí hlavně na rychlé dohledání, komu se ještě
+  nějaký formulář nebo dokument vůbec neposlal. Jakmile něco
   vyhledáte nebo zafiltrujete, appka automaticky rozbalí přesně ty
   roky, měsíce i konkrétní lidi, kterých se výsledek týká – není
   potřeba se k nim ručně proklikávat.
-- **„Rozbalit vše" / „Sbalit vše"** – u Nástupů i Odchodů lze jedním
-  tlačítkem rozbalit nebo sbalit všechny roky a měsíce v dané sekci
-  najednou, když chcete rychle projet celý seznam.
+- **Barevné rozlišení podle stavu** – karta každého člověka je jemně
+  podbarvená podle toho, jestli jde o plánovaný nebo skutečný
+  nástup/odchod (nástupy modře/zeleně, odchody oranžově/červeně,
+  zrušené záznamy šedě), takže je na první pohled vidět, o co jde.
+- **„Rozbalit vše" / „Sbalit vše"** – u Nástupů i Odchodů je jedno
+  tlačítko, které rozbalí, nebo když je vše rozbalené, zase sbalí
+  všechny roky a měsíce v dané sekci najednou. Stejné tlačítko
+  („Rozbalit měsíce" / „Sbalit měsíce") je i u každého jednotlivého
+  roku, když chcete projet jen jeden rok.
 - **Detail osoby** – kliknutím na jméno se rozbalí přehled všech jejích
-  dokumentů se stavem, možností stáhnout, poslat e-mailem, zobrazit
-  historii nebo dokument otevřít k úpravě.
+  dokumentů se stavem, možností dokument rovnou **zobrazit v náhledu**
+  na stránce (bez stahování, s indikátorem načítání, dokud se náhled
+  nenačte), stáhnout, poslat e-mailem nebo zobrazit historii.
 - **Hromadné akce u jedné osoby** – po rozbalení detailu lze tlačítkem
   **„Stáhnout vše"** stáhnout najednou všechny dostupné dokumenty dané
   osoby, nebo tlačítkem **„Poslat vše"** je všechny najednou odeslat na
   jeden zadaný e-mail.
+- **Krátká poznámka u každého dokumentu** – pod stavem dokumentu je
+  drobný text s tím, na čem dokument je: „Zatím neodesláno", „Odesláno 12. 8. 2026 (Jan Novák)", případně i s poslední automatickou
+  připomínkou, nebo „Vyplněno 10. 8. 2026". U automaticky odeslaných
+  věcí (cron) je to vidět místo jména konkrétního člověka.
 
 Přístup má ADMIN, HR a IT (viz kapitola 3).
 

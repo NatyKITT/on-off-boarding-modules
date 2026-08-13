@@ -145,7 +145,9 @@ export function LinkedRecordInfoButton({
   const shortLabel = isInfoOnly
     ? offboarding
       ? "Evidováno v odchodech"
-      : "Neuskutečněné nástupy"
+      : sourceCancelled
+        ? "Evidováno v nástupech"
+        : "Neuskutečněné nástupy"
     : offboarding
       ? "Propojené odchody"
       : "Propojené nástupy"
@@ -173,7 +175,10 @@ export function LinkedRecordInfoButton({
         </Button>
       </DialogTrigger>
 
-      <DialogContent className="max-w-lg">
+      <DialogContent
+        className="max-w-lg"
+        onInteractOutside={(event) => event.preventDefault()}
+      >
         <DialogHeader>
           <div className="flex items-center gap-3">
             <div
@@ -197,9 +202,9 @@ export function LinkedRecordInfoButton({
         <div className="space-y-2 text-sm">
           {sourceCancelled && (
             <p className="text-muted-foreground">
-              Nástup je označený jako neuskutečněný – níže uvedený{" "}
-              {offboarding ? "odchod" : "nástup"} je evidovaný jen podle
-              shodného osobního čísla, žádná akce se z toho neodvíjí.
+              {offboarding ? "Nástup" : "Odchod"} je označený jako neuskutečněný
+              – níže uvedený {offboarding ? "odchod" : "nástup"} je evidovaný
+              jen podle shodného osobního čísla, žádná akce se z toho neodvíjí.
             </p>
           )}
 

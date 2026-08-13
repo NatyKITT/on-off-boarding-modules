@@ -2,6 +2,7 @@ export type StatMetric =
   | "onboardings"
   | "offboardings"
   | "onboardingsCancelled"
+  | "offboardingsCancelled"
   | "offboardingsDuringProbation"
   | "changes"
   | "documentsCompletion"
@@ -49,6 +50,7 @@ export type KpiSummary = {
   currentHeadcount: number
   offboardingsDuringProbationPercent: number
   onboardingsCancelledTotal: number
+  offboardingsCancelledTotal: number
 }
 
 export type MonthlyFlowPoint = {
@@ -104,6 +106,7 @@ export const METRIC_LABELS: Record<StatMetric, string> = {
   onboardings: "Nástupy",
   offboardings: "Odchody",
   onboardingsCancelled: "Neuskutečněné nástupy",
+  offboardingsCancelled: "Neuskutečněné odchody",
   offboardingsDuringProbation: "Odchody ve zkušební době",
   changes: "Zaměstnanecké změny",
   documentsCompletion: "Dokončenost dokumentů",
@@ -141,6 +144,7 @@ export const METRIC_ALLOWED_DIMENSIONS: Record<StatMetric, StatDimension[]> = {
   ],
   offboardings: ["department", "unitName", "positionName", "month"],
   onboardingsCancelled: ["department", "unitName", "positionName", "month"],
+  offboardingsCancelled: ["department", "unitName", "positionName", "month"],
   offboardingsDuringProbation: [
     "department",
     "unitName",

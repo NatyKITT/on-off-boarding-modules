@@ -83,6 +83,7 @@ async function fetchOffboardingsRaw() {
       id: true,
       plannedEnd: true,
       actualEnd: true,
+      cancelledAt: true,
       department: true,
       unitName: true,
       positionName: true,
@@ -164,21 +165,22 @@ async function fetchOnboardings(filters: StatisticsFilters, cache: RawCache) {
   })
 }
 
-function offboardingSection(row: OffboardingRow): "planned" | "actual" {
+function offboardingSection(row: OffboardingRow): StatSection {
+  if (row.cancelledAt) return "cancelled"
   return row.actualEnd ? "actual" : "planned"
 }
 
 function offboardingRelevantDate(row: OffboardingRow): Date {
-  return row.actualEnd ?? row.plannedEnd
+  return offboardingSection(row) === "cancelled"
+    ? (row.cancelledAt ?? row.plannedEnd)
+    : (row.actualEnd ?? row.plannedEnd)
 }
 
 async function fetchOffboardings(filters: StatisticsFilters, cache: RawCache) {
   const { start, end } = resolveDateRange(filters)
-  const sections = (
-    filters.section?.length
-      ? filters.section.filter((s) => s !== "cancelled")
-      : (["planned", "actual"] as StatSection[])
-  ) as Array<"planned" | "actual">
+  const sections = filters.section?.length
+    ? filters.section
+    : (["planned", "actual"] as StatSection[])
   const orgMatcher = buildOrgMatcher(filters)
 
   const rows = await cachedOffboardingsRaw(cache)
@@ -225,7 +227,8 @@ async function getCurrentHeadcountAsOf(
   ).length
 
   const ended = offboardings.filter(
-    (row) => row.actualEnd && row.actualEnd < asOf && matcher(row)
+    (row) =>
+      !row.cancelledAt && row.actualEnd && row.actualEnd < asOf && matcher(row)
   ).length
 
   return started - ended
@@ -255,7 +258,11 @@ async function getOffboardingsDuringProbationMatches(
 
   const linked = personalNumbers.length
     ? await prisma.employeeOffboarding.findMany({
-        where: { deletedAt: null, personalNumber: { in: personalNumbers } },
+        where: {
+          deletedAt: null,
+          cancelledAt: null,
+          personalNumber: { in: personalNumbers },
+        },
         select: { personalNumber: true, actualEnd: true, plannedEnd: true },
       })
     : []
@@ -291,12 +298,14 @@ async function getKpis(
     onboardings,
     offboardings,
     cancelledOnboardings,
+    cancelledOffboardings,
     probationMatch,
     currentHeadcount,
   ] = await Promise.all([
     fetchOnboardings({ ...filters, section: ["planned", "actual"] }, cache),
     fetchOffboardings({ ...filters, section: ["planned", "actual"] }, cache),
     fetchOnboardings({ ...filters, section: ["cancelled"] }, cache),
+    fetchOffboardings({ ...filters, section: ["cancelled"] }, cache),
     getOffboardingsDuringProbationMatches(filters, cache),
     getCurrentHeadcountAsOf(filters, new Date(), cache),
   ])
@@ -314,6 +323,7 @@ async function getKpis(
     currentHeadcount,
     offboardingsDuringProbationPercent,
     onboardingsCancelledTotal: cancelledOnboardings.length,
+    offboardingsCancelledTotal: cancelledOffboardings.length,
   }
 }
 
@@ -612,6 +622,23 @@ async function getCustomViewRows(
         : (["planned", "actual"] as const)
       const rows = await fetchOffboardings(
         { ...filters, section: [...sections] },
+        cache
+      )
+      return rows.map((row) => ({
+        department: row.department,
+        unitName: row.unitName,
+        positionName: row.positionName,
+        supervisorName: null,
+        probationMonths: null,
+        positionType: null,
+        date: offboardingRelevantDate(row),
+        changeType: null,
+        completed: null,
+      }))
+    }
+    case "offboardingsCancelled": {
+      const rows = await fetchOffboardings(
+        { ...filters, section: ["cancelled"] },
         cache
       )
       return rows.map((row) => ({

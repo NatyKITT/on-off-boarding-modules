@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE `EmployeeOffboarding` ADD COLUMN `cancelReason` VARCHAR(191) NULL,
+    ADD COLUMN `cancelledAt` DATETIME(3) NULL,
+    ADD COLUMN `cancelledBy` VARCHAR(191) NULL,
+    MODIFY `status` ENUM('NEW', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') NOT NULL DEFAULT 'NEW';

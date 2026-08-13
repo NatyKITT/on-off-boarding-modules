@@ -9,6 +9,7 @@ export type DocumentSummary = {
   statusLabel: string
   recordId: number
   documentId: number | null
+  note: string | null
 }
 
 export type PersonRow = {

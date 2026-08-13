@@ -12,6 +12,7 @@ import type {
   FormStatus,
   OffboardingDocuments,
   OffboardingReportRow,
+  OffboardingReportStatus,
   OnboardingDocuments,
   OnboardingReportRow,
   OnboardingReportStatus,
@@ -224,7 +225,11 @@ export async function getOffboardingReportRows(
   )
 
   for (const record of records) {
-    const status = record.actualEnd ? "actual" : "planned"
+    const status: OffboardingReportStatus = record.cancelledAt
+      ? "cancelled"
+      : record.actualEnd
+        ? "actual"
+        : "planned"
     const date = status === "actual" ? record.actualEnd : record.plannedEnd
 
     const header = (record.exitChecklist?.header ??
@@ -266,6 +271,9 @@ export async function getOffboardingReportRows(
           allSignedDone ? mostRecentSignatureAt(header) : null
         ),
       } satisfies OffboardingDocuments,
+      cancelReason: record.cancelReason,
+      cancelledAt: isoOrNull(record.cancelledAt),
+      cancelledBy: record.cancelledBy,
     })
   }
 
@@ -389,7 +397,10 @@ export async function buildReportSections(
 
       sections.push({
         module: "odchod",
-        status: section.status === "actual" ? "actual" : "planned",
+        status:
+          section.status === "actual" || section.status === "cancelled"
+            ? section.status
+            : "planned",
         month: section.month,
         rows,
         includeDocuments: section.includeDocuments ?? false,

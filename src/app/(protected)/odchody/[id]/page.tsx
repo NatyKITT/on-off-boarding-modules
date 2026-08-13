@@ -25,12 +25,16 @@ type LinkedOnboardingInfo = {
 
 type OffboardingDetail = {
   id: number
-  status: "NEW" | "IN_PROGRESS" | "COMPLETED"
+  status: "NEW" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED"
   plannedEnd: string
   actualEnd?: string | null
   noticeEnd?: string | null
   noticeMonths?: number | null
   hasCustomDates?: boolean
+
+  cancelledAt?: string | null
+  cancelledBy?: string | null
+  cancelReason?: string | null
 
   titleBefore?: string | null
   name: string
@@ -93,6 +97,10 @@ export default async function OffboardingDetailPage({ params }: PageProps) {
       noticeEnd: true,
       noticeMonths: true,
       hasCustomDates: true,
+
+      cancelledAt: true,
+      cancelledBy: true,
+      cancelReason: true,
 
       titleBefore: true,
       name: true,
@@ -185,6 +193,7 @@ export default async function OffboardingDetailPage({ params }: PageProps) {
     plannedEnd: record.plannedEnd.toISOString(),
     actualEnd: record.actualEnd?.toISOString() ?? null,
     noticeEnd: record.noticeEnd?.toISOString() ?? null,
+    cancelledAt: record.cancelledAt?.toISOString() ?? null,
     probationStopDecisionAt:
       record.probationStopDecisionAt?.toISOString() ?? null,
     probationStopDecisionBy: probationStopDecisionByName,

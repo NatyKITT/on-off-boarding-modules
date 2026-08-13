@@ -61,7 +61,7 @@ export type FormValues = {
   plannedEnd?: string
   actualEnd?: string
   notes?: string
-  status?: "NEW" | "IN_PROGRESS" | "COMPLETED"
+  status?: "NEW" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED"
   noticeEnd?: string
   noticeMonths?: number
   hasCustomDates?: boolean
@@ -149,7 +149,7 @@ const baseSchema = z.object({
       "Neplatné datum"
     ),
   notes: z.string().optional(),
-  status: z.enum(["NEW", "IN_PROGRESS", "COMPLETED"]).optional(),
+  status: z.enum(["NEW", "IN_PROGRESS", "COMPLETED", "CANCELLED"]).optional(),
 })
 
 type SupervisorApiResponse = {
@@ -239,9 +239,6 @@ export function OffboardingFormUnified({
   } | null>(null)
   const [probationConfirmBusy, setProbationConfirmBusy] = useState(false)
   const firstDateRef = useRef<HTMLInputElement | null>(null)
-  useEffect(() => {
-    firstDateRef.current?.focus()
-  }, [])
 
   const defaults: FormValues = useMemo(() => {
     const base: FormValues = {
@@ -1249,7 +1246,10 @@ export function OffboardingFormUnified({
             if (!open && !deleteConfirm.loading) closeDeleteConfirm()
           }}
         >
-          <DialogContent className="max-w-md">
+          <DialogContent
+            className="max-w-md"
+            onInteractOutside={(event) => event.preventDefault()}
+          >
             <DialogTitle>Smazat záznam</DialogTitle>
 
             {!deleteConfirm.checked ? (

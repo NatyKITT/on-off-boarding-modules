@@ -1,7 +1,7 @@
 export type ReportModule = "nastup" | "odchod" | "zmena"
 
 export type OnboardingReportStatus = "planned" | "actual" | "cancelled"
-export type OffboardingReportStatus = "planned" | "actual"
+export type OffboardingReportStatus = "planned" | "actual" | "cancelled"
 
 export type DocFlag = {
   done: boolean
@@ -66,6 +66,9 @@ export type OffboardingReportRow = {
   userName: string | null
   notice: PeriodInfo | null
   documents: OffboardingDocuments
+  cancelReason: string | null
+  cancelledAt: string | null
+  cancelledBy: string | null
 }
 
 export type ChangeValues = {

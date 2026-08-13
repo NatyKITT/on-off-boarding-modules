@@ -48,10 +48,22 @@ export function useFacetedFilter<T, K extends string>(
     [facetKeysSignature]
   )
 
-  const [filters, setFilters] = useSessionStorageState<Record<K, string[]>>(
-    options?.persistKey,
-    emptyFilters
-  )
+  const [storedFilters, setFilters] = useSessionStorageState<
+    Record<K, string[]>
+  >(options?.persistKey, emptyFilters)
+
+  // Guards against stale persisted state missing keys that were added to
+  // `facets` after the value was originally saved to session storage.
+  const filters = React.useMemo(() => {
+    const merged = { ...emptyFilters }
+
+    for (const key of facetKeys) {
+      if (Array.isArray(storedFilters[key])) merged[key] = storedFilters[key]
+    }
+
+    return merged
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storedFilters, emptyFilters, facetKeysSignature])
 
   const setFacetValues = React.useCallback(
     (key: K, values: string[]) => {

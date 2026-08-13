@@ -15,6 +15,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
+import { joinNameWithTitles } from "@/lib/format-name"
 import { ROLE_LABELS } from "@/lib/rbac"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -56,6 +57,8 @@ type DbUser = {
   id: string
   name: string | null
   surname: string | null
+  titleBefore: string | null
+  titleAfter: string | null
   email: string
   role: Role
   canAccessApp: boolean
@@ -75,6 +78,8 @@ type RemoveDialogUser = {
   email: string
   name: string | null
   surname: string | null
+  titleBefore: string | null
+  titleAfter: string | null
   role: Role
 } | null
 
@@ -94,8 +99,15 @@ const ROLE_ACCESS: Record<Role, string> = {
   USER: "Pouze výstupní listy",
 }
 
-function getFullName(user: Pick<DbUser, "name" | "surname">) {
-  return [user.name, user.surname].filter(Boolean).join(" ").trim()
+function getFullName(
+  user: Pick<DbUser, "name" | "surname" | "titleBefore" | "titleAfter">
+) {
+  return joinNameWithTitles({
+    titleBefore: user.titleBefore,
+    name: user.name,
+    surname: user.surname,
+    titleAfter: user.titleAfter,
+  })
 }
 
 function RoleLegend() {
@@ -208,7 +220,10 @@ function AddUserDialog({ onAdded }: { onAdded: () => void }) {
         </Button>
       </DialogTrigger>
 
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="sm:max-w-md"
+        onInteractOutside={(event) => event.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle>Přidat uživatele</DialogTitle>
           <DialogDescription>
@@ -385,7 +400,10 @@ function EditNameDialog({
         </Button>
       </DialogTrigger>
 
-      <DialogContent className="sm:max-w-sm">
+      <DialogContent
+        className="sm:max-w-sm"
+        onInteractOutside={(event) => event.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle>Upravit jméno</DialogTitle>
           <DialogDescription>{user.email}</DialogDescription>
@@ -464,7 +482,7 @@ function DbUsersList({
     <>
       <div className="space-y-3 md:hidden">
         {users.map((user) => {
-          const fullName = [user.name, user.surname].filter(Boolean).join(" ")
+          const fullName = getFullName(user)
 
           return (
             <div key={user.id} className="space-y-3 rounded-md border p-4">
@@ -604,7 +622,7 @@ function DbUsersList({
               <tr key={user.id}>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-1.5">
-                    {[user.name, user.surname].filter(Boolean).join(" ") || (
+                    {getFullName(user) || (
                       <span className="italic text-muted-foreground">
                         {user.hasSignedIn ? "Bez vyplněného jména" : "—"}
                       </span>
@@ -718,7 +736,10 @@ function RemoveUserDialog({
 
   return (
     <Dialog open={Boolean(user)} onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent
+        className="sm:max-w-lg"
+        onInteractOutside={(event) => event.preventDefault()}
+      >
         <DialogHeader>
           <div className="mb-2 flex size-11 items-center justify-center rounded-full bg-destructive/10 text-destructive">
             <AlertTriangle className="size-5" />
@@ -990,6 +1011,8 @@ export function UserRoleManagement() {
               email: user.email,
               name: user.name,
               surname: user.surname,
+              titleBefore: user.titleBefore,
+              titleAfter: user.titleAfter,
               role: user.role,
             })
           }

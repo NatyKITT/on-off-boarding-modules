@@ -78,6 +78,10 @@ export function KpiComparisonTable({ overviewsByYear, years }: Props) {
       get: (k) => `${k.offboardingsDuringProbationPercent} %`,
     },
     { label: "Neuskutečněné nástupy", get: (k) => k.onboardingsCancelledTotal },
+    {
+      label: "Neuskutečněné odchody",
+      get: (k) => k.offboardingsCancelledTotal,
+    },
   ]
 
   const currentHeadcount =

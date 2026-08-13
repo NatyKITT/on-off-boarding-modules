@@ -311,7 +311,10 @@ export function DeletedRecordsDialog({
             {triggerLabel}
           </Button>
         </DialogTrigger>
-        <DialogContent className="max-w-4xl">
+        <DialogContent
+          className="max-w-4xl"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Trash2 className="size-5" />

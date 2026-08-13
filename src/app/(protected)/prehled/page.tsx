@@ -2083,10 +2083,11 @@ export default function DashboardPage(): JSX.Element {
 
       <Dialog open={openNewOnbPlanned} onOpenChange={setOpenNewOnbPlanned}>
         <DialogContent
-          className={`z-[300] max-h-[90vh] ${tier === "mobile" ? "max-w-[95vw]" : "max-w-5xl"} touch-scroll overflow-y-auto p-0`}
+          className={`z-[300] flex max-h-[90vh] ${tier === "mobile" ? "max-w-[95vw]" : "max-w-5xl"} flex-col gap-0 overflow-hidden p-0`}
+          onInteractOutside={(event) => event.preventDefault()}
         >
           <DialogTitle
-            className={`${tier === "mobile" ? "px-4 pt-4 text-base" : "px-6 pt-6"}`}
+            className={`shrink-0 border-b ${tier === "mobile" ? "px-4 py-3 text-base" : "px-6 py-4"}`}
           >
             Nový předpokládaný nástup
           </DialogTitle>
@@ -2095,7 +2096,11 @@ export default function DashboardPage(): JSX.Element {
               Formulář pro vytvoření předpokládaného nástupu.
             </span>
           </DialogDescription>
-          <div className={tier === "mobile" ? "p-4" : "p-6"}>
+          <div
+            className={`touch-scroll min-h-0 flex-1 overflow-y-auto ${tier === "mobile" ? "p-4" : "p-6"}`}
+            data-lenis-prevent=""
+            onWheelCapture={(event) => event.stopPropagation()}
+          >
             {loadingPositions ? (
               <div className="flex items-center justify-center py-8">
                 <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
@@ -2125,10 +2130,11 @@ export default function DashboardPage(): JSX.Element {
 
       <Dialog open={openNewOnbActual} onOpenChange={setOpenNewOnbActual}>
         <DialogContent
-          className={`z-[300] max-h-[90vh] ${tier === "mobile" ? "max-w-[95vw]" : "max-w-5xl"} touch-scroll overflow-y-auto p-0`}
+          className={`z-[300] flex max-h-[90vh] ${tier === "mobile" ? "max-w-[95vw]" : "max-w-5xl"} flex-col gap-0 overflow-hidden p-0`}
+          onInteractOutside={(event) => event.preventDefault()}
         >
           <DialogTitle
-            className={`${tier === "mobile" ? "px-4 pt-4 text-base" : "px-6 pt-6"}`}
+            className={`shrink-0 border-b ${tier === "mobile" ? "px-4 py-3 text-base" : "px-6 py-4"}`}
           >
             Nový skutečný nástup
           </DialogTitle>
@@ -2137,7 +2143,11 @@ export default function DashboardPage(): JSX.Element {
               Formulář pro vytvoření skutečného nástupu.
             </span>
           </DialogDescription>
-          <div className={tier === "mobile" ? "p-4" : "p-6"}>
+          <div
+            className={`touch-scroll min-h-0 flex-1 overflow-y-auto ${tier === "mobile" ? "p-4" : "p-6"}`}
+            data-lenis-prevent=""
+            onWheelCapture={(event) => event.stopPropagation()}
+          >
             {loadingPositions ? (
               <div className="flex items-center justify-center py-8">
                 <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
@@ -2167,10 +2177,11 @@ export default function DashboardPage(): JSX.Element {
 
       <Dialog open={openNewOffPlanned} onOpenChange={setOpenNewOffPlanned}>
         <DialogContent
-          className={`z-[300] max-h-[90vh] ${tier === "mobile" ? "max-w-[95vw]" : "max-w-5xl"} touch-scroll overflow-y-auto p-0`}
+          className={`z-[300] flex max-h-[90vh] ${tier === "mobile" ? "max-w-[95vw]" : "max-w-5xl"} flex-col gap-0 overflow-hidden p-0`}
+          onInteractOutside={(event) => event.preventDefault()}
         >
           <DialogTitle
-            className={`${tier === "mobile" ? "px-4 pt-4 text-base" : "px-6 pt-6"}`}
+            className={`shrink-0 border-b ${tier === "mobile" ? "px-4 py-3 text-base" : "px-6 py-4"}`}
           >
             Nový plánovaný odchod
           </DialogTitle>
@@ -2179,7 +2190,11 @@ export default function DashboardPage(): JSX.Element {
               Formulář pro vytvoření plánovaného odchodu.
             </span>
           </DialogDescription>
-          <div className={tier === "mobile" ? "p-4" : "p-6"}>
+          <div
+            className={`touch-scroll min-h-0 flex-1 overflow-y-auto ${tier === "mobile" ? "p-4" : "p-6"}`}
+            data-lenis-prevent=""
+            onWheelCapture={(event) => event.stopPropagation()}
+          >
             <OffboardingFormUnified
               key={`new-off-planned-${toISO(slotDate) || "no-date"}`}
               mode="create-planned"
@@ -2196,10 +2211,11 @@ export default function DashboardPage(): JSX.Element {
 
       <Dialog open={openNewOffActual} onOpenChange={setOpenNewOffActual}>
         <DialogContent
-          className={`z-[300] max-h-[90vh] ${tier === "mobile" ? "max-w-[95vw]" : "max-w-5xl"} touch-scroll overflow-y-auto p-0`}
+          className={`z-[300] flex max-h-[90vh] ${tier === "mobile" ? "max-w-[95vw]" : "max-w-5xl"} flex-col gap-0 overflow-hidden p-0`}
+          onInteractOutside={(event) => event.preventDefault()}
         >
           <DialogTitle
-            className={`${tier === "mobile" ? "px-4 pt-4 text-base" : "px-6 pt-6"}`}
+            className={`shrink-0 border-b ${tier === "mobile" ? "px-4 py-3 text-base" : "px-6 py-4"}`}
           >
             Nový skutečný odchod
           </DialogTitle>
@@ -2208,7 +2224,11 @@ export default function DashboardPage(): JSX.Element {
               Formulář pro vytvoření skutečného odchodu.
             </span>
           </DialogDescription>
-          <div className={tier === "mobile" ? "p-4" : "p-6"}>
+          <div
+            className={`touch-scroll min-h-0 flex-1 overflow-y-auto ${tier === "mobile" ? "p-4" : "p-6"}`}
+            data-lenis-prevent=""
+            onWheelCapture={(event) => event.stopPropagation()}
+          >
             <OffboardingFormUnified
               key={`new-off-actual-${toISO(slotDate) || "no-date"}`}
               mode="create-actual"
@@ -2226,6 +2246,7 @@ export default function DashboardPage(): JSX.Element {
       <Dialog open={clusterOpen} onOpenChange={setClusterOpen}>
         <DialogContent
           className={`z-[300] ${tier === "mobile" ? "max-w-[90vw]" : "max-w-md"} touch-scroll`}
+          onInteractOutside={(event) => event.preventDefault()}
         >
           <DialogTitle className={tier === "mobile" ? "text-sm" : ""}>
             Události {clusterSlotLabel}
@@ -2287,6 +2308,7 @@ export default function DashboardPage(): JSX.Element {
       >
         <DialogContent
           className={`z-[300] ${tier === "mobile" ? "max-w-[95vw]" : "max-w-3xl"} overflow-hidden p-0`}
+          onInteractOutside={(event) => event.preventDefault()}
         >
           <DialogTitle
             className={`${tier === "mobile" ? "px-4 pt-4 text-base" : "px-6 pt-6"}`}
@@ -2445,6 +2467,7 @@ export default function DashboardPage(): JSX.Element {
       >
         <DialogContent
           className={`z-[300] ${tier === "mobile" ? "max-w-[95vw]" : "max-w-3xl"} overflow-hidden p-0`}
+          onInteractOutside={(event) => event.preventDefault()}
         >
           <DialogTitle
             className={`${tier === "mobile" ? "px-4 pt-4 text-base" : "px-6 pt-6"}`}
@@ -2599,6 +2622,7 @@ export default function DashboardPage(): JSX.Element {
       >
         <DialogContent
           className={`z-[300] max-h-[90dvh] ${tier === "mobile" ? "max-w-[95vw]" : "max-w-5xl"} overflow-hidden p-0`}
+          onInteractOutside={(event) => event.preventDefault()}
         >
           <DialogTitle
             className={`${tier === "mobile" ? "px-4 pt-4 text-base" : "px-6 pt-6"}`}

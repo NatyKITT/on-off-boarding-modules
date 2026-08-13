@@ -1941,7 +1941,10 @@ export function ProbationEvaluationSection({
       )}
 
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent
+          className="max-w-2xl"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle>Historie vyhodnocení zkušební doby</DialogTitle>
           </DialogHeader>
@@ -1994,7 +1997,10 @@ export function ProbationEvaluationSection({
           if (!open) setSendDialogMode(null)
         }}
       >
-        <DialogContent className="max-w-lg">
+        <DialogContent
+          className="max-w-lg"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle>
               {sendDialogMode === "remind"

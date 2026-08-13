@@ -187,6 +187,7 @@ function serializeOffboardingRecord(
     noticeEnd: offboarding.noticeEnd?.toISOString() ?? null,
     noticeMonths: offboarding.noticeMonths ?? 2,
     hasCustomDates: offboarding.hasCustomDates ?? false,
+    cancelledAt: offboarding.cancelledAt?.toISOString() ?? null,
     createdAt: offboarding.createdAt.toISOString(),
     updatedAt: offboarding.updatedAt.toISOString(),
     linkedOnboarding,

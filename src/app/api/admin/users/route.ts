@@ -67,6 +67,8 @@ export async function GET() {
         id: true,
         name: true,
         surname: true,
+        titleBefore: true,
+        titleAfter: true,
         email: true,
         role: true,
         canAccessApp: true,

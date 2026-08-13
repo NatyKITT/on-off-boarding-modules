@@ -1,14 +1,14 @@
 "use client"
 
 import * as React from "react"
-import Link from "next/link"
 import {
+  Clock,
   Download,
+  Eye,
   History as HistoryIcon,
   Loader2,
   Mail,
   MailPlus,
-  SquareArrowOutUpRight,
 } from "lucide-react"
 
 import { useToast } from "@/hooks/use-toast"
@@ -19,6 +19,13 @@ import { cn } from "@/lib/utils"
 
 import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import {
   Popover,
@@ -130,16 +137,55 @@ function getActionLabel(kind: DocumentSummary["kind"]) {
   return documentEventActionLabel
 }
 
-function getOpenUrl(doc: DocumentSummary): string | null {
-  if (doc.kind === "probation_evaluation") {
-    return `/nastupy/${doc.recordId}/vyhodnoceni-zkusebni-doby`
-  }
+function DocumentPreviewDialog({ url, label }: { url: string; label: string }) {
+  const [open, setOpen] = React.useState(false)
+  const [loaded, setLoaded] = React.useState(false)
 
-  if (doc.kind === "exit_checklist") {
-    return `/odchody/${doc.recordId}/vystupni-list`
-  }
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (!next) setLoaded(false)
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button type="button" size="sm" variant="outline" className="gap-1.5">
+          <Eye className="size-3.5 shrink-0" />
+          Náhled
+        </Button>
+      </DialogTrigger>
 
-  return null
+      <DialogContent
+        className="flex h-[90svh] w-[calc(100vw-2rem)] max-w-4xl flex-col gap-0 overflow-hidden p-0"
+        onInteractOutside={(event) => event.preventDefault()}
+      >
+        <DialogHeader className="shrink-0 border-b p-4">
+          <DialogTitle className="flex items-center gap-2">
+            <Eye className="size-5 shrink-0" />
+            {label}
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="relative min-h-0 flex-1 bg-muted/30">
+          {!loaded && (
+            <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-5 animate-spin" />
+              Načítám náhled…
+            </div>
+          )}
+          {open && (
+            <iframe
+              src={url}
+              title={label}
+              className="size-full border-0"
+              onLoad={() => setLoaded(true)}
+            />
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 function SendPopover({ doc }: { doc: DocumentSummary }) {
@@ -224,18 +270,29 @@ function SendPopover({ doc }: { doc: DocumentSummary }) {
 export function DocumentRow({ doc }: { doc: DocumentSummary }) {
   const downloadUrl = getDownloadUrl(doc)
   const historyFetchUrl = getHistoryFetchUrl(doc)
-  const openUrl = getOpenUrl(doc)
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background px-3 py-2">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="text-sm font-medium">{doc.label}</span>
-        <Badge variant={badgeVariant(doc.status)} className="shrink-0">
-          {doc.statusLabel}
-        </Badge>
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="text-sm font-medium">{doc.label}</span>
+          <Badge variant={badgeVariant(doc.status)} className="shrink-0">
+            {doc.statusLabel}
+          </Badge>
+        </div>
+        {doc.note && (
+          <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+            <Clock className="size-3 shrink-0" />
+            <span className="truncate">{doc.note}</span>
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
+        {downloadUrl && (
+          <DocumentPreviewDialog url={downloadUrl} label={doc.label} />
+        )}
+
         {downloadUrl && (
           <a
             href={downloadUrl}
@@ -270,19 +327,6 @@ export function DocumentRow({ doc }: { doc: DocumentSummary }) {
               </Button>
             }
           />
-        )}
-
-        {openUrl && (
-          <Link
-            href={openUrl}
-            className={cn(
-              buttonVariants({ size: "sm", variant: "ghost" }),
-              "gap-1.5"
-            )}
-          >
-            <SquareArrowOutUpRight className="size-3.5 shrink-0" />
-            Otevřít
-          </Link>
         )}
       </div>
     </div>
@@ -372,7 +416,7 @@ export function PersonBulkActions({
           type="button"
           size="sm"
           variant="outline"
-          className="gap-1.5"
+          className="gap-1.5 bg-white text-black hover:bg-neutral-100"
           onClick={handleDownloadAll}
         >
           <Download className="size-3.5 shrink-0" />
@@ -387,7 +431,7 @@ export function PersonBulkActions({
               type="button"
               size="sm"
               variant="outline"
-              className="gap-1.5"
+              className="gap-1.5 bg-white text-black hover:bg-neutral-100"
             >
               <MailPlus className="size-3.5 shrink-0" />
               Poslat vše ({sendable.length})

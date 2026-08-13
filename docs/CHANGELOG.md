@@ -2,6 +2,51 @@
 
 Historie významných změn v aplikaci On-Off-Boarding Modul. Nejnovější verze nahoře.
 
+## 0.10.0 – 2026-08-13
+
+### Nové funkce
+
+- **Neuskutečněný odchod** – u plánovaného i skutečného odchodu jde nově tlačítkem "Neuskutečnil se" označit, že zaměstnanec nakonec neodešel (zůstal, přešel na jiné oddělení apod.). Záznam se přesune do nové sekce/záložky "Neuskutečněné" (stejně jako to už funguje u Nástupů), zmizí z aktivních filtrů plánovaných/skutečných odchodů i ze statistik, a jde ho kdykoliv tlačítkem "Vrátit" obnovit zpět tam, kde byl (do plánovaných, nebo do skutečných, pokud už měl vyplněné skutečné datum odchodu) – i opakovaně tam a zpět, vše se zaznamenává do historie záznamu. Důvod zrušení je u odchodu (na rozdíl od nástupu) nepovinný.
+- Filtr "Stav" u Odchodů má nově stejné možnosti jako u Nástupů: Plánované, Skutečné, Neuskutečněné a Vše (dřívější volba "Obojí" nahrazena volbou "Vše", která navíc počítá i s neuskutečněnými).
+- V okně "Generovat PDF report" jde u Odchodů nově zahrnout i "Neuskutečněné" (dřív bylo jen u Nástupů).
+- Statistiky mají novou kartu "Neuskutečněné odchody" (KPI karty, srovnání let, PDF export) a odpovídající novou vlastní metriku pro vlastní přehledy – zrcadlí už existující "Neuskutečněné nástupy".
+- V adminovi (správa uživatelů a rolí) se teď u jména zobrazují i tituly před/za jménem, ne jen jméno a příjmení.
+- **Barevné rozlišení karet v přehledu Dokumentů** – karta každé osoby je jemně podbarvená podle toho, jestli jde o plánovaný nebo skutečný nástup/odchod (nástupy modře/zeleně, odchody oranžově/červeně, zrušené záznamy šedě).
+- **Náhled dokumentu přímo na stránce** – u každého dostupného dokumentu (nástupní dokumenty, vyhodnocení zkušební doby, výstupní list) je nově tlačítko "Náhled", které dokument otevře v okně přímo na stránce, bez nutnosti stahování.
+- **Krátká poznámka u každého dokumentu** – pod stavem dokumentu je vidět, na čem dokument je: "Zatím neodesláno", "Odesláno [datum] ([jméno])" (u automatického odeslání cronem místo jména "automaticky"), případně i poslední připomínka, nebo "Vyplněno [datum]".
+- **Jeden přepínací tlačítko místo dvou** pro "Rozbalit vše"/"Sbalit vše" v přehledu Dokumentů – vždy je vidět jen ta akce, která reálně přijde v úvahu. Stejné tlačítko nově funguje i na úrovni jednotlivého roku ("Rozbalit měsíce"/"Sbalit měsíce").
+- **Nástupy a Odchody jako záložky** v přehledu Dokumentů – místo dlouhého seznamu pod sebou jde mezi nimi přepínat jako mezi dvěma záložkami vedle sebe, s počtem záznamů rovnou na záložce.
+- **Filtr "Stav odeslání"** v přehledu Dokumentů (nevytvořeno/neodesláno/odesláno-nevyplněno/vyplněno) – jde podle něj dohledat, komu se ještě nějaký dokument nebo formulář vůbec neposlal.
+- **Indikátor načítání u náhledu dokumentu** – dokud se PDF v okně náhledu nenačte, zobrazí se točící se ikona, aby bylo jasné, že se něco děje.
+
+### Opravy
+
+- Zrušené (neuskutečněné) odchody se už nezapočítávaly správně do statistik – nově se stejně jako u nástupů úplně vyřazují z počtu plánovaných/skutečných odchodů, z aktuálního stavu zaměstnanců i z podílu odchodů během zkušební doby.
+- Přehled Dokumentů u odchodů správně rozlišuje, jestli je odchod zrušený (dřív se u odchodů toto vždy tvářilo jako "ne", i když zrušený byl).
+- Popisek filtru "Po termínu" u plánovaných odchodů byl zavádějící ("Již odešel / po termínu") u odchodů, které ještě nebyly potvrzené jako skutečné – přejmenováno na "Po termínu, nepotvrzeno".
+- Informační okno "Evidováno v odchodech/nástupech" u propojeného záznamu správně píše, že je zrušený zrovna ten odchod (dřív text vždy tvrdil, že jde o zrušený nástup, i když šlo o zrušený odchod).
+- U vyhodnocení zkušební doby i u výstupního listu odebráno tlačítko "Otevřít" z přehledu Dokumentů (vedlo na interní správu procesu, ne na náhled) – teď stačí "Náhled".
+- **Filtry, vyhledávání a rozbalené roky/měsíce/záložky se už nepamatují při přechodu na jinou stránku** (Nástupy, Odchody, Změny, Dokumenty, Statistiky) – při otevření modálního okna nebo úpravě záznamu na téže stránce se samozřejmě dál drží, ale jakmile se přejde jinam, začíná se od výchozího stavu. Vedlejší efekt: tím zmizely i dvě související chyby, které se předtím objevovaly kvůli tomuto zapamatovávání – chyba hydratace v prohlížeči ("Text content did not match... Server: srpen 2026 Client: červen 2026") a pád stránky Dokumenty ("Cannot read properties of undefined") při starých zapamatovaných filtrech z doby před přidáním filtru "Stav odeslání".
+- Opravena nefunkční statická (sticky) viditelnost sloupce "Zaměstnanec" při horizontálním scrollování u Odchodů (tabulka měla zdvojený scrollovací kontejner) – funguje teď stejně jako u Nástupů a Změn, včetně mobilu.
+- **Dialogy se po otevření už neotevírají scrollnuté v polovině – a nadpis s křížkem na zavření se už neposouvá pryč při scrollování obsahu.** Šlo o skutečnou strukturální chybu ve 12 formulářových dialozích napříč aplikací (zakládání/úprava nástupu a odchodu na Nástupech, Odchodech i na Přehledu, zakládání/úprava změny na Změnách): scrollovala se rovnou celá karta dialogu včetně nadpisu, místo aby zůstal nadpis pevně nahoře a scrolloval se jen obsah formuláře. Opraveno ve třech krocích: (1) obecně se ve všech dialozích vypnulo výchozí přeskočení focusu na první pole, které prohlížeč posouvalo do zobrazení, (2) u odchodu navíc formulář sám o sobě po otevření natvrdo přesouval focus na pole "Datum podání výpovědi" uprostřed formuláře – toto automatické přeskočení focusu se u odchodu úplně zrušilo, (3) u zmíněných 12 dialogů se nadpis oddělil od scrollovatelného obsahu (stejný vzor jako už dřív fungoval u výstupního listu nebo "Odeslat všem k podpisu").
+- **Zavírání kliknutím vedle dialogu vypnuto v podstatě ve všech modálních oknech v celé aplikaci** – včetně rychlého zakládání/potvrzování nástupu a odchodu z Přehledu (kalendáře), náhledu PDF v Dokumentech, a dalších desítek dialogů na detailech nástupu/odchodu/změny (mazání, vrácení do plánovaných, potvrzení), ne jen u hlavních formulářů jako dosud – zavřít jde jen tlačítkem, takže se rozdělaná práce nebo pozice v seznamu už neztratí omylem.
+- **Změny: dialogy "Přidat/Upravit změnu" nezešednou pozadí** – měly omylem nastavený nemodální režim (na rozdíl od Nástupů/Odchodů), takže šlo klikat i psát mimo otevřený dialog a pozadí se netmavilo. Sjednoceno se stejným chováním jako u Nástupů/Odchodů.
+- Tlačítka "Stáhnout vše" a "Poslat vše" v přehledu Dokumentů jsou nově bílá, aby byla dobře vidět i na podbarvené kartě osoby.
+
+Tato verze přidává novou databázovou migraci (`add_offboarding_cancellation` – nová hodnota stavu `CANCELLED` a pole `cancelledAt`/`cancelledBy`/`cancelReason` u odchodu), žádnou novou proměnnou prostředí.
+
+---
+
+## Deployment checklist k verzi 0.10.0
+
+- [ ] **Nová migrace.** Před nasazením spustit `npx prisma migrate deploy` (nebo ekvivalent v CI/CD), teprve pak nasadit kód.
+- [ ] Po nasazení zkusit otevřít "Přidat plánovaný/skutečný nástup/odchod" (na Nástupech, Odchodech i z Přehledu) a "Přidat/Upravit změnu" – ověřit, že se dialog otevře odshora, nadpis se zavíracím křížkem zůstane při scrollování nahoře a kliknutí mimo dialog ho nezavře.
+- [ ] Ověřit, že se u "Přidat/Upravit změnu" pozadí za dialogem ztmaví (dřív se u těchto dvou dialogů netmavilo).
+- [ ] Zkusit přehled Dokumentů: záložky Nástupy/Odchody, filtr "Stav odeslání", náhled dokumentu a hromadné "Stáhnout vše"/"Poslat vše".
+- [ ] Vyzkoušet u testovacího plánovaného i skutečného odchodu tlačítko "Neuskutečnil se" (bez i s vyplněným důvodem) a ověřit přesun do záložky "Neuskutečněné" i zpětné "Vrátit" – včetně opakovaného cyklu tam a zpět.
+- [ ] Ověřit, že se neuskutečněný odchod nezapočítává do KPI karet ve Statistikách a objeví se nová karta "Neuskutečněné odchody".
+- [ ] Zkontrolovat v adminovi, že se uživatelům s vyplněným titulem zobrazuje titul u jména.
+
 ## 0.9.0 – 2026-08-12
 
 ### Nové funkce

@@ -31,7 +31,7 @@ import { Input } from "@/components/ui/input"
 import { ReportsHistoryButton } from "@/components/history/reports-history-button"
 
 type OnboardingStatus = "planned" | "actual" | "cancelled"
-type OffboardingStatus = "planned" | "actual"
+type OffboardingStatus = "planned" | "actual" | "cancelled"
 
 type ArrivalLite = {
   id: number
@@ -44,6 +44,7 @@ type DepartureLite = {
   id: number
   plannedEnd: string
   actualEnd?: string | null
+  cancelledAt?: string | null
 }
 
 type ChangeLite = {
@@ -108,6 +109,7 @@ function arrivalMonth(a: ArrivalLite): string {
 }
 
 function departureStatus(d: DepartureLite): OffboardingStatus {
+  if (d.cancelledAt) return "cancelled"
   return d.actualEnd ? "actual" : "planned"
 }
 
@@ -156,6 +158,7 @@ const ONBOARDING_STATUS_LABEL: Record<OnboardingStatus, string> = {
 const OFFBOARDING_STATUS_LABEL: Record<OffboardingStatus, string> = {
   planned: "Plánované",
   actual: "Skutečné",
+  cancelled: "Neuskutečněné",
 }
 
 type Props = {
@@ -181,6 +184,8 @@ export function PdfReportModal({ openSignal, canSend }: Props) {
 
   const [includeOdchodPlanned, setIncludeOdchodPlanned] = React.useState(false)
   const [includeOdchodActual, setIncludeOdchodActual] = React.useState(false)
+  const [includeOdchodCancelled, setIncludeOdchodCancelled] =
+    React.useState(false)
   const [includeOdchodDocuments, setIncludeOdchodDocuments] =
     React.useState(false)
 
@@ -282,9 +287,16 @@ export function PdfReportModal({ openSignal, canSend }: Props) {
         const status = departureStatus(d)
         if (status === "planned" && !includeOdchodPlanned) return false
         if (status === "actual" && !includeOdchodActual) return false
+        if (status === "cancelled" && !includeOdchodCancelled) return false
         return selectedMonths.includes(departureMonth(d))
       }),
-    [departures, includeOdchodPlanned, includeOdchodActual, selectedMonths]
+    [
+      departures,
+      includeOdchodPlanned,
+      includeOdchodActual,
+      includeOdchodCancelled,
+      selectedMonths,
+    ]
   )
 
   const zmenaMatching = React.useMemo(
@@ -300,7 +312,9 @@ export function PdfReportModal({ openSignal, canSend }: Props) {
     (includeNastupPlanned || includeNastupActual || includeNastupCancelled
       ? nastupMatching.length
       : 0) +
-    (includeOdchodPlanned || includeOdchodActual ? odchodMatching.length : 0) +
+    (includeOdchodPlanned || includeOdchodActual || includeOdchodCancelled
+      ? odchodMatching.length
+      : 0) +
     (includeZmeny ? zmenaMatching.length : 0)
 
   const nastupCountsByStatus = React.useMemo(() => {
@@ -317,7 +331,11 @@ export function PdfReportModal({ openSignal, canSend }: Props) {
   }, [arrivals, selectedMonths])
 
   const odchodCountsByStatus = React.useMemo(() => {
-    const counts: Record<OffboardingStatus, number> = { planned: 0, actual: 0 }
+    const counts: Record<OffboardingStatus, number> = {
+      planned: 0,
+      actual: 0,
+      cancelled: 0,
+    }
     for (const d of departures) {
       if (!selectedMonths.includes(departureMonth(d))) continue
       counts[departureStatus(d)] += 1
@@ -333,6 +351,7 @@ export function PdfReportModal({ openSignal, canSend }: Props) {
     setIncludeNastupDocuments(false)
     setIncludeOdchodPlanned(false)
     setIncludeOdchodActual(false)
+    setIncludeOdchodCancelled(false)
     setIncludeOdchodDocuments(false)
     setIncludeZmeny(false)
     setEmail("")
@@ -378,6 +397,7 @@ export function PdfReportModal({ openSignal, canSend }: Props) {
     const odchodByStatus: Record<OffboardingStatus, DepartureLite[]> = {
       planned: [],
       actual: [],
+      cancelled: [],
     }
     for (const d of odchodMatching) {
       odchodByStatus[departureStatus(d)].push(d)
@@ -387,6 +407,7 @@ export function PdfReportModal({ openSignal, canSend }: Props) {
       [
         ["planned", includeOdchodPlanned],
         ["actual", includeOdchodActual],
+        ["cancelled", includeOdchodCancelled],
       ] as const
     ).forEach(([status, enabled]) => {
       if (!enabled) return
@@ -401,7 +422,8 @@ export function PdfReportModal({ openSignal, canSend }: Props) {
           status,
           month,
           ids,
-          includeDocuments: includeOdchodDocuments,
+          includeDocuments:
+            status === "cancelled" ? false : includeOdchodDocuments,
         })
       }
     })
@@ -424,7 +446,8 @@ export function PdfReportModal({ openSignal, canSend }: Props) {
     const slugs: string[] = []
     if (includeNastupPlanned || includeNastupActual || includeNastupCancelled)
       slugs.push("nastupy")
-    if (includeOdchodPlanned || includeOdchodActual) slugs.push("odchody")
+    if (includeOdchodPlanned || includeOdchodActual || includeOdchodCancelled)
+      slugs.push("odchody")
     if (includeZmeny) slugs.push("zmeny")
     return slugs
   }
@@ -524,6 +547,7 @@ export function PdfReportModal({ openSignal, canSend }: Props) {
       <DialogContent
         className="flex max-h-[95svh] w-[calc(100vw-2rem)] max-w-3xl flex-col gap-0 p-0"
         style={{ overscrollBehavior: "contain" }}
+        onInteractOutside={(event) => event.preventDefault()}
       >
         <DialogHeader className="shrink-0 border-b p-4 sm:px-6">
           <DialogTitle>Generovat PDF report</DialogTitle>
@@ -711,6 +735,14 @@ export function PdfReportModal({ openSignal, canSend }: Props) {
                       />
                       {OFFBOARDING_STATUS_LABEL.actual} (
                       {odchodCountsByStatus.actual})
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={includeOdchodCancelled}
+                        onCheckedChange={(c) => setIncludeOdchodCancelled(!!c)}
+                      />
+                      {OFFBOARDING_STATUS_LABEL.cancelled} (
+                      {odchodCountsByStatus.cancelled})
                     </label>
                   </div>
 

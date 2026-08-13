@@ -121,6 +121,7 @@ export function ExitChecklistDialog({ offboardingId, open }: Props) {
         <DialogContent
           className="flex max-h-[95svh] w-full max-w-6xl flex-col overflow-hidden p-0"
           style={{ overscrollBehavior: "contain" }}
+          onInteractOutside={(event) => event.preventDefault()}
         >
           <div className="shrink-0 border-b bg-background px-5 py-4 sm:px-6">
             <DialogTitle className="text-lg font-semibold">

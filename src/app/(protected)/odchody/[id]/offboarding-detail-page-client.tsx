@@ -33,12 +33,16 @@ type LinkedOnboardingInfo = {
 
 type OffboardingDetail = {
   id: number
-  status: "NEW" | "IN_PROGRESS" | "COMPLETED"
+  status: "NEW" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED"
   plannedEnd: string
   actualEnd?: string | null
   noticeEnd?: string | null
   noticeMonths?: number | null
   hasCustomDates?: boolean
+
+  cancelledAt?: string | null
+  cancelledBy?: string | null
+  cancelReason?: string | null
 
   titleBefore?: string | null
   name: string
@@ -201,6 +205,7 @@ export function OffboardingDetailPageClient({ data }: Props) {
     NEW: "Plánovaný",
     IN_PROGRESS: "Zpracovává se",
     COMPLETED: "Odešel/a",
+    CANCELLED: "Zrušeno",
   }
 
   const fullName = `${data.titleBefore ?? ""} ${data.name} ${data.surname} ${
@@ -490,7 +495,10 @@ export function OffboardingDetailPageClient({ data }: Props) {
             })
         }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent
+          className="max-w-md"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
           <DialogTitle>Smazat záznam</DialogTitle>
 
           {!deleteConfirm.checked ? (

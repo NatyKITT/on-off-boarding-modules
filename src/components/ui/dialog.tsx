@@ -105,60 +105,80 @@ type DialogContentProps = React.ComponentPropsWithoutRef<
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(({ className, children, a11yTitle = "Dialog", ...props }, ref) => {
-  const hasDescription = hasElementOfType(children, [
-    DialogDescription,
-    DialogPrimitive.Description,
-  ])
+>(
+  (
+    { className, children, a11yTitle = "Dialog", onOpenAutoFocus, ...props },
+    ref
+  ) => {
+    const hasDescription = hasElementOfType(children, [
+      DialogDescription,
+      DialogPrimitive.Description,
+    ])
 
-  const hasTitle = hasElementOfType(children, [
-    DialogTitle,
-    DialogPrimitive.Title,
-  ])
+    const hasTitle = hasElementOfType(children, [
+      DialogTitle,
+      DialogPrimitive.Title,
+    ])
 
-  const describedBy = props["aria-describedby"]
-  const labelledBy = props["aria-labelledby"]
+    const describedBy = props["aria-describedby"]
+    const labelledBy = props["aria-labelledby"]
 
-  const shouldInjectTitle = !hasTitle && labelledBy === undefined
+    const shouldInjectTitle = !hasTitle && labelledBy === undefined
 
-  const contentProps: React.ComponentPropsWithoutRef<
-    typeof DialogPrimitive.Content
-  > = {
-    ...props,
-    ...(!hasDescription && describedBy === undefined
-      ? { "aria-describedby": undefined }
-      : {}),
+    const contentProps: React.ComponentPropsWithoutRef<
+      typeof DialogPrimitive.Content
+    > = {
+      ...props,
+      ...(!hasDescription && describedBy === undefined
+        ? { "aria-describedby": undefined }
+        : {}),
+    }
+
+    return (
+      <DialogPortal>
+        <DialogOverlay />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <DialogPrimitive.Content
+            ref={ref}
+            className={cn(
+              "relative grid w-full max-w-lg gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[-2%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[-2%] sm:rounded-lg",
+              className
+            )}
+            onOpenAutoFocus={(event) => {
+              onOpenAutoFocus?.(event)
+              event.preventDefault()
+
+              const content = event.currentTarget as HTMLElement
+              content.focus({ preventScroll: true })
+              content.scrollTop = 0
+              content
+                .querySelectorAll<HTMLElement>(
+                  ".overflow-y-auto, .overflow-auto"
+                )
+                .forEach((el) => {
+                  el.scrollTop = 0
+                })
+            }}
+            {...contentProps}
+          >
+            {shouldInjectTitle ? (
+              <DialogPrimitive.Title className="sr-only">
+                {a11yTitle}
+              </DialogPrimitive.Title>
+            ) : null}
+
+            {children}
+
+            <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
+              <X className="size-4" />
+              <span className="sr-only">Close</span>
+            </DialogPrimitive.Close>
+          </DialogPrimitive.Content>
+        </div>
+      </DialogPortal>
+    )
   }
-
-  return (
-    <DialogPortal>
-      <DialogOverlay />
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <DialogPrimitive.Content
-          ref={ref}
-          className={cn(
-            "relative grid w-full max-w-lg gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[-2%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[-2%] sm:rounded-lg",
-            className
-          )}
-          {...contentProps}
-        >
-          {shouldInjectTitle ? (
-            <DialogPrimitive.Title className="sr-only">
-              {a11yTitle}
-            </DialogPrimitive.Title>
-          ) : null}
-
-          {children}
-
-          <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
-            <X className="size-4" />
-            <span className="sr-only">Close</span>
-          </DialogPrimitive.Close>
-        </DialogPrimitive.Content>
-      </div>
-    </DialogPortal>
-  )
-})
+)
 DialogContent.displayName = DialogPrimitive.Content.displayName
 
 export {

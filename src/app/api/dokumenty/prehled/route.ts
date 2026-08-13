@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import type { EmploymentDocumentType } from "@prisma/client"
+import { format } from "date-fns"
+import { cs } from "date-fns/locale"
 
 import type { ExitChecklistData } from "@/types/exit-checklist"
 
@@ -24,6 +26,46 @@ type DocumentSummary = {
   statusLabel: string
   recordId: number
   documentId: number | null
+  note: string | null
+}
+
+function fmtNoteDate(date: Date | string | null | undefined) {
+  if (!date) return null
+  const value = typeof date === "string" ? new Date(date) : date
+  return format(value, "d. M. yyyy", { locale: cs })
+}
+
+function isCronActor(by: string | null | undefined) {
+  return by === "system-cron"
+}
+
+function buildSentNote(args: {
+  sentAt: Date | null
+  sentByName: string | null
+  sentBy: string | null
+  reminderAt?: Date | null
+  reminderByName?: string | null
+  reminderBy?: string | null
+}): string | null {
+  if (!args.sentAt) return "Zatím neodesláno"
+
+  const sentActor = isCronActor(args.sentBy) ? "automaticky" : args.sentByName
+
+  const parts = [
+    `Odesláno ${fmtNoteDate(args.sentAt)}${sentActor ? ` (${sentActor})` : ""}`,
+  ]
+
+  if (args.reminderAt) {
+    const reminderActor = isCronActor(args.reminderBy)
+      ? "cron"
+      : args.reminderByName
+
+    parts.push(
+      `připomínka ${fmtNoteDate(args.reminderAt)}${reminderActor ? ` (${reminderActor})` : ""}`
+    )
+  }
+
+  return parts.join(" · ")
 }
 
 type PersonRow = {
@@ -113,12 +155,23 @@ export async function GET() {
             id: true,
             type: true,
             status: true,
+            sentAt: true,
+            sentBy: true,
+            completedAt: true,
           },
         },
         probationEvaluationRequest: {
           select: {
             id: true,
             status: true,
+            sentAt: true,
+            sentBy: true,
+            sentByName: true,
+            lastReminderAt: true,
+            lastReminderBy: true,
+            lastReminderByName: true,
+            completedAt: true,
+            completedByName: true,
           },
         },
       },
@@ -137,6 +190,7 @@ export async function GET() {
         unitName: true,
         plannedEnd: true,
         actualEnd: true,
+        cancelledAt: true,
         exitChecklist: {
           select: {
             id: true,
@@ -168,6 +222,7 @@ export async function GET() {
           statusLabel: "Nevytvořeno",
           recordId: onboarding.id,
           documentId: null,
+          note: null,
         }
       }
 
@@ -182,6 +237,13 @@ export async function GET() {
         statusLabel: isCompleted ? "Vyplněno" : "Nevyplněno",
         recordId: onboarding.id,
         documentId: doc.id,
+        note: isCompleted
+          ? `Vyplněno ${fmtNoteDate(doc.completedAt) ?? ""}`.trim()
+          : buildSentNote({
+              sentAt: doc.sentAt,
+              sentByName: doc.sentBy,
+              sentBy: doc.sentBy,
+            }),
       }
     })
 
@@ -195,11 +257,25 @@ export async function GET() {
         statusLabel: "Nevytvořeno",
         recordId: onboarding.id,
         documentId: null,
+        note: null,
       })
     } else {
-      const { status, statusLabel } = probationStatusInfo(
-        onboarding.probationEvaluationRequest.status
-      )
+      const request = onboarding.probationEvaluationRequest
+      const { status, statusLabel } = probationStatusInfo(request.status)
+
+      const note =
+        request.status === "COMPLETED"
+          ? `Vyplněno ${fmtNoteDate(request.completedAt) ?? ""}${
+              request.completedByName ? ` (${request.completedByName})` : ""
+            }`.trim()
+          : buildSentNote({
+              sentAt: request.sentAt,
+              sentByName: request.sentByName,
+              sentBy: request.sentBy,
+              reminderAt: request.lastReminderAt,
+              reminderByName: request.lastReminderByName,
+              reminderBy: request.lastReminderBy,
+            })
 
       documents.push({
         key: `onboarding-${onboarding.id}-probation`,
@@ -209,7 +285,8 @@ export async function GET() {
         status,
         statusLabel,
         recordId: onboarding.id,
-        documentId: onboarding.probationEvaluationRequest.id,
+        documentId: request.id,
+        note,
       })
     }
 
@@ -241,12 +318,26 @@ export async function GET() {
         statusLabel: "Nevytvořeno",
         recordId: offboarding.id,
         documentId: null,
+        note: null,
       })
     } else {
       const { status, statusLabel } = exitChecklistStatusInfo(
         offboarding.exitChecklist.header,
         offboarding.exitChecklist.items
       )
+      const headerData = (offboarding.exitChecklist.header ??
+        {}) as Partial<ExitChecklistData>
+
+      const note =
+        status === "completed"
+          ? `Vyplněno ${fmtNoteDate(headerData.completedAt) ?? ""}`.trim()
+          : buildSentNote({
+              sentAt: headerData.signatureRecipientsSentAt
+                ? new Date(headerData.signatureRecipientsSentAt)
+                : null,
+              sentByName: headerData.signatureRecipientsSentByName ?? null,
+              sentBy: headerData.signatureRecipientsSentByEmail ?? null,
+            })
 
       documents.push({
         key: `offboarding-${offboarding.id}-checklist`,
@@ -255,6 +346,7 @@ export async function GET() {
         label: "Výstupní list",
         status,
         statusLabel,
+        note,
         recordId: offboarding.id,
         documentId: offboarding.exitChecklist.id,
       })
@@ -269,7 +361,7 @@ export async function GET() {
       unitName: offboarding.unitName,
       plannedDate: offboarding.plannedEnd.toISOString(),
       actualDate: offboarding.actualEnd?.toISOString() ?? null,
-      cancelledAt: null,
+      cancelledAt: offboarding.cancelledAt?.toISOString() ?? null,
       documents,
     }
   })
