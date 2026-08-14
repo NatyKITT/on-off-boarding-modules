@@ -73,3 +73,6 @@ logs/
 
 # idea / WebStorm
 .idea/
+
+# locally generated .docx export of the user manual (personal use only)
+/docs/uzivatelska-prirucka.docx
