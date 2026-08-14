@@ -10,10 +10,9 @@ import { ExitChecklistForm } from "@/components/forms/exit-checklist-form"
 
 type Props = {
   token: string
-  employeeName: string
 }
 
-export function PublicExitChecklistShell({ token, employeeName }: Props) {
+export function PublicExitChecklistShell({ token }: Props) {
   const searchParams = useSearchParams()
 
   const loginSuccess = searchParams.get("login") === "success"
@@ -87,7 +86,6 @@ export function PublicExitChecklistShell({ token, employeeName }: Props) {
       <div className="mx-auto max-w-4xl space-y-4">
         <div className="space-y-1">
           <h1 className="text-2xl font-bold">Výstupní list</h1>
-          <p className="text-sm text-muted-foreground">{employeeName}</p>
         </div>
 
         {showLoginSuccess && !loading && !error && (

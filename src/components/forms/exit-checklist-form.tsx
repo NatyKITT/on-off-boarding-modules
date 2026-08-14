@@ -4,6 +4,7 @@ import * as React from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { format } from "date-fns"
 import {
+  AlertTriangle,
   Check,
   CheckCircle,
   ChevronDown,
@@ -12,6 +13,7 @@ import {
   Lock,
   Printer,
   RefreshCcw,
+  Search,
   Send,
   Undo2,
   X,
@@ -33,6 +35,7 @@ import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
 
 import { useSignatureName } from "@/hooks/use-signature-name"
 import { exitChecklistEventActionLabel } from "@/lib/exit-checklist-event-labels"
+import { joinNameWithTitles } from "@/lib/format-name"
 
 import {
   AlertDialog,
@@ -77,9 +80,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import type { EmployeeItem } from "@/components/common/employee-combobox"
+import { EosPersonPickerDialog } from "@/components/common/eos-person-picker-dialog"
 import { SendAllDialog } from "@/components/common/send-all-dialog"
 import { SendInviteBehalfDialog } from "@/components/common/send-invite-behalf-dialog"
 import { SendInviteDialog } from "@/components/common/send-invite-dialog"
+import { SignatureRecipientsDialog } from "@/components/common/signature-recipients-dialog"
 import { DocumentHistoryDialog } from "@/components/history/document-history-dialog"
 
 type Props = {
@@ -88,7 +94,7 @@ type Props = {
   mode?: "internal" | "public"
   initialData: ExitChecklistData
   onDirtyChange?: (dirty: boolean) => void
-  onSaved?: (data: ExitChecklistData) => void
+  onSaved?: (data: ExitChecklistData, requestClose?: boolean) => void
   externalSaveTrigger?: number
 }
 
@@ -894,6 +900,19 @@ export function ExitChecklistForm({
   const [pdfRecipientEmail, setPdfRecipientEmail] = useState("")
   const [pdfMessage, setPdfMessage] = useState("")
   const [sendingPdf, setSendingPdf] = useState(false)
+  const [pdfPickerOpen, setPdfPickerOpen] = useState(false)
+
+  function handlePdfPersonSelected(employee: EmployeeItem) {
+    setPdfRecipientName(
+      joinNameWithTitles({
+        titleBefore: employee.titleBefore,
+        name: employee.name,
+        surname: employee.surname,
+        titleAfter: employee.titleAfter,
+      })
+    )
+    setPdfRecipientEmail(employee.email ?? "")
+  }
 
   const [positionPickerOpen, setPositionPickerOpen] = useState(false)
   const [positionQuery, setPositionQuery] = useState("")
@@ -945,6 +964,16 @@ export function ExitChecklistForm({
   const currentUserName = useSignatureName()
   const currentUserEmail = session?.user?.email ?? ""
   const currentUserEmailNormalized = normalizeEmail(currentUserEmail)
+
+  const isPrivilegedRole = role !== "USER"
+  const signatureRecipients = initialData.signatureRecipients ?? []
+  const isCurrentUserAuthorizedSigner =
+    isPrivilegedRole ||
+    signatureRecipients.some(
+      (recipient) =>
+        normalizeEmail(recipient.email) === currentUserEmailNormalized &&
+        !recipient.revokedAt
+    )
 
   const validHandoverRecipients = useMemo(
     () =>
@@ -1212,6 +1241,29 @@ export function ExitChecklistForm({
   function signHeaderSignature(key: HeaderSignatureKey) {
     if (isLocked || (!currentUserName && !currentUserEmail)) return
 
+    if (
+      key === "employee" &&
+      !isInternalMode &&
+      normalizeEmail(initialData.employeeEmail) &&
+      currentUserEmailNormalized !== normalizeEmail(initialData.employeeEmail)
+    ) {
+      showFeedback(
+        "error",
+        "Nesouhlasí e-mail",
+        "Podpis zaměstnance může provést jen odcházející zaměstnanec, přihlášený přes Google se svým vlastním e-mailem."
+      )
+      return
+    }
+
+    if (!isCurrentUserAuthorizedSigner) {
+      showFeedback(
+        "error",
+        "Nejste v seznamu příjemců",
+        "Byli jste odebráni ze seznamu příjemců k podpisu tohoto výstupního listu. Požádejte Personální oddělení o opětovné přidání do seznamu."
+      )
+      return
+    }
+
     const now = new Date().toISOString()
 
     setSignatures((prev) => {
@@ -1227,11 +1279,36 @@ export function ExitChecklistForm({
       }
     })
 
+    if (key === "manager") {
+      setItems((prev) =>
+        prev.map((item) => {
+          if (item.key !== "handoverProtocol" || item.signedAt) return item
+
+          return {
+            ...item,
+            resolved: "YES",
+            signedByName: currentUserName || currentUserEmail,
+            signedByEmail: currentUserEmail || null,
+            signedAt: now,
+          }
+        })
+      )
+    }
+
     markDirty()
   }
 
   function signHeaderSignatureBehalf(key: HeaderSignatureKey) {
     if (isLocked || (!currentUserName && !currentUserEmail)) return
+
+    if (!isCurrentUserAuthorizedSigner) {
+      showFeedback(
+        "error",
+        "Nejste v seznamu příjemců",
+        "Byli jste odebráni ze seznamu příjemců k podpisu tohoto výstupního listu. Požádejte Personální oddělení o opětovné přidání do seznamu."
+      )
+      return
+    }
 
     const now = new Date().toISOString()
 
@@ -1247,6 +1324,22 @@ export function ExitChecklistForm({
         },
       }
     })
+
+    if (key === "manager") {
+      setItems((prev) =>
+        prev.map((item) => {
+          if (item.key !== "handoverProtocol" || item.signedAt) return item
+
+          return {
+            ...item,
+            resolved: "YES",
+            signedByName: `${currentUserName || currentUserEmail} — v zastoupení`,
+            signedByEmail: currentUserEmail || null,
+            signedAt: now,
+          }
+        })
+      )
+    }
 
     markDirty()
   }
@@ -1268,6 +1361,28 @@ export function ExitChecklistForm({
         [key]: emptySignature(),
       }
     })
+
+    if (key === "manager") {
+      setItems((prev) =>
+        prev.map((item) => {
+          if (item.key !== "handoverProtocol" || !item.signedAt) return item
+
+          const signerEmail = normalizeEmail(item.signedByEmail)
+
+          if (!isAdmin && signerEmail !== currentUserEmailNormalized) {
+            return item
+          }
+
+          return {
+            ...item,
+            resolved: null,
+            signedByName: null,
+            signedByEmail: null,
+            signedAt: null,
+          }
+        })
+      )
+    }
 
     markDirty()
   }
@@ -1313,27 +1428,50 @@ export function ExitChecklistForm({
       return
     }
 
+    if (!isCurrentUserAuthorizedSigner) {
+      showFeedback(
+        "error",
+        "Nejste v seznamu příjemců",
+        "Byli jste odebráni ze seznamu příjemců k podpisu tohoto výstupního listu. Požádejte Personální oddělení o opětovné přidání do seznamu."
+      )
+      return
+    }
+
+    const target = items.find((item) => item.key === key)
+    if (!target || target.signedAt) return
+
     const now = new Date().toISOString()
-    let changed = false
 
     setItems((prev) =>
-      prev.map((item) => {
-        if (item.key !== key) return item
-        if (item.signedAt) return item
-
-        changed = true
-
-        return {
-          ...item,
-          resolved: "YES",
-          signedByName: currentUserName || currentUserEmail,
-          signedByEmail: currentUserEmail,
-          signedAt: now,
-        }
-      })
+      prev.map((item) =>
+        item.key === key
+          ? {
+              ...item,
+              resolved: "YES",
+              signedByName: currentUserName || currentUserEmail,
+              signedByEmail: currentUserEmail,
+              signedAt: now,
+            }
+          : item
+      )
     )
 
-    if (changed) markDirty()
+    if (key === "handoverProtocol") {
+      setSignatures((prev) => {
+        if (prev.manager?.signedAt) return prev
+
+        return {
+          ...prev,
+          manager: {
+            signedByName: currentUserName || currentUserEmail,
+            signedByEmail: currentUserEmail || null,
+            signedAt: now,
+          },
+        }
+      })
+    }
+
+    markDirty()
   }
 
   function signRowOnBehalf(key: ExitChecklistItem["key"]) {
@@ -1341,62 +1479,108 @@ export function ExitChecklistForm({
       return
     }
 
+    if (!isCurrentUserAuthorizedSigner) {
+      showFeedback(
+        "error",
+        "Nejste v seznamu příjemců",
+        "Byli jste odebráni ze seznamu příjemců k podpisu tohoto výstupního listu. Požádejte Personální oddělení o opětovné přidání do seznamu."
+      )
+      return
+    }
+
+    const behalfTarget = items.find((item) => item.key === key)
+    if (!behalfTarget || behalfTarget.signedAt) return
+
     const now = new Date().toISOString()
-    let changed = false
 
     setItems((prev) =>
-      prev.map((item) => {
-        if (item.key !== key) return item
-        if (item.signedAt) return item
-
-        changed = true
-
-        return {
-          ...item,
-          resolved: "YES",
-          signedByName: `${currentUserName || currentUserEmail} — v zastoupení`,
-          signedByEmail: currentUserEmail,
-          signedAt: now,
-        }
-      })
+      prev.map((item) =>
+        item.key === key
+          ? {
+              ...item,
+              resolved: "YES",
+              signedByName: `${currentUserName || currentUserEmail} — v zastoupení`,
+              signedByEmail: currentUserEmail,
+              signedAt: now,
+            }
+          : item
+      )
     )
 
-    if (changed) markDirty()
+    if (key === "handoverProtocol") {
+      setSignatures((prev) => {
+        if (prev.manager?.signedAt) return prev
+
+        return {
+          ...prev,
+          manager: {
+            signedByName: `${currentUserName || currentUserEmail} — v zastoupení`,
+            signedByEmail: currentUserEmail || null,
+            signedAt: now,
+          },
+        }
+      })
+    }
+
+    markDirty()
   }
 
   function revokeSignature(key: ExitChecklistItem["key"]) {
     if (isLocked) return
 
-    let changed = false
+    const target = items.find((item) => item.key === key)
+    if (!target?.signedAt) return
+
+    const signerEmail = normalizeEmail(target.signedByEmail)
+    if (!isAdmin && signerEmail !== currentUserEmailNormalized) return
 
     setItems((prev) =>
-      prev.map((item) => {
-        if (item.key !== key) return item
-        if (!item.signedAt) return item
-
-        const signerEmail = normalizeEmail(item.signedByEmail)
-
-        if (!isAdmin && signerEmail !== currentUserEmailNormalized) {
-          return item
-        }
-
-        changed = true
-
-        return {
-          ...item,
-          resolved: null,
-          signedByName: null,
-          signedByEmail: null,
-          signedAt: null,
-        }
-      })
+      prev.map((item) =>
+        item.key === key
+          ? {
+              ...item,
+              resolved: null,
+              signedByName: null,
+              signedByEmail: null,
+              signedAt: null,
+            }
+          : item
+      )
     )
 
-    if (changed) markDirty()
+    if (key === "handoverProtocol") {
+      setSignatures((prev) => {
+        const current = prev.manager
+
+        if (!current?.signedAt) return prev
+
+        const managerSignerEmail = normalizeEmail(current.signedByEmail)
+
+        if (!isAdmin && managerSignerEmail !== currentUserEmailNormalized) {
+          return prev
+        }
+
+        return {
+          ...prev,
+          manager: emptySignature(),
+        }
+      })
+    }
+
+    markDirty()
   }
 
   function signHandoverManagerSignature(behalf = false) {
     if (isLocked || (!currentUserName && !currentUserEmail)) return
+
+    if (!isCurrentUserAuthorizedSigner) {
+      showFeedback(
+        "error",
+        "Nejste v seznamu příjemců",
+        "Byli jste odebráni ze seznamu příjemců k podpisu tohoto výstupního listu. Požádejte Personální oddělení o opětovné přidání do seznamu."
+      )
+      return
+    }
 
     const now = new Date().toISOString()
 
@@ -1706,7 +1890,10 @@ export function ExitChecklistForm({
     }
   }
 
-  async function handleSave(lockAfterSave: boolean): Promise<boolean> {
+  async function handleSave(
+    lockAfterSave: boolean,
+    options?: { requestClose?: boolean }
+  ): Promise<boolean> {
     try {
       setSaving(true)
 
@@ -1842,7 +2029,7 @@ export function ExitChecklistForm({
             : "Všechny změny a podpisy byly úspěšně zaznamenány."
         )
 
-        onSaved?.(payload.data)
+        onSaved?.(payload.data, options?.requestClose)
         return true
       }
 
@@ -2066,6 +2253,19 @@ export function ExitChecklistForm({
         </CardHeader>
 
         <CardContent className="space-y-6 text-sm">
+          {!isInternalMode && !isCurrentUserAuthorizedSigner && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+              <span>
+                Byli jste odebráni ze seznamu příjemců k podpisu tohoto
+                výstupního listu, takže ho aktuálně nemůžete podepsat. Výstupní
+                list si můžete prohlédnout, ale pro obnovení možnosti podepsat
+                požádejte Personální oddělení o opětovné přidání do seznamu
+                příjemců.
+              </span>
+            </div>
+          )}
+
           <div className="grid gap-2 md:grid-cols-[1.5fr,1fr]">
             <div>
               <span className="font-medium text-muted-foreground">
@@ -3417,21 +3617,20 @@ export function ExitChecklistForm({
                 : "Výstupní list můžete doplnit, podepsat a uložit pod svým přihlášeným účtem."}
           </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {canInvite && initialData.publicToken && (
-              <SendAllDialog
-                offboardingId={resolvedOffboardingId}
-                employeeName={header.employeeName ?? ""}
-                employeeEmail={header.employeeEmail ?? null}
-                publicToken={initialData.publicToken}
-                conflictOfInterest={conflictOfInterest}
-                managerEmail={managerEmail || null}
-                managerName={managerName || null}
-              />
-            )}
-
+          <div className="flex flex-col items-end gap-2">
             {canInvite && (
-              <>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {initialData.publicToken && (
+                  <SendAllDialog
+                    offboardingId={resolvedOffboardingId}
+                    employeeName={header.employeeName ?? ""}
+                    employeeEmail={header.employeeEmail ?? null}
+                    publicToken={initialData.publicToken}
+                    conflictOfInterest={conflictOfInterest}
+                    managerEmail={managerEmail || null}
+                    managerName={managerName || null}
+                  />
+                )}
                 <SendInviteDialog
                   offboardingId={resolvedOffboardingId}
                   employeeName={header.employeeName ?? ""}
@@ -3441,93 +3640,109 @@ export function ExitChecklistForm({
                   employeeName={header.employeeName ?? ""}
                   managerName={managerName || null}
                 />
-              </>
+              </div>
             )}
 
-            {canGeneratePdf && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={requestGeneratePdf}
-                className="gap-1"
-                disabled={saving || sendingPdf}
-              >
-                <Printer className="size-4" /> {pdfButtonLabel}
-              </Button>
-            )}
-
-            {canSendPdf && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setSendPdfDialogOpen(true)}
-                className="gap-1"
-                disabled={saving || sendingPdf}
-              >
-                <Send className="size-4" /> Odeslat PDF
-              </Button>
-            )}
-
-            {canUnlock && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => void handleUnlock()}
-                disabled={saving}
-                className="gap-1"
-              >
-                <Undo2 className="size-4" />
-                Odemknout pro úpravy
-              </Button>
-            )}
-
-            {!isLocked && (
-              <>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void handleSave(false)}
-                  disabled={saving}
-                >
-                  {saving ? "Ukládám…" : "Uložit"}
-                </Button>
-
-                {canLock && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="bg-[#00847C] text-white hover:bg-[#0B6D73]"
-                    onClick={() => void handleSave(true)}
-                    disabled={saving}
-                  >
-                    Uzamknout
-                  </Button>
+            {(canInvite || canGeneratePdf || canSendPdf) && (
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {canInvite && resolvedOffboardingId && (
+                  <SignatureRecipientsDialog
+                    offboardingId={resolvedOffboardingId}
+                    employeeName={header.employeeName ?? ""}
+                    managerName={managerName || null}
+                  />
                 )}
-              </>
-            )}
 
-            {isInternalMode && isAdmin && resolvedOffboardingId && (
-              <DocumentHistoryDialog
-                title="Historie výstupního listu"
-                fetchUrl={`/api/odchody/${resolvedOffboardingId}/exit-checklist/history`}
-                actionLabel={exitChecklistEventActionLabel}
-                trigger={
+                {canGeneratePdf && (
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
+                    onClick={requestGeneratePdf}
                     className="gap-1"
+                    disabled={saving || sendingPdf}
                   >
-                    <HistoryIcon className="size-4" />
-                    Historie
+                    <Printer className="size-4" /> {pdfButtonLabel}
                   </Button>
-                }
-              />
+                )}
+
+                {canSendPdf && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSendPdfDialogOpen(true)}
+                    className="gap-1"
+                    disabled={saving || sendingPdf}
+                  >
+                    <Send className="size-4" /> Odeslat PDF
+                  </Button>
+                )}
+              </div>
             )}
+
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {canUnlock && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleUnlock()}
+                  disabled={saving}
+                  className="gap-1"
+                >
+                  <Undo2 className="size-4" />
+                  Odemknout pro úpravy
+                </Button>
+              )}
+
+              {!isLocked && (
+                <>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="bg-[#00847C] text-white hover:bg-[#0B6D73]"
+                    onClick={() =>
+                      void handleSave(false, { requestClose: true })
+                    }
+                    disabled={saving}
+                  >
+                    {saving ? "Ukládám…" : "Uložit"}
+                  </Button>
+
+                  {canLock && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleSave(true)}
+                      disabled={saving}
+                    >
+                      Uzamknout
+                    </Button>
+                  )}
+                </>
+              )}
+
+              {isInternalMode && isAdmin && resolvedOffboardingId && (
+                <DocumentHistoryDialog
+                  title="Historie výstupního listu"
+                  fetchUrl={`/api/odchody/${resolvedOffboardingId}/exit-checklist/history`}
+                  actionLabel={exitChecklistEventActionLabel}
+                  trigger={
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-1"
+                    >
+                      <HistoryIcon className="size-4" />
+                      Historie
+                    </Button>
+                  }
+                />
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -3671,6 +3886,18 @@ export function ExitChecklistForm({
             </AlertDialogHeader>
 
             <div className="mt-5 space-y-3">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => setPdfPickerOpen(true)}
+                disabled={sendingPdf}
+              >
+                <Search className="size-3.5" />
+                Vybrat ze zaměstnanců
+              </Button>
+
               <div className="space-y-1.5">
                 <Label>Jméno příjemce</Label>
                 <Input
@@ -3690,6 +3917,14 @@ export function ExitChecklistForm({
                   disabled={sendingPdf}
                 />
               </div>
+
+              <EosPersonPickerDialog
+                open={pdfPickerOpen}
+                onOpenChange={setPdfPickerOpen}
+                title="Vybrat zaměstnance"
+                onSelect={handlePdfPersonSelected}
+                excludeActiveOffboardings={false}
+              />
 
               <div className="space-y-1.5">
                 <Label>Doplňující zpráva</Label>

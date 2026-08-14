@@ -130,6 +130,11 @@ type OffRow = {
   userEmail?: string | null
   personalNumber?: string | null
   notes?: string | null
+  supervisorName?: string | null
+  supervisorEmail?: string | null
+  supervisorPosition?: string | null
+  supervisorDepartment?: string | null
+  supervisorUnitName?: string | null
   status?: "NEW" | "IN_PROGRESS" | "COMPLETED"
 }
 
@@ -271,6 +276,11 @@ const mapOffInitial = (e: Partial<OffRow>): Partial<OffFormValues> => ({
   department: toUndef(e.department) ?? "",
   unitName: toUndef(e.unitName) ?? "",
   userEmail: toUndef(e.userEmail),
+  supervisorName: toUndef(e.supervisorName),
+  supervisorEmail: toUndef(e.supervisorEmail),
+  supervisorPosition: toUndef(e.supervisorPosition),
+  supervisorDepartment: toUndef(e.supervisorDepartment),
+  supervisorUnitName: toUndef(e.supervisorUnitName),
   noticeFiled: e.noticeFiled ? e.noticeFiled.slice(0, 10) : undefined,
   hasCustomDates: e.hasCustomDates ?? undefined,
   plannedEnd: e.plannedEnd ? e.plannedEnd.slice(0, 10) : undefined,

@@ -1,13 +1,18 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { auth } from "@/auth"
+import { Prisma } from "@prisma/client"
 
 import { prisma } from "@/lib/db"
 import {
   logEmailHistory,
   sendBehalfSignatureEmail,
+  sendEmployeeExitChecklistInviteEmail,
   sendSignatureInviteEmail,
 } from "@/lib/email"
-import { getOrCreateChecklist } from "@/lib/exit-checklist"
+import {
+  getOrCreateChecklist,
+  mergeSignatureRecipients,
+} from "@/lib/exit-checklist"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
 import { canAdminExitChecklist } from "@/lib/rbac"
 
@@ -64,6 +69,7 @@ export async function POST(
   const inviteeEmail = cleanText(
     (body as Record<string, unknown>).inviteeEmail
   ).toLowerCase()
+  const inviteeName = cleanText((body as Record<string, unknown>).inviteeName)
   const isBehalf = (body as Record<string, unknown>).isBehalf === true
   const behalfOf = cleanText((body as Record<string, unknown>).behalfOf)
   const behalfOfName = cleanText((body as Record<string, unknown>).behalfOfName)
@@ -71,6 +77,12 @@ export async function POST(
   const behalfOfDisplayLabel = cleanText(
     (body as Record<string, unknown>).behalfOfDisplayLabel
   )
+  const behalfOfRowKeysRaw = (body as Record<string, unknown>).behalfOfRowKeys
+  const behalfOfRowKeys = Array.isArray(behalfOfRowKeysRaw)
+    ? behalfOfRowKeysRaw.filter(
+        (key): key is string => typeof key === "string" && key.trim() !== ""
+      )
+    : []
 
   if (!inviteeEmail) {
     return NextResponse.json(
@@ -110,6 +122,7 @@ export async function POST(
       unitName: true,
       actualEnd: true,
       plannedEnd: true,
+      userEmail: true,
       exitChecklist: true,
     },
   })
@@ -160,6 +173,10 @@ export async function POST(
 
   const signUrl = `${getAppBaseUrl(req)}/odchody-public/${checklist.publicToken}`
 
+  const isEmployeeInvite =
+    Boolean(offboarding.userEmail) &&
+    inviteeEmail === offboarding.userEmail?.trim().toLowerCase()
+
   try {
     if (isBehalf) {
       await sendBehalfSignatureEmail({
@@ -167,6 +184,15 @@ export async function POST(
         behalfOfName: behalfOfName || behalfOf || "zodpovědnou osobu",
         behalfOfRole,
         behalfOfDisplayLabel: behalfOfDisplayLabel || behalfOf || undefined,
+        employeeName,
+        employeePosition: offboarding.positionName ?? "",
+        employeeDepartment: offboarding.department ?? "",
+        employmentEndDate,
+        signUrl,
+      })
+    } else if (isEmployeeInvite) {
+      await sendEmployeeExitChecklistInviteEmail({
+        to: inviteeEmail,
         employeeName,
         employeePosition: offboarding.positionName ?? "",
         employeeDepartment: offboarding.department ?? "",
@@ -196,6 +222,54 @@ export async function POST(
       createdBy: session.user.id ?? session.user.email ?? "unknown",
     })
 
+    const behalfLabel = behalfOfDisplayLabel || behalfOfName || behalfOf
+    const nameSuffix = inviteeName ? ` (${inviteeName})` : ""
+
+    await prisma.$transaction(async (tx) => {
+      const fresh = await tx.exitChecklist.findUnique({
+        where: { id: checklist.id },
+        select: { header: true },
+      })
+
+      const headerRaw = fresh?.header ?? checklist.header
+      const header =
+        headerRaw && typeof headerRaw === "object" && !Array.isArray(headerRaw)
+          ? (headerRaw as Record<string, unknown>)
+          : {}
+
+      const mergedRecipients = mergeSignatureRecipients(
+        Array.isArray(header.signatureRecipients)
+          ? header.signatureRecipients
+          : [],
+        [
+          {
+            name: inviteeName || inviteeEmail,
+            email: inviteeEmail,
+            invitedAt: new Date().toISOString(),
+            ...(isBehalf && behalfOfRowKeys.length
+              ? { rowKeys: behalfOfRowKeys }
+              : {}),
+            ...(isBehalf && behalfLabel ? { behalfLabel } : {}),
+          },
+        ]
+      )
+
+      await tx.exitChecklist.update({
+        where: { id: checklist.id },
+        data: {
+          header: {
+            ...(header as Prisma.InputJsonObject),
+            signatureRecipients:
+              mergedRecipients as unknown as Prisma.InputJsonValue,
+            signatureRecipientsSentAt: new Date().toISOString(),
+            signatureRecipientsSentByName:
+              session.user.name ?? session.user.email ?? null,
+            signatureRecipientsSentByEmail: session.user.email ?? null,
+          },
+        },
+      })
+    })
+
     await logExitChecklistEvent({
       checklistId: checklist.id,
       action: "SIGNATURE_INVITE_SENT",
@@ -203,8 +277,8 @@ export async function POST(
       byName: session.user.name ?? session.user.email ?? null,
       byEmail: session.user.email ?? null,
       message: isBehalf
-        ? `Pozvánka k podpisu v zastoupení byla odeslána na adresu ${inviteeEmail}.`
-        : `Pozvánka k podpisu byla odeslána na adresu ${inviteeEmail}.`,
+        ? `Pozvánka k podpisu v zastoupení za „${behalfLabel}" byla odeslána na adresu ${inviteeEmail}${nameSuffix}. Přidán(a) do seznamu příjemců k podpisu.`
+        : `Pozvánka k podpisu byla odeslána na adresu ${inviteeEmail}${nameSuffix}. Přidán(a) do seznamu příjemců k podpisu.`,
     })
   } catch (error) {
     console.error(

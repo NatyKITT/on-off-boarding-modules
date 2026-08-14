@@ -140,4 +140,8 @@ export interface ExitChecklistData {
 export interface ExitChecklistSignatureRecipient {
   name: string
   email: string
+  rowKeys?: string[]
+  behalfLabel?: string
+  invitedAt?: string
+  revokedAt?: string
 }

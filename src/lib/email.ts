@@ -1700,6 +1700,188 @@ export async function sendSignatureInviteEmail({
   })
 }
 
+type SendEmployeeExitChecklistInviteEmailParams = {
+  to: string
+  employeeName: string
+  employeePosition?: string | null
+  employeeDepartment?: string | null
+  employmentEndDate?: string | Date | null
+  signUrl: string
+}
+
+export async function sendEmployeeExitChecklistInviteEmail({
+  to,
+  employeeName,
+  employeePosition,
+  employeeDepartment,
+  employmentEndDate,
+  signUrl,
+}: SendEmployeeExitChecklistInviteEmailParams): Promise<void> {
+  const primary = "#00847C"
+  const bgLight = "#E5F5F2"
+
+  const greeting = "Dobrý den,"
+  const subject = `Váš odchod byl zaevidován – výstupní list k podpisu`
+
+  const html = `
+  <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+  <html xmlns="http://www.w3.org/1999/xhtml" lang="cs">
+    <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <meta name="color-scheme" content="light" />
+      <meta name="supported-color-schemes" content="light" />
+      <title>${escapeHtml(subject)}</title>
+      <style type="text/css">
+        body { margin: 0; padding: 0; }
+        table { border-collapse: collapse; }
+        ${EMAIL_GLOBAL_FONT_STYLE}
+        .intro-text {
+          font-family: ${EMAIL_FONT_FAMILY};
+          font-size:14px;
+          line-height: 1.6;
+          color: #082B2A;
+        }
+      </style>
+    </head>
+
+    <body style="margin:0;padding:0;background-color:${bgLight};width:100% !important;font-family:${EMAIL_FONT_FAMILY};">
+      <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
+        <tr>
+          <td align="center" style="padding:30px 10px;">
+            <table
+              border="0"
+              cellpadding="0"
+              cellspacing="0"
+              width="600"
+              bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border-collapse:separate;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;"
+            >
+              <tr bgcolor="${primary}">
+                <td
+                  bgcolor="${primary}"
+                  style="padding:25px 30px;background-color:${primary};border-radius:12px 12px 0 0;"
+                >
+                  <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                    <tr>
+                      <td style="color:#ffffff;font-family:${EMAIL_FONT_FAMILY};">
+                        <div style="font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;opacity:0.9;">
+                          Odchod ze zaměstnání
+                        </div>
+                        <div style="font-size:22px;font-weight:bold;line-height:1.2;">
+                          Váš odchod byl zaevidován
+                        </div>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+              <tr>
+                <td
+                  bgcolor="#ffffff"
+                  style="padding:26px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};"
+                >
+                  <p class="intro-text" style="margin:0 0 16px 0;color:#082B2A;">
+                    ${greeting}
+                  </p>
+
+                  <p class="intro-text" style="margin:0 0 16px 0;color:#374151;">
+                    Váš odchod byl zaevidován jako plánovaný. Než pracovní poměr
+                    skončí, je potřeba předat agendu, vrátit svěřený majetek
+                    a elektronicky podepsat výstupní list.
+                  </p>
+
+                  ${renderExitChecklistInfoTable({
+                    primary,
+                    bgLight,
+                    employeeName,
+                    employeePosition,
+                    employeeDepartment,
+                    employmentEndDate,
+                  })}
+
+                  <p class="intro-text" style="margin:0 0 16px 0;color:#374151;">
+                    Přihlaste se svým firemním účtem Google
+                    (<strong>@praha6.cz</strong>) – stejným, na který vám tento
+                    e-mail přišel.
+                  </p>
+
+                  <p class="intro-text" style="margin:0 0 24px 0;color:#374151;">
+                    Po přihlášení budete přesměrován(a) na výstupní list, kde
+                    potvrdíte předání agendy a majetku a připojíte svůj podpis.
+                    Jakmile podepíší všechny zúčastněné strany, přijde vám
+                    e-mailem potvrzení a budete se moct dostavit na Personální
+                    oddělení pro zápočtový list.
+                  </p>
+
+                  ${wrapWithBottomSpacing(
+                    `
+                  <table border="0" cellpadding="0" cellspacing="0">
+                    <tr>
+                      <td bgcolor="${primary}" style="border-radius:6px;background-color:${primary};border:1px solid ${primary};">
+                        <a
+                          href="${escapeHtml(signUrl)}"
+                          style="display:inline-block;padding:12px 28px;color:#ffffff;font-family:${EMAIL_FONT_FAMILY};font-size:15px;font-weight:bold;text-decoration:none;border-radius:6px;"
+                        >
+                          Otevřít výstupní list
+                        </a>
+                      </td>
+                    </tr>
+                  </table>
+                  `,
+                    24
+                  )}
+
+                  <p style="margin:0 0 4px 0;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;">
+                    Pokud tlačítko nefunguje, zkopírujte tento odkaz do prohlížeče:
+                  </p>
+                  <p style="margin:0;word-break:break-all;">
+                    <a href="${escapeHtml(signUrl)}" style="font-family:monospace;font-size:12px;color:${primary};">
+                      ${escapeHtml(signUrl)}
+                    </a>
+                  </p>
+                </td>
+              </tr>
+
+              <tr>
+                <td
+                  bgcolor="${bgLight}"
+                  style="padding:18px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;line-height:1.5;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;"
+                >
+                  ${EMAIL_FOOTER_HTML}
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+  </html>`
+
+  const text = [
+    greeting,
+    "",
+    "Váš odchod byl zaevidován jako plánovaný. Než pracovní poměr skončí, je potřeba předat agendu, vrátit svěřený majetek a elektronicky podepsat výstupní list.",
+    "",
+    `Pozice: ${employeePosition || "—"}`,
+    `Odbor: ${employeeDepartment || "—"}`,
+    `Datum odchodu: ${fmtDate(employmentEndDate)}`,
+    "",
+    "Přihlaste se svým firemním účtem Google (@praha6.cz) – stejným, na který vám tento e-mail přišel.",
+    "Po přihlášení budete přesměrován(a) na výstupní list k potvrzení a podpisu.",
+    "Jakmile podepíší všechny zúčastněné strany, přijde vám e-mailem potvrzení a budete se moct dostavit na Personální oddělení pro zápočtový list.",
+    "",
+    `Odkaz: ${signUrl}`,
+  ].join("\n")
+
+  await sendMail({
+    to: [to],
+    subject,
+    html,
+    text,
+  })
+}
+
 export async function sendMail(params: {
   to?: string[]
   bcc?: string[]

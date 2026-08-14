@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client"
 import { z, ZodError } from "zod"
 
 import { prisma } from "@/lib/db"
+import { mergeSignatureRecipients } from "@/lib/exit-checklist"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
 import { canAdminExitChecklist } from "@/lib/rbac"
 import { getSession } from "@/lib/session"
@@ -18,38 +19,21 @@ const bodySchema = z.object({
       z.object({
         name: z.string().trim().min(1, "Jméno příjemce je povinné."),
         email: z.string().trim().email("Neplatný e-mail příjemce."),
+        rowKeys: z.array(z.string()).optional(),
+        behalfLabel: z.string().optional(),
+        invitedAt: z.string().optional(),
+        revokedAt: z.string().optional(),
       })
     )
     .min(1)
     .max(50),
+  mode: z.enum(["merge", "replace"]).optional().default("replace"),
 })
-
-function sanitizeText(value: unknown): string {
-  return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : ""
-}
-
-function normalizeEmail(value: unknown): string {
-  return sanitizeText(value).toLowerCase()
-}
 
 function getHeaderObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {}
-}
-
-function normalizeRecipients(
-  recipients: Array<{ name: string; email: string }>
-) {
-  return Array.from(
-    new Map(
-      recipients.map((recipient) => {
-        const email = normalizeEmail(recipient.email)
-
-        return [email, { name: sanitizeText(recipient.name), email }]
-      })
-    ).values()
-  ).filter((recipient) => recipient.name && recipient.email)
 }
 
 export async function POST(
@@ -87,18 +71,7 @@ export async function POST(
 
   try {
     const rawBody = await req.json().catch(() => null)
-    const { recipients } = bodySchema.parse(rawBody)
-    const uniqueRecipients = normalizeRecipients(recipients)
-
-    if (uniqueRecipients.length === 0) {
-      return NextResponse.json(
-        {
-          status: "error",
-          message: "Chybí alespoň jeden příjemce s platným e-mailem.",
-        },
-        { status: 400 }
-      )
-    }
+    const { recipients, mode } = bodySchema.parse(rawBody)
 
     const offboarding = await prisma.employeeOffboarding.findFirst({
       where: { id: offboardingId, deletedAt: null },
@@ -127,9 +100,29 @@ export async function POST(
 
     const header = getHeaderObject(offboarding.exitChecklist.header)
 
+    const uniqueRecipients =
+      mode === "merge"
+        ? mergeSignatureRecipients(
+            Array.isArray(header.signatureRecipients)
+              ? header.signatureRecipients
+              : [],
+            recipients
+          )
+        : mergeSignatureRecipients(null, recipients)
+
+    if (uniqueRecipients.length === 0) {
+      return NextResponse.json(
+        {
+          status: "error",
+          message: "Chybí alespoň jeden příjemce s platným e-mailem.",
+        },
+        { status: 400 }
+      )
+    }
+
     const nextHeader: Prisma.InputJsonObject = {
       ...(header as Prisma.InputJsonObject),
-      signatureRecipients: uniqueRecipients,
+      signatureRecipients: uniqueRecipients as unknown as Prisma.InputJsonValue,
       signatureRecipientsSentAt: new Date().toISOString(),
       signatureRecipientsSentByName: user.name ?? user.email ?? null,
       signatureRecipientsSentByEmail: user.email ?? null,

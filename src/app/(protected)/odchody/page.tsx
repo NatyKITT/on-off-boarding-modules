@@ -20,6 +20,7 @@ import {
   RotateCcw,
   Trash2,
   User,
+  UserCheck,
   XCircle,
 } from "lucide-react"
 import { useSession } from "next-auth/react"
@@ -153,6 +154,11 @@ type Departure = {
   userEmail?: string | null
   userName?: string | null
   notes?: string | null
+  supervisorName?: string | null
+  supervisorEmail?: string | null
+  supervisorPosition?: string | null
+  supervisorDepartment?: string | null
+  supervisorUnitName?: string | null
   status?: "NEW" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED"
   probationStopDecision?: "STOP" | "KEEP" | null
 
@@ -466,6 +472,11 @@ function departureToInitial(d: Departure): Partial<FormValues> {
     department: d.department ?? "",
     unitName: d.unitName ?? "",
     userEmail: d.userEmail ?? "",
+    supervisorName: d.supervisorName ?? "",
+    supervisorEmail: d.supervisorEmail ?? "",
+    supervisorPosition: d.supervisorPosition ?? "",
+    supervisorDepartment: d.supervisorDepartment ?? "",
+    supervisorUnitName: d.supervisorUnitName ?? "",
     noticeFiled: d.noticeFiled ? d.noticeFiled.slice(0, 10) : "",
     noticeEnd: d.noticeEnd ? d.noticeEnd.slice(0, 10) : undefined,
     noticeMonths: d.noticeMonths ?? undefined,
@@ -839,7 +850,33 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
         </div>
       </TableCell>
 
-      <TableCell className="w-[140px] whitespace-nowrap">
+      <TableCell className="w-[200px] min-w-[200px]">
+        {departure.supervisorName ? (
+          <div className="flex items-start gap-2">
+            <UserCheck className="mt-0.5 size-4 shrink-0 text-blue-600" />
+            <div className="min-w-0">
+              <div
+                className="truncate py-0.5 text-sm font-medium leading-normal"
+                title={departure.supervisorName}
+              >
+                {departure.supervisorName}
+              </div>
+              {departure.supervisorEmail && (
+                <div
+                  className="truncate text-xs text-muted-foreground"
+                  title={departure.supervisorEmail}
+                >
+                  {departure.supervisorEmail}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <span className="text-xs text-muted-foreground">–</span>
+        )}
+      </TableCell>
+
+      <TableCell className="w-[160px] whitespace-nowrap">
         <div className="flex items-center gap-2">
           <Clock className="size-4 text-muted-foreground" />
           <span className="text-sm">
@@ -2209,7 +2246,7 @@ export default function OffboardingPage() {
                                     <div className="inline-block min-w-full pr-6">
                                       <Table
                                         disableWrapperScroll
-                                        className="w-max min-w-[1440px]"
+                                        className="w-max min-w-[1900px]"
                                       >
                                         <TableHeader>
                                           <TableRow>
@@ -2222,7 +2259,10 @@ export default function OffboardingPage() {
                                             <TableHead className="w-[240px]">
                                               Odbor / Oddělení
                                             </TableHead>
-                                            <TableHead className="w-[140px]">
+                                            <TableHead className="w-[200px] min-w-[200px]">
+                                              Vedoucí
+                                            </TableHead>
+                                            <TableHead className="w-[160px]">
                                               Plánovaný odchod
                                             </TableHead>
                                             <TableHead className="w-[230px]">
@@ -2480,7 +2520,7 @@ export default function OffboardingPage() {
                                     <div className="inline-block min-w-full pr-6">
                                       <Table
                                         disableWrapperScroll
-                                        className="w-max min-w-[1440px]"
+                                        className="w-max min-w-[1900px]"
                                       >
                                         <TableHeader>
                                           <TableRow>
@@ -2493,7 +2533,10 @@ export default function OffboardingPage() {
                                             <TableHead className="w-[240px]">
                                               Odbor / Oddělení
                                             </TableHead>
-                                            <TableHead className="w-[140px]">
+                                            <TableHead className="w-[200px] min-w-[200px]">
+                                              Vedoucí
+                                            </TableHead>
+                                            <TableHead className="w-[160px]">
                                               Skutečný odchod
                                             </TableHead>
                                             <TableHead className="w-[230px]">

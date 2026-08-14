@@ -1,7 +1,16 @@
 "use client"
 
 import { useState } from "react"
-import { CheckCircle2, ClipboardCopy, Loader2, Mail, Send } from "lucide-react"
+import {
+  CheckCircle2,
+  ClipboardCopy,
+  Loader2,
+  Mail,
+  Search,
+  Send,
+} from "lucide-react"
+
+import { joinNameWithTitles } from "@/lib/format-name"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -14,6 +23,8 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import type { EmployeeItem } from "@/components/common/employee-combobox"
+import { EosPersonPickerDialog } from "@/components/common/eos-person-picker-dialog"
 
 type Props = {
   offboardingId: number
@@ -29,6 +40,7 @@ export function SendInviteDialog({ offboardingId, employeeName }: Props) {
   const [successUrl, setSuccessUrl] = useState<string | null>(null)
   const [emailFailed, setEmailFailed] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   function handleOpenChange(next: boolean) {
     setOpen(next)
@@ -40,6 +52,19 @@ export function SendInviteDialog({ offboardingId, employeeName }: Props) {
       setEmailFailed(false)
       setCopied(false)
     }
+  }
+
+  function handlePersonSelected(employee: EmployeeItem) {
+    setName(
+      joinNameWithTitles({
+        titleBefore: employee.titleBefore,
+        name: employee.name,
+        surname: employee.surname,
+        titleAfter: employee.titleAfter,
+      })
+    )
+    setEmail(employee.email ?? "")
+    setError(null)
   }
 
   async function handleSend() {
@@ -134,6 +159,18 @@ export function SendInviteDialog({ offboardingId, employeeName }: Props) {
         </DialogHeader>
 
         <div className="space-y-4">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => setPickerOpen(true)}
+            disabled={sending}
+          >
+            <Search className="size-3.5" />
+            Vybrat ze zaměstnanců
+          </Button>
+
           <div className="space-y-1">
             <Label htmlFor="invite-email">
               E-mail příjemce <span className="text-red-500">*</span>
@@ -169,6 +206,14 @@ export function SendInviteDialog({ offboardingId, employeeName }: Props) {
               disabled={sending}
             />
           </div>
+
+          <EosPersonPickerDialog
+            open={pickerOpen}
+            onOpenChange={setPickerOpen}
+            title="Vybrat zaměstnance"
+            onSelect={handlePersonSelected}
+            excludeActiveOffboardings={false}
+          />
 
           {successUrl && !emailFailed && (
             <div className="rounded-md border border-green-200 bg-green-50 p-3">

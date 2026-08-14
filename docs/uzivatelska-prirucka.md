@@ -102,7 +102,7 @@ odesílání e-mailů), „–“ = žádný přístup.
 | Interní dokumenty – prohlížení a odeslání PDF            | Č + Z | Č + Z | Č + Z | –        | –       |
 | Interní dokumenty – přiřazení, zámek, znovu-vygenerování | Č + Z | Č + Z | –     | –        | –       |
 | Vyhodnocení zkušební doby (interní správa)               | Č + Z | Č + Z | Č + Z | –        | –       |
-| Exit checklist (interní správa a podpis)                 | Č + Z | Č + Z | Č + Z | Podpis¹  | Podpis¹ |
+| Výstupní list (interní správa a podpis)                  | Č + Z | Č + Z | Č + Z | Podpis¹  | Podpis¹ |
 | Měsíční e-mailové reporty (Nástupy/Odchody/Změny)        | Č + Z | Č + Z | Č + Z | Č        | –       |
 | Statistiky – prohlížení, export a odeslání PDF           | Č + Z | Č + Z | Č + Z | Č + Z    | –       |
 | Statistiky – uložení/smazání vlastního pohledu           | Č + Z | Č + Z | Č + Z | –        | –       |
@@ -283,57 +283,132 @@ založit záznam s plánovaným datem konce, později potvrdit **skutečný**
 konec pracovního poměru. Vedoucí odboru se dohledává automaticky podle
 čísla funkce a lze ho ručně přepsat nebo znovu dohledat tlačítkem
 „Obnovit dle pozice" – poslední zadaná hodnota se vždy uloží a použije
-i ve výstupním listu.
+i ve výstupním listu. Dohledaný vedoucí je vidět přímo v detailu
+odchodu, ne jen po otevření výstupního listu. Automatické dohledání se
+ale nemusí vždy podařit (např. neobsazená pozice nebo chybějící údaj
+v systemizaci) – v takovém případě je potřeba vedoucího doplnit ručně.
 
 Z detailu odchodu se dále řídí:
 
-- **Výstupní list** – souhrnný dokument k odchodu, včetně pozice,
-  čísla funkce a odboru zaměstnance.
-- **Exit checklist** – strukturovaný výstupní proces se sekcemi:
+- **Výstupní list** – modální okno u odchodu se všemi akcemi
+  a informacemi k výstupnímu procesu zaměstnance: odeslání k podpisu
+  (Odeslat všem k podpisu, Odeslat k podpisu, Odeslat k podpisu
+  v zastoupení), přehled a správa osob k podpisu, generování
+  a odesílání PDF, uzamčení/odemčení a historie. Jeho hlavní součástí
+  je samotný **dokument výstupní list** (v kódu appky označovaný jako
+  „exit-checklist") se strukturovanými sekcemi:
   - vrácení majetku a vybavení,
   - předání agendy (komu a co),
   - střet zájmů,
   - podpis zaměstnance, vedoucího a vydávajícího.
 
-  Checklist se částečně vyplňuje interně (HR/IT), částečně jej
-  vyplňuje a podepisuje sám odcházející zaměstnanec nebo jeho
-  vedoucí prostřednictvím veřejného odkazu (kapitola 6). Jméno a
-  e-mail vedoucího se do checklistu při jeho založení automaticky
-  přebírá z odchodu.
+  Dokument se částečně vyplňuje interně (HR/IT), částečně jej vyplňuje
+  a podepisuje sám odcházející zaměstnanec nebo jeho vedoucí
+  prostřednictvím veřejného odkazu (kapitola 6). Jméno a e-mail
+  vedoucího se do dokumentu při jeho založení automaticky přebírá
+  z odchodu.
 
-  Výstupní list je hotový, až jsou podepsané úplně **všechny
+  Dokument výstupní list je hotový, až jsou podepsané úplně **všechny
   vyžadované položky** – nejen zaměstnanec, vedoucí a vydávající, ale i
   každý další řádek, který se k danému odchodu váže (vrácení
   konkrétního vybavení, předání agendy, případně střet zájmů), tedy
   reálně všichni, kdo mají v „Odeslat všem k podpisu" u daného řádku
   co podepsat. Teprve jakmile jsou podepsaná úplně všechna políčka,
-  aplikace automaticky pošle HR e-mail s PDF podepsaného výstupního
-  listu v příloze a samostatný informační e-mail odcházejícímu
-  zaměstnanci, že má výstupní list podepsaný a má se dostavit na
-  Personální oddělení pro zápočtový list.
+  aplikace automaticky pošle HR e-mail s PDF podepsaného dokumentu
+  v příloze a samostatný informační e-mail odcházejícímu zaměstnanci,
+  že má výstupní list podepsaný a má se dostavit na Personální oddělení
+  pro zápočtový list.
 
   Pozor: pokud HR do „Odeslat všem k podpisu" ručně přidá zcela nového
-  člověka, který v checklistu nemá žádný svůj konkrétní řádek k
-  podpisu (není mezi předdefinovanými signatáři ani není zaměstnanec
-  či vedoucí), jeho podpis se do vyhodnocení „je vše podepsáno" nijak
-  nepočítá – takový člověk dostane e-mail a připomínky, ale checklist
-  se může uzavřít, i kdyby on sám nic nepodepsal.
+  člověka, který v dokumentu nemá žádný svůj konkrétní řádek k podpisu
+  (není mezi předdefinovanými signatáři ani není zaměstnanec či
+  vedoucí), jeho podpis se do vyhodnocení „je vše podepsáno" nijak
+  nepočítá – takový člověk dostane e-mail a připomínky, ale dokument se
+  může uzavřít, i kdyby on sám nic nepodepsal.
+
+**Kdo smí výstupní list podepsat:** je to přesně skupina lidí uložená
+v seznamu osob k podpisu (viz níže) – kdo z ní byl odebraný, uvidí si
+sice výstupní list přes svůj odkaz stále zobrazit, ale nesmí už nic
+podepsat a místo toho se mu zobrazí informace, že byl odebrán a má
+požádat o opětovné přidání. Uživatelé s vyšším oprávněním než běžný
+zaměstnanec (HR, IT, READONLY, admin) vidí a mohou podepisovat vždy,
+bez ohledu na to, jestli jsou v seznamu.
 
 **Jak odeslat výstupní list k podpisu – „Odeslat všem k podpisu":**
 
 1. Na stránce výstupního listu otevřít tlačítko **„Odeslat všem
-   k podpisu"**.
-2. V okně se zobrazí seznam příjemců – standardně zaměstnanec a
-   vedoucí, ale HR může seznam upravit: **kohokoli odebrat** nebo
-   **přidat dalšího signatáře** (typicky vydávající majetek, spisovou
-   službu, mzdovou účtárnu, právní odbor apod., podle toho, kdo má
-   u daného odchodu skutečně co podepsat).
-3. Po kliknutí na odeslání dostane každý v seznamu e-mail s odkazem
-   k podpisu a **tento konkrétní seznam se pro daný odchod zapamatuje**.
-4. Pokud HR později někoho ze seznamu odebere nebo přidá a znovu
-   klikne „Odeslat všem", nový seznam **nahradí** ten předchozí –
-   všechny další automatické připomínky (viz níže) se od té chvíle
-   řídí jen novým seznamem.
+   k podpisu"**. Okno při otevření vždy načte **aktuální naposledy
+   uložený seznam** příjemců (je vidět, kdy a kým byl potvrzen); teprve
+   pokud pro daný odchod ještě žádný seznam neexistuje, nabídne k úpravě
+   výchozí návrh – standardně zaměstnanec a vedoucí. Tenhle výchozí
+   návrh je ale jen pomůcka – dokud se z něj opravdu někomu neodešle
+   pozvánka, nikam se neukládá.
+2. HR může seznam upravit: **přidat dalšího příjemce** – buď tlačítkem
+   **„Vybrat ze zaměstnanců"** (vybraný člověk se jen předvyplní do
+   políček jméno/e-mail, dá se ještě upravit a teprve tlačítkem
+   „Přidat" se skutečně přidá), nebo ručním vypsáním jména a e-mailu
+   (typicky vydávající majetek, spisovou službu, mzdovou účtárnu,
+   právní odbor apod., podle toho, kdo má u daného odchodu skutečně co
+   podepsat). Zaškrtávátkem **„Přidat v zastoupení"** jde rovnou vybrat
+   zodpovědnou osobu/odbor, za kterou bude přidaný člověk podepisovat –
+   dostane pak ten odlišný e-mail pro zastoupení, i když se odesílá
+   hromadně spolu s ostatními. Nově přidaný člověk se rovnou zaškrtne
+   k odeslání.
+3. Zaškrtnout, komu se má (znovu) odeslat – u každého, komu už dřív
+   bylo odesláno, je vidět poznámka „Odesláno [datum a čas]". Teprve
+   tlačítkem **„Odeslat vybraným"** dostane zaškrtnutá skupina e-mail
+   s odkazem k podpisu a **tento seznam se pro daný odchod uloží** (jen
+   ti, komu už bylo skutečně odesláno – nikdy neodeslaní kandidáti
+   z výchozího návrhu se neukládají) – všechny další automatické
+   připomínky (viz níže) se od té chvíle řídí jen jím.
+4. Kdokoli, komu se pošle samostatná pozvánka tlačítkem **„Odeslat
+   k podpisu"** nebo **„Odeslat k podpisu v zastoupení"** (mimo hlavní
+   okno „Odeslat všem"), se do uloženého seznamu **automaticky přidá** –
+   tyto jednotlivé pozvánky zbytek seznamu nemažou, jen do něj doplňují
+   další lidi, takže automatizace i vyhodnocení „už podepsáno" počítají
+   se všemi, komu bylo kdy odesláno, ať už kterýmkoli způsobem.
+
+Jedna a tatáž osoba (stejný e-mail) může být v seznamu ve dvou různých
+rolích zároveň – jednou přímo za sebe a případně ještě jednou (nebo
+víckrát) v zastoupení za jinou odpovědnou osobu/odbor. Aplikace tyto
+role eviduje a vyhodnocuje nezávisle na sobě – zrušení jedné role
+neovlivní tu druhou a za každé jiné zastoupení chodí samostatný e-mail,
+i když jde o stejnou osobu.
+
+Odcházející zaměstnanec dostává na svůj podpis **jinou verzi e-mailu**
+než ostatní signatáři – informuje ho, že jeho odchod byl zaevidován a má
+si vyřídit předání agendy a vrácení majetku, než výstupní list podepíší
+všechny strany. Řádek podpisu zaměstnance na veřejném odkaze navíc smí
+podepsat jen účet se stejným e-mailem, jaký má u odchodu uvedený
+odcházející zaměstnanec – ne kterýkoli přihlášený uživatel z povolené
+domény.
+
+Vedoucí odboru podepisuje ve dvou místech: nahoře v hlavičce
+(„Podpis vedoucího odboru") a u řádku „předávací protokol" v části A.
+Tato dvě políčka jsou **propojená** – stačí podepsat (i v zastoupení)
+kterékoli z nich a to druhé se automaticky označí jako podepsané stejnou
+osobou; zrušení podpisu na jednom zruší i to druhé.
+
+**Jak spravovat seznam osob k podpisu – „Osoby k podpisu":**
+
+Vedle „Odeslat všem k podpisu" je samostatné tlačítko **„Osoby
+k podpisu"**, které zobrazí aktuální uložený seznam bez nutnosti nic
+znovu odesílat – u každého je vidět, kdy dostal pozvánku, a pokud
+podepisuje v zastoupení, tak i za koho. Odsud jde:
+
+- kohokoli **odebrat** (zrušit) – po potvrzení mu přestanou chodit
+  automatické připomínky k podpisu tohoto výstupního listu a nesmí ho
+  už ani podepsat (výstupní list přes svůj odkaz ale stále vidí).
+  Odebraný člověk se nemaže, jen se přesune do části **„Zrušení
+  příjemci"** níže, s poznámkou, kdy byl zrušen.
+- **kdykoli vrátit** zrušeného člověka zpět tlačítkem **„Vrátit"** –
+  obnoví se mu právo podepisovat a znovu mu budou chodit připomínky,
+  ale **nová pozvánka se mu neposílá**.
+- **přidat nového příjemce** (ručně, nebo tlačítkem „Vybrat ze
+  zaměstnanců") – tomu se rovnou odešle nová pozvánka k podpisu a
+  přidá se do seznamu. Zaškrtávátkem **„Přidat v zastoupení"** jde
+  rovnou vybrat, za kterou zodpovědnou osobu/odbor bude podepisovat –
+  dostane pak ten odlišný e-mail s pozvánkou pro zastoupení.
 
 **Automatické upomínky na blížící se konec pracovního poměru** – dokud
 je odchod jen **plánovaný** (skutečný konec ještě není potvrzený) a
@@ -478,7 +553,7 @@ záznam, na kterém nepotřebuje mít v aplikaci účet ani roli:
 - **Vyplnění osobních dokumentů** (`/dokumenty/[hash]`) – nový
   zaměstnanec zde vyplní osobní dotazník, čestné prohlášení a další
   podklady k nástupu.
-- **Exit checklist** (`/odchody-public/[token]`) – odcházející
+- **Výstupní list** (`/odchody-public/[token]`) – odcházející
   zaměstnanec nebo jeho nadřízený zde potvrdí vrácení majetku,
   předání agendy a podepíše výstup.
 - **Vyhodnocení zkušební doby**
@@ -560,16 +635,16 @@ včetně jména, e-mailu a času.
 
 ## 9. Slovníček pojmů
 
-| Pojem                         | Význam                                                                                                                                                                          |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Plánovaný** nástup/odchod   | Termín, který se má stát podle plánu, dosud nepotvrzen                                                                                                                          |
-| **Skutečný** nástup/odchod    | Termín potvrzený jako reálně proběhlý                                                                                                                                           |
-| **Exit checklist**            | Strukturovaný výstupní proces při odchodu (majetek, agenda, střet zájmů, podpis)                                                                                                |
-| **Výstupní list**             | Souhrnný dokument k odchodu, jehož součástí je exit checklist                                                                                                                   |
-| **Seznam příjemců k podpisu** | Skupina lidí (zaměstnanec, vedoucí, případně další signatáři), kterým HR naposledy poslala výstupní list k podpisu tlačítkem „Odeslat všem"; podle ní se řídí cílené připomínky |
-| **Vyhodnocení zkušební doby** | Formulář hodnocení zaměstnance nadřízeným na konci zkušební doby                                                                                                                |
-| **Vyjádření tajemníka**       | Druhá fáze vyhodnocení zkušební doby – tajemník úřadu se souhlasem/nesouhlasem, komentářem a podpisem vyjádří k doporučení nadřízeného, pokud jím není sám                      |
-| **Zaměstnanecká změna**       | Informační záznam o změně jména a/nebo pozice u stávajícího zaměstnance                                                                                                         |
-| **Osobní číslo**              | Identifikátor zaměstnance, podle kterého se automaticky propojují nástup a odchod                                                                                               |
-| **Upomínka na konec PP**      | Automatická e-mailová upomínka pro HR a pro seznam příjemců k podpisu, 30/14/7/3/2/1 den před **plánovaným** koncem pracovního poměru, pokud výstupní list ještě není hotový    |
-| **Smazané záznamy**           | Přehled smazaných nástupů/odchodů/změn s možností obnovení                                                                                                                      |
+| Pojem                         | Význam                                                                                                                                                                                                                                                           |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Plánovaný** nástup/odchod   | Termín, který se má stát podle plánu, dosud nepotvrzen                                                                                                                                                                                                           |
+| **Skutečný** nástup/odchod    | Termín potvrzený jako reálně proběhlý                                                                                                                                                                                                                            |
+| **Výstupní list**             | Modální okno u odchodu se všemi akcemi k výstupnímu procesu (odeslání k podpisu, osoby k podpisu, PDF, zámek, historie)                                                                                                                                          |
+| **Dokument výstupní list**    | Hlavní součást okna Výstupní list – strukturovaný dokument se sekcemi majetek, agenda, střet zájmů, podpis (v kódu appky označovaný jako „exit-checklist")                                                                                                       |
+| **Osoby k podpisu**           | Skupina lidí (zaměstnanec, vedoucí, případně další signatáři, i v zastoupení), kterým HR naposledy poslala výstupní list k podpisu; podle ní se řídí cílené připomínky i to, kdo smí podepisovat – kdo z ní byl odebraný, nesmí podepsat, dokud není vrácen zpět |
+| **Vyhodnocení zkušební doby** | Formulář hodnocení zaměstnance nadřízeným na konci zkušební doby                                                                                                                                                                                                 |
+| **Vyjádření tajemníka**       | Druhá fáze vyhodnocení zkušební doby – tajemník úřadu se souhlasem/nesouhlasem, komentářem a podpisem vyjádří k doporučení nadřízeného, pokud jím není sám                                                                                                       |
+| **Zaměstnanecká změna**       | Informační záznam o změně jména a/nebo pozice u stávajícího zaměstnance                                                                                                                                                                                          |
+| **Osobní číslo**              | Identifikátor zaměstnance, podle kterého se automaticky propojují nástup a odchod                                                                                                                                                                                |
+| **Upomínka na konec PP**      | Automatická e-mailová upomínka pro HR a pro osoby k podpisu, 30/14/7/3/2/1 den před **plánovaným** koncem pracovního poměru, pokud výstupní list ještě není hotový                                                                                               |
+| **Smazané záznamy**           | Přehled smazaných nástupů/odchodů/změn s možností obnovení                                                                                                                                                                                                       |

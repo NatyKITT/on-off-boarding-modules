@@ -239,6 +239,7 @@ async function queueExitChecklistReminders(args: {
       ? (data.signatureRecipients ?? [])
           .filter(
             (recipient) =>
+              !recipient.revokedAt &&
               !resolveSignatureRecipientStatus(data, off.userEmail, recipient)
                 .hasSigned
           )
@@ -319,6 +320,7 @@ async function queueExitChecklistReminders(args: {
 async function existsOffboardingSignatureReminderJob(args: {
   offboardingId: number
   email: string
+  behalfLabel: string | null
   daysBeforeEnd: SignatureReminderDay
 }) {
   const jobs = await prisma.mailQueue.findMany({
@@ -338,6 +340,9 @@ async function existsOffboardingSignatureReminderJob(args: {
     }
     if (asNumber(payload.daysBeforeEnd) !== args.daysBeforeEnd) return false
 
+    const payloadBehalfLabel = asString(payload.behalfLabel)?.trim() || null
+    if (payloadBehalfLabel !== args.behalfLabel) return false
+
     return isSameOffboardingPayload({
       payload,
       offboardingId: args.offboardingId,
@@ -348,9 +353,18 @@ async function existsOffboardingSignatureReminderJob(args: {
 function resolveSignatureRecipientStatus(
   data: ExitChecklistData,
   employeeEmail: string | null,
-  recipient: { name: string; email: string }
+  recipient: { name: string; email: string; rowKeys?: string[] }
 ): { hasSigned: boolean; label: string } {
   const email = recipient.email.trim().toLowerCase()
+
+  if (recipient.rowKeys?.length) {
+    return {
+      hasSigned: recipient.rowKeys.every((key) =>
+        Boolean(data.items.find((item) => item.key === key)?.signedAt)
+      ),
+      label: recipient.name,
+    }
+  }
 
   if (employeeEmail && email === employeeEmail.trim().toLowerCase()) {
     return {
@@ -437,7 +451,7 @@ async function queueExitChecklistSignatureReminders(args: {
     for (const recipient of data.signatureRecipients) {
       const email = recipient.email.trim().toLowerCase()
 
-      if (!email) continue
+      if (!email || recipient.revokedAt) continue
 
       const { hasSigned, label } = resolveSignatureRecipientStatus(
         data,
@@ -450,6 +464,7 @@ async function queueExitChecklistSignatureReminders(args: {
       const alreadyQueued = await existsOffboardingSignatureReminderJob({
         offboardingId: off.id,
         email,
+        behalfLabel: recipient.behalfLabel ?? null,
         daysBeforeEnd: args.daysBeforeEnd,
       })
 
@@ -472,6 +487,11 @@ async function queueExitChecklistSignatureReminders(args: {
             employmentEndDate: effectiveEnd?.toISOString() ?? null,
             signUrl,
             reminderRole: label,
+            isBehalf: Boolean(recipient.behalfLabel),
+            behalfLabel: recipient.behalfLabel ?? null,
+            isEmployee:
+              Boolean(off.userEmail) &&
+              email === off.userEmail?.trim().toLowerCase(),
             daysBeforeEnd: args.daysBeforeEnd,
             createdBy: "system-cron",
             createdByName: "Systémový cron",

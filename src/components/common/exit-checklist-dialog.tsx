@@ -103,13 +103,13 @@ export function ExitChecklistDialog({ offboardingId, open }: Props) {
     }
   }
 
-  function handleSaved(newData: ExitChecklistData) {
+  function handleSaved(newData: ExitChecklistData, requestClose?: boolean) {
     setData(newData)
     setDirty(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 4000)
 
-    if (closeAfterSave) {
+    if (closeAfterSave || requestClose) {
       setCloseAfterSave(false)
       setTimeout(() => emitClose(), 1000)
     }

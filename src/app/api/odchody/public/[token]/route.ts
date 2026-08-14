@@ -223,6 +223,22 @@ function getExistingCompletionMetadata(
   }
 }
 
+function getExistingSignatureRecipientsMetadata(
+  currentHeader: Record<string, unknown>
+): Prisma.InputJsonObject {
+  return {
+    signatureRecipients: Array.isArray(currentHeader.signatureRecipients)
+      ? (currentHeader.signatureRecipients as Prisma.InputJsonValue)
+      : [],
+    signatureRecipientsSentAt:
+      sanitizeText(currentHeader.signatureRecipientsSentAt) || null,
+    signatureRecipientsSentByName:
+      sanitizeText(currentHeader.signatureRecipientsSentByName) || null,
+    signatureRecipientsSentByEmail:
+      sanitizeText(currentHeader.signatureRecipientsSentByEmail) || null,
+  }
+}
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: { token: string } }
@@ -633,6 +649,7 @@ export async function PUT(
       handover,
       signatures: sanitizeSignaturesForJson(nextSignatures),
       ...existingCompletionMetadata,
+      ...getExistingSignatureRecipientsMetadata(currentHeader),
     }
 
     const updatedChecklist = await prisma.exitChecklist.update({

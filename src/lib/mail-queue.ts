@@ -6,6 +6,8 @@ import type {
 
 import { prisma } from "@/lib/db"
 import {
+  sendBehalfSignatureEmail,
+  sendEmployeeExitChecklistInviteEmail,
   sendExitChecklistDueSoonReminderEmail,
   sendQueuedProbationEmail,
   sendSignatureInviteEmail,
@@ -137,9 +139,9 @@ function toExitSignatureReminderPayload(payload: QueuePayload) {
   return {
     to: asStr(payload.to) ?? "",
     employeeName: asStr(payload.employeeName) ?? "",
-    employeePosition: asStr(payload.employeePosition),
-    employeeDepartment: asStr(payload.employeeDepartment),
-    employmentEndDate: asStr(payload.employmentEndDate),
+    employeePosition: asStr(payload.employeePosition) ?? "",
+    employeeDepartment: asStr(payload.employeeDepartment) ?? "",
+    employmentEndDate: asStr(payload.employmentEndDate) ?? "",
     signUrl: asStr(payload.signUrl) ?? "",
   }
 }
@@ -349,6 +351,25 @@ async function processJob(job: MailQueue) {
   }
 
   if (job.type === "EXIT_SIGNATURE_INVITE") {
+    const behalfLabel = asStr(payload.behalfLabel)
+
+    if (payload.isBehalf === true && behalfLabel) {
+      await sendBehalfSignatureEmail({
+        ...toExitSignatureReminderPayload(payload),
+        behalfOfName: behalfLabel,
+        behalfOfRole: "",
+        behalfOfDisplayLabel: behalfLabel,
+      })
+      return
+    }
+
+    if (payload.isEmployee === true) {
+      await sendEmployeeExitChecklistInviteEmail(
+        toExitSignatureReminderPayload(payload)
+      )
+      return
+    }
+
     await sendSignatureInviteEmail(toExitSignatureReminderPayload(payload))
     return
   }

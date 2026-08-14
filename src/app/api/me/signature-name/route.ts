@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
+import { getEmployees } from "@/lib/eos-employees"
 import { joinNameWithTitles } from "@/lib/format-name"
 
 export const dynamic = "force-dynamic"
@@ -18,6 +19,8 @@ export async function GET() {
     )
   }
 
+  const normalizedEmail = session.user.email.trim().toLowerCase()
+
   const user = await prisma.user.findUnique({
     where: { email: session.user.email },
     select: {
@@ -28,7 +31,7 @@ export async function GET() {
     },
   })
 
-  const titledName = user
+  let titledName = user
     ? joinNameWithTitles({
         titleBefore: user.titleBefore,
         name: user.name,
@@ -36,6 +39,30 @@ export async function GET() {
         titleAfter: user.titleAfter,
       })
     : ""
+
+  const hasTitle = Boolean(
+    user?.titleBefore?.trim() || user?.titleAfter?.trim()
+  )
+
+  if (!hasTitle) {
+    try {
+      const employees = await getEmployees("")
+      const match = employees.find(
+        (employee) => employee.email?.trim().toLowerCase() === normalizedEmail
+      )
+
+      if (match) {
+        const eosTitledName = joinNameWithTitles({
+          titleBefore: match.titleBefore,
+          name: match.name,
+          surname: match.surname,
+          titleAfter: match.titleAfter,
+        })
+
+        if (eosTitledName) titledName = eosTitledName
+      }
+    } catch {}
+  }
 
   return NextResponse.json({
     name: titledName || session.user.name || session.user.email,

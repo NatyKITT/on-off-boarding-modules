@@ -50,6 +50,11 @@ type OffboardingDetail = {
   userEmail?: string | null
   personalNumber?: string | null
   notes?: string | null
+  supervisorName?: string | null
+  supervisorEmail?: string | null
+  supervisorPosition?: string | null
+  supervisorDepartment?: string | null
+  supervisorUnitName?: string | null
 
   probationStopDecision?: "STOP" | "KEEP" | null
   probationStopDecisionAt?: string | null
@@ -116,6 +121,11 @@ export default async function OffboardingDetailPage({ params }: PageProps) {
       userEmail: true,
       personalNumber: true,
       notes: true,
+      supervisorName: true,
+      supervisorEmail: true,
+      supervisorPosition: true,
+      supervisorDepartment: true,
+      supervisorUnitName: true,
 
       probationStopDecision: true,
       probationStopDecisionAt: true,

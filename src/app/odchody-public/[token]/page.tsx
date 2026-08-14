@@ -42,20 +42,5 @@ export default async function PublicExitChecklistPage({ params }: Props) {
     )
   }
 
-  const employeeName = [
-    checklist.offboarding.titleBefore,
-    checklist.offboarding.name,
-    checklist.offboarding.surname,
-    checklist.offboarding.titleAfter,
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .trim()
-
-  return (
-    <PublicExitChecklistShell
-      token={params.token}
-      employeeName={employeeName}
-    />
-  )
+  return <PublicExitChecklistShell token={params.token} />
 }

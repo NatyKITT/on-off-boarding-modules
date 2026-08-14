@@ -58,6 +58,11 @@ type OffboardingDetail = {
   userEmail?: string | null
   personalNumber?: string | null
   notes?: string | null
+  supervisorName?: string | null
+  supervisorEmail?: string | null
+  supervisorPosition?: string | null
+  supervisorDepartment?: string | null
+  supervisorUnitName?: string | null
 
   probationStopDecision?: "STOP" | "KEEP" | null
   probationStopDecisionAt?: string | null
@@ -140,6 +145,11 @@ function toInitial(d: OffboardingDetail): Partial<FormValues> {
     department: d.department ?? "",
     unitName: d.unitName ?? "",
     userEmail: d.userEmail ?? "",
+    supervisorName: d.supervisorName ?? "",
+    supervisorEmail: d.supervisorEmail ?? "",
+    supervisorPosition: d.supervisorPosition ?? "",
+    supervisorDepartment: d.supervisorDepartment ?? "",
+    supervisorUnitName: d.supervisorUnitName ?? "",
     noticeFiled: d.noticeEnd ? d.noticeEnd.slice(0, 10) : "",
     noticeEnd: d.noticeEnd ? d.noticeEnd.slice(0, 10) : undefined,
     noticeMonths: d.noticeMonths ?? undefined,
@@ -363,6 +373,15 @@ export function OffboardingDetailPageClient({ data }: Props) {
           {Boolean(data.personalNumber) && (
             <p>
               <strong>Osobní číslo:</strong> {data.personalNumber}
+            </p>
+          )}
+          {Boolean(data.supervisorName || data.supervisorEmail) && (
+            <p>
+              <strong>Vedoucí odboru:</strong>{" "}
+              {data.supervisorName || data.supervisorEmail}
+              {data.supervisorName && data.supervisorEmail
+                ? ` (${data.supervisorEmail})`
+                : ""}
             </p>
           )}
           <p>

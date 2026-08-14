@@ -17,6 +17,13 @@ type Props = {
   onOpenChange: (open: boolean) => void
   title: string
   onSelect: (employee: EmployeeItem) => void
+  excludeActiveOffboardings?: boolean
+}
+
+const DIACRITICS_PATTERN = new RegExp("[\\u0300-\\u036f]", "g")
+
+function normalize(value: string) {
+  return value.normalize("NFD").replace(DIACRITICS_PATTERN, "").toLowerCase()
 }
 
 export function EosPersonPickerDialog({
@@ -24,36 +31,34 @@ export function EosPersonPickerDialog({
   onOpenChange,
   title,
   onSelect,
+  excludeActiveOffboardings = true,
 }: Props) {
   const [query, setQuery] = useState("")
   const [loading, setLoading] = useState(false)
-  const [items, setItems] = useState<EmployeeItem[]>([])
+  const [allEmployees, setAllEmployees] = useState<EmployeeItem[]>([])
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open) {
       setQuery("")
-      setItems([])
-      setError(null)
-      return
-    }
-
-    if (query.trim().length < 2) {
-      setItems([])
+      setAllEmployees([])
       setError(null)
       return
     }
 
     const controller = new AbortController()
 
-    const timeout = setTimeout(async () => {
+    void (async () => {
       try {
         setLoading(true)
         setError(null)
 
         const url = new URL("/api/zamestnanci/hledat", window.location.origin)
-        url.searchParams.set("q", query.trim())
-        url.searchParams.set("limit", "20")
+        url.searchParams.set("q", "1")
+        url.searchParams.set("limit", "1000")
+        if (!excludeActiveOffboardings) {
+          url.searchParams.set("excludeActiveOffboardings", "false")
+        }
 
         const res = await fetch(url.toString(), {
           cache: "no-store",
@@ -65,7 +70,7 @@ export function EosPersonPickerDialog({
         }
 
         const json = await res.json().catch(() => null)
-        setItems(Array.isArray(json?.data) ? json.data : [])
+        setAllEmployees(Array.isArray(json?.data) ? json.data : [])
       } catch (e) {
         if ((e as Error).name !== "AbortError") {
           setError(
@@ -75,13 +80,30 @@ export function EosPersonPickerDialog({
       } finally {
         setLoading(false)
       }
-    }, 250)
+    })()
 
-    return () => {
-      clearTimeout(timeout)
-      controller.abort()
-    }
-  }, [open, query])
+    return () => controller.abort()
+  }, [open, excludeActiveOffboardings])
+
+  const q = normalize(query.trim())
+  const items = q
+    ? allEmployees.filter((item) => {
+        const num = normalize(item.personalNumber)
+        const name = normalize(
+          `${item.titleBefore ?? ""} ${item.name} ${item.surname} ${item.titleAfter ?? ""}`
+        )
+        const org = normalize(
+          `${item.positionName} ${item.department} ${item.unitName}`
+        )
+        const email = normalize(item.email ?? "")
+        return (
+          num.includes(q) ||
+          name.includes(q) ||
+          org.includes(q) ||
+          email.includes(q)
+        )
+      })
+    : allEmployees
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -92,7 +114,8 @@ export function EosPersonPickerDialog({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
-            Vyhledejte zaměstnance podle osobního čísla, jména nebo příjmení.
+            Vyhledejte zaměstnance podle osobního čísla, jména, příjmení nebo
+            e-mailu, případně procházejte celý seznam.
           </DialogDescription>
         </DialogHeader>
 
@@ -104,13 +127,14 @@ export function EosPersonPickerDialog({
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Např. Novák, 0123, Jana..."
               className="pl-9"
+              autoFocus
             />
           </div>
 
           <div className="max-h-[420px] space-y-2 overflow-y-auto">
             {loading && (
               <div className="rounded-md border px-3 py-6 text-center text-sm text-muted-foreground">
-                Načítám výsledky…
+                Načítám zaměstnance z EOS…
               </div>
             )}
 
@@ -120,20 +144,11 @@ export function EosPersonPickerDialog({
               </div>
             )}
 
-            {!loading && !error && query.trim().length < 2 && (
+            {!loading && !error && items.length === 0 && (
               <div className="rounded-md border px-3 py-6 text-center text-sm text-muted-foreground">
-                Začněte psát alespoň 2 znaky.
+                Nic nenalezeno.
               </div>
             )}
-
-            {!loading &&
-              !error &&
-              query.trim().length >= 2 &&
-              items.length === 0 && (
-                <div className="rounded-md border px-3 py-6 text-center text-sm text-muted-foreground">
-                  Nic nenalezeno.
-                </div>
-              )}
 
             {!loading &&
               !error &&

@@ -230,6 +230,22 @@ function getExistingCompletionMetadata(
   }
 }
 
+function getExistingSignatureRecipientsMetadata(
+  currentHeader: Record<string, unknown>
+): Prisma.InputJsonObject {
+  return {
+    signatureRecipients: Array.isArray(currentHeader.signatureRecipients)
+      ? (currentHeader.signatureRecipients as Prisma.InputJsonValue)
+      : [],
+    signatureRecipientsSentAt:
+      sanitizeText(currentHeader.signatureRecipientsSentAt) || null,
+    signatureRecipientsSentByName:
+      sanitizeText(currentHeader.signatureRecipientsSentByName) || null,
+    signatureRecipientsSentByEmail:
+      sanitizeText(currentHeader.signatureRecipientsSentByEmail) || null,
+  }
+}
+
 async function requireExitChecklistRead() {
   const session = await getSession()
   const user = session?.user
@@ -569,6 +585,7 @@ export async function PUT(
       handover,
       signatures: sanitizeSignaturesForJson(signatures),
       ...existingCompletionMetadata,
+      ...getExistingSignatureRecipientsMetadata(currentHeader),
     }
 
     const resolutionChanges: string[] = []

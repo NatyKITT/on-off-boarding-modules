@@ -97,19 +97,39 @@ funkce `queueExitChecklistReminders`):
 
 - pro každý nedokončený odchod se podívá na **uloženou skupinu
   příjemců** (`ExitChecklist.header.signatureRecipients`) – tedy
-  přesně ten seznam lidí, který HR naposledy poslala přes dialog
-  "Odeslat všem k podpisu" (viz kapitola 11.6). Skupina se přepíše
-  pokaždé, když HR znovu odešle (někoho odebere/přidá) – cron proto
-  vždy reaguje na aktuální stav, ne na historii všech dřívějších
-  odeslání,
+  přesně ten seznam lidí, kterým bylo kdy odesláno k podpisu. Skupina
+  se nepřepisuje jen přes dialog "Odeslat všem k podpisu" (viz
+  kapitola 11.6, tam se dá i explicitně odebrat/zrušit), ale
+  **doplňuje se automaticky** i každým jednotlivým odesláním tlačítkem
+  "Odeslat k podpisu", "Odeslat k podpisu v zastoupení" nebo přidáním
+  v okně "Osoby k podpisu" – žádná z těchto akcí zbytek skupiny
+  nemaže, jen do ní přidává. Cron vždy reaguje na aktuální uložený
+  stav, ne na historii všech dřívějších odeslání,
+- příjemci s `revokedAt` (odebraní/zrušení – viz kapitola 11.6) se
+  **přeskakují úplně**, žádná připomínka jim nechodí, dokud nejsou
+  vráceni zpět,
+- stejný e-mail může být ve skupině ve dvou nezávislých rolích zároveň
+  (přímo za sebe a k tomu v zastoupení za jinou osobu/odbor) – cron je
+  vyhodnocuje **odděleně** (podle dvojice e-mail + role v zastoupení),
+  takže vyřízení jedné role stejného člověka neovlivní tu druhou,
 - u každého člověka ze skupiny zjistí, jestli má ještě co podepsat:
-  zaměstnanec/vedoucí podle hlavičkového podpisu, funkční signatáři
-  (SNEO, spisová služba, mzdová účtárna...) podle svých konkrétních
-  řádků výstupního listu, ostatní obecně podle celkové kompletnosti,
+  pokud byl přidán "v zastoupení", počítá se podle konkrétních řádků
+  výstupního listu, za které podepisuje (uložené u něj jako
+  `rowKeys`); jinak zaměstnanec/vedoucí podle hlavičkového podpisu,
+  funkční signatáři (SNEO, spisová služba, mzdová účtárna...) podle
+  svých konkrétních řádků výstupního listu, ostatní obecně podle
+  celkové kompletnosti,
 - e-mail vede na stejný veřejný odkaz (`/odchody-public/[token]`),
-  jaký dostali v původní pozvánce,
+  jaký dostali v původní pozvánce; odcházející zaměstnanec dostává
+  jinou verzi textu než ostatní signatáři (viz kapitola 11.6) a stejně
+  tak lidé přidaní "v zastoupení" (text s "v zastoupení za…"),
 - zápis události `SIGNATURE_INVITE_SENT` do historie výstupního
   listu, s metadaty o tom, komu a kolik dní před koncem se poslalo.
+
+Řádek podpisu zaměstnance na veřejném odkaze (`/odchody-public/[token]`)
+navíc smí podepsat jen účet přihlášený přes Google se stejným e-mailem,
+jaký má u odchodu uvedený odcházející zaměstnanec – ne kterýkoli
+přihlášený uživatel z povolené domény jako dřív.
 
 Endpoint stejně jako `probation-notifications` e-maily přímo
 neposílá, pouze vytváří úlohy do `MailQueue` (`NOTICE_WARNING` a
@@ -748,28 +768,72 @@ z interní aplikace, nebo z veřejného odkazu):
 
 ---
 
-### 11.6 Skupina příjemců k podpisu výstupního listu
+### 11.6 Skupina osob k podpisu výstupního listu
 
-Dialog "Odeslat všem k podpisu" (`SendAllDialog`,
-`/odchody/[id]/vystupni-list`) umožňuje HR poslat pozvánku k podpisu
-libovolné skupině lidí najednou – typicky zaměstnanci, vedoucímu a
-funkčním signatářům (SNEO, spisová služba, mzdová účtárna, právní
-odbor...), případně ručně přidaným lidem. HR může kohokoli před
-odesláním z návrhu odebrat nebo přidat dalšího.
+Skupina příjemců (`ExitChecklist.header.signatureRecipients`) je
+jediný zdroj pravdy pro cílené cronové připomínky (kapitola 2.2, bod
+B) i pro to, kdo smí výstupní list podepsat (viz níže). Existují tři
+místa, odkud se do ní dá zasahovat:
 
-Jakmile HR klikne "Odeslat všem", aplikace:
+**"Odeslat všem k podpisu"** (`SendAllDialog`,
+`/odchody/[id]/vystupni-list`) – při otevření načte **aktuální uložený
+seznam** (ne vždy jen výchozí návrh); teprve pokud pro daný odchod
+ještě žádný seznam neexistuje, nabídne k úpravě jen orientační návrh
+(zaměstnanec, vedoucí, funkční signatáři jako SNEO, spisová služba,
+mzdová účtárna, právní odbor...) – tenhle návrh je ale jen pomůcka,
+dokud se z něj opravdu někomu neodešle, do databáze se neukládá. HR
+může přidat dalšího příjemce ručně, tlačítkem "Vybrat ze zaměstnanců",
+nebo rovnou "v zastoupení" za vybranou zodpovědnou osobu/odbor (dostane
+odlišný e-mail). Nově přidaný člověk se automaticky zaškrtne k
+odeslání; u každého, komu už dřív bylo odesláno, je vidět "Odesláno
+[datum]". Teprve tlačítkem "Odeslat vybraným" appka odešle pozvánku
+(`POST .../exit-checklist/invite`) zaškrtnuté skupině a uloží **jen
+skutečně odeslané/zrušené příjemce** přes
+`POST .../exit-checklist/signature-recipients` s `mode: "replace"`.
 
-1. odešle pozvánku (`POST /api/odchody/[id]/exit-checklist/invite`)
-   každému v seznamu zvlášť,
-2. **uloží přesně tento finální seznam** (po úpravách) přes
-   `POST /api/odchody/[id]/exit-checklist/signature-recipients` do
-   `ExitChecklist.header.signatureRecipients` – **nahrazuje** předchozí
-   uložený seznam, nesčítá se s ním.
+**Jednotlivé pozvánky** ("Odeslat k podpisu", "Odeslat k podpisu
+v zastoupení") – při odeslání se daný člověk do skupiny **automaticky
+přidá** (`mode` bez `replace`, tedy sloučení) – zbytek skupiny
+nemažou, jen do ní doplňují. U "v zastoupení" se navíc uloží konkrétní
+řádky výstupního listu (`rowKeys`), za které daný člověk podepisuje, a
+popisek, za koho podepisuje (`behalfLabel`).
 
-Tahle uložená skupina je jediný zdroj pravdy pro cílené cronové
-připomínky (kapitola 2.2, bod B) – když HR příště někoho odebere a
-někoho přidá a znovu odešle, příští běh cronu už reaguje přesně na
-nový seznam, ne na ten předchozí.
+**"Osoby k podpisu"** (`SignatureRecipientsDialog`,
+`/odchody/[id]/vystupni-list`, dřív "Příjemci k podpisu") – samostatné
+okno jen pro správu už uložené skupiny, mimo tok "odeslat všem znovu".
+Zobrazí aktuální seznam (kdo, kdy dostal pozvánku, případně
+"v zastoupení za koho") a umožní přidat nového člověka (ručně, tlačítkem
+"Vybrat ze zaměstnanců", nebo rovnou "v zastoupení" – v obou případech
+rovnou pošle pozvánku a přidá ho do seznamu).
+
+**Odebrání = zrušení, ne smazání.** V obou oknech ("Odeslat všem
+k podpisu" i "Osoby k podpisu") odebrání člověka, kterému už bylo
+odesláno, nastaví jen `revokedAt` – záznam v poli zůstává, jen se
+přesune do části "Zrušení příjemci" a přestane se počítat jako aktivní
+(cron ho přeskočí, viz kapitola 2.2 bod B, a nesmí ani podepisovat, viz
+níže). Tlačítkem "Vrátit" jde zrušení kdykoli vzít zpět – vymaže se
+`revokedAt`, obnoví se právo podepisovat i připomínky, ale **nová
+pozvánka se neposílá**. Odebrání kandidáta z výchozího návrhu, kterému
+ještě nikdy nic nebylo odesláno, se naopak z pole prostě smaže (nemá co
+zrušit).
+
+**Identita v poli je e-mail + role v zastoupení, ne jen e-mail.**
+Stejný člověk (stejný e-mail) může být ve skupině ve dvou nezávislých
+rolích zároveň – jednou přímo za sebe, jednou (nebo víckrát) v
+zastoupení za jinou osobu/odbor (`behalfLabel`). Přidání, odebrání,
+vrácení i cílené připomínky rozlišují každou roli zvlášť podle dvojice
+e-mail + `behalfLabel`, takže zásah do jedné role neovlivní tu druhou.
+
+**Přístup k podpisu je vázaný na tuto skupinu.** Kdo je v ní aktivně
+(bez `revokedAt`), smí ve výstupním listu podepisovat; kdo byl
+odebraný, výstupní list přes svůj odkaz stále vidí, ale nesmí nic
+podepsat a uvidí informaci, že má požádat o opětovné přidání.
+Uživatelé s vyšším oprávněním než USER (HR, IT, READONLY, ADMIN) smí
+podepisovat vždy, bez ohledu na členství ve skupině.
+
+Ať už se skupina upraví kterýmkoli z těchto tří míst, příští běh cronu
+vždy reaguje na aktuální uložený stav, ne na historii dřívějších
+odeslání.
 
 ---
 

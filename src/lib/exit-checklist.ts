@@ -20,6 +20,7 @@ import type {
 import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
 
 import { prisma } from "@/lib/db"
+import { recipientIdentityKey } from "@/lib/exit-checklist-recipient-key"
 import { resolveSupervisorFromPositionNum } from "@/lib/systemizace-superior"
 
 export type ChecklistWithRelations = Prisma.ExitChecklistGetPayload<{
@@ -672,6 +673,17 @@ export function sanitizeSignaturesForResponse(
   }
 }
 
+function sanitizeRowKeys(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+
+  const keys = value
+    .filter((key): key is string => typeof key === "string")
+    .map((key) => sanitizeText(key))
+    .filter(Boolean)
+
+  return keys.length > 0 ? keys : undefined
+}
+
 export function sanitizeSignatureRecipientsForResponse(
   value: unknown
 ): ExitChecklistSignatureRecipient[] {
@@ -681,11 +693,39 @@ export function sanitizeSignatureRecipientsForResponse(
     .filter((item): item is Record<string, unknown> => {
       return Boolean(item) && typeof item === "object"
     })
-    .map((item) => ({
-      name: sanitizeText(item.name),
-      email: normalizeEmail(item.email),
-    }))
+    .map((item) => {
+      const rowKeys = sanitizeRowKeys(item.rowKeys)
+      const behalfLabel = sanitizeNullableText(item.behalfLabel)
+      const invitedAt = sanitizeNullableText(item.invitedAt)
+      const revokedAt = sanitizeNullableText(item.revokedAt)
+
+      return {
+        name: sanitizeText(item.name),
+        email: normalizeEmail(item.email),
+        ...(rowKeys ? { rowKeys } : {}),
+        ...(behalfLabel ? { behalfLabel } : {}),
+        ...(invitedAt ? { invitedAt } : {}),
+        ...(revokedAt ? { revokedAt } : {}),
+      }
+    })
     .filter((item) => item.name && item.email)
+}
+
+export function mergeSignatureRecipients(
+  existing: unknown,
+  additions: unknown
+): ExitChecklistSignatureRecipient[] {
+  const byKey = new Map<string, ExitChecklistSignatureRecipient>()
+
+  for (const recipient of sanitizeSignatureRecipientsForResponse(existing)) {
+    byKey.set(recipientIdentityKey(recipient), recipient)
+  }
+
+  for (const recipient of sanitizeSignatureRecipientsForResponse(additions)) {
+    byKey.set(recipientIdentityKey(recipient), recipient)
+  }
+
+  return Array.from(byKey.values())
 }
 
 export function mapToExitChecklistData(

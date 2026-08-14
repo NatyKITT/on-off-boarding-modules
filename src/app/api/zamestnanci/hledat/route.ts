@@ -46,24 +46,31 @@ export async function GET(req: NextRequest) {
           .filter(Boolean)
       : []
 
+    const excludeActiveOffboardings =
+      req.nextUrl.searchParams.get("excludeActiveOffboardings") !== "false"
+
     if (!q) {
       return NextResponse.json({ data: [] })
     }
 
-    const activeOffboardings = await prisma.employeeOffboarding.findMany({
-      where: {
-        deletedAt: null,
-      },
-      select: {
-        personalNumber: true,
-      },
-    })
+    const excludeFromDB = excludeActiveOffboardings
+      ? (
+          await prisma.employeeOffboarding.findMany({
+            where: {
+              deletedAt: null,
+            },
+            select: {
+              personalNumber: true,
+            },
+          })
+        )
+          .map((offboarding) => offboarding.personalNumber)
+          .filter(Boolean)
+      : []
 
-    const excludeFromDB = activeOffboardings
-      .map((offboarding) => offboarding.personalNumber)
-      .filter(Boolean) as string[]
-
-    const allExcluded = [...new Set([...excludeFromDB, ...manualExclude])]
+    const allExcluded = [
+      ...new Set([...(excludeFromDB as string[]), ...manualExclude]),
+    ]
 
     const employees = await getEmployees(q)
 
