@@ -34,7 +34,7 @@ import { HistoryDialog } from "@/components/history/history-dialog"
 
 type ChangeData = {
   id: number
-  type: "POSITION" | "NAME" | "NAME_AND_POSITION"
+  type: "POSITION" | "NAME" | "NAME_AND_POSITION" | "MATERNITY_LEAVE"
   status: "DRAFT" | "APPLIED" | "CANCELLED"
   audience: string | null
   effectiveDate: string
@@ -44,6 +44,10 @@ type ChangeData = {
   surname: string
   titleAfter: string | null
   personalNumber: string | null
+  userEmail: string | null
+
+  supervisorName: string | null
+  supervisorEmail: string | null
 
   oldTitleBefore: string | null
   newTitleBefore: string | null
@@ -95,6 +99,7 @@ function fmtDate(value?: string | null) {
 function typeLabel(type: ChangeData["type"]) {
   if (type === "NAME") return "Změna jména / titulů"
   if (type === "POSITION") return "Změna pozice / odboru"
+  if (type === "MATERNITY_LEAVE") return "Mateřská dovolená"
 
   return "Změna jména i pozice"
 }
@@ -383,6 +388,46 @@ export function EmployeeChangeDetailClient({ data }: { data: ChangeData }) {
           </div>
         </CardContent>
       </Card>
+
+      {(data.userEmail || data.supervisorName || data.supervisorEmail) && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Kontakt</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-3 text-sm md:grid-cols-3">
+            <div>
+              <p className="text-xs text-muted-foreground">
+                E-mail zaměstnance
+              </p>
+              <p className="font-medium">{data.userEmail || "–"}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Vedoucí odboru</p>
+              <p className="font-medium">{data.supervisorName || "–"}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">E-mail vedoucího</p>
+              <p className="font-medium">{data.supervisorEmail || "–"}</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {data.type === "MATERNITY_LEAVE" && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Změna</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-md bg-green-50 px-3 py-2 font-medium text-green-900 dark:bg-green-950/30 dark:text-green-200">
+              Odchod na mateřskou dovolenou
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Účinnost {fmtDate(data.effectiveDate)} = den odchodu.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {isNameChange && (
         <ChangeComparisonCard

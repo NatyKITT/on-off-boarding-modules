@@ -42,7 +42,7 @@ import { ReportsHistoryButton } from "@/components/history/reports-history-butto
 type Audience = "ONBOARDING_GROUP" | "ALL_EMPLOYEES"
 type Mode = "selected" | "all" | "unsentOnly"
 type RecordKind = "planned" | "actual"
-type ChangeType = "POSITION" | "NAME" | "NAME_AND_POSITION"
+type ChangeType = "POSITION" | "NAME" | "NAME_AND_POSITION" | "MATERNITY_LEAVE"
 
 type PersonRow = {
   id: number
@@ -115,7 +115,12 @@ const focusRing =
   "focus-visible:ring-2 focus-visible:ring-primary/55 " +
   "focus-visible:ring-offset-2 focus:ring-offset-background"
 
-const ALL_CHANGE_TYPES: ChangeType[] = ["POSITION", "NAME", "NAME_AND_POSITION"]
+const ALL_CHANGE_TYPES: ChangeType[] = [
+  "POSITION",
+  "NAME",
+  "NAME_AND_POSITION",
+  "MATERNITY_LEAVE",
+]
 
 function toggleInArray<T>(arr: T[], val: T): T[] {
   return arr.includes(val) ? arr.filter((v) => v !== val) : [...arr, val]
@@ -147,6 +152,7 @@ function formatFullName(r: {
 function changeTypeLabel(type: ChangeRow["type"]) {
   if (type === "NAME") return "Jméno / titul"
   if (type === "POSITION") return "Pozice / odbor"
+  if (type === "MATERNITY_LEAVE") return "Mateřská dovolená"
   return "Jméno i pozice"
 }
 
@@ -1000,6 +1006,17 @@ export function CombinedReportModal({
                         }
                       />
                       Jméno i pozice
+                    </label>
+                    <label className="flex cursor-pointer items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={changeTypes.includes("MATERNITY_LEAVE")}
+                        onCheckedChange={() =>
+                          setChangeTypes((prev) =>
+                            toggleInArray(prev, "MATERNITY_LEAVE")
+                          )
+                        }
+                      />
+                      Mateřská dovolená
                     </label>
                   </div>
                 </div>

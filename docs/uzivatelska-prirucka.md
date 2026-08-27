@@ -213,7 +213,13 @@ skutečnými nástupy a odchody, barevně rozlišenými podle typu události.
    (nebo kliknout do volného dne v Přehledu).
 2. Vyplnit osobní číslo, jméno, pozici, odbor/oddělení a plánované
    datum nástupu. Vedoucího lze dohledat automaticky podle čísla
-   funkce, nebo zadat ručně.
+   funkce, nebo zadat ručně. Aplikace u osobního čísla nabízí návrh
+   dalšího volného čísla v pořadí – počítá se s ním jen v rámci 4místné
+   řady čísel úřadu, 5místná a delší speciální čísla (KITT6 a další
+   organizace) se do návrhu nepletou, zobrazují se ale informačně
+   zvlášť. Tlačítko/odkaz **„Nevyužitá osobní čísla"** vedle pole ukáže
+   čísla, která nikdo dosud nepoužil ani nepoužívá (ověřuje se to živě
+   proti EOS i evidenci appky, ne jen podle uložené historie).
 3. Uložit – záznam se objeví v seznamu jako **plánovaný**.
 4. V den skutečného nástupu (nebo když je jistý) záznam otevřít a
    potvrdit **skutečný nástup** – tím se z plánovaného stane skutečný
@@ -262,6 +268,11 @@ Z detailu nástupu se dále řídí:
      dostane HR znovu e-mail s aktuálním PDF; tajemníkovi ani
      nadřízenému se v tomto kroku nic automaticky neposílá.
 
+  Všechny tyto e-maily (pozvánka, připomínky i navazující zprávy)
+  obsahují u konce zkušební doby i odkaz/tlačítko **„Přidat do
+  kalendáře"** – zvlášť pro Google kalendář a zvlášť univerzální soubor
+  .ics pro Outlook nebo Apple Kalendář.
+
   Tajemníka lze pro testovací nebo přechodné účely ručně přepsat
   (jméno a e-mail) přímo v detailu vyhodnocení zkušební doby, vedle
   údajů o nadřízeném – nastavení je globální a platí okamžitě pro
@@ -287,6 +298,12 @@ i ve výstupním listu. Dohledaný vedoucí je vidět přímo v detailu
 odchodu, ne jen po otevření výstupního listu. Automatické dohledání se
 ale nemusí vždy podařit (např. neobsazená pozice nebo chybějící údaj
 v systemizaci) – v takovém případě je potřeba vedoucího doplnit ručně.
+
+Při zakládání odchodu jde zaškrtnout **„Vyplnit vlastní data"**, pokud
+zaměstnanec zatím není v EOS nebo se má zadat ručně. I v tomto režimu
+je ale nově k dispozici **samostatné vyhledávání osoby a pozice v
+EOS/systemizaci** – po vyhledání se jméno/kontakt, případně pozice a
+zařazení, jen předvyplní do polí níže a dál je jde libovolně upravit.
 
 Z detailu odchodu se dále řídí:
 
@@ -428,6 +445,10 @@ výstupní list ještě není kompletně podepsaný, aplikace automaticky
 - každou odeslanou upomínku i uložení/úpravu seznamu příjemců zapíše
   do historie výstupního listu.
 
+Pozvánky i tyto připomínky obsahují u data konce pracovního poměru i
+odkaz/tlačítko **„Přidat do kalendáře"** (Google kalendář i univerzální
+soubor .ics pro Outlook nebo Apple Kalendář).
+
 Jakmile se odchod potvrdí jako **skutečný**, tahle automatizace se pro
 daný záznam úplně zastaví – smysl má jen dokud je odchod ještě
 plánovaný a je čas věci stihnout podepsat.
@@ -460,12 +481,27 @@ vlastní KPI kartu.
 ### 5.4 Zaměstnanecké změny
 
 **Jak založit změnu:** v menu **Změny** → nový záznam → zvolit typ
-(změna jména, změna pozice, nebo obojí) → vyplnit osobní číslo a nové
-údaje → uložit.
+(změna jména, změna pozice, obojí, nebo odchod na mateřskou dovolenou)
+→ vyplnit osobní číslo a nové údaje → uložit. Zaměstnance lze vybrat
+z EOS (údaje se jen předvyplní pro potřeby appky), nebo zadat ručně.
 
 Změny jsou čistě **informační**: nikdy se nepropisují do nástupů ani
 odchodů. Propojení podle osobního čísla slouží pouze k zobrazení, že u
 dané osoby v minulosti proběhla i jiná změna.
+
+**Kontaktní údaje** – u každé změny jde volitelně vyplnit i **e-mail
+zaměstnance** a **vedoucího odboru** (jméno a e-mail). Vedoucí se
+dohledává automaticky podle pozice zaměstnance (tlačítkem „Obnovit dle
+pozice" i znovu), lze ho ale kdykoli přepsat ručně nebo vyhledat
+v EOS. Tyto údaje se zobrazují jako samostatné sloupce **„Kontakt"** a
+**„Vedoucí"** v přehledu Změn a jako karta na detailu záznamu – do
+e-mailových reportů (kapitola 5.6) se nepropisují.
+
+**Odchod na mateřskou dovolenou** je samostatný typ změny – nemá
+starou/novou hodnotu, jen datum účinnosti (den odchodu). V přehledu,
+detailu i propojených záznamech se zobrazuje jako zvýrazněný, ale
+nekřiklavý štítek. V e-mailu s reportem má tento řádek navíc odkaz
+**„Přidat do kalendáře"** (viz kapitola 5.6).
 
 ### 5.5 Statistiky
 
@@ -474,7 +510,8 @@ Agregovaný pohled nad nástupy, odchody a změnami:
 - **KPI karty** – např. počty nástupů/odchodů, čistý přírůstek, podíl
   odchodů ve zkušební době.
 - **Hlavní grafy** – vývoj nástupů/odchodů v čase, fluktuace podle
-  odboru, změny podle typu v čase.
+  odboru, změny podle typu v čase (změna jména, pozice, obojí i odchod
+  na mateřskou dovolenou zvlášť).
 - **Zdraví procesu** – karty sledující stav dokumentů, hodnocení,
   výstupních listů a dodržování termínů.
 - **Vlastní pohledy** – uživatel si sestaví vlastní kombinaci metriky,
@@ -500,6 +537,15 @@ před opětovným odesláním na to upozorní. Tento report smí **odeslat**
 jen ADMIN, HR a IT – READONLY jej může prohlížet, ale ne odesílat
 (narozdíl od exportu PDF u Statistik, který READONLY odeslat smí – viz
 kapitola 3).
+
+Každý řádek v reportu (nástup, odchod i odchod na mateřskou dovolenou)
+má vlastní odkaz **„Přidat do kalendáře"** – zvlášť pro Google kalendář
+a zvlášť univerzální soubor .ics pro Outlook nebo Apple Kalendář.
+Celý e-mail navíc obsahuje jednu společnou přílohu .ics se všemi
+událostmi z reportu najednou, kterou jde v Outlooku nebo Apple
+Kalendáři otevřít a naimportovat vše hromadně jedním krokem (u Google
+kalendáře stejná příloha jde naimportovat přes jeho vlastní funkci
+Import v nastavení).
 
 ### 5.7 Přehled dokumentů
 

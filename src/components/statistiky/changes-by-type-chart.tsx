@@ -39,6 +39,7 @@ const chartConfig = {
   POSITION: { label: "Změna pozice", color: "#00847C" },
   NAME: { label: "Změna jména", color: "#2563eb" },
   NAME_AND_POSITION: { label: "Jméno i pozice", color: "#d97706" },
+  MATERNITY_LEAVE: { label: "Mateřská dovolená", color: "#db2777" },
 } satisfies ChartConfig
 
 type Props = {
@@ -99,6 +100,12 @@ export function ChangesByTypeChart({ data, year }: Props) {
           dataKey="NAME_AND_POSITION"
           stackId="changes"
           fill="var(--color-NAME_AND_POSITION)"
+          cursor="pointer"
+        />
+        <Bar
+          dataKey="MATERNITY_LEAVE"
+          stackId="changes"
+          fill="var(--color-MATERNITY_LEAVE)"
           radius={[3, 3, 0, 0]}
           cursor="pointer"
         />

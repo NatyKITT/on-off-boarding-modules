@@ -7,7 +7,14 @@ import { canReadMonthlyReports } from "@/lib/rbac"
 
 type Audience = "ONBOARDING_GROUP" | "ALL_EMPLOYEES"
 type RecordKind = "planned" | "actual"
-type ChangeType = "POSITION" | "NAME" | "NAME_AND_POSITION"
+type ChangeType = "POSITION" | "NAME" | "NAME_AND_POSITION" | "MATERNITY_LEAVE"
+
+const ALL_CHANGE_TYPE_VALUES: ChangeType[] = [
+  "POSITION",
+  "NAME",
+  "NAME_AND_POSITION",
+  "MATERNITY_LEAVE",
+]
 
 export type CombinedOnboardingRow = {
   id: number
@@ -113,13 +120,14 @@ function parseCsvKinds(value: string | null): RecordKind[] {
 }
 
 function parseCsvChangeTypes(value: string | null): ChangeType[] {
-  const valid: ChangeType[] = ["POSITION", "NAME", "NAME_AND_POSITION"]
   return Array.from(
     new Set(
       (value ?? "")
         .split(",")
         .map((v) => v.trim())
-        .filter((v): v is ChangeType => (valid as string[]).includes(v))
+        .filter((v): v is ChangeType =>
+          (ALL_CHANGE_TYPE_VALUES as string[]).includes(v)
+        )
     )
   )
 }
@@ -287,7 +295,9 @@ export async function GET(req: Request) {
           deletedAt: null,
           status: { not: "CANCELLED" as const },
           effectiveDate: { gte: overallStart, lte: overallEnd },
-          ...(changeTypes.length < 3 ? { type: { in: changeTypes } } : {}),
+          ...(changeTypes.length < ALL_CHANGE_TYPE_VALUES.length
+            ? { type: { in: changeTypes } }
+            : {}),
         }
       : null
 

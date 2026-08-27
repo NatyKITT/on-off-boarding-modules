@@ -228,6 +228,7 @@ enum EmployeeChangeType {
   POSITION
   NAME
   NAME_AND_POSITION
+  MATERNITY_LEAVE
 }
 
 enum EmployeeChangeStatus {
@@ -496,6 +497,10 @@ model EmployeeChange {
   titleAfter  String?
 
   personalNumber String?
+  userEmail      String?
+
+  supervisorName  String?
+  supervisorEmail String?
 
   oldTitleBefore String?
   newTitleBefore String?

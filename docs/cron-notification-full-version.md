@@ -68,12 +68,12 @@ musí být `null`). Jakmile se odchod potvrdí jako skutečný
 nemají smysl. Je to záměrně opačná logika než u nástupů (tam se
 zkušební doba řeší až po potvrzení skutečného nástupu).
 
-Řeší dva samostatné typy připomínek, oba v okamžicích 30, 14, 7, 3, 2
-a 1 den před (plánovaným) koncem, vždy nejvýš jednou za dané okno a
+Řeší dva samostatné typy připomínek, vždy nejvýš jednou za dané okno a
 daný odchod:
 
 **A) Souhrnná připomínka pro HR** (typ úlohy `NOTICE_WARNING`,
-funkce `queueExitChecklistReminders`):
+funkce `queueExitChecklistReminders`) – v okamžicích **30, 14, 7, 3, 2
+a 1 den** před plánovaným koncem:
 
 - dohledá plánované odchody (bez `actualEnd`), kterým se blíží
   plánovaný konec pracovního poměru,
@@ -93,7 +93,9 @@ funkce `queueExitChecklistReminders`):
   listu, včetně `meta.pendingSigners` se stejným seznamem.
 
 **B) Cílená připomínka konkrétním lidem** (typ úlohy
-`EXIT_SIGNATURE_INVITE`, funkce `queueExitChecklistSignatureReminders`):
+`EXIT_SIGNATURE_INVITE`, funkce `queueExitChecklistSignatureReminders`)
+– v okamžicích **14, 7, 3, 2 a 1 den** před plánovaným koncem (bez
+30denního okna, na rozdíl od souhrnné připomínky pro HR výše):
 
 - pro každý nedokončený odchod se podívá na **uloženou skupinu
   příjemců** (`ExitChecklist.header.signatureRecipients`) – tedy
@@ -183,10 +185,16 @@ Cron endpointy nejsou autorizované přes běžné uživatelské role typu `HR`,
 
 Cron se autorizuje technicky přes `CRON_SECRET`.
 
-Každé volání cron endpointu musí obsahovat HTTP header:
+Každé volání cron endpointu musí obsahovat jeden z těchto HTTP headerů:
 
 ```txt
 Authorization: Bearer <CRON_SECRET>
+```
+
+nebo alternativně:
+
+```txt
+x-cron-secret: <CRON_SECRET>
 ```
 
 Příklad:
@@ -261,7 +269,7 @@ Cron `mail-worker` čte a aktualizuje `MailQueue`.
 Pro odesílání e-mailů je potřeba:
 
 - platný `RESEND_API_KEY`,
-- správně nastavený `EMAIL_FROM`,
+- správně nastavený `RESEND_EMAIL_FROM`,
 - ověřená doména nebo odesílací adresa v Resendu,
 - nastavení příjemců, například `HR_EMAILS`.
 
@@ -303,15 +311,24 @@ Poznámky:
 
 ```env
 RESEND_API_KEY=...
-EMAIL_FROM=...
+RESEND_EMAIL_FROM=...
 HR_EMAILS=hr1@praha6.cz,hr2@praha6.cz
 ```
 
 Poznámky:
 
 - `RESEND_API_KEY` je API klíč pro Resend.
-- `EMAIL_FROM` musí být adresa/doména povolená v Resendu.
+- `RESEND_EMAIL_FROM` musí být adresa/doména povolená v Resendu.
 - `HR_EMAILS` je seznam HR příjemců oddělený čárkou.
+
+Volitelně, jen pro mail worker:
+
+```env
+MAIL_WORKER_BATCH_SIZE=20
+```
+
+Určuje, kolik položek z `MailQueue` mail worker zpracuje v jednom
+běhu. Výchozí hodnota je 20, maximum 100.
 
 ### 5.3 Běžné aplikační proměnné
 
@@ -877,7 +894,7 @@ Před spuštěním cronů v novém prostředí ověřit:
 - [ ] Je nastavená `DATABASE_URL`.
 - [ ] Jsou nasazené databázové migrace (včetně nových hodnot enumů, např. `DEADLINE_REMINDER_SENT`).
 - [ ] Je nastavený `RESEND_API_KEY`.
-- [ ] Je nastavený `EMAIL_FROM`.
+- [ ] Je nastavený `RESEND_EMAIL_FROM`.
 - [ ] Odesílací doména/adresa je ověřená v Resendu.
 - [ ] Jsou nastavené příjemci, například `HR_EMAILS`.
 - [ ] Mail worker umí zpracovat čekající položky v `MailQueue`.
@@ -949,7 +966,7 @@ NEXTAUTH_URL=http://localhost:3000
 Ověřit:
 
 - `RESEND_API_KEY`,
-- `EMAIL_FROM`,
+- `RESEND_EMAIL_FROM`,
 - ověření domény v Resendu,
 - `HR_EMAILS`,
 - záznamy v `MailQueue`,
@@ -1008,7 +1025,7 @@ Cron probation-notifications pouze kontroluje zkušební doby a vytváří e-mai
 
 Oba kontrolní crony mají v aplikaci běžet jen jednou denně v 8:00 pražského času, proto mají v GitHub Actions nastavené schedule na dvě UTC hodnoty (6 a 7) kvůli letnímu/zimnímu času – endpoint sám pozná, který běh je ten správný.
 
-Pro e-maily musí být v běžícím prostředí nastavený RESEND_API_KEY, EMAIL_FROM a příjemci, například HR_EMAILS. Pro DEV a PROD je doporučené mít oddělené APP_URL a CRON_SECRET.
+Pro e-maily musí být v běžícím prostředí nastavený RESEND_API_KEY, RESEND_EMAIL_FROM a příjemci, například HR_EMAILS. Pro DEV a PROD je doporučené mít oddělené APP_URL a CRON_SECRET.
 
 Cron endpointy se neautorizují přes role HR/ADMIN v aplikaci, ale technicky přes Authorization: Bearer <CRON_SECRET>.
 ```

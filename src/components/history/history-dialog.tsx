@@ -258,6 +258,7 @@ const CZ_VALUE_LABEL: Record<string, string> = {
   POSITION: "Změna pozice",
   NAME: "Změna jména",
   NAME_AND_POSITION: "Změna jména a pozice",
+  MATERNITY_LEAVE: "Mateřská dovolená",
 
   DRAFT: "Koncept",
   APPLIED: "Uplatněno",

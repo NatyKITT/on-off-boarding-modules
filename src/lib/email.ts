@@ -3,6 +3,7 @@ import { format } from "date-fns"
 import { cs } from "date-fns/locale"
 import { Resend } from "resend"
 
+import { buildCalendarLinksHtml, buildIcsCalendar } from "@/lib/calendar-link"
 import { formatDayCountCs } from "@/lib/dates"
 import { prisma } from "@/lib/db"
 import { joinNameWithTitles } from "@/lib/format-name"
@@ -147,6 +148,24 @@ function fmtDate(d: string | Date | null | undefined): string {
   return format(dt, "dd.MM.yyyy")
 }
 
+function toIsoDateOnly(d: string | Date | null | undefined): string | null {
+  if (!d) return null
+
+  if (typeof d === "string") {
+    const czech = d.trim().match(/^(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{4})$/)
+    if (czech) {
+      const [, day, month, year] = czech
+      return `${year}-${month!.padStart(2, "0")}-${day!.padStart(2, "0")}`
+    }
+  }
+
+  const dt = d instanceof Date ? d : new Date(d.trim())
+
+  if (Number.isNaN(dt.getTime())) return null
+
+  return format(dt, "yyyy-MM-dd")
+}
+
 function escapeHtml(value: string | number | null | undefined): string {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -181,8 +200,11 @@ function renderExitChecklistInfoTable(args: {
     label: string
     value?: string | null
     strong?: boolean
+    raw?: boolean
   }>
 }) {
+  const employmentEndDateIso = toIsoDateOnly(args.employmentEndDate)
+
   const rows = [
     ...(args.extraRows ?? []),
     {
@@ -202,6 +224,21 @@ function renderExitChecklistInfoTable(args: {
       label: "Datum odchodu",
       value: fmtDate(args.employmentEndDate),
     },
+    ...(employmentEndDateIso
+      ? [
+          {
+            label: "Kalendář",
+            value: buildCalendarLinksHtml({
+              title: `Konec pracovního poměru – ${args.employeeName}`,
+              description: [args.employeePosition, args.employeeDepartment]
+                .filter(Boolean)
+                .join(", "),
+              date: employmentEndDateIso,
+            }),
+            raw: true,
+          },
+        ]
+      : []),
   ]
 
   return wrapWithBottomSpacing(
@@ -221,7 +258,7 @@ function renderExitChecklistInfoTable(args: {
               <td style="padding:10px 16px;font-size:14px;line-height:1.4;color:${
                 isHighlighted ? "#082B2A" : "#374151"
               };font-weight:${isHighlighted ? 700 : 400};">
-                ${escapeHtml(row.value || "—")}
+                ${row.raw ? row.value || "—" : escapeHtml(row.value || "—")}
               </td>
             </tr>
           `
@@ -454,6 +491,36 @@ export function buildMonthlyReportSubject(
   return `Přehled personálních změn – ${monthLabel}`
 }
 
+function buildEmailRecordCalendarEvent(r: EmailRecord) {
+  const iso = toIsoDateOnly(r.date)
+  if (!iso) return null
+
+  const kind = r.type === "onboarding" ? "Nástup" : "Odchod"
+
+  return {
+    title: `${kind} – ${formatName(r)}`,
+    description: [r.position, r.department].filter(Boolean).join(", "),
+    date: iso,
+  }
+}
+
+export function buildEmailRecordsIcsAttachment(
+  records: EmailRecord[],
+  filename = "udalosti.ics"
+): { filename: string; content: Buffer; contentType: string } | null {
+  const events = records
+    .map((r) => buildEmailRecordCalendarEvent(r))
+    .filter((e): e is NonNullable<typeof e> => e !== null)
+
+  if (!events.length) return null
+
+  return {
+    filename,
+    content: Buffer.from(buildIcsCalendar(events), "utf-8"),
+    contentType: "text/calendar",
+  }
+}
+
 function renderNastupyOdchodyTableActual(
   rows: EmailRecord[],
   dateHeader: string
@@ -470,12 +537,15 @@ function renderNastupyOdchodyTableActual(
             <th align="left" style="padding: 13px; font-weight: 600; text-transform: uppercase; font-size:11px; color: #ffffff; white-space: normal;">Pozice</th>
             <th align="left" style="padding: 13px; font-weight: 600; text-transform: uppercase; font-size:11px; color: #ffffff; white-space: normal;">Odbor</th>
             <th align="left" style="padding: 13px; width: 120px; font-weight: 600; text-transform: uppercase; font-size:11px; white-space: nowrap; color: #ffffff;">${dateHeader}</th>
+            <th align="left" style="padding: 13px; width: 120px; font-weight: 600; text-transform: uppercase; font-size:11px; white-space: nowrap; color: #ffffff;">Kalendář</th>
           </tr>
         </thead>
         <tbody>
           ${rows
-            .map(
-              (r, i) => `
+            .map((r, i) => {
+              const calendarEvent = buildEmailRecordCalendarEvent(r)
+
+              return `
             <tr bgcolor="${i % 2 === 0 ? "#ffffff" : "#f9fafb"}" style="background-color: ${
               i % 2 === 0 ? "#ffffff" : "#f9fafb"
             };">
@@ -495,9 +565,13 @@ function renderNastupyOdchodyTableActual(
               <td style="padding: 13px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; font-variant-numeric: tabular-nums; color: #111827;">
                 ${fmtDate(r.date)}
               </td>
+
+              <td style="padding: 13px; border-bottom: 1px solid #e5e7eb; white-space: nowrap;">
+                ${calendarEvent ? buildCalendarLinksHtml(calendarEvent) : "—"}
+              </td>
             </tr>
           `
-            )
+            })
             .join("")}
         </tbody>
       </table>
@@ -548,12 +622,19 @@ function renderNastupyOdchodyTablePlanned(
               style="padding: 13px; width: 120px; font-weight: 600; text-transform: uppercase; font-size:11px; color: #ffffff;">
             ${dateHeader}
           </th>
+
+          <th align="left"
+              style="padding: 13px; width: 120px; font-weight: 600; text-transform: uppercase; font-size:11px; color: #ffffff;">
+            Kalendář
+          </th>
         </tr>
       </thead>
       <tbody>
         ${rows
-          .map(
-            (r, i) => `
+          .map((r, i) => {
+            const calendarEvent = buildEmailRecordCalendarEvent(r)
+
+            return `
           <tr bgcolor="${i % 2 === 0 ? "#ffffff" : "#f9fafb"}"
               style="background-color: ${i % 2 === 0 ? "#ffffff" : "#f9fafb"};">
 
@@ -580,9 +661,13 @@ function renderNastupyOdchodyTablePlanned(
             <td style="padding: 13px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; font-variant-numeric: tabular-nums; color: #111827;">
               ${fmtDate(r.date)}
             </td>
+
+            <td style="padding: 13px; border-bottom: 1px solid #e5e7eb; white-space: nowrap;">
+              ${calendarEvent ? buildCalendarLinksHtml(calendarEvent) : "—"}
+            </td>
           </tr>
         `
-          )
+          })
           .join("")}
       </tbody>
     </table>
@@ -781,7 +866,7 @@ export async function renderMonthlyReportHtml(args: {
 
 export type EmployeeChangeEmailRecord = {
   id: number
-  type: "POSITION" | "NAME" | "NAME_AND_POSITION"
+  type: "POSITION" | "NAME" | "NAME_AND_POSITION" | "MATERNITY_LEAVE"
   status: string
   audience?: string | null
 
@@ -860,6 +945,7 @@ function formatEmployeeChangeNewName(record: EmployeeChangeEmailRecord) {
 function employeeChangeTypeLabel(type: EmployeeChangeEmailRecord["type"]) {
   if (type === "NAME") return "Změna jména"
   if (type === "POSITION") return "Změna pozice"
+  if (type === "MATERNITY_LEAVE") return "Mateřská dovolená"
   return "Změna jména i pozice"
 }
 
@@ -963,6 +1049,26 @@ function renderChangeValueCell(
 function renderEmployeeChangeBubbles(
   record: EmployeeChangeEmailRecord
 ): string {
+  if (record.type === "MATERNITY_LEAVE") {
+    const calendarEvent = buildEmployeeChangeCalendarEvent(record)
+
+    return `
+      <div style="display:inline-block;background-color:#E5F5F2;border:1px solid #00847C;border-radius:8px;padding:8px 10px;font-family:${EMAIL_FONT_FAMILY};">
+        <div style="margin-bottom:4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:#00847C;">
+          Změna
+        </div>
+        <div style="font-size:12px;font-weight:700;color:#00847C;">
+          Odchod na mateřskou dovolenou
+        </div>
+        ${
+          calendarEvent
+            ? `<div style="margin-top:6px;">${buildCalendarLinksHtml(calendarEvent)}</div>`
+            : ""
+        }
+      </div>
+    `
+  }
+
   const groups = buildEmployeeChangeGroups(record)
 
   if (!groups.length) {
@@ -984,6 +1090,61 @@ function renderEmployeeChangeBubbles(
       `
     })
     .join("")
+}
+
+function buildEmployeeChangeCalendarEvent(record: EmployeeChangeEmailRecord) {
+  if (record.type !== "MATERNITY_LEAVE") return null
+
+  const iso = toIsoDateOnly(record.effectiveDate)
+  if (!iso) return null
+
+  return {
+    title: `Odchod na mateřskou dovolenou – ${formatEmployeeChangeName(record)}`,
+    description: buildEmployeeChangePositionSummary(record, false),
+    date: iso,
+  }
+}
+
+export function buildCombinedReportIcsAttachment(
+  args: {
+    records?: EmailRecord[]
+    changes?: EmployeeChangeEmailRecord[]
+  },
+  filename = "udalosti-report.ics"
+): { filename: string; content: Buffer; contentType: string } | null {
+  const events = [
+    ...(args.records ?? [])
+      .map((r) => buildEmailRecordCalendarEvent(r))
+      .filter((e): e is NonNullable<typeof e> => e !== null),
+    ...(args.changes ?? [])
+      .map((r) => buildEmployeeChangeCalendarEvent(r))
+      .filter((e): e is NonNullable<typeof e> => e !== null),
+  ]
+
+  if (!events.length) return null
+
+  return {
+    filename,
+    content: Buffer.from(buildIcsCalendar(events), "utf-8"),
+    contentType: "text/calendar",
+  }
+}
+
+export function buildEmployeeChangeRecordsIcsAttachment(
+  records: EmployeeChangeEmailRecord[],
+  filename = "udalosti-zmeny.ics"
+): { filename: string; content: Buffer; contentType: string } | null {
+  const events = records
+    .map((r) => buildEmployeeChangeCalendarEvent(r))
+    .filter((e): e is NonNullable<typeof e> => e !== null)
+
+  if (!events.length) return null
+
+  return {
+    filename,
+    content: Buffer.from(buildIcsCalendar(events), "utf-8"),
+    contentType: "text/calendar",
+  }
 }
 
 export function buildEmployeeChangeReportSubject(args: {
@@ -1019,7 +1180,7 @@ function renderEmployeeChangeTable(
           }
           <th align="left" style="padding:13px;width:60px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:nowrap;">Číslo funkce</th>
           <th align="left" style="padding:13px;width:65px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:normal;">Typ změny</th>
-          <th align="left" style="padding:13px;width:280px;font-size:11px;text-transform:uppercase;color:#ffffff;">Změna</th>
+          <th align="left" style="padding:13px;width:360px;font-size:11px;text-transform:uppercase;color:#ffffff;">Změna</th>
           <th align="left" style="padding:13px;width:65px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:nowrap;">Účinnost</th>
         </tr>
       </thead>
@@ -2157,7 +2318,12 @@ function getProbationEmployeeUnitName(payload: ProbationMailQueuePayload) {
 
 function renderInfoTable(
   bgLight: string,
-  rows: Array<{ label: string; value?: string | null; strong?: boolean }>
+  rows: Array<{
+    label: string
+    value?: string | null
+    strong?: boolean
+    raw?: boolean
+  }>
 ) {
   const visibleRows = rows.filter(
     (row) => Boolean(row.value) && row.value !== "—"
@@ -2180,7 +2346,7 @@ function renderInfoTable(
               <td style="padding:10px 16px;font-size:14px;line-height:1.4;color:${
                 strong ? "#082B2A" : "#374151"
               };font-weight:${strong ? 700 : 400};">
-                ${escapeHtml(row.value || "—")}
+                ${row.raw ? row.value || "—" : escapeHtml(row.value || "—")}
               </td>
             </tr>
           `
@@ -2275,7 +2441,28 @@ function renderProbationInfoTable(args: {
       label: "E-mail hodnotitele",
       value: args.evaluatorEmail || null,
     },
-  ].filter((row) => Boolean(row.value) && row.value !== "—")
+  ].filter((row) => Boolean(row.value) && row.value !== "—") as Array<{
+    label: string
+    value?: string | null
+    strong?: boolean
+    raw?: boolean
+  }>
+
+  const probationEndDateIso = toIsoDateOnly(args.probationEndDate)
+
+  if (probationEndDateIso) {
+    rows.push({
+      label: "Kalendář",
+      value: buildCalendarLinksHtml({
+        title: `Konec zkušební doby – ${args.employeeName ?? ""}`.trim(),
+        description: [args.employeePosition, args.employeeDepartment]
+          .filter(Boolean)
+          .join(", "),
+        date: probationEndDateIso,
+      }),
+      raw: true,
+    })
+  }
 
   return wrapWithBottomSpacing(
     `
@@ -2294,7 +2481,7 @@ function renderProbationInfoTable(args: {
               <td style="padding:10px 16px;font-size:14px;line-height:1.4;color:${
                 strong ? "#082B2A" : "#374151"
               };font-weight:${strong ? 700 : 400};">
-                ${escapeHtml(row.value || "—")}
+                ${row.raw ? row.value || "—" : escapeHtml(row.value || "—")}
               </td>
             </tr>
           `
@@ -2626,6 +2813,8 @@ export async function sendExitChecklistDueSoonReminderEmail(args: {
     args.intro?.trim() ||
     `Pracovní poměr zaměstnance končí za ${daysLabel} a výstupní list zatím není kompletně podepsaný. Prosíme o zajištění podpisu všech povinných polí.`
 
+  const employmentEndDateIso = toIsoDateOnly(args.employmentEndDate)
+
   const infoTable = renderInfoTable(bgLight, [
     { label: "Zaměstnanec", value: args.employeeName, strong: true },
     { label: "Osobní číslo", value: args.employeePersonalNumber },
@@ -2637,6 +2826,21 @@ export async function sendExitChecklistDueSoonReminderEmail(args: {
       value: fmtDate(args.employmentEndDate),
     },
     { label: "Zbývá", value: daysLabel },
+    ...(employmentEndDateIso
+      ? [
+          {
+            label: "Kalendář",
+            value: buildCalendarLinksHtml({
+              title: `Konec pracovního poměru – ${args.employeeName}`,
+              description: [args.employeePosition, args.employeeDepartment]
+                .filter(Boolean)
+                .join(", "),
+              date: employmentEndDateIso,
+            }),
+            raw: true,
+          },
+        ]
+      : []),
   ])
 
   const checklistLink = args.checklistLink?.trim() || null

@@ -99,27 +99,33 @@ export async function GET(
     const events: HistoryEvent[] = []
     let syntheticId = 1
 
-    events.push({
-      id: syntheticId++,
-      employeeId: id,
-      userId: "system",
-      displayUser: "Systém",
-      action: "CREATE",
-      field: "initial_creation",
-      oldValue: null,
-      newValue: JSON.stringify({
-        name: `${record.name} ${record.surname}`,
-        personalNumber: record.personalNumber,
-        type: record.type,
-        effectiveDate: record.effectiveDate.toISOString(),
-      }),
-      createdAt: record.createdAt.toISOString(),
-    })
-
     const changeLogRows = await prisma.employeeChangeLog.findMany({
       where: { employeeId: id },
       orderBy: { createdAt: "desc" },
     })
+
+    const hasRealCreateEvent = changeLogRows.some(
+      (row) => row.action === "CREATED"
+    )
+
+    if (!hasRealCreateEvent) {
+      events.push({
+        id: syntheticId++,
+        employeeId: id,
+        userId: "unknown",
+        displayUser: "Neznámý autor",
+        action: "CREATE",
+        field: "initial_creation",
+        oldValue: null,
+        newValue: JSON.stringify({
+          name: `${record.name} ${record.surname}`,
+          personalNumber: record.personalNumber,
+          type: record.type,
+          effectiveDate: record.effectiveDate.toISOString(),
+        }),
+        createdAt: record.createdAt.toISOString(),
+      })
+    }
 
     for (const row of changeLogRows) {
       const userDisplay = await resolveUserDisplay(row.userId)

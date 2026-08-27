@@ -2,6 +2,42 @@
 
 Historie významných změn v aplikaci On-Off-Boarding Modul. Nejnovější verze nahoře.
 
+## 0.12.0 – 2026-08-27
+
+### Nové funkce
+
+- **Kontaktní údaje u zaměstnaneckých změn** – e-mail zaměstnance a jméno/e-mail vedoucího odboru, s automatickým dohledáním vedoucího podle pozice (stejný mechanismus jako u nástupů/odchodů) i ručním přepsáním nebo vyhledáním v EOS. Zobrazuje se jako nové sloupce „Kontakt" a „Vedoucí" v přehledu Změn a jako samostatná karta na detailu záznamu (v e-mailových reportech se nezobrazuje).
+- **Vyhledávání v ručním režimu u odchodu** – po zaškrtnutí „Vyplnit vlastní data" jde nově navíc vyhledat osobu i pozici v EOS/systemizaci (předvyplní jméno/kontakt a pozici/zařazení), pole pak zůstávají volně editovatelná. Dřív bylo vyhledávání dostupné jen při plném výběru zaměstnance z EOS.
+- **Sjednocené a spolehlivé vyhledávání osob i pozic** napříč nástupy, odchody i změnami – konzistentní chování s diakritikou i bez ní, okamžité hledání při psaní a plynulé donačítání dalších výsledků při scrollování u velkých seznamů (dřív mohlo v některých dialozích donačítání tiše nefungovat).
+- **Oprava návrhu dalšího osobního čísla u nástupů** – počítá se teď správně jen se 4místnou řadou čísel úřadu; 5místná a delší čísla (KITT6 a další organizace) se do návrhu už nepletou. Zobrazují se ale nadále informačně zvlášť, viditelně barevně odlišená.
+- **„Nevyužitá osobní čísla"** (dřív „Přeskočená čísla") se teď při každém zobrazení ověřují živě proti aktuálnímu seznamu v EOS i proti evidenci appky, ne jen podle dřív uložené historie – odstraní se tak i čísla, která byla mezitím použita mimo tuto appku.
+- Pokud appka eviduje novější osobní číslo, které se ještě neobjevuje v EOS (typicky krátce po zapsání), zobrazí se u něj upozornění „zatím jen v aplikaci, ještě není v EOS".
+- **Vyhledávání vedoucího odboru přidáno i do formuláře odchodu** (dřív dostupné jen u nástupů a u zaměstnaneckých změn) – dohledá se automaticky podle pozice, jde přepsat ručně nebo znovu vyhledat v EOS.
+- **Tlačítko/odkaz „Přidat do kalendáře"** (Google kalendář i univerzální soubor .ics pro Outlook a Apple Kalendář) u všech e-mailů, kde je po někom vyžadovaná akce k určitému datu: řádky v měsíčních i kombinovaných reportech (nástup, odchod, odchod na mateřskou dovolenou), pozvánky a připomínky k podpisu výstupního listu, pozvánky a připomínky k vyhodnocení zkušební doby. U reportů s více lidmi navíc celý e-mail dostane i jednu souhrnnou přílohu .ics se všemi událostmi najednou pro hromadné přidání do kalendáře.
+- Zaměstnanecká změna „Odchod na mateřskou dovolenou" je teď plně zapojená i do Statistik (graf podle typu, PDF export), do e-mailových reportů (filtr typu, sloupec v PDF) a do historie/auditní stopy.
+
+### Opravy
+
+- Formulář Změny: chybová hláška „vyberte alespoň jednu oblast změny" se už neváže na konkrétní zaškrtávátko (dřív zůstávalo červené jen první políčko) a zobrazuje se správně přímo pod datem účinnosti.
+- Opravena nespolehlivost vyhledávání zaměstnanců v EOS napříč appkou – chybný interní trik (`q=1`) pro „načíst všechny" ve skutečnosti spouštěl úzký číselný filtr a mohl vracet neúplné výsledky; nahrazeno vlastním parametrem pro skutečné načtení celého seznamu.
+- Auditní historie u zaměstnanecké změny teď rozlišuje reálného uživatele od automatizace (cronu) – dřív bylo u vytvoření záznamu vždy uvedeno „Systém", i když ho založil konkrétní člověk.
+- Zobrazení „Odchod na mateřskou dovolenou" restylováno na méně výrazný vzhled (sjednoceno se stylem ostatních typů změn) v přehledu, na detailu, v okně propojených záznamů i v e-mailu.
+- Drobné sjednocení vzhledu karty „Vedoucí odboru" u formulářů nástupu, odchodu i změny (tlačítko „Obnovit dle pozice" se dřív mohlo vizuálně zúžit vedle delšího popisku).
+
+Tato verze přidává dvě nové databázové migrace: `20260824143351_add_maternity_leave_change_type` (nová hodnota `MATERNITY_LEAVE` v enumu typu zaměstnanecké změny) a `20260827110811_add_employee_change_contact_and_supervisor` (nové sloupce `userEmail`, `supervisorName`, `supervisorEmail` u zaměstnanecké změny). Žádná nová proměnná prostředí není potřeba – nový endpoint `/api/kalendar/ics` je bez přihlášení, stejně jako už dřív existující veřejné odkazy na výstupní listy.
+
+---
+
+## Deployment checklist k verzi 0.12.0
+
+- [ ] **Dvě nové migrace.** Spustit `prisma migrate deploy` (v pořadí `add_maternity_leave_change_type`, `add_employee_change_contact_and_supervisor`), poté `prisma generate` a restart/redeploy aplikace.
+- [ ] Žádné nové proměnné prostředí ani npm závislosti nejsou potřeba.
+- [ ] Na testovací zaměstnanecké změně ověřit: kontakt (e-mail) a vedoucí odboru (jméno/e-mail, i automatické dohledání podle pozice) se uloží a zobrazí ve sloupcích „Kontakt"/„Vedoucí" v přehledu i na kartě na detailu.
+- [ ] U odchodu v režimu „Vyplnit vlastní data" ověřit, že vyhledání osoby i pozice předvyplní pole a jde je dál upravit.
+- [ ] Ověřit, že návrh osobního čísla u nástupu ignoruje 5místná speciální čísla a že „Nevyužitá osobní čísla" v popoveru skutečně nejsou obsazená ani v EOS, ani v appce.
+- [ ] Otevřít odeslaný report e-mail (kombinovaný i samostatný) a zkontrolovat odkaz „Přidat do kalendáře" u jednotlivých řádků i přiloženou souhrnnou přílohu `.ics`.
+- [ ] Zkontrolovat, že se „Odchod na mateřskou dovolenou" správně zobrazuje v grafu a PDF exportu Statistik.
+
 ## 0.11.0 – 2026-08-14
 
 ### Nové funkce

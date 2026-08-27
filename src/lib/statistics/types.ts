@@ -65,6 +65,7 @@ export type ChangesByTypeMonthPoint = {
   POSITION: number
   NAME: number
   NAME_AND_POSITION: number
+  MATERNITY_LEAVE: number
 }
 
 export type ProcessHealth = {

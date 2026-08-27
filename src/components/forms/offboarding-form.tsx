@@ -34,6 +34,14 @@ import {
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { EmployeeCombobox } from "@/components/common/employee-combobox"
+import {
+  buildPersonFullName,
+  PersonLookupCombobox,
+} from "@/components/common/person-lookup-combobox"
+import {
+  PositionCombobox,
+  type PositionSearchItem,
+} from "@/components/common/position-combobox"
 
 type Mode = "create-planned" | "create-actual" | "edit"
 
@@ -897,6 +905,86 @@ export function OffboardingFormUnified({
               </Alert>
             )}
 
+            {manualData && (
+              <div className="grid grid-cols-1 gap-4 rounded-lg border bg-muted/10 p-4 md:grid-cols-2">
+                <div>
+                  <FormLabel>Vyhledat osobu v EOS (nepovinné)</FormLabel>
+                  <p className="mb-2 mt-1 text-xs text-muted-foreground">
+                    Předvyplní jméno a kontakt níže, dál je můžete volně
+                    upravit.
+                  </p>
+                  <PersonLookupCombobox
+                    placeholder="Vyhledejte osobu v EOS…"
+                    onSelect={(employee) => {
+                      form.setValue("titleBefore", employee.titleBefore ?? "", {
+                        shouldDirty: true,
+                      })
+                      form.setValue("name", employee.name ?? "", {
+                        shouldDirty: true,
+                      })
+                      form.setValue("surname", employee.surname ?? "", {
+                        shouldDirty: true,
+                      })
+                      form.setValue("titleAfter", employee.titleAfter ?? "", {
+                        shouldDirty: true,
+                      })
+                      form.setValue("userEmail", employee.email ?? "", {
+                        shouldDirty: true,
+                      })
+                      if (!form.getValues("personalNumber")?.trim()) {
+                        form.setValue(
+                          "personalNumber",
+                          employee.personalNumber ?? "",
+                          { shouldDirty: true }
+                        )
+                      }
+                      void form.trigger()
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <FormLabel>Vyhledat pozici (nepovinné)</FormLabel>
+                  <p className="mb-2 mt-1 text-xs text-muted-foreground">
+                    Předvyplní pozici a zařazení níže, dál je můžete volně
+                    upravit.
+                  </p>
+                  <PositionCombobox<PositionSearchItem>
+                    positions={[]}
+                    showOccupantInfo={false}
+                    trigger={({ selected }) => (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full justify-between font-normal"
+                      >
+                        <span className="truncate">
+                          {selected
+                            ? `${selected.num} — ${selected.name}`
+                            : "Vyhledejte pozici v systemizaci…"}
+                        </span>
+                      </Button>
+                    )}
+                    onSelect={(position) => {
+                      form.setValue("positionNum", position.num, {
+                        shouldDirty: true,
+                      })
+                      form.setValue("positionName", position.name ?? "", {
+                        shouldDirty: true,
+                      })
+                      form.setValue("department", position.dept_name ?? "", {
+                        shouldDirty: true,
+                      })
+                      form.setValue("unitName", position.unit_name ?? "", {
+                        shouldDirty: true,
+                      })
+                      void form.trigger()
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               {(
                 [
@@ -959,8 +1047,8 @@ export function OffboardingFormUnified({
 
         <Card className="border-l-4 border-l-[#00847C]">
           <CardHeader>
-            <div className="flex items-center justify-between gap-3">
-              <div>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
                 <CardTitle className="flex items-center gap-2">
                   <User className="size-5" /> Vedoucí odboru
                 </CardTitle>
@@ -973,6 +1061,7 @@ export function OffboardingFormUnified({
                 type="button"
                 variant="outline"
                 size="sm"
+                className="shrink-0"
                 onClick={restoreSupervisorFromPosition}
                 disabled={!form.getValues("positionNum") || isSupervisorLoading}
               >
@@ -997,6 +1086,65 @@ export function OffboardingFormUnified({
             )}
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <FormItem className="md:col-span-2">
+                <FormLabel>Vybrat vedoucího odboru z EOS</FormLabel>
+                <FormControl>
+                  <PersonLookupCombobox
+                    valueName={form.watch("supervisorName")}
+                    valueEmail={form.watch("supervisorEmail")}
+                    placeholder="Vyhledejte vedoucího odboru v EOS…"
+                    onSelect={async (employee) => {
+                      setSupervisorManuallyChanged(true)
+
+                      form.setValue(
+                        "supervisorName",
+                        buildPersonFullName(employee),
+                        {
+                          shouldDirty: true,
+                          shouldTouch: true,
+                          shouldValidate: true,
+                        }
+                      )
+                      form.setValue("supervisorEmail", employee.email ?? "", {
+                        shouldDirty: true,
+                        shouldTouch: true,
+                        shouldValidate: true,
+                      })
+                      form.setValue(
+                        "supervisorPosition",
+                        employee.positionName ?? "",
+                        {
+                          shouldDirty: true,
+                          shouldTouch: true,
+                          shouldValidate: false,
+                        }
+                      )
+                      form.setValue(
+                        "supervisorDepartment",
+                        employee.department ?? "",
+                        {
+                          shouldDirty: true,
+                          shouldTouch: true,
+                          shouldValidate: false,
+                        }
+                      )
+                      form.setValue(
+                        "supervisorUnitName",
+                        employee.unitName ?? "",
+                        {
+                          shouldDirty: true,
+                          shouldTouch: true,
+                          shouldValidate: false,
+                        }
+                      )
+                    }}
+                  />
+                </FormControl>
+                <FormDescription>
+                  Použijte, pokud má být vedoucí jiný než automaticky dohledaný.
+                </FormDescription>
+              </FormItem>
+
               <FormField
                 name="supervisorName"
                 control={form.control}

@@ -14,6 +14,7 @@ import {
   Edit,
   History as HistoryIcon,
   Info,
+  Mail,
   Trash2,
   User,
   XCircle,
@@ -68,7 +69,7 @@ import { EmployeeChangeForm } from "@/components/forms/employee-change-form"
 import { DeletedRecordsDialog } from "@/components/history/deleted-records-dialog"
 import { HistoryDialog } from "@/components/history/history-dialog"
 
-type ChangeType = "POSITION" | "NAME" | "NAME_AND_POSITION"
+type ChangeType = "POSITION" | "NAME" | "NAME_AND_POSITION" | "MATERNITY_LEAVE"
 type ChangeStatus = "DRAFT" | "APPLIED" | "CANCELLED"
 
 type ChangeRow = {
@@ -83,6 +84,10 @@ type ChangeRow = {
   surname: string
   titleAfter?: string | null
   personalNumber?: string | null
+  userEmail?: string | null
+
+  supervisorName?: string | null
+  supervisorEmail?: string | null
 
   oldTitleBefore?: string | null
   newTitleBefore?: string | null
@@ -198,6 +203,7 @@ function fullName(row: ChangeRow) {
 function typeLabel(type: ChangeType) {
   if (type === "NAME") return "Změna jména"
   if (type === "POSITION") return "Změna pozice"
+  if (type === "MATERNITY_LEAVE") return "Mateřská dovolená"
 
   return "Změna jména i pozice"
 }
@@ -213,6 +219,7 @@ const CHANGE_TYPE_OPTIONS: MultiSelectOption[] = [
   { value: "NAME", label: "Změna jména" },
   { value: "POSITION", label: "Změna pozice" },
   { value: "NAME_AND_POSITION", label: "Změna jména i pozice" },
+  { value: "MATERNITY_LEAVE", label: "Mateřská dovolená" },
 ]
 
 const EMAIL_SENT_OPTIONS: MultiSelectOption[] = [
@@ -369,6 +376,25 @@ function EmployeeInfoCell({ row }: { row: ChangeRow }) {
 }
 
 function NewChangeCell({ row }: { row: ChangeRow }) {
+  if (row.type === "MATERNITY_LEAVE") {
+    return (
+      <div className="rounded-xl border border-[#00847C]/25 bg-[#00847C]/5 p-3 shadow-sm">
+        <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[#00847C]">
+          Nově od {formatDate(row.effectiveDate)}
+        </div>
+
+        <div>
+          <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Změna
+          </div>
+          <div className="mt-0.5 break-words text-sm font-semibold text-[#00847C]">
+            Odchod na mateřskou dovolenou
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const showName = hasNameChange(row)
   const showPosition = hasPositionChange(row)
   const newName = buildNewEmployeeName(row)
@@ -465,7 +491,7 @@ function getAllYearsAndMonths(
 function ResponsiveTableShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="w-full max-w-full overflow-x-auto overscroll-x-contain">
-      <div className="min-w-[1370px]">{children}</div>
+      <div className="min-w-[1790px]">{children}</div>
     </div>
   )
 }
@@ -996,7 +1022,7 @@ export default function EmployeeChangesPage() {
           <EmployeeInfoCell row={row} />
         </TableCell>
 
-        <TableCell className="w-[150px] min-w-[150px] align-top">
+        <TableCell className="w-[190px] min-w-[190px] align-top">
           <div className="flex flex-col items-start gap-1.5">
             <Badge
               variant="outline"
@@ -1037,6 +1063,44 @@ export default function EmployeeChangesPage() {
 
         <TableCell className="w-[360px] min-w-[360px] align-top">
           <NewChangeCell row={row} />
+        </TableCell>
+
+        <TableCell className="w-[180px] min-w-[180px] align-top">
+          {row.userEmail ? (
+            <div className="flex items-center gap-1.5 text-sm">
+              <Mail className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="truncate" title={row.userEmail}>
+                {row.userEmail}
+              </span>
+            </div>
+          ) : (
+            <span className="text-xs text-muted-foreground">–</span>
+          )}
+        </TableCell>
+
+        <TableCell className="w-[200px] min-w-[200px] align-top">
+          {row.supervisorName || row.supervisorEmail ? (
+            <div className="space-y-0.5 text-sm">
+              {row.supervisorName && (
+                <div
+                  className="truncate font-medium"
+                  title={row.supervisorName}
+                >
+                  {row.supervisorName}
+                </div>
+              )}
+              {row.supervisorEmail && (
+                <div
+                  className="truncate text-xs text-muted-foreground"
+                  title={row.supervisorEmail}
+                >
+                  {row.supervisorEmail}
+                </div>
+              )}
+            </div>
+          ) : (
+            <span className="text-xs text-muted-foreground">–</span>
+          )}
         </TableCell>
 
         <TableCell className="w-[135px] min-w-[135px] align-top">
@@ -1450,7 +1514,7 @@ export default function EmployeeChangesPage() {
                                                 <TableHead className="w-[280px] min-w-[280px]">
                                                   Další info
                                                 </TableHead>
-                                                <TableHead className="w-[150px] min-w-[150px]">
+                                                <TableHead className="w-[190px] min-w-[190px]">
                                                   Typ změny
                                                 </TableHead>
                                                 <TableHead className="w-[130px] min-w-[130px]">
@@ -1458,6 +1522,12 @@ export default function EmployeeChangesPage() {
                                                 </TableHead>
                                                 <TableHead className="w-[360px] min-w-[360px]">
                                                   Nová změna
+                                                </TableHead>
+                                                <TableHead className="w-[180px] min-w-[180px]">
+                                                  Kontakt
+                                                </TableHead>
+                                                <TableHead className="w-[200px] min-w-[200px]">
+                                                  Vedoucí
                                                 </TableHead>
                                                 <TableHead className="w-[135px] min-w-[135px]">
                                                   Odeslání reportu

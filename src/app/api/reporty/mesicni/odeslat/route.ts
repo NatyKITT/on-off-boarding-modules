@@ -3,6 +3,7 @@ import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
 import {
+  buildEmailRecordsIcsAttachment,
   buildMonthlyReportSubject,
   logEmailHistory,
   renderMonthlyReportHtml,
@@ -163,10 +164,16 @@ export async function POST(request: Request) {
       kind: kind,
     })
 
+    const icsAttachment = buildEmailRecordsIcsAttachment(
+      emailRecords,
+      `report-${month}.ics`
+    )
+
     await sendMail({
       bcc: reportRecipients,
       subject,
       html,
+      ...(icsAttachment ? { attachments: [icsAttachment] } : {}),
     })
 
     await Promise.all(

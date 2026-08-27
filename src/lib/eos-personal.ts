@@ -8,11 +8,13 @@ function buildEmployeeLabel(e: Employee): string {
     .trim()
 }
 
-export async function getLastDc2PersonalNumber(): Promise<{
+export async function getLastDc2PersonalNumber(
+  preloadedEmployees?: Employee[]
+): Promise<{
   number: string | null
   name: string | null
 }> {
-  const employees = await getEmployees("")
+  const employees = preloadedEmployees ?? (await getEmployees(""))
 
   let best: Employee | null = null
 
@@ -20,7 +22,43 @@ export async function getLastDc2PersonalNumber(): Promise<{
     if (e.terminated) continue
 
     const num = e.personalNumber?.trim()
-    if (!num || !/^\d+$/.test(num)) continue
+    if (!num || !/^\d{4}$/.test(num)) continue
+
+    if (!best) {
+      best = e
+      continue
+    }
+
+    if (parseInt(num, 10) > parseInt(best.personalNumber.trim(), 10)) {
+      best = e
+    }
+  }
+
+  if (!best) {
+    return { number: null, name: null }
+  }
+
+  return {
+    number: best.personalNumber.trim(),
+    name: buildEmployeeLabel(best) || null,
+  }
+}
+
+export async function getLastSpecialPersonalNumber(
+  preloadedEmployees?: Employee[]
+): Promise<{
+  number: string | null
+  name: string | null
+}> {
+  const employees = preloadedEmployees ?? (await getEmployees(""))
+
+  let best: Employee | null = null
+
+  for (const e of employees) {
+    if (e.terminated) continue
+
+    const num = e.personalNumber?.trim()
+    if (!num || !/^\d+$/.test(num) || num.length === 4) continue
 
     if (!best) {
       best = e

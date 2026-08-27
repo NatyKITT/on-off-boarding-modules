@@ -820,7 +820,10 @@ const CHANGE_COLUMNS: ColumnDef<ChangeReportRow>[] = [
     label: "Nová hodnota",
     weight: 22,
     wrap: true,
-    cell: (row) => changeValuesCell(row.newValues),
+    cell: (row) =>
+      row.changeTypeLabel === "Mateřská dovolená"
+        ? "Odchod na mateřskou dovolenou"
+        : changeValuesCell(row.newValues),
   },
   {
     label: "Odeslání reportu",

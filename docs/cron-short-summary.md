@@ -37,12 +37,12 @@ Důležité: tento endpoint běžně e-maily přímo neposílá, pouze vytvář�
 GET /api/cron/offboarding-notifications
 ```
 
-Slouží ke kontrole **plánovaných** odchodů (dosud bez potvrzeného skutečného konce), kterým se blíží konec pracovního poměru a jejich výstupní list ještě není kompletně podepsaný. Jakmile se odchod potvrdí jako skutečný (vyplní se `actualEnd`), cron ho od té chvíle úplně přeskočí. Řeší dva typy připomínek, obě v okamžicích 30, 14, 7, 3, 2 a 1 den před koncem, vždy jen jednou za dané okno:
+Slouží ke kontrole **plánovaných** odchodů (dosud bez potvrzeného skutečného konce), kterým se blíží konec pracovního poměru a jejich výstupní list ještě není kompletně podepsaný. Jakmile se odchod potvrdí jako skutečný (vyplní se `actualEnd`), cron ho od té chvíle úplně přeskočí. Řeší dva typy připomínek, vždy jen jednou za dané okno:
 
-1. **Souhrnná připomínka pro HR** (`HR_EMAILS`) – pokud výstupní list ještě není hotový. Text se liší podle toho, jestli už HR vůbec jednou kliknula „Odeslat všem k podpisu":
+1. **Souhrnná připomínka pro HR** (`HR_EMAILS`) – v okamžicích **30, 14, 7, 3, 2 a 1 den** před koncem, pokud výstupní list ještě není hotový. Text se liší podle toho, jestli už HR vůbec jednou kliknula „Odeslat všem k podpisu":
    - Pokud ne → HR se vyzve, ať pozvánku odešle.
    - Pokud ano, ale někdo ještě nepodepsal → HR se jen informuje, že list stále není kompletní, a e-mail obsahuje i konkrétní seznam jmen a e-mailů, kdo ještě nepodepsal.
-2. **Cílená připomínka konkrétním lidem** – posílá se přímo každému příjemci ze skupiny naposledy uložené (`ExitChecklist.header.signatureRecipients`), kdo ještě nepodepsal, na stejný odkaz, jaký dostal v pozvánce. Skupina se pro každý odchod může lišit (zaměstnanec, vedoucí i libovolní další signatáři, včetně lidí přidaných "v zastoupení") a cron ji vždy počítá podle posledního uloženého stavu. Do skupiny se přidává jak přes „Odeslat všem k podpisu" (tam jde i "v zastoupení" a i tam jde kohokoli zrušit), tak automaticky každou jednotlivou pozvánkou a přes okno „Osoby k podpisu" (dřív „Příjemci k podpisu"). Zrušený (odebraný) člověk se nemaže, jen se vynechá z připomínek, dokud není tlačítkem „Vrátit" vrácen zpět – zrušení mu zároveň odebere i právo výstupní list podepsat. Stejný e-mail může mít ve skupině dvě nezávislé role (přímo za sebe a k tomu v zastoupení za jinou osobu) – cron je počítá odděleně. Odcházející zaměstnanec a lidé „v zastoupení" dostávají jinak znějící verzi připomínky než ostatní signatáři. Cron nikoho nezve poprvé sám od sebe.
+2. **Cílená připomínka konkrétním lidem** – v okamžicích **14, 7, 3, 2 a 1 den** před koncem (bez 30denního okna). Posílá se přímo každému příjemci ze skupiny naposledy uložené (`ExitChecklist.header.signatureRecipients`), kdo ještě nepodepsal, na stejný odkaz, jaký dostal v pozvánce. Skupina se pro každý odchod může lišit (zaměstnanec, vedoucí i libovolní další signatáři, včetně lidí přidaných "v zastoupení") a cron ji vždy počítá podle posledního uloženého stavu. Do skupiny se přidává jak přes „Odeslat všem k podpisu" (tam jde i "v zastoupení" a i tam jde kohokoli zrušit), tak automaticky každou jednotlivou pozvánkou a přes okno „Osoby k podpisu" (dřív „Příjemci k podpisu"). Zrušený (odebraný) člověk se nemaže, jen se vynechá z připomínek, dokud není tlačítkem „Vrátit" vrácen zpět – zrušení mu zároveň odebere i právo výstupní list podepsat. Stejný e-mail může mít ve skupině dvě nezávislé role (přímo za sebe a k tomu v zastoupení za jinou osobu) – cron je počítá odděleně. Odcházející zaměstnanec a lidé „v zastoupení" dostávají jinak znějící verzi připomínky než ostatní signatáři. Cron nikoho nezve poprvé sám od sebe.
 
 Stejně jako u `probation-notifications`: endpoint přímo neposílá e-maily, pouze vytváří úlohy typu `NOTICE_WARNING` do `MailQueue`.
 
@@ -66,10 +66,16 @@ Může sloužit pro kompatibilitu nebo starší napojení. Primárně je vhodné
 
 Cron endpointy jsou chráněné přes `CRON_SECRET`.
 
-Každé volání musí obsahovat header:
+Každé volání musí obsahovat jeden z těchto headerů:
 
 ```txt
 Authorization: Bearer <CRON_SECRET>
+```
+
+nebo alternativně:
+
+```txt
+x-cron-secret: <CRON_SECRET>
 ```
 
 Hodnota `CRON_SECRET` musí být stejná:
@@ -103,8 +109,14 @@ Pro e-maily přes Resend:
 
 ```env
 RESEND_API_KEY=...
-EMAIL_FROM=...
+RESEND_EMAIL_FROM=...
 HR_EMAILS=hr1@praha6.cz,hr2@praha6.cz
+```
+
+Volitelně lze nastavit i velikost dávky pro mail worker (výchozí 20, max 100):
+
+```env
+MAIL_WORKER_BATCH_SIZE=20
 ```
 
 `AUTH_SECRET` má být samostatný náhodný secret, ne Google Client ID. Lze ho vygenerovat například:
@@ -167,7 +179,7 @@ Crony pracují s databází, hlavně s nástupy, zkušební dobou a tabulkou `Ma
 
 ### Resend / e-mailová služba
 
-Pro odesílání e-mailů musí být nastavený `RESEND_API_KEY`, `EMAIL_FROM`, ověřená doména nebo odesílací adresa v Resendu a příjemci jako `HR_EMAILS`.
+Pro odesílání e-mailů musí být nastavený `RESEND_API_KEY`, `RESEND_EMAIL_FROM`, ověřená doména nebo odesílací adresa v Resendu a příjemci jako `HR_EMAILS`.
 
 ### Aplikační role
 
@@ -344,7 +356,7 @@ GitHub secrets se lokálně nepoužívají. Je potřeba mít vlastní `.env.loca
 
 ### E-maily nejsou doručené
 
-Zkontrolovat `RESEND_API_KEY`, `EMAIL_FROM`, ověřenou doménu/adresu v Resendu, `HR_EMAILS`, logy aplikace a stav položek v `MailQueue`.
+Zkontrolovat `RESEND_API_KEY`, `RESEND_EMAIL_FROM`, ověřenou doménu/adresu v Resendu, `HR_EMAILS`, logy aplikace a stav položek v `MailQueue`.
 
 ### Cron vytvoří úlohy, ale nic se neodešle
 

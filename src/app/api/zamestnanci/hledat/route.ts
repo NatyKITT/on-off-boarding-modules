@@ -33,6 +33,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const q = (req.nextUrl.searchParams.get("q") || "").trim()
+    const listAll = req.nextUrl.searchParams.get("listAll") === "true"
     const limit = Math.min(
       Math.max(Number(req.nextUrl.searchParams.get("limit") || 200), 1),
       1000
@@ -49,7 +50,7 @@ export async function GET(req: NextRequest) {
     const excludeActiveOffboardings =
       req.nextUrl.searchParams.get("excludeActiveOffboardings") !== "false"
 
-    if (!q) {
+    if (!q && !listAll) {
       return NextResponse.json({ data: [] })
     }
 
@@ -72,7 +73,7 @@ export async function GET(req: NextRequest) {
       ...new Set([...(excludeFromDB as string[]), ...manualExclude]),
     ]
 
-    const employees = await getEmployees(q)
+    const employees = await getEmployees(listAll ? "" : q)
 
     const filteredEmployees =
       allExcluded.length > 0

@@ -6,11 +6,16 @@ import { prisma } from "@/lib/db"
 import { canReadMonthlyReports } from "@/lib/rbac"
 
 type Audience = "ONBOARDING_GROUP" | "ALL_EMPLOYEES"
-type ChangeType = "all" | "POSITION" | "NAME" | "NAME_AND_POSITION"
+type ChangeType =
+  | "all"
+  | "POSITION"
+  | "NAME"
+  | "NAME_AND_POSITION"
+  | "MATERNITY_LEAVE"
 
 export type EmployeeChangeReportRow = {
   id: number
-  type: "POSITION" | "NAME" | "NAME_AND_POSITION"
+  type: "POSITION" | "NAME" | "NAME_AND_POSITION" | "MATERNITY_LEAVE"
   status: string
   audience: string | null
 
@@ -87,7 +92,8 @@ export async function GET(req: Request) {
   const changeType: ChangeType =
     changeTypeParam === "POSITION" ||
     changeTypeParam === "NAME" ||
-    changeTypeParam === "NAME_AND_POSITION"
+    changeTypeParam === "NAME_AND_POSITION" ||
+    changeTypeParam === "MATERNITY_LEAVE"
       ? changeTypeParam
       : "all"
 

@@ -27,6 +27,10 @@ const createSchema = z.object({
   surname: z.string().trim().min(1, "Příjmení je povinné."),
   titleAfter: z.preprocess(emptyToNull, z.string().nullable().optional()),
   personalNumber: z.preprocess(emptyToNull, z.string().nullable().optional()),
+  userEmail: z.preprocess(emptyToNull, z.string().nullable().optional()),
+
+  supervisorName: z.preprocess(emptyToNull, z.string().nullable().optional()),
+  supervisorEmail: z.preprocess(emptyToNull, z.string().nullable().optional()),
 
   oldTitleBefore: z.preprocess(emptyToNull, z.string().nullable().optional()),
   newTitleBefore: z.preprocess(emptyToNull, z.string().nullable().optional()),
@@ -61,6 +65,10 @@ type EmployeeChangeWithTargets = {
   surname: string
   titleAfter: string | null
   personalNumber: string | null
+  userEmail: string | null
+
+  supervisorName: string | null
+  supervisorEmail: string | null
 
   oldTitleBefore: string | null
   newTitleBefore: string | null
@@ -300,6 +308,10 @@ export async function POST(request: NextRequest) {
         surname: data.surname,
         titleAfter: data.titleAfter ?? null,
         personalNumber: data.personalNumber ?? null,
+        userEmail: data.userEmail ?? null,
+
+        supervisorName: data.supervisorName ?? null,
+        supervisorEmail: data.supervisorEmail ?? null,
 
         oldTitleBefore: data.oldTitleBefore ?? null,
         newTitleBefore: data.newTitleBefore ?? null,
@@ -330,6 +342,27 @@ export async function POST(request: NextRequest) {
             appliedAt: true,
           },
         },
+      },
+    })
+
+    const userKey =
+      (session.user as { id?: string; email?: string }).id ??
+      session.user.email ??
+      "unknown"
+
+    await prisma.employeeChangeLog.create({
+      data: {
+        employeeId: created.id,
+        userId: userKey,
+        action: "CREATED",
+        field: "initial_creation",
+        oldValue: null,
+        newValue: JSON.stringify({
+          name: `${created.name} ${created.surname}`,
+          personalNumber: created.personalNumber,
+          type: created.type,
+          effectiveDate: created.effectiveDate.toISOString(),
+        }),
       },
     })
 

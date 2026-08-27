@@ -22,20 +22,11 @@ import { z } from "zod"
 import { type Position } from "@/types/position"
 
 import { useIsReadonly } from "@/hooks/use-current-role"
-import { cn } from "@/lib/utils"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command"
 import {
   Dialog,
   DialogContent,
@@ -55,12 +46,16 @@ import {
 import { Input } from "@/components/ui/input"
 import {
   Popover,
-  PopoverAnchor,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 import { AssignCompanyDataDialog } from "@/components/common/assign-company-data-dialog"
+import {
+  buildPersonFullName,
+  PersonLookupCombobox,
+} from "@/components/common/person-lookup-combobox"
+import { PositionCombobox } from "@/components/common/position-combobox"
 
 type Mode = "create-planned" | "create-actual" | "edit"
 
@@ -119,9 +114,12 @@ export type FormValues = {
 export type PersonalNumberMeta = {
   lastUsedNumber?: string | null
   lastUsedName?: string | null
+  lastUsedNumberInEos?: boolean
   skippedNumbers?: string[]
   lastDc2Number?: string | null
   lastDc2AssignedTo?: string | null
+  lastSpecialNumber?: string | null
+  lastSpecialAssignedTo?: string | null
 }
 
 export type PersonalNumberCheckResult =
@@ -143,95 +141,9 @@ type Props = {
   ) => Promise<PersonalNumberCheckResult>
 }
 
-type SearchablePosition = Position & {
-  _key: string
-  _hay: string
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
-}
-
-function normalizePositionsResponse(api: unknown): Position[] {
-  const source: unknown[] = Array.isArray(api)
-    ? api
-    : isRecord(api) && Array.isArray(api.data)
-      ? api.data
-      : []
-
-  const output: Position[] = []
-
-  for (const item of source) {
-    if (!isRecord(item)) continue
-
-    const num = typeof item.num === "string" ? item.num : ""
-    const name = typeof item.name === "string" ? item.name : ""
-
-    if (!num || !name) continue
-
-    output.push({
-      id: String(
-        typeof item.id === "string" || typeof item.id === "number"
-          ? item.id
-          : num
-      ),
-      num,
-      name,
-      dept_name: typeof item.dept_name === "string" ? item.dept_name : "",
-      unit_name: typeof item.unit_name === "string" ? item.unit_name : "",
-      supervisorName:
-        typeof item.supervisorName === "string"
-          ? item.supervisorName
-          : typeof item.supervisor_name === "string"
-            ? item.supervisor_name
-            : "",
-      supervisorEmail:
-        typeof item.supervisorEmail === "string"
-          ? item.supervisorEmail
-          : typeof item.supervisor_email === "string"
-            ? item.supervisor_email
-            : "",
-      personName:
-        typeof item.personName === "string" ? item.personName : undefined,
-      personPersonalNumber:
-        typeof item.personPersonalNumber === "string"
-          ? item.personPersonalNumber
-          : undefined,
-      personGid:
-        typeof item.personGid === "string" ? item.personGid : undefined,
-    })
-  }
-
-  return output
-}
-
-type OnboardingRowForMeta = {
-  personalNumber?: string | null
-  titleBefore?: string | null
-  name?: string | null
-  surname?: string | null
-  titleAfter?: string | null
-}
-
 type OnboardingPayload = Record<string, unknown> & {
   generatedSkippedPersonalNumbers?: string[]
   supervisorManualOverride?: boolean
-}
-
-type EmployeePersonItem = {
-  id: string
-  personalNumber: string
-  name: string
-  surname: string
-  email: string
-  titleBefore?: string | null
-  titleAfter?: string | null
-  positionNum?: string
-  positionName?: string
-  department?: string
-  unitName?: string
-  label?: string
-  userName?: string | null
 }
 
 type SupervisorApiResponse = {
@@ -416,12 +328,6 @@ const stripAccents = (s: string) =>
     .replace(/\p{Diacritic}/gu, "")
     .toLowerCase()
 
-const normalize = (s: string) =>
-  s
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-
 const isManagerialPosition = (positionName?: string): boolean => {
   if (!positionName) return false
   const low = stripAccents(positionName)
@@ -469,6 +375,7 @@ const computeSkippedPersonalNumbers = (
   const curr = (current ?? "").trim()
   if (!last || !curr) return []
   if (!/^\d+$/.test(last) || !/^\d+$/.test(curr)) return []
+  if (last.length !== curr.length) return []
   const lastNum = parseInt(last, 10)
   const currNum = parseInt(curr, 10)
   if (currNum <= lastNum + 1) return []
@@ -512,70 +419,6 @@ const getBaselineLastPersonalNumber = (meta?: PersonalNumberMeta): string => {
   }
 
   return best
-}
-
-function buildPersonalNumberMetaFromOnboardings(
-  rows: OnboardingRowForMeta[],
-  base?: PersonalNumberMeta
-): PersonalNumberMeta {
-  const parsed: { num: number; raw: string; fullName: string }[] = []
-
-  for (const r of rows) {
-    const raw = (r.personalNumber ?? "").trim()
-    if (!raw) continue
-    const match = raw.match(/\d+/)
-    if (!match) continue
-    const n = Number(match[0])
-    if (!Number.isFinite(n)) continue
-
-    const fullName =
-      `${r.titleBefore ?? ""} ${r.name ?? ""} ${r.surname ?? ""} ${r.titleAfter ?? ""}`
-        .replace(/\s+/g, " ")
-        .trim()
-
-    parsed.push({ num: n, raw, fullName })
-  }
-
-  const baseMeta: PersonalNumberMeta = {
-    lastUsedNumber: base?.lastUsedNumber ?? null,
-    lastUsedName: base?.lastUsedName ?? null,
-    skippedNumbers: base?.skippedNumbers ?? [],
-    lastDc2Number: base?.lastDc2Number ?? null,
-    lastDc2AssignedTo: base?.lastDc2AssignedTo ?? null,
-  }
-
-  if (!parsed.length) return baseMeta
-
-  parsed.sort((a, b) => a.num - b.num)
-  const first = parsed[0]!
-  const last = parsed[parsed.length - 1]!
-
-  const usedSet = new Set(parsed.map((p) => p.num))
-  const padLen = Math.max(last.raw.length, baseMeta.lastUsedNumber?.length ?? 0)
-
-  const computedSkipped: string[] = []
-  for (let n = first.num + 1; n < last.num; n++) {
-    if (!usedSet.has(n)) {
-      computedSkipped.push(n.toString().padStart(padLen, "0"))
-    }
-  }
-
-  const unionSkipped = new Set<string>(baseMeta.skippedNumbers ?? [])
-  for (const n of computedSkipped) unionSkipped.add(n)
-
-  const sortedSkipped = Array.from(unionSkipped).sort((a, b) => {
-    const na = parseInt(a, 10)
-    const nb = parseInt(b, 10)
-    if (Number.isNaN(na) || Number.isNaN(nb)) return a.localeCompare(b)
-    return na - nb
-  })
-
-  return {
-    ...baseMeta,
-    lastUsedNumber: last.raw,
-    lastUsedName: last.fullName || baseMeta.lastUsedName || null,
-    skippedNumbers: sortedSkipped,
-  }
 }
 
 const baseSchema = z.object({
@@ -647,15 +490,6 @@ function buildDisplayName(parts: Array<string | null | undefined>): string {
   return dedupeAdjacentWords(parts.filter(Boolean).join(" "))
 }
 
-function buildEmployeeFullName(person: Partial<EmployeePersonItem>) {
-  return buildDisplayName([
-    person.titleBefore,
-    person.name,
-    person.surname,
-    person.titleAfter,
-  ])
-}
-
 function buildSupervisorFullName(
   supervisor?: SupervisorApiResponse["supervisor"]
 ): string {
@@ -671,225 +505,6 @@ function buildSupervisorFullName(
     supervisor.surname,
     supervisor.titleAfter,
   ])
-}
-
-function PersonLookupCombobox({
-  valueName,
-  valueEmail,
-  placeholder,
-  disabled,
-  onSelect,
-  className,
-}: {
-  valueName?: string
-  valueEmail?: string
-  placeholder?: string
-  disabled?: boolean
-  onSelect: (employee: EmployeePersonItem) => void | Promise<void>
-  className?: string
-}) {
-  const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState("")
-  const [allEmployees, setAllEmployees] = useState<EmployeePersonItem[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!open || allEmployees.length > 0) return
-
-    const controller = new AbortController()
-
-    ;(async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        const url = new URL("/api/zamestnanci/hledat", window.location.origin)
-        url.searchParams.set("q", "1")
-        url.searchParams.set("limit", "500")
-
-        const res = await fetch(url.toString(), {
-          cache: "no-store",
-          signal: controller.signal,
-          headers: { Accept: "application/json" },
-        })
-
-        if (!res.ok) {
-          throw new Error(
-            res.status === 502
-              ? "EOS služba není dostupná"
-              : `Chyba při načítání zaměstnanců (${res.status})`
-          )
-        }
-
-        const json = await res.json().catch(() => null)
-        const data: EmployeePersonItem[] = Array.isArray(json?.data)
-          ? json.data
-          : []
-
-        setAllEmployees(data)
-      } catch (e) {
-        if ((e as Error).name !== "AbortError") {
-          setError((e as Error).message || "Chyba vyhledávání")
-        }
-      } finally {
-        setLoading(false)
-      }
-    })()
-
-    return () => controller.abort()
-  }, [open, allEmployees.length])
-
-  useEffect(() => {
-    if (!open) setQuery("")
-  }, [open])
-
-  const filtered = useMemo(() => {
-    const q = normalize(query.trim())
-    if (!q) return allEmployees
-
-    return allEmployees.filter((e) => {
-      const num = normalize(e.personalNumber ?? "")
-      const nm = normalize(
-        `${e.titleBefore ?? ""} ${e.name ?? ""} ${e.surname ?? ""} ${e.titleAfter ?? ""}`
-      )
-      const org = normalize(
-        `${e.positionName ?? ""} ${e.department ?? ""} ${e.unitName ?? ""}`
-      )
-      const email = normalize(e.email ?? "")
-
-      return (
-        num.includes(q) ||
-        nm.includes(q) ||
-        org.includes(q) ||
-        email.includes(q)
-      )
-    })
-  }, [allEmployees, query])
-
-  const selectedLabel =
-    valueName || valueEmail
-      ? [valueName, valueEmail].filter(Boolean).join(" • ")
-      : ""
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverAnchor asChild>
-        <div className={cn("relative", className)}>
-          <Input
-            readOnly
-            value={selectedLabel}
-            placeholder={placeholder ?? "Vybrat osobu z EOS…"}
-            disabled={disabled}
-            onClick={() => !disabled && setOpen(true)}
-            className={focusRing}
-          />
-        </div>
-      </PopoverAnchor>
-
-      <PopoverContent
-        className="w-[--radix-popover-trigger-width] p-0"
-        sideOffset={4}
-        align="start"
-        onOpenAutoFocus={(e) => e.preventDefault()}
-        onWheelCapture={(e) => e.stopPropagation()}
-      >
-        <Command shouldFilter={false}>
-          <div className="relative">
-            <CommandInput
-              placeholder="Pište číslo, jméno, příjmení nebo e-mail…"
-              value={query}
-              onValueChange={setQuery}
-              autoFocus
-              className={focusRing}
-            />
-            {query && (
-              <button
-                type="button"
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm text-muted-foreground hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                title="Vymazat hledání"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => setQuery("")}
-              >
-                <X className="size-4" />
-              </button>
-            )}
-          </div>
-
-          <CommandEmpty>
-            {loading ? (
-              <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
-                <div className="mr-2 size-4 animate-spin rounded-full border-b-2 border-current" />
-                Načítám zaměstnance…
-              </div>
-            ) : error ? (
-              <div className="flex flex-col items-center justify-center py-6 text-sm text-destructive">
-                <User className="mb-2 size-8 opacity-50" />
-                {error}
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-6 text-sm text-muted-foreground">
-                <User className="mb-2 size-8 opacity-50" />
-                Nic nenalezeno.
-              </div>
-            )}
-          </CommandEmpty>
-
-          <CommandList className="max-h-80 overflow-y-auto overscroll-contain">
-            <CommandGroup>
-              {filtered.map((e) => (
-                <CommandItem
-                  key={e.id}
-                  value={e.personalNumber || e.id}
-                  onSelect={() => {
-                    void onSelect(e)
-                    setOpen(false)
-                    setQuery("")
-                  }}
-                  className="flex cursor-pointer items-start gap-3 py-3"
-                >
-                  <Check className="mt-0.5 size-4 shrink-0 opacity-0" />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <User className="size-4 shrink-0 text-muted-foreground" />
-                      {e.personalNumber ? (
-                        <span className="font-mono text-sm text-muted-foreground">
-                          {e.personalNumber}
-                        </span>
-                      ) : null}
-                      <span className="truncate py-0.5 font-medium leading-normal">
-                        {buildEmployeeFullName(e)}
-                      </span>
-                    </div>
-
-                    <div className="mt-1 space-y-1 text-sm text-muted-foreground">
-                      {e.positionName ? (
-                        <div className="truncate">
-                          <span className="font-medium">Pozice:</span>{" "}
-                          {e.positionName}
-                        </div>
-                      ) : null}
-                      {e.department || e.unitName ? (
-                        <div className="truncate">
-                          {[e.department, e.unitName]
-                            .filter(Boolean)
-                            .join(" • ")}
-                        </div>
-                      ) : null}
-                      {e.email ? (
-                        <div className="truncate">
-                          <span className="font-medium">Email:</span> {e.email}
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
-  )
 }
 
 function ClearableTimeInput({
@@ -967,15 +582,8 @@ export function OnboardingFormUnified({
     message: string
   }>({ open: false, message: "" })
 
-  const [positionPickerOpen, setPositionPickerOpen] = useState(false)
   const positionTriggerRef = useRef<HTMLButtonElement | null>(null)
-  const [searchQuery, setSearchQuery] = useState("")
   const [fallbackPositions, setFallbackPositions] = useState<Position[]>([])
-  const [positionsLoadingFallback, setPositionsLoadingFallback] =
-    useState(false)
-  const [positionsFallbackError, setPositionsFallbackError] = useState<
-    string | null
-  >(null)
 
   const [skippedOpen, setSkippedOpen] = useState(false)
   const [skippedNumbersState, setSkippedNumbersState] = useState<string[]>([])
@@ -1016,30 +624,24 @@ export function OnboardingFormUnified({
   }, [personalNumberMeta])
 
   useEffect(() => {
-    if (personalNumberMeta && personalNumberMeta.skippedNumbers?.length) return
+    if (personalNumberMeta) return
 
     let cancelled = false
 
     ;(async () => {
       try {
-        const res = await fetch("/api/nastupy", { cache: "no-store" })
+        const res = await fetch("/api/osobni-cislo/meta", {
+          cache: "no-store",
+        })
         if (!res.ok) return
 
         const json = await res.json().catch(() => null)
-        const rows: OnboardingRowForMeta[] = Array.isArray(json?.data)
-          ? json.data
-          : []
 
-        const computed = buildPersonalNumberMetaFromOnboardings(
-          rows,
-          personalNumberMeta
-        )
-
-        if (!cancelled) {
-          setResolvedPersonalMeta(computed)
+        if (!cancelled && json?.data) {
+          setResolvedPersonalMeta(json.data as PersonalNumberMeta)
         }
       } catch (e) {
-        console.error("Nepodařilo se načíst osobní čísla pro meta:", e)
+        console.error("Nepodařilo se načíst metainformace k osobním číslům:", e)
       }
     })()
 
@@ -1223,43 +825,6 @@ export function OnboardingFormUnified({
     () => (positions.length > 0 ? positions : fallbackPositions),
     [fallbackPositions, positions]
   )
-
-  const selectedPositionOccupant = useMemo(
-    () => activePositions.find((p) => p.num === watchPositionNum) ?? null,
-    [activePositions, watchPositionNum]
-  )
-
-  const loadFallbackPositions = useCallback(async () => {
-    if (positions.length > 0 || fallbackPositions.length > 0) return
-
-    try {
-      setPositionsLoadingFallback(true)
-      setPositionsFallbackError(null)
-
-      const res = await fetch("/api/systemizace", { cache: "no-store" })
-
-      if (!res.ok) {
-        throw new Error("Nepodařilo se načíst seznam pozic ze systemizace.")
-      }
-
-      const json = await res.json().catch(() => null)
-      setFallbackPositions(normalizePositionsResponse(json))
-    } catch (error) {
-      console.error("Nepodařilo se načíst pozice:", error)
-      setPositionsFallbackError(
-        error instanceof Error
-          ? error.message
-          : "Nepodařilo se načíst seznam pozic."
-      )
-    } finally {
-      setPositionsLoadingFallback(false)
-    }
-  }, [fallbackPositions.length, positions.length])
-
-  useEffect(() => {
-    if (!positionPickerOpen) return
-    void loadFallbackPositions()
-  }, [positionPickerOpen, loadFallbackPositions])
 
   const extensionDraftDays = useMemo(
     () => countWeekdaysInclusive(extensionFrom, extensionTo),
@@ -1686,22 +1251,6 @@ export function OnboardingFormUnified({
     watchPositionNum,
   ])
 
-  const positionsForSearch: SearchablePosition[] = useMemo(
-    () =>
-      activePositions.map((p) => ({
-        ...p,
-        _key: `${p.num} ${p.name}`,
-        _hay: stripAccents(`${p.num} ${p.name} ${p.dept_name} ${p.unit_name}`),
-      })),
-    [activePositions]
-  )
-
-  const filteredPositions: SearchablePosition[] = useMemo(() => {
-    const q = stripAccents(searchQuery)
-    if (!q) return positionsForSearch
-    return positionsForSearch.filter((p) => p._hay.includes(q))
-  }, [positionsForSearch, searchQuery])
-
   const pickPosition = (p: Position) => {
     form.setValue("positionNum", p.num, { shouldValidate: true })
     form.setValue("positionName", ensure(p.name, "(nezjištěno)"), {
@@ -1735,7 +1284,6 @@ export function OnboardingFormUnified({
 
     void loadSupervisorForPosition(p.num, { force: true })
 
-    setPositionPickerOpen(false)
     requestAnimationFrame(() => positionTriggerRef.current?.focus())
   }
 
@@ -2123,20 +1671,18 @@ export function OnboardingFormUnified({
                     <FormItem className="md:col-span-2">
                       <FormLabel>Pozice *</FormLabel>
                       <FormControl>
-                        <Popover
-                          open={positionPickerOpen}
-                          onOpenChange={(open) => {
-                            setPositionPickerOpen(open)
-                            if (open) void loadFallbackPositions()
-                            if (!open) setSearchQuery("")
-                          }}
-                        >
-                          <PopoverTrigger asChild>
+                        <PositionCombobox
+                          positions={positions}
+                          value={field.value}
+                          onSelect={pickPosition}
+                          onFallbackLoaded={setFallbackPositions}
+                          selectFirstOnEnter
+                          popoverClassName="w-[var(--w)] min-w-[var(--w)] p-0 [--w:var(--radix-popover-trigger-width)]"
+                          trigger={() => (
                             <button
                               ref={positionTriggerRef}
                               type="button"
                               className={`flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground [&>span]:line-clamp-1 ${focusRing} data-[state=open]:ring-2 data-[state=open]:ring-primary/55 data-[state=open]:ring-offset-2 data-[state=open]:ring-offset-background`}
-                              onClick={() => setPositionPickerOpen((s) => !s)}
                             >
                               <span className="truncate text-left">
                                 {field.value ? (
@@ -2155,72 +1701,12 @@ export function OnboardingFormUnified({
                               </span>
                               <Search className="ml-2 size-4 opacity-60" />
                             </button>
-                          </PopoverTrigger>
-                          <PopoverContent
-                            className="w-[var(--w)] min-w-[var(--w)] p-0 [--w:var(--radix-popover-trigger-width)]"
-                            align="start"
-                            sideOffset={4}
-                            onOpenAutoFocus={(e) => e.preventDefault()}
-                            onWheelCapture={(e) => e.stopPropagation()}
-                          >
-                            <Command>
-                              <CommandInput
-                                placeholder="Hledat číslo nebo název pozice..."
-                                value={searchQuery}
-                                onValueChange={setSearchQuery}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") {
-                                    e.preventDefault()
-                                    const first = filteredPositions[0]
-                                    if (first) pickPosition(first)
-                                    else setPositionPickerOpen(false)
-                                  }
-                                }}
-                              />
-                              <CommandEmpty>
-                                {positionsLoadingFallback
-                                  ? "Načítám pozice…"
-                                  : positionsFallbackError ||
-                                    "Žádná pozice nenalezena"}
-                              </CommandEmpty>
-                              <CommandList className="max-h-[min(60vh,420px)] overflow-y-auto overscroll-contain">
-                                <CommandGroup>
-                                  {filteredPositions.map((p) => (
-                                    <CommandItem
-                                      key={p.id ?? p.num}
-                                      value={`${p.num} ${p.name}`}
-                                      onSelect={() => pickPosition(p)}
-                                      className="flex items-start gap-3 py-3"
-                                    >
-                                      <span className="min-w-[80px] rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
-                                        {p.num}
-                                      </span>
-                                      <div className="flex-1">
-                                        <div className="text-sm font-medium">
-                                          {p.name}
-                                        </div>
-                                        <div className="text-xs text-muted-foreground">
-                                          {p.dept_name} • {p.unit_name}
-                                        </div>
-                                      </div>
-                                    </CommandItem>
-                                  ))}
-                                </CommandGroup>
-                              </CommandList>
-                            </Command>
-                          </PopoverContent>
-                        </Popover>
+                          )}
+                        />
                       </FormControl>
                       <FormDescription>
                         Vyhledejte pozici podle čísla nebo názvu.
                       </FormDescription>
-                      {selectedPositionOccupant && (
-                        <p className="text-xs text-muted-foreground">
-                          {selectedPositionOccupant.personPersonalNumber
-                            ? `Obsazeno: ${selectedPositionOccupant.personName ?? "—"} (osobní číslo ${selectedPositionOccupant.personPersonalNumber})`
-                            : "Neobsazená pracovní pozice."}
-                        </p>
-                      )}
                       <FormMessage />
                     </FormItem>
                   )}
@@ -2305,7 +1791,7 @@ export function OnboardingFormUnified({
                                 className="inline-flex items-center gap-1 rounded-md border border-input bg-background px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
                               >
                                 <ListChecks className="size-3" />
-                                Přeskočená čísla
+                                Nevyužitá osobní čísla
                               </button>
                             </PopoverTrigger>
                             <PopoverContent
@@ -2316,8 +1802,8 @@ export function OnboardingFormUnified({
                               onWheelCapture={(e) => e.stopPropagation()}
                             >
                               <p className="text-xs text-muted-foreground">
-                                Osobní čísla, která byla přeskočena a dosud
-                                nejsou využita.
+                                Osobní čísla v mezeře řady, která nikdo
+                                nevyužíval ani nevyužívá.
                               </p>
 
                               <div className="mt-2 max-h-[min(40vh,220px)] overflow-y-auto pr-1">
@@ -2372,7 +1858,8 @@ export function OnboardingFormUnified({
                       </FormDescription>
 
                       {(resolvedPersonalMeta?.lastUsedNumber ||
-                        resolvedPersonalMeta?.lastDc2Number) && (
+                        resolvedPersonalMeta?.lastDc2Number ||
+                        resolvedPersonalMeta?.lastSpecialNumber) && (
                         <div className="mt-2 text-xs text-muted-foreground">
                           <ul className="list-disc space-y-1 pl-5">
                             {resolvedPersonalMeta?.lastUsedNumber && (
@@ -2384,6 +1871,12 @@ export function OnboardingFormUnified({
                                 {resolvedPersonalMeta.lastUsedName ? (
                                   <> – {resolvedPersonalMeta.lastUsedName}</>
                                 ) : null}
+                                {resolvedPersonalMeta.lastUsedNumberInEos ===
+                                  false && (
+                                  <span className="ml-1.5 rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-800 dark:bg-sky-900/30 dark:text-sky-300">
+                                    zatím jen v aplikaci, ještě není v EOS
+                                  </span>
+                                )}
                               </li>
                             )}
 
@@ -2397,6 +1890,22 @@ export function OnboardingFormUnified({
                                   <>
                                     {" "}
                                     – {resolvedPersonalMeta.lastDc2AssignedTo}
+                                  </>
+                                ) : null}
+                              </li>
+                            )}
+
+                            {resolvedPersonalMeta?.lastSpecialNumber && (
+                              <li>
+                                Poslední speciální číslo (mimo řadu úřadu):{" "}
+                                <span className="rounded bg-amber-100 px-1.5 py-0.5 font-mono font-semibold text-amber-900 dark:bg-amber-900/30 dark:text-amber-300">
+                                  {resolvedPersonalMeta.lastSpecialNumber}
+                                </span>
+                                {resolvedPersonalMeta.lastSpecialAssignedTo ? (
+                                  <>
+                                    {" "}
+                                    –{" "}
+                                    {resolvedPersonalMeta.lastSpecialAssignedTo}
                                   </>
                                 ) : null}
                               </li>
@@ -2463,8 +1972,8 @@ export function OnboardingFormUnified({
 
           <Card className="border-l-4 border-l-[#00847C]">
             <CardHeader>
-              <div className="flex items-center justify-between gap-3">
-                <div>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
                   <CardTitle className="flex items-center gap-2">
                     <User className="size-5" /> Vedoucí odboru
                   </CardTitle>
@@ -2478,6 +1987,7 @@ export function OnboardingFormUnified({
                   type="button"
                   variant="outline"
                   size="sm"
+                  className="shrink-0"
                   onClick={restoreSupervisorFromPosition}
                   disabled={
                     !form.getValues("positionNum") || isSupervisorLoading
@@ -2516,7 +2026,7 @@ export function OnboardingFormUnified({
 
                         form.setValue(
                           "supervisorName",
-                          buildEmployeeFullName(employee),
+                          buildPersonFullName(employee),
                           {
                             shouldDirty: true,
                             shouldTouch: true,
@@ -2658,7 +2168,7 @@ export function OnboardingFormUnified({
                       onSelect={async (employee) => {
                         form.setValue(
                           "mentorName",
-                          buildEmployeeFullName(employee),
+                          buildPersonFullName(employee),
                           {
                             shouldDirty: true,
                             shouldTouch: true,

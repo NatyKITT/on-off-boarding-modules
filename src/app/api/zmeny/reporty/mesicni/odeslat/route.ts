@@ -6,6 +6,7 @@ import { z } from "zod"
 
 import { prisma } from "@/lib/db"
 import {
+  buildEmployeeChangeRecordsIcsAttachment,
   buildEmployeeChangeReportSubject,
   logEmailHistory,
   renderEmployeeChangeReportHtml,
@@ -58,7 +59,7 @@ async function getReportRecipients(audience: ReportAudience) {
 
 function toEmailRecord(change: {
   id: number
-  type: "POSITION" | "NAME" | "NAME_AND_POSITION"
+  type: "POSITION" | "NAME" | "NAME_AND_POSITION" | "MATERNITY_LEAVE"
   status: string
   audience: string | null
   effectiveDate: Date
@@ -245,10 +246,16 @@ export async function POST(request: Request) {
       audience: audience as EmployeeChangeReportAudience,
     })
 
+    const icsAttachment = buildEmployeeChangeRecordsIcsAttachment(
+      emailRecords,
+      `report-zmeny-${month}.ics`
+    )
+
     await sendMail({
       bcc: reportRecipients,
       subject: finalSubject,
       html,
+      ...(icsAttachment ? { attachments: [icsAttachment] } : {}),
     })
 
     const savedReport = await prisma.monthlyReport.upsert({

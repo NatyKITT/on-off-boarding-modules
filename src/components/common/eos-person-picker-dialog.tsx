@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react"
 import { Search, User } from "lucide-react"
 
+import { useIncrementalReveal } from "@/hooks/use-incremental-reveal"
+
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -54,7 +56,7 @@ export function EosPersonPickerDialog({
         setError(null)
 
         const url = new URL("/api/zamestnanci/hledat", window.location.origin)
-        url.searchParams.set("q", "1")
+        url.searchParams.set("listAll", "true")
         url.searchParams.set("limit", "1000")
         if (!excludeActiveOffboardings) {
           url.searchParams.set("excludeActiveOffboardings", "false")
@@ -105,6 +107,11 @@ export function EosPersonPickerDialog({
       })
     : allEmployees
 
+  const { visibleItems, hasMore, listRef, onScroll } = useIncrementalReveal(
+    items,
+    `${open}:${q}`
+  )
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -131,7 +138,11 @@ export function EosPersonPickerDialog({
             />
           </div>
 
-          <div className="max-h-[420px] space-y-2 overflow-y-auto">
+          <div
+            ref={listRef}
+            onScroll={onScroll}
+            className="max-h-[420px] space-y-2 overflow-y-auto"
+          >
             {loading && (
               <div className="rounded-md border px-3 py-6 text-center text-sm text-muted-foreground">
                 Načítám zaměstnance z EOS…
@@ -152,7 +163,7 @@ export function EosPersonPickerDialog({
 
             {!loading &&
               !error &&
-              items.map((item) => (
+              visibleItems.map((item) => (
                 <button
                   key={item.id}
                   type="button"
@@ -193,6 +204,12 @@ export function EosPersonPickerDialog({
                   </div>
                 </button>
               ))}
+
+            {!loading && !error && hasMore && (
+              <div className="py-3 text-center text-xs text-muted-foreground">
+                Načítám další…
+              </div>
+            )}
           </div>
 
           <div className="flex justify-end">

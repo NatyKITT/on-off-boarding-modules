@@ -27,6 +27,7 @@ const BORDER_GRAY = rgb(0.6, 0.6, 0.6)
 const GREEN = rgb(0, 0.518, 0.486)
 const AMBER = rgb(0.85, 0.47, 0.02)
 const BLUE = rgb(0.11, 0.29, 0.63)
+const PINK = rgb(0.859, 0.153, 0.467)
 const ZEBRA_GRAY = rgb(0.95, 0.95, 0.95)
 
 const cv = (yFromTop: number) => PAGE_HEIGHT - yFromTop
@@ -487,14 +488,15 @@ export async function renderStatisticsPdfBuffer(args: {
       { label: "Pozice", color: GREEN },
       { label: "Jméno", color: BLUE },
       { label: "Jméno i pozice", color: AMBER },
+      { label: "Mateřská dovolená", color: PINK },
     ])
     ctx = drawStackedBarChart(
       ctx,
       changesByTypeMonthly.map((p) => ({
         label: formatMonth(p.month),
-        segments: [p.POSITION, p.NAME, p.NAME_AND_POSITION],
+        segments: [p.POSITION, p.NAME, p.NAME_AND_POSITION, p.MATERNITY_LEAVE],
       })),
-      [GREEN, BLUE, AMBER]
+      [GREEN, BLUE, AMBER, PINK]
     )
   }
 

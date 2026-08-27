@@ -1,15 +1,11 @@
 "use client"
 
-import * as React from "react"
-import { useMemo, useState } from "react"
-import { Check, Search } from "lucide-react"
-import { useFormContext } from "react-hook-form"
+import { useEffect, useMemo, useState } from "react"
+import { Check } from "lucide-react"
 
-import type { Position } from "@/types/position"
-
+import { useIncrementalReveal } from "@/hooks/use-incremental-reveal"
 import { cn } from "@/lib/utils"
 
-import { Button } from "@/components/ui/button"
 import {
   Command,
   CommandEmpty,
@@ -24,159 +20,265 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 
-type Props = {
-  positions: Position[]
-  fields: {
-    num: string
-    name: string
-    dept: string
-    unit: string
-  }
-  placeholder?: string
-  disabled?: boolean
-  className?: string
+export type PositionSearchItem = {
+  id?: string | number | null
+  num: string
+  name: string
+  dept_name?: string | null
+  unit_name?: string | null
+  personName?: string | null
+  personPersonalNumber?: string | null
 }
 
-const toStr = (v: unknown) =>
-  typeof v === "number" ? String(v) : typeof v === "string" ? v : ""
+type Props<T extends PositionSearchItem> = {
+  positions: T[]
+  value?: string
+  onSelect: (position: T) => void
+  trigger: (state: { open: boolean; selected: T | null }) => React.ReactNode
+  placeholder?: string
+  showOccupantInfo?: boolean
+  selectFirstOnEnter?: boolean
+  disabled?: boolean
+  popoverClassName?: string
+  popoverAlign?: "start" | "center" | "end"
+  onFallbackLoaded?: (positions: T[]) => void
+}
 
-const stripAccents = (s: string) =>
-  s
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase()
+const DIACRITICS_PATTERN = new RegExp("[\\u0300-\\u036f]", "g")
 
-export function PositionCombobox({
+function normalize(value: string) {
+  return value.normalize("NFD").replace(DIACRITICS_PATTERN, "").toLowerCase()
+}
+
+function normalizePositionsPayload<T extends PositionSearchItem>(
+  payload: unknown
+): T[] {
+  const source: unknown[] = Array.isArray(payload)
+    ? payload
+    : Array.isArray((payload as { data?: unknown })?.data)
+      ? (payload as { data: unknown[] }).data
+      : []
+
+  const output: PositionSearchItem[] = []
+
+  for (const item of source) {
+    if (!item || typeof item !== "object") continue
+    const rec = item as Record<string, unknown>
+
+    const num = typeof rec.num === "string" ? rec.num : ""
+    const name = typeof rec.name === "string" ? rec.name : ""
+    if (!num || !name) continue
+
+    output.push({
+      id:
+        typeof rec.id === "string" || typeof rec.id === "number"
+          ? String(rec.id)
+          : num,
+      num,
+      name,
+      dept_name: typeof rec.dept_name === "string" ? rec.dept_name : "",
+      unit_name: typeof rec.unit_name === "string" ? rec.unit_name : "",
+      personName: typeof rec.personName === "string" ? rec.personName : null,
+      personPersonalNumber:
+        typeof rec.personPersonalNumber === "string"
+          ? rec.personPersonalNumber
+          : null,
+    })
+  }
+
+  return output as T[]
+}
+
+export function PositionCombobox<T extends PositionSearchItem>({
   positions,
-  fields,
-  placeholder = "Vyhledejte číslo nebo název pozice...",
+  value,
+  onSelect,
+  trigger,
+  placeholder = "Hledat číslo, název pozice nebo odbor…",
+  showOccupantInfo = true,
+  selectFirstOnEnter = false,
   disabled,
-  className,
-}: Props) {
-  const form = useFormContext()
+  popoverClassName,
+  popoverAlign = "start",
+  onFallbackLoaded,
+}: Props<T>) {
   const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState("")
+  const [fallbackPositions, setFallbackPositions] = useState<T[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const currentNum = toStr(form.getValues(fields.num))
-  const currentName = toStr(form.getValues(fields.name))
+  const resolvedPositions = positions.length > 0 ? positions : fallbackPositions
 
-  const selected = useMemo(
-    () => positions.find((p) => toStr(p.num) === currentNum) ?? null,
-    [positions, currentNum]
+  useEffect(() => {
+    if (!open || positions.length > 0 || fallbackPositions.length > 0) return
+
+    const controller = new AbortController()
+
+    ;(async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        const res = await fetch("/api/systemizace", {
+          cache: "no-store",
+          signal: controller.signal,
+          headers: { Accept: "application/json" },
+        })
+
+        if (!res.ok) {
+          throw new Error("Nepodařilo se načíst seznam pozic ze systemizace.")
+        }
+
+        const json = await res.json().catch(() => null)
+        const normalized = normalizePositionsPayload<T>(json)
+        setFallbackPositions(normalized)
+        onFallbackLoaded?.(normalized)
+      } catch (e) {
+        if ((e as Error).name !== "AbortError") {
+          setError((e as Error).message || "Nepodařilo se načíst pozice.")
+        }
+      } finally {
+        setLoading(false)
+      }
+    })()
+
+    return () => controller.abort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, positions.length, fallbackPositions.length])
+
+  useEffect(() => {
+    if (!open) setQuery("")
+  }, [open])
+
+  const filtered = useMemo(() => {
+    const q = normalize(query.trim())
+    if (!q) return resolvedPositions
+
+    return resolvedPositions.filter((p) => {
+      const hay = normalize(
+        `${p.num} ${p.name} ${p.dept_name ?? ""} ${p.unit_name ?? ""}`
+      )
+      return hay.includes(q)
+    })
+  }, [resolvedPositions, query])
+
+  const { visibleItems, hasMore, listRef, onScroll } = useIncrementalReveal(
+    filtered,
+    `${open}:${query}`
   )
 
-  const positionsForSearch = useMemo(() => {
-    return positions.map((p) => ({
-      ...p,
-      _key: `${p.num} ${p.name}`,
-      _normNum: stripAccents(toStr(p.num)),
-      _normName: stripAccents(p.name || ""),
-    }))
-  }, [positions])
+  const selected = resolvedPositions.find((p) => p.num === value) ?? null
 
-  function apply(p: Position) {
-    form.setValue(fields.num, toStr(p.num), {
-      shouldDirty: true,
-      shouldValidate: true,
-    })
-    form.setValue(fields.name, p.name ?? "", {
-      shouldDirty: true,
-      shouldValidate: true,
-    })
-    form.setValue(fields.dept, p.dept_name ?? "", {
-      shouldDirty: true,
-      shouldValidate: true,
-    })
-    form.setValue(fields.unit, p.unit_name ?? "", {
-      shouldDirty: true,
-      shouldValidate: true,
-    })
+  function commit(position: T) {
+    onSelect(position)
     setOpen(false)
+    setQuery("")
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          disabled={disabled}
-          className={cn(
-            "w-full justify-between font-normal",
-            !currentNum && "text-muted-foreground",
-            className
-          )}
-        >
-          <span className="truncate text-left">
-            {currentNum ? (
-              <span>
-                <span className="font-mono text-muted-foreground">
-                  {currentNum}
-                </span>
-                {" — "}
-                <span>{currentName}</span>
-              </span>
-            ) : (
-              placeholder
-            )}
-          </span>
-          <Search className="ml-2 size-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-
-      <PopoverContent
-        className="w-[--radix-popover-trigger-width] p-0"
-        align="start"
-        sideOffset={4}
+    <div className="space-y-1">
+      <Popover
+        modal={false}
+        open={open}
+        onOpenChange={(next) => {
+          if (disabled) return
+          setOpen(next)
+        }}
       >
-        <Command
-          filter={(val, search) => {
-            const s = stripAccents(search)
-            const v = stripAccents(val)
-            return v.includes(s) ? 1 : 0
-          }}
+        <PopoverTrigger asChild disabled={disabled}>
+          {trigger({ open, selected })}
+        </PopoverTrigger>
+
+        <PopoverContent
+          className={cn(
+            "w-[--radix-popover-trigger-width] p-0",
+            popoverClassName
+          )}
+          align={popoverAlign}
+          sideOffset={4}
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          onWheelCapture={(e) => e.stopPropagation()}
         >
-          <CommandInput placeholder="Hledat číslo nebo název pozice..." />
-          <CommandEmpty>Žádná pozice nenalezena</CommandEmpty>
-          <CommandList
-            className="max-h-80 overflow-y-auto overscroll-contain"
-            onWheel={(e) => {
-              e.stopPropagation()
-            }}
-          >
-            <CommandGroup>
-              {positionsForSearch.map((p) => {
-                const isSelected = selected?.num === p.num
-                return (
+          <Command shouldFilter={false}>
+            <CommandInput
+              placeholder={placeholder}
+              value={query}
+              onValueChange={setQuery}
+              autoFocus
+              onKeyDown={(e) => {
+                if (!selectFirstOnEnter || e.key !== "Enter") return
+                e.preventDefault()
+                const first = filtered[0]
+                if (first) commit(first)
+                else setOpen(false)
+              }}
+            />
+
+            <CommandEmpty>
+              {loading
+                ? "Načítám pozice…"
+                : error || "Žádná pozice nenalezena."}
+            </CommandEmpty>
+
+            <CommandList
+              ref={listRef}
+              onScroll={onScroll}
+              className="max-h-80 overflow-y-auto overscroll-contain"
+            >
+              <CommandGroup>
+                {visibleItems.map((position) => (
                   <CommandItem
-                    key={p.id}
-                    value={`${p.num} ${p.name}`}
-                    onSelect={() => apply(p)}
-                    className="flex items-start gap-3 py-3"
+                    key={position.id ?? position.num}
+                    value={`${position.num} ${position.name}`}
+                    onPointerDown={(e) => {
+                      e.preventDefault()
+                      commit(position)
+                    }}
+                    onSelect={() => {}}
+                    className="flex cursor-pointer items-start gap-3 py-3"
                   >
-                    <span className="min-w-[80px] rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
-                      {p.num}
-                    </span>
-                    <div className="flex-1">
-                      <div className="text-sm font-medium">{p.name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {p.dept_name} • {p.unit_name}
-                      </div>
-                    </div>
                     <Check
                       className={cn(
-                        "size-4 shrink-0",
-                        isSelected ? "opacity-100" : "opacity-0"
+                        "mt-0.5 size-4 shrink-0",
+                        value === position.num ? "opacity-100" : "opacity-0"
                       )}
                     />
+
+                    <span className="min-w-[80px] rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
+                      {position.num}
+                    </span>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">
+                        {position.name}
+                      </div>
+                      <div className="truncate text-xs text-muted-foreground">
+                        {[position.dept_name, position.unit_name]
+                          .filter(Boolean)
+                          .join(" • ")}
+                      </div>
+                    </div>
                   </CommandItem>
-                )
-              })}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+                ))}
+              </CommandGroup>
+
+              {hasMore && (
+                <div className="py-3 text-center text-xs text-muted-foreground">
+                  Načítám další…
+                </div>
+              )}
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+
+      {showOccupantInfo && selected && (
+        <p className="text-xs text-muted-foreground">
+          {selected.personPersonalNumber
+            ? `Obsazeno: ${selected.personName ?? "—"} (osobní číslo ${selected.personPersonalNumber})`
+            : "Neobsazená pracovní pozice."}
+        </p>
+      )}
+    </div>
   )
 }

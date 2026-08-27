@@ -29,6 +29,10 @@ const updateSchema = z.object({
   surname: z.string().trim().min(1, "Příjmení je povinné.").optional(),
   titleAfter: z.preprocess(emptyToNull, z.string().nullable().optional()),
   personalNumber: z.preprocess(emptyToNull, z.string().nullable().optional()),
+  userEmail: z.preprocess(emptyToNull, z.string().nullable().optional()),
+
+  supervisorName: z.preprocess(emptyToNull, z.string().nullable().optional()),
+  supervisorEmail: z.preprocess(emptyToNull, z.string().nullable().optional()),
 
   oldTitleBefore: z.preprocess(emptyToNull, z.string().nullable().optional()),
   newTitleBefore: z.preprocess(emptyToNull, z.string().nullable().optional()),
@@ -74,6 +78,10 @@ function serializeChange(
     surname: string
     titleAfter: string | null
     personalNumber: string | null
+    userEmail: string | null
+
+    supervisorName: string | null
+    supervisorEmail: string | null
 
     oldTitleBefore: string | null
     newTitleBefore: string | null

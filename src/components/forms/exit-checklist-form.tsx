@@ -51,14 +51,6 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command"
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -67,11 +59,6 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
 import {
   Table,
   TableBody,
@@ -82,6 +69,14 @@ import {
 } from "@/components/ui/table"
 import type { EmployeeItem } from "@/components/common/employee-combobox"
 import { EosPersonPickerDialog } from "@/components/common/eos-person-picker-dialog"
+import {
+  buildPersonFullName,
+  PersonLookupCombobox,
+} from "@/components/common/person-lookup-combobox"
+import {
+  PositionCombobox,
+  type PositionSearchItem,
+} from "@/components/common/position-combobox"
 import { SendAllDialog } from "@/components/common/send-all-dialog"
 import { SendInviteBehalfDialog } from "@/components/common/send-invite-behalf-dialog"
 import { SendInviteDialog } from "@/components/common/send-invite-dialog"
@@ -96,28 +91,6 @@ type Props = {
   onDirtyChange?: (dirty: boolean) => void
   onSaved?: (data: ExitChecklistData, requestClose?: boolean) => void
   externalSaveTrigger?: number
-}
-
-type EmployeePersonItem = {
-  id: string
-  personalNumber: string
-  name: string
-  surname: string
-  email: string
-  titleBefore?: string | null
-  titleAfter?: string | null
-  positionNum?: string
-  positionName?: string
-  department?: string
-  unitName?: string
-}
-
-type HandoverPositionItem = {
-  id?: string | number | null
-  num: string
-  name: string
-  dept_name?: string | null
-  unit_name?: string | null
 }
 
 type HeaderSignatureKey = "employee" | "manager" | "issuer"
@@ -172,22 +145,8 @@ function mergeItemsWithConfig(
   })
 }
 
-function normalizeStr(s: string) {
-  return s
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-}
-
 function normalizeEmail(value?: string | null) {
   return value?.trim().toLowerCase() ?? ""
-}
-
-function buildEmployeeFullName(person: Partial<EmployeePersonItem>) {
-  return [person.titleBefore, person.name, person.surname, person.titleAfter]
-    .filter(Boolean)
-    .join(" ")
-    .trim()
 }
 
 function cleanPositionName(value?: string | null, positionNum?: string | null) {
@@ -216,47 +175,6 @@ function formatHandoverPositionLabel(
   return [positionNum?.trim(), cleanName].filter(Boolean).join(" — ")
 }
 
-type RawHandoverPositionItem = Record<string, unknown> & {
-  num: string | number
-}
-
-function isRawHandoverPositionItem(
-  item: unknown
-): item is RawHandoverPositionItem {
-  if (!item || typeof item !== "object") return false
-
-  const num = (item as { num?: unknown }).num
-
-  return typeof num === "string" || typeof num === "number"
-}
-
-function normalizeHandoverPositions(payload: unknown): HandoverPositionItem[] {
-  const arr = Array.isArray((payload as { data?: unknown })?.data)
-    ? (payload as { data: unknown[] }).data
-    : Array.isArray(payload)
-      ? payload
-      : []
-
-  return arr
-    .filter(isRawHandoverPositionItem)
-    .map((item) => {
-      const idValue = item.id
-      const num = String(item.num)
-
-      return {
-        id:
-          typeof idValue === "string" || typeof idValue === "number"
-            ? idValue
-            : num,
-        num,
-        name: typeof item.name === "string" ? item.name : "",
-        dept_name: typeof item.dept_name === "string" ? item.dept_name : null,
-        unit_name: typeof item.unit_name === "string" ? item.unit_name : null,
-      }
-    })
-    .filter((item) => item.num || item.name)
-}
-
 function renderOrganization(text: string, managerName?: string | null) {
   const lines = text.split("\n").filter(Boolean)
 
@@ -274,204 +192,6 @@ function renderOrganization(text: string, managerName?: string | null) {
         </div>
       ))}
     </div>
-  )
-}
-
-function PersonLookupCombobox({
-  valueName,
-  valueEmail,
-  placeholder,
-  disabled,
-  onSelect,
-}: {
-  valueName?: string
-  valueEmail?: string
-  placeholder?: string
-  disabled?: boolean
-  onSelect: (employee: EmployeePersonItem) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState("")
-  const [allEmployees, setAllEmployees] = useState<EmployeePersonItem[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!open || allEmployees.length > 0) return
-
-    const controller = new AbortController()
-
-    ;(async () => {
-      setLoading(true)
-      setError(null)
-
-      try {
-        const url = new URL("/api/zamestnanci/hledat", window.location.origin)
-        url.searchParams.set("q", "1")
-        url.searchParams.set("limit", "500")
-
-        const res = await fetch(url.toString(), {
-          cache: "no-store",
-          signal: controller.signal,
-          headers: { Accept: "application/json" },
-        })
-
-        if (!res.ok) {
-          throw new Error(
-            res.status === 502 ? "EOS není dostupná" : `Chyba (${res.status})`
-          )
-        }
-
-        const json = await res.json().catch(() => null)
-        setAllEmployees(Array.isArray(json?.data) ? json.data : [])
-      } catch (e) {
-        if ((e as Error).name !== "AbortError") {
-          setError((e as Error).message || "Chyba vyhledávání")
-        }
-      } finally {
-        setLoading(false)
-      }
-    })()
-
-    return () => controller.abort()
-  }, [open, allEmployees.length])
-
-  useEffect(() => {
-    if (!open) setQuery("")
-  }, [open])
-
-  const filtered = useMemo(() => {
-    const q = normalizeStr(query.trim())
-
-    if (!q) return allEmployees
-
-    return allEmployees.filter((e) => {
-      const num = normalizeStr(e.personalNumber ?? "")
-      const nm = normalizeStr(
-        `${e.titleBefore ?? ""} ${e.name ?? ""} ${e.surname ?? ""} ${e.titleAfter ?? ""}`
-      )
-      const org = normalizeStr(
-        `${e.positionName ?? ""} ${e.department ?? ""} ${e.unitName ?? ""}`
-      )
-      const email = normalizeStr(e.email ?? "")
-
-      return (
-        num.includes(q) ||
-        nm.includes(q) ||
-        org.includes(q) ||
-        email.includes(q)
-      )
-    })
-  }, [allEmployees, query])
-
-  const selectedLabel =
-    valueName || valueEmail
-      ? [valueName, valueEmail].filter(Boolean).join(" · ")
-      : ""
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="w-full justify-between text-xs"
-          disabled={disabled}
-        >
-          <span className="truncate">
-            {selectedLabel || (placeholder ?? "Vyhledat v eOSu…")}
-          </span>
-          <ChevronDown className="ml-2 size-3 opacity-60" />
-        </Button>
-      </PopoverTrigger>
-
-      <PopoverContent className="w-[420px] p-0" align="start">
-        <Command shouldFilter={false}>
-          <div className="relative">
-            <CommandInput
-              placeholder="Osobní číslo, jméno nebo e-mail…"
-              value={query}
-              onValueChange={setQuery}
-              autoFocus
-            />
-            {query && (
-              <button
-                type="button"
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => setQuery("")}
-              >
-                <X className="size-4" />
-              </button>
-            )}
-          </div>
-
-          <CommandEmpty>
-            {loading ? (
-              <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
-                <div className="mr-2 size-4 animate-spin rounded-full border-b-2 border-current" />
-                Načítám…
-              </div>
-            ) : error ? (
-              <div className="py-6 text-center text-sm text-destructive">
-                {error}
-              </div>
-            ) : (
-              <div className="py-6 text-center text-sm text-muted-foreground">
-                Nic nenalezeno.
-              </div>
-            )}
-          </CommandEmpty>
-
-          <CommandList className="max-h-80 overflow-y-auto overscroll-contain">
-            <CommandGroup>
-              {filtered.map((e) => (
-                <CommandItem
-                  key={e.id}
-                  value={e.personalNumber || e.id}
-                  onPointerDown={(ev) => {
-                    ev.preventDefault()
-                    onSelect(e)
-                    setOpen(false)
-                    setQuery("")
-                  }}
-                  onSelect={() => {}}
-                  className="flex cursor-pointer items-start gap-3 py-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      {e.personalNumber && (
-                        <span className="font-mono text-xs text-muted-foreground">
-                          {e.personalNumber}
-                        </span>
-                      )}
-                      <span className="truncate text-sm font-medium">
-                        {buildEmployeeFullName(e)}
-                      </span>
-                    </div>
-
-                    <div className="mt-0.5 space-y-0.5 text-xs text-muted-foreground">
-                      {e.positionName && (
-                        <div className="truncate">{e.positionName}</div>
-                      )}
-                      {(e.department || e.unitName) && (
-                        <div className="truncate">
-                          {[e.department, e.unitName]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </div>
-                      )}
-                      {e.email && <div className="truncate">{e.email}</div>}
-                    </div>
-                  </div>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
   )
 }
 
@@ -914,16 +634,6 @@ export function ExitChecklistForm({
     setPdfRecipientEmail(employee.email ?? "")
   }
 
-  const [positionPickerOpen, setPositionPickerOpen] = useState(false)
-  const [positionQuery, setPositionQuery] = useState("")
-  const [handoverPositions, setHandoverPositions] = useState<
-    HandoverPositionItem[]
-  >([])
-  const [loadingPositions, setLoadingPositions] = useState(false)
-  const [positionLoadError, setPositionLoadError] = useState<string | null>(
-    null
-  )
-
   const isInternalMode = mode === "internal"
   const isLocked = Boolean(lockedAt)
   const resolvedOffboardingId = offboardingId ?? initialData.offboardingId
@@ -1030,25 +740,6 @@ export function ExitChecklistForm({
     [handoverOption2Target, handoverOption2TargetPositionNum]
   )
 
-  const filteredPositions = useMemo(() => {
-    const query = normalizeStr(positionQuery.trim())
-
-    if (!query) return handoverPositions
-
-    return handoverPositions.filter((position) => {
-      const searchable = normalizeStr(
-        [
-          position.num,
-          position.name,
-          position.dept_name ?? "",
-          position.unit_name ?? "",
-        ].join(" ")
-      )
-
-      return searchable.includes(query)
-    })
-  }, [handoverPositions, positionQuery])
-
   const initialDataIdentity = useMemo(
     () =>
       [
@@ -1138,44 +829,6 @@ export function ExitChecklistForm({
     void handleSave(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalSaveTrigger])
-
-  useEffect(() => {
-    if (!positionPickerOpen || handoverPositions.length > 0) return
-
-    const controller = new AbortController()
-
-    ;(async () => {
-      setLoadingPositions(true)
-      setPositionLoadError(null)
-
-      try {
-        const res = await fetch("/api/systemizace", {
-          cache: "no-store",
-          signal: controller.signal,
-          headers: { Accept: "application/json" },
-        })
-
-        if (!res.ok) {
-          throw new Error(`Pozice se nepodařilo načíst (${res.status}).`)
-        }
-
-        const json = await res.json().catch(() => null)
-        setHandoverPositions(normalizeHandoverPositions(json))
-      } catch (err) {
-        if ((err as Error).name !== "AbortError") {
-          setPositionLoadError(
-            err instanceof Error
-              ? err.message
-              : "Nepodařilo se načíst pozice ze systemizace."
-          )
-        }
-      } finally {
-        setLoadingPositions(false)
-      }
-    })()
-
-    return () => controller.abort()
-  }, [positionPickerOpen, handoverPositions.length])
 
   function showFeedback(
     type: FeedbackDialogState["type"],
@@ -2389,11 +2042,12 @@ export function ExitChecklistForm({
                   )}
 
                   <PersonLookupCombobox
+                    variant="button"
                     valueName={managerName || undefined}
                     valueEmail={managerEmail || undefined}
                     placeholder="Vyhledejte vedoucího v eOSu…"
                     onSelect={(employee) => {
-                      setManagerName(buildEmployeeFullName(employee))
+                      setManagerName(buildPersonFullName(employee))
                       setManagerEmail(employee.email ?? "")
                       setManagerLoadError(null)
                       markDirty()
@@ -3057,16 +2711,22 @@ export function ExitChecklistForm({
 
                 {handoverOption2 && (
                   <div className="ml-7 space-y-2">
-                    <Popover
-                      open={positionPickerOpen}
-                      onOpenChange={setPositionPickerOpen}
-                    >
-                      <PopoverTrigger asChild>
+                    <PositionCombobox<PositionSearchItem>
+                      positions={[]}
+                      showOccupantInfo={false}
+                      disabled={isLocked}
+                      popoverClassName="w-[420px] p-0"
+                      onSelect={(position) => {
+                        setHandoverOption2TargetPositionNum(position.num)
+                        setHandoverOption2Target(position.name)
+                        markDirty()
+                      }}
+                      trigger={() => (
                         <Button
                           type="button"
                           variant="outline"
                           className="w-full justify-between"
-                          disabled={isLocked || loadingPositions}
+                          disabled={isLocked}
                         >
                           <span className="truncate">
                             {selectedHandoverOption2PositionLabel ||
@@ -3074,61 +2734,8 @@ export function ExitChecklistForm({
                           </span>
                           <ChevronDown className="ml-2 size-4 opacity-60" />
                         </Button>
-                      </PopoverTrigger>
-
-                      <PopoverContent className="w-[420px] p-0" align="start">
-                        <Command shouldFilter={false}>
-                          <CommandInput
-                            placeholder="Hledat číslo nebo název pozice..."
-                            value={positionQuery}
-                            onValueChange={setPositionQuery}
-                          />
-
-                          <CommandEmpty>
-                            {loadingPositions
-                              ? "Načítám pozice..."
-                              : positionLoadError || "Žádná pozice nenalezena"}
-                          </CommandEmpty>
-
-                          <CommandList className="max-h-80 overflow-y-auto">
-                            <CommandGroup>
-                              {filteredPositions.map((position) => (
-                                <CommandItem
-                                  key={position.id ?? position.num}
-                                  value={`${position.num} ${position.name}`}
-                                  onSelect={() => {
-                                    setHandoverOption2TargetPositionNum(
-                                      position.num
-                                    )
-                                    setHandoverOption2Target(position.name)
-                                    setPositionPickerOpen(false)
-                                    setPositionQuery("")
-                                    markDirty()
-                                  }}
-                                  className="flex items-start gap-3 py-3"
-                                >
-                                  <span className="min-w-[80px] rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
-                                    {position.num}
-                                  </span>
-
-                                  <div className="min-w-0 flex-1">
-                                    <div className="truncate text-sm font-medium">
-                                      {position.name}
-                                    </div>
-
-                                    <div className="truncate text-xs text-muted-foreground">
-                                      {[position.dept_name, position.unit_name]
-                                        .filter(Boolean)
-                                        .join(" • ")}
-                                    </div>
-                                  </div>
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverContent>
-                    </Popover>
+                      )}
+                    />
 
                     {selectedHandoverOption2PositionLabel && (
                       <p className="text-xs text-muted-foreground">
@@ -3204,6 +2811,7 @@ export function ExitChecklistForm({
                       {!isLocked && (
                         <>
                           <PersonLookupCombobox
+                            variant="button"
                             placeholder="Vyhledat odpovědnou osobu v eOSu…"
                             onSelect={(employee) => {
                               const id = employee.id
@@ -3223,7 +2831,7 @@ export function ExitChecklistForm({
                                 ...prev,
                                 {
                                   id,
-                                  name: buildEmployeeFullName(employee),
+                                  name: buildPersonFullName(employee),
                                   email: employee.email ?? "",
                                   personalNumber: employee.personalNumber,
                                   department: employee.department,

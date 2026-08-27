@@ -401,6 +401,7 @@ async function getChangesByTypeMonthly(
       POSITION: 0,
       NAME: 0,
       NAME_AND_POSITION: 0,
+      MATERNITY_LEAVE: 0,
     }
     point[row.type] += 1
     byMonth.set(key, point)

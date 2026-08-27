@@ -293,7 +293,7 @@ function computeProbationEndForStart(arrival: Arrival, start: string) {
 
 type EmployeeChangeInfo = {
   id: number
-  type: "POSITION" | "NAME" | "NAME_AND_POSITION"
+  type: "POSITION" | "NAME" | "NAME_AND_POSITION" | "MATERNITY_LEAVE"
   status?: "DRAFT" | "APPLIED" | "CANCELLED" | string | null
   effectiveDate?: string | null
   personalNumber?: string | null
@@ -355,6 +355,7 @@ function changeTypeLabel(type?: EmployeeChangeInfo["type"] | null) {
   if (type === "NAME") return "Změna jména"
   if (type === "POSITION") return "Změna pozice"
   if (type === "NAME_AND_POSITION") return "Změna jména i pozice"
+  if (type === "MATERNITY_LEAVE") return "Mateřská dovolená"
 
   return "Zaměstnanecká změna"
 }
@@ -528,6 +529,12 @@ function EmployeeChangeInfoButton({
                         {buildNewPositionLine(change) || "–"}
                       </div>
                     </div>
+                  </div>
+                )}
+
+                {change.type === "MATERNITY_LEAVE" && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+                    Odchod na mateřskou dovolenou
                   </div>
                 )}
 

@@ -3,6 +3,7 @@ import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
 import {
+  buildCombinedReportIcsAttachment,
   logEmailHistory,
   renderCombinedReportHtml,
   sendMail,
@@ -37,7 +38,7 @@ type IncomingOffboarding = IncomingOnboarding
 
 type IncomingChange = {
   id: number
-  type: "POSITION" | "NAME" | "NAME_AND_POSITION"
+  type: "POSITION" | "NAME" | "NAME_AND_POSITION" | "MATERNITY_LEAVE"
   status: string
   personalNumber: string | null
   effectiveDate: string
@@ -98,29 +99,22 @@ async function ensureMonthlyReport(args: {
 }
 
 async function recordSent(args: {
-  month: string
-  reportType: string
+  monthlyReportId: number
   recordType: string
   recordId: number
   sentBy: string
 }) {
-  const report = await ensureMonthlyReport({
-    month: args.month,
-    reportType: args.reportType,
-    generatedBy: args.sentBy,
-  })
-
   await prisma.monthlyReportRecord.upsert({
     where: {
       recordType_recordId_monthlyReportId: {
         recordType: args.recordType,
         recordId: args.recordId,
-        monthlyReportId: report.id,
+        monthlyReportId: args.monthlyReportId,
       },
     },
     update: { sentAt: new Date(), sentBy: args.sentBy },
     create: {
-      monthlyReportId: report.id,
+      monthlyReportId: args.monthlyReportId,
       recordType: args.recordType,
       recordId: args.recordId,
       sentAt: new Date(),
@@ -129,7 +123,7 @@ async function recordSent(args: {
   })
 
   await prisma.monthlyReport.update({
-    where: { id: report.id },
+    where: { id: args.monthlyReportId },
     data: { sentAt: new Date() },
   })
 }
@@ -196,9 +190,15 @@ export async function POST(request: Request) {
   }
 
   const sentBy = getUserKey(session.user)
+  const totalSent = onboardings.length + offboardings.length + changes.length
+
+  let recipients: string[]
+  let html: string
+  let text: string
+  let subject: string
 
   try {
-    const recipients = Array.from(
+    recipients = Array.from(
       new Set(
         (
           await recipientsFor(
@@ -248,7 +248,7 @@ export async function POST(request: Request) {
       })
     )
 
-    const { html, text, subject } = await renderCombinedReportHtml({
+    const rendered = await renderCombinedReportHtml({
       months,
       onboardingsPlanned: onboardingsPlanned.map((o) =>
         toEmailRecord(o, "onboarding")
@@ -265,58 +265,27 @@ export async function POST(request: Request) {
       changes: changeEmailRecords,
       changeAudience,
     })
+    html = rendered.html
+    text = rendered.text
+    subject = rendered.subject
 
-    await sendMail({ bcc: recipients, subject, html, text })
-
-    await logEmailHistory({
-      emailType: "MONTHLY_SUMMARY",
-      recipients,
-      subject,
-      content: html,
-      status: "SENT",
-      createdBy: sentBy,
+    const icsAttachment = buildCombinedReportIcsAttachment({
+      records: [
+        ...onboardingsPlanned.map((o) => toEmailRecord(o, "onboarding")),
+        ...onboardingsActual.map((o) => toEmailRecord(o, "onboarding")),
+        ...offboardingsPlanned.map((o) => toEmailRecord(o, "offboarding")),
+        ...offboardingsActual.map((o) => toEmailRecord(o, "offboarding")),
+      ],
+      changes: changeEmailRecords,
     })
 
-    const totalSent = onboardings.length + offboardings.length + changes.length
-
-    await Promise.all([
-      ...onboardings.map((o) =>
-        recordSent({
-          month: o.month,
-          reportType: o.kind,
-          recordType: `onboarding_${o.kind}`,
-          recordId: o.id,
-          sentBy,
-        })
-      ),
-      ...offboardings.map((o) =>
-        recordSent({
-          month: o.month,
-          reportType: o.kind,
-          recordType: `offboarding_${o.kind}`,
-          recordId: o.id,
-          sentBy,
-        })
-      ),
-      ...changes.map((c) =>
-        recordSent({
-          month: c.month,
-          reportType: `employee_changes_${audience.toLowerCase()}`,
-          recordType: "employee_change",
-          recordId: c.id,
-          sentBy,
-        })
-      ),
-    ])
-
-    if (changes.length > 0) {
-      await prisma.employeeChange.updateMany({
-        where: { id: { in: changes.map((c) => c.id) } },
-        data: { emailSentAt: new Date(), emailSentBy: sentBy },
-      })
-    }
-
-    return NextResponse.json({ ok: true, sent: totalSent })
+    await sendMail({
+      bcc: recipients,
+      subject,
+      html,
+      text,
+      ...(icsAttachment ? { attachments: [icsAttachment] } : {}),
+    })
   } catch (error) {
     console.error("POST /api/reporty/kombinovany/odeslat error:", error)
 
@@ -335,4 +304,84 @@ export async function POST(request: Request) {
       { status: 500 }
     )
   }
+
+  try {
+    await logEmailHistory({
+      emailType: "MONTHLY_SUMMARY",
+      recipients,
+      subject,
+      content: html,
+      status: "SENT",
+      createdBy: sentBy,
+    })
+
+    const reportKeyOf = (month: string, reportType: string) =>
+      `${month}::${reportType}`
+
+    const neededReportKeys = new Set<string>([
+      ...onboardings.map((o) => reportKeyOf(o.month, o.kind)),
+      ...offboardings.map((o) => reportKeyOf(o.month, o.kind)),
+      ...changes.map((c) =>
+        reportKeyOf(c.month, `employee_changes_${audience.toLowerCase()}`)
+      ),
+    ])
+
+    const monthlyReportIdByKey = new Map<string, number>()
+    for (const key of neededReportKeys) {
+      const [month, reportType] = key.split("::") as [string, string]
+      const report = await ensureMonthlyReport({
+        month,
+        reportType,
+        generatedBy: sentBy,
+      })
+      monthlyReportIdByKey.set(key, report.id)
+    }
+
+    await Promise.all([
+      ...onboardings.map((o) =>
+        recordSent({
+          monthlyReportId: monthlyReportIdByKey.get(
+            reportKeyOf(o.month, o.kind)
+          )!,
+          recordType: `onboarding_${o.kind}`,
+          recordId: o.id,
+          sentBy,
+        })
+      ),
+      ...offboardings.map((o) =>
+        recordSent({
+          monthlyReportId: monthlyReportIdByKey.get(
+            reportKeyOf(o.month, o.kind)
+          )!,
+          recordType: `offboarding_${o.kind}`,
+          recordId: o.id,
+          sentBy,
+        })
+      ),
+      ...changes.map((c) =>
+        recordSent({
+          monthlyReportId: monthlyReportIdByKey.get(
+            reportKeyOf(c.month, `employee_changes_${audience.toLowerCase()}`)
+          )!,
+          recordType: "employee_change",
+          recordId: c.id,
+          sentBy,
+        })
+      ),
+    ])
+
+    if (changes.length > 0) {
+      await prisma.employeeChange.updateMany({
+        where: { id: { in: changes.map((c) => c.id) } },
+        data: { emailSentAt: new Date(), emailSentBy: sentBy },
+      })
+    }
+  } catch (error) {
+    console.error(
+      "POST /api/reporty/kombinovany/odeslat - e-mail odeslán, evidence v DB selhala:",
+      error
+    )
+  }
+
+  return NextResponse.json({ ok: true, sent: totalSent })
 }

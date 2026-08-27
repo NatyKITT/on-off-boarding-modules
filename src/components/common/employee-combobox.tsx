@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { Check, User, X } from "lucide-react"
 import { useFormContext, useWatch } from "react-hook-form"
 
+import { useIncrementalReveal } from "@/hooks/use-incremental-reveal"
 import { cn } from "@/lib/utils"
 
 import {
@@ -132,7 +133,8 @@ export function EmployeeCombobox({
 
   useEffect(() => {
     if (searchMode !== "eager") return
-    if (!open || allEmployees.length > 0) return
+    if (allEmployees.length > 0) return
+    if (!open && !currentPersonalNumber) return
 
     const controller = new AbortController()
     abortRef.current?.abort()
@@ -142,7 +144,7 @@ export function EmployeeCombobox({
       setError(null)
       try {
         const url = new URL("/api/zamestnanci/hledat", window.location.origin)
-        url.searchParams.set("q", "1")
+        url.searchParams.set("listAll", "true")
         url.searchParams.set("limit", String(fetchLimit))
         if (excludePersonalNumbers.length > 0) {
           url.searchParams.set("exclude", excludePersonalNumbers.join(","))
@@ -178,6 +180,7 @@ export function EmployeeCombobox({
     allEmployees.length,
     fetchLimit,
     excludePersonalNumbers,
+    currentPersonalNumber,
   ])
 
   useEffect(() => {
@@ -259,6 +262,11 @@ export function EmployeeCombobox({
       return num.includes(q) || nm.includes(q) || org.includes(q)
     })
   }, [searchMode, allEmployees, lazyResults, query])
+
+  const { visibleItems, hasMore, listRef, onScroll } = useIncrementalReveal(
+    displayItems,
+    `${open}:${query}`
+  )
 
   async function applyEmployee(e: EmployeeItem) {
     const opts = {
@@ -469,11 +477,13 @@ export function EmployeeCombobox({
           </CommandEmpty>
 
           <CommandList
+            ref={listRef}
+            onScroll={onScroll}
             className="max-h-80 overflow-y-auto overscroll-contain"
             onWheelCapture={(e) => e.stopPropagation()}
           >
             <CommandGroup>
-              {displayItems.map((e) => (
+              {visibleItems.map((e) => (
                 <CommandItem
                   key={e.id}
                   value={e.personalNumber}
@@ -533,6 +543,12 @@ export function EmployeeCombobox({
                 </CommandItem>
               ))}
             </CommandGroup>
+
+            {hasMore && (
+              <div className="py-3 text-center text-xs text-muted-foreground">
+                Načítám další…
+              </div>
+            )}
           </CommandList>
         </Command>
       </PopoverContent>

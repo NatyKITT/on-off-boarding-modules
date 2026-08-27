@@ -1,16 +1,16 @@
 "use client"
 
 import * as React from "react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { format } from "date-fns"
 import { cs } from "date-fns/locale"
 import {
   CalendarDays,
-  Check,
   ChevronsUpDown,
   Link2,
   PencilLine,
+  RefreshCcw,
   User,
   Users,
   XCircle,
@@ -23,18 +23,11 @@ import { type Position } from "@/types/position"
 import { useIsReadonly } from "@/hooks/use-current-role"
 import { cn } from "@/lib/utils"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command"
 import {
   Dialog,
   DialogContent,
@@ -53,18 +46,18 @@ import {
   FormMessage,
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 import {
   EmployeeCombobox,
   type EmployeeItem,
 } from "@/components/common/employee-combobox"
+import {
+  buildPersonFullName,
+  PersonLookupCombobox,
+} from "@/components/common/person-lookup-combobox"
+import { PositionCombobox } from "@/components/common/position-combobox"
 
-type ChangeType = "POSITION" | "NAME" | "NAME_AND_POSITION"
+type ChangeType = "POSITION" | "NAME" | "NAME_AND_POSITION" | "MATERNITY_LEAVE"
 
 type LinkedMatch = {
   id: number
@@ -100,22 +93,47 @@ const emptyToNull = (value?: string | null) => {
   return trimmed.length > 0 ? trimmed : null
 }
 
-function normalizeText(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-}
-
 function positionLabel(position: Position) {
   return [position.num, position.name, position.dept_name, position.unit_name]
     .filter(Boolean)
     .join(" — ")
 }
 
+type SupervisorApiResponse = {
+  supervisor?: {
+    titleBefore?: string | null
+    name?: string | null
+    surname?: string | null
+    titleAfter?: string | null
+    fullName?: string | null
+    email?: string | null
+  }
+}
+
+function buildSupervisorFullName(
+  supervisor?: SupervisorApiResponse["supervisor"]
+): string {
+  if (!supervisor) return ""
+  if (supervisor.fullName) return supervisor.fullName
+
+  return [
+    supervisor.titleBefore,
+    supervisor.name,
+    supervisor.surname,
+    supervisor.titleAfter,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
 function isChangeType(value: unknown): value is ChangeType {
   return (
-    value === "POSITION" || value === "NAME" || value === "NAME_AND_POSITION"
+    value === "POSITION" ||
+    value === "NAME" ||
+    value === "NAME_AND_POSITION" ||
+    value === "MATERNITY_LEAVE"
   )
 }
 
@@ -131,6 +149,7 @@ function toInitialString(
 }
 
 function getChangeType(values: FormValues): ChangeType {
+  if (values.maternityLeave) return "MATERNITY_LEAVE"
   if (values.changeName && values.changePosition) return "NAME_AND_POSITION"
   if (values.changeName) return "NAME"
 
@@ -158,6 +177,7 @@ function getDefaultValues(
     changeName: initialType === "NAME" || initialType === "NAME_AND_POSITION",
     changePosition:
       initialType === "POSITION" || initialType === "NAME_AND_POSITION",
+    maternityLeave: initialType === "MATERNITY_LEAVE",
     effectiveDate: effectiveDate ? effectiveDate.slice(0, 10) : todayString(),
     manualEmployee: isEdit || Boolean(initial?.manualEmployee),
 
@@ -168,6 +188,9 @@ function getDefaultValues(
 
     personalNumber: toInitialString(initial, "personalNumber"),
     userEmail: toInitialString(initial, "userEmail"),
+
+    supervisorName: toInitialString(initial, "supervisorName"),
+    supervisorEmail: toInitialString(initial, "supervisorEmail"),
 
     oldTitleBefore: toInitialString(initial, "oldTitleBefore"),
     newTitleBefore: toInitialString(initial, "newTitleBefore"),
@@ -195,6 +218,7 @@ const schema = z
   .object({
     changeName: z.boolean().default(true),
     changePosition: z.boolean().default(false),
+    maternityLeave: z.boolean().default(false),
     effectiveDate: z.string().min(1, "Datum účinnosti je povinné."),
     manualEmployee: z.boolean().default(false),
 
@@ -205,6 +229,9 @@ const schema = z
 
     personalNumber: z.string().trim().min(1, "Osobní číslo je povinné."),
     userEmail: z.string().optional(),
+
+    supervisorName: z.string().optional(),
+    supervisorEmail: z.string().optional(),
 
     oldTitleBefore: z.string().optional(),
     newTitleBefore: z.string().optional(),
@@ -227,13 +254,19 @@ const schema = z
     notes: z.string().optional(),
   })
   .superRefine((values, ctx) => {
-    if (!values.changeName && !values.changePosition) {
+    if (
+      !values.changeName &&
+      !values.changePosition &&
+      !values.maternityLeave
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["changeName"],
+        path: ["changeArea"],
         message: "Vyberte alespoň jednu oblast změny.",
       })
     }
+
+    if (values.maternityLeave) return
 
     if (values.changeName) {
       const hasSome =
@@ -262,7 +295,7 @@ const schema = z
 
 type FormValues = z.infer<typeof schema>
 
-function PositionCombobox({
+function PositionField({
   positions,
   value,
   onSelect,
@@ -273,119 +306,29 @@ function PositionCombobox({
   onSelect: (position: Position) => void
   placeholder?: string
 }) {
-  const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState("")
-
-  const selected = positions.find((position) => position.num === value) ?? null
-
-  const filtered = useMemo(() => {
-    const normalizedQuery = normalizeText(query.trim())
-
-    if (!normalizedQuery) return positions
-
-    return positions.filter((position) =>
-      normalizeText(positionLabel(position)).includes(normalizedQuery)
-    )
-  }, [positions, query])
-
   return (
-    <div className="space-y-1">
-      <Popover
-        modal={false}
-        open={open}
-        onOpenChange={(nextOpen) => {
-          setOpen(nextOpen)
-          if (!nextOpen) setQuery("")
-        }}
-      >
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="outline"
-            role="combobox"
-            aria-expanded={open}
-            className={cn(
-              "h-auto min-h-10 w-full justify-between whitespace-normal text-left",
-              focusRing
-            )}
-          >
-            <span className="line-clamp-2">
-              {selected ? positionLabel(selected) : placeholder}
-            </span>
-            <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
-          </Button>
-        </PopoverTrigger>
-
-        <PopoverContent
-          className="w-[--radix-popover-trigger-width] p-0"
-          align="start"
-          sideOffset={4}
-          onOpenAutoFocus={(event) => event.preventDefault()}
-          onCloseAutoFocus={(event) => event.preventDefault()}
-          onWheelCapture={(event) => event.stopPropagation()}
+    <PositionCombobox
+      positions={positions}
+      value={value}
+      onSelect={onSelect}
+      trigger={({ open, selected }) => (
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className={cn(
+            "h-auto min-h-10 w-full justify-between whitespace-normal text-left",
+            focusRing
+          )}
         >
-          <Command shouldFilter={false}>
-            <CommandInput
-              value={query}
-              onValueChange={setQuery}
-              placeholder="Hledat číslo, pozici nebo odbor…"
-              className={focusRing}
-            />
-
-            <CommandEmpty>Žádná pozice nenalezena.</CommandEmpty>
-
-            <CommandList className="max-h-80 overflow-y-auto overscroll-contain">
-              <CommandGroup>
-                {filtered.map((position) => (
-                  <CommandItem
-                    key={position.num}
-                    value={position.num}
-                    onSelect={() => {
-                      onSelect(position)
-                      setOpen(false)
-                      setQuery("")
-                    }}
-                    className="flex cursor-pointer items-start gap-3 py-3"
-                  >
-                    <Check
-                      className={cn(
-                        "mt-0.5 size-4 shrink-0",
-                        value === position.num ? "opacity-100" : "opacity-0"
-                      )}
-                    />
-
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
-                          {position.num}
-                        </span>
-                        <span className="truncate text-sm font-medium">
-                          {position.name}
-                        </span>
-                      </div>
-
-                      <div className="mt-1 truncate text-xs text-muted-foreground">
-                        {[position.dept_name, position.unit_name]
-                          .filter(Boolean)
-                          .join(" • ")}
-                      </div>
-                    </div>
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            </CommandList>
-          </Command>
-        </PopoverContent>
-      </Popover>
-
-      {selected && (
-        <p className="text-xs text-muted-foreground">
-          {selected.personPersonalNumber
-            ? `Obsazeno: ${selected.personName ?? "—"} (osobní číslo ${selected.personPersonalNumber})`
-            : "Neobsazená pracovní pozice."}
-        </p>
+          <span className="line-clamp-2">
+            {selected ? positionLabel(selected) : placeholder}
+          </span>
+          <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
+        </Button>
       )}
-    </div>
+    />
   )
 }
 
@@ -413,6 +356,14 @@ export function EmployeeChangeForm({
   const [manualEmployee, setManualEmployee] = useState(
     defaultValues.manualEmployee
   )
+
+  const [supervisorManuallyChanged, setSupervisorManuallyChanged] =
+    useState(false)
+  const [isSupervisorLoading, setIsSupervisorLoading] = useState(false)
+  const [supervisorLoadError, setSupervisorLoadError] = useState<string | null>(
+    null
+  )
+  const supervisorRequestRef = useRef(0)
 
   const [linkModal, setLinkModal] = useState<{
     open: boolean
@@ -477,6 +428,15 @@ export function EmployeeChangeForm({
     control: form.control,
     name: "changePosition",
   })
+
+  const maternityLeave = useWatch({
+    control: form.control,
+    name: "maternityLeave",
+  })
+
+  const changeAreaError = (
+    form.formState.errors as Record<string, { message?: string } | undefined>
+  ).changeArea?.message
 
   const personalNumber = useWatch({
     control: form.control,
@@ -676,6 +636,105 @@ export function EmployeeChangeForm({
     })
   }
 
+  const loadSupervisorForPosition = useCallback(
+    async (positionNum: string, options?: { force?: boolean }) => {
+      const trimmed = positionNum.trim()
+
+      if (!trimmed) return
+
+      if (supervisorManuallyChanged && !options?.force) {
+        return
+      }
+
+      const requestId = ++supervisorRequestRef.current
+      setIsSupervisorLoading(true)
+      setSupervisorLoadError(null)
+
+      try {
+        const res = await fetch(
+          `/api/systemizace/superior?positionNum=${encodeURIComponent(trimmed)}`,
+          { cache: "no-store" }
+        )
+
+        if (!res.ok) {
+          if (requestId !== supervisorRequestRef.current) return
+
+          form.setValue("supervisorName", "", { shouldValidate: true })
+          form.setValue("supervisorEmail", "", { shouldValidate: true })
+          setSupervisorLoadError("Vedoucí nebyl pro tuto pozici nalezen.")
+          return
+        }
+
+        const json = (await res
+          .json()
+          .catch(() => null)) as SupervisorApiResponse | null
+        const supervisor = json?.supervisor
+        const fullName = buildSupervisorFullName(supervisor)
+
+        if (requestId !== supervisorRequestRef.current) return
+
+        form.setValue("supervisorName", fullName, {
+          shouldDirty: false,
+          shouldValidate: true,
+        })
+        form.setValue("supervisorEmail", supervisor?.email ?? "", {
+          shouldDirty: false,
+          shouldValidate: true,
+        })
+        setSupervisorLoadError(null)
+      } catch (error) {
+        if (requestId !== supervisorRequestRef.current) return
+
+        console.error("Nepodařilo se dohledat vedoucího:", error)
+        form.setValue("supervisorName", "", { shouldValidate: true })
+        form.setValue("supervisorEmail", "", { shouldValidate: true })
+        setSupervisorLoadError("Nepodařilo se načíst vedoucího.")
+      } finally {
+        if (requestId === supervisorRequestRef.current) {
+          setIsSupervisorLoading(false)
+        }
+      }
+    },
+    [form, supervisorManuallyChanged]
+  )
+
+  const restoreSupervisorFromPosition = () => {
+    const positionNum = form.getValues("oldPositionNum")
+    if (!positionNum) return
+    setSupervisorManuallyChanged(false)
+    void loadSupervisorForPosition(positionNum, { force: true })
+  }
+
+  const previousAutoSupervisorPositionRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!currentPositionNum) {
+      previousAutoSupervisorPositionRef.current = null
+      return
+    }
+
+    if (previousAutoSupervisorPositionRef.current === currentPositionNum) {
+      return
+    }
+    previousAutoSupervisorPositionRef.current = currentPositionNum
+
+    if (
+      Boolean(id) &&
+      !supervisorManuallyChanged &&
+      form.getValues("supervisorName")
+    ) {
+      return
+    }
+
+    void loadSupervisorForPosition(currentPositionNum)
+  }, [
+    currentPositionNum,
+    form,
+    id,
+    loadSupervisorForPosition,
+    supervisorManuallyChanged,
+  ])
+
   async function finishSuccessfully(changeId?: number) {
     await onSuccess?.(changeId)
   }
@@ -719,6 +778,10 @@ export function EmployeeChangeForm({
         surname: values.surname.trim(),
         titleAfter: emptyToNull(values.titleAfter),
         personalNumber: emptyToNull(values.personalNumber),
+        userEmail: emptyToNull(values.userEmail),
+
+        supervisorName: emptyToNull(values.supervisorName),
+        supervisorEmail: emptyToNull(values.supervisorEmail),
 
         oldTitleBefore: emptyToNull(
           values.oldTitleBefore || values.titleBefore
@@ -809,7 +872,7 @@ export function EmployeeChangeForm({
             </CardHeader>
 
             <CardContent className="space-y-5">
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <FormField
                   name="changeName"
                   control={form.control}
@@ -819,9 +882,16 @@ export function EmployeeChangeForm({
                         <FormControl>
                           <Checkbox
                             checked={field.value}
-                            onCheckedChange={(value) =>
-                              field.onChange(Boolean(value))
-                            }
+                            onCheckedChange={(value) => {
+                              const checked = Boolean(value)
+                              field.onChange(checked)
+                              if (checked) {
+                                form.setValue("maternityLeave", false, {
+                                  shouldDirty: true,
+                                })
+                              }
+                              void form.trigger()
+                            }}
                           />
                         </FormControl>
                         <div className="space-y-1">
@@ -831,7 +901,6 @@ export function EmployeeChangeForm({
                           </FormDescription>
                         </div>
                       </div>
-                      <FormMessage />
                     </FormItem>
                   )}
                 />
@@ -845,9 +914,16 @@ export function EmployeeChangeForm({
                         <FormControl>
                           <Checkbox
                             checked={field.value}
-                            onCheckedChange={(value) =>
-                              field.onChange(Boolean(value))
-                            }
+                            onCheckedChange={(value) => {
+                              const checked = Boolean(value)
+                              field.onChange(checked)
+                              if (checked) {
+                                form.setValue("maternityLeave", false, {
+                                  shouldDirty: true,
+                                })
+                              }
+                              void form.trigger()
+                            }}
                           />
                         </FormControl>
                         <div className="space-y-1">
@@ -857,7 +933,42 @@ export function EmployeeChangeForm({
                           </FormDescription>
                         </div>
                       </div>
-                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  name="maternityLeave"
+                  control={form.control}
+                  render={({ field }) => (
+                    <FormItem className="rounded-lg border p-4">
+                      <div className="flex items-start gap-3">
+                        <FormControl>
+                          <Checkbox
+                            checked={field.value}
+                            onCheckedChange={(value) => {
+                              const checked = Boolean(value)
+                              field.onChange(checked)
+                              if (checked) {
+                                form.setValue("changeName", false, {
+                                  shouldDirty: true,
+                                })
+                                form.setValue("changePosition", false, {
+                                  shouldDirty: true,
+                                })
+                              }
+                              void form.trigger()
+                            }}
+                          />
+                        </FormControl>
+                        <div className="space-y-1">
+                          <FormLabel>Odchod na mateřskou dovolenou</FormLabel>
+                          <FormDescription>
+                            Samostatná změna bez staré/nové hodnoty – jen
+                            zaměstnanec a datum odchodu.
+                          </FormDescription>
+                        </div>
+                      </div>
                     </FormItem>
                   )}
                 />
@@ -869,11 +980,20 @@ export function EmployeeChangeForm({
                   control={form.control}
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Datum účinnosti *</FormLabel>
+                      <FormLabel>
+                        {maternityLeave
+                          ? "Datum odchodu na mateřskou dovolenou *"
+                          : "Datum účinnosti *"}
+                      </FormLabel>
                       <FormControl>
                         <Input type="date" {...field} className={focusRing} />
                       </FormControl>
                       <FormMessage />
+                      {changeAreaError && (
+                        <p className="text-sm font-medium text-destructive">
+                          {changeAreaError}
+                        </p>
+                      )}
                     </FormItem>
                   )}
                 />
@@ -924,7 +1044,7 @@ export function EmployeeChangeForm({
                         unitName: "oldUnitName",
                       }}
                       placeholder="Vyberte zaměstnance podle jména nebo osobního čísla…"
-                      fetchLimit={20}
+                      fetchLimit={500}
                       excludePersonalNumbers={EMPTY_EXCLUDED_PERSONAL_NUMBERS}
                       onSelect={(employee) => {
                         copySelectedEmployeeToOldAndNewValues(employee)
@@ -1032,7 +1152,7 @@ export function EmployeeChangeForm({
 
                 {(manualEmployee || isEdit) && (
                   <div className="mt-3">
-                    <PositionCombobox
+                    <PositionField
                       positions={sortedPositions}
                       value={currentPositionNum}
                       onSelect={selectCurrentPosition}
@@ -1074,6 +1194,126 @@ export function EmployeeChangeForm({
                     />
                   ))}
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-l-4 border-l-[#00847C]">
+            <CardHeader>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <CardTitle className="flex items-center gap-2">
+                    <User className="size-5" /> Vedoucí odboru
+                  </CardTitle>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Dohledá se automaticky podle pozice, ale lze ho změnit.
+                  </p>
+                </div>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={restoreSupervisorFromPosition}
+                  disabled={
+                    !form.getValues("oldPositionNum") || isSupervisorLoading
+                  }
+                >
+                  <RefreshCcw className="mr-2 size-4" />
+                  Obnovit dle pozice
+                </Button>
+              </div>
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              {isSupervisorLoading && (
+                <Alert>
+                  <AlertDescription>
+                    Načítám vedoucího podle pozice…
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {!isSupervisorLoading && supervisorLoadError && (
+                <Alert>
+                  <AlertDescription>{supervisorLoadError}</AlertDescription>
+                </Alert>
+              )}
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <FormItem className="md:col-span-2">
+                  <FormLabel>Vybrat vedoucího odboru z EOS</FormLabel>
+                  <FormControl>
+                    <PersonLookupCombobox
+                      valueName={form.watch("supervisorName")}
+                      valueEmail={form.watch("supervisorEmail")}
+                      placeholder="Vyhledejte vedoucího odboru v EOS…"
+                      onSelect={(employee) => {
+                        setSupervisorManuallyChanged(true)
+                        form.setValue(
+                          "supervisorName",
+                          buildPersonFullName(employee),
+                          { shouldDirty: true, shouldTouch: true }
+                        )
+                        form.setValue("supervisorEmail", employee.email ?? "", {
+                          shouldDirty: true,
+                          shouldTouch: true,
+                        })
+                      }}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    Použijte, pokud má být vedoucí jiný než automaticky
+                    dohledaný.
+                  </FormDescription>
+                </FormItem>
+
+                <FormField
+                  name="supervisorName"
+                  control={form.control}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Jméno vedoucího</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          placeholder="Např. Bc. Jana Nováková"
+                          className={focusRing}
+                          onChange={(e) => {
+                            setSupervisorManuallyChanged(true)
+                            field.onChange(e)
+                          }}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  name="supervisorEmail"
+                  control={form.control}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>E-mail vedoucího</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="email"
+                          autoComplete="off"
+                          {...field}
+                          placeholder="vedouci@praha6.cz"
+                          className={focusRing}
+                          onChange={(e) => {
+                            setSupervisorManuallyChanged(true)
+                            field.onChange(e)
+                          }}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
             </CardContent>
           </Card>
@@ -1155,7 +1395,7 @@ export function EmployeeChangeForm({
                   <FormLabel>Vybrat novou pozici</FormLabel>
 
                   <div className="mt-2">
-                    <PositionCombobox
+                    <PositionField
                       positions={sortedPositions}
                       value={newPositionNum}
                       onSelect={selectNewPosition}
