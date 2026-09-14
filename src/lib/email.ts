@@ -6,6 +6,7 @@ import { Resend } from "resend"
 import { buildCalendarLinksHtml, buildIcsCalendar } from "@/lib/calendar-link"
 import { formatDayCountCs } from "@/lib/dates"
 import { prisma } from "@/lib/db"
+import { getEmployeeChangeDetailLabel } from "@/lib/employment-linking"
 import { joinNameWithTitles } from "@/lib/format-name"
 
 const resend = process.env.RESEND_API_KEY
@@ -942,17 +943,13 @@ function formatEmployeeChangeNewName(record: EmployeeChangeEmailRecord) {
     .trim()
 }
 
-function employeeChangeTypeLabel(type: EmployeeChangeEmailRecord["type"]) {
-  if (type === "NAME") return "Změna jména"
-  if (type === "POSITION") return "Změna pozice"
-  if (type === "MATERNITY_LEAVE") return "Mateřská dovolená"
-  return "Změna jména i pozice"
-}
-
 function buildEmployeeChangePositionSummary(
   record: EmployeeChangeEmailRecord,
-  useNew: boolean
+  useNew: boolean,
+  options?: { includePositionNum?: boolean }
 ): string {
+  const includePositionNum = options?.includePositionNum ?? true
+
   const positionName = useNew
     ? (record.newPositionName ?? record.oldPositionName)
     : record.oldPositionName
@@ -969,7 +966,7 @@ function buildEmployeeChangePositionSummary(
   return (
     [
       positionName || null,
-      positionNum ? `č. ${positionNum}` : null,
+      includePositionNum && positionNum ? `č. ${positionNum}` : null,
       department || null,
       unitName || null,
     ]
@@ -978,7 +975,7 @@ function buildEmployeeChangePositionSummary(
   )
 }
 
-type EmployeeChangeGroup = { label: string; oldValue: string; newValue: string }
+type EmployeeChangeGroup = { label: string; newValue: string }
 
 function buildEmployeeChangeGroups(
   record: EmployeeChangeEmailRecord
@@ -992,7 +989,6 @@ function buildEmployeeChangeGroups(
     if (oldFull !== newFull) {
       groups.push({
         label: "Jméno",
-        oldValue: oldFull || "—",
         newValue: newFull || "—",
       })
     }
@@ -1005,7 +1001,6 @@ function buildEmployeeChangeGroups(
     if (oldSummary !== newSummary) {
       groups.push({
         label: "Pozice",
-        oldValue: oldSummary,
         newValue: newSummary,
       })
     }
@@ -1014,35 +1009,16 @@ function buildEmployeeChangeGroups(
   return groups
 }
 
-function labelGenitive(label: string): string {
-  if (label === "Jméno") return "jména"
-  if (label === "Pozice") return "pozice"
-  return label.toLowerCase()
-}
-
-function renderChangeValueCell(
-  labelPrefix: string,
-  fieldLabel: string,
-  value: string,
-  variant: "old" | "new"
-) {
-  const bg = variant === "old" ? "#e9ebee" : "#E5F5F2"
-  const border = variant === "old" ? "#c6cbd2" : "#00847C"
-  const color = variant === "old" ? "#4b5563" : "#00847C"
-  const fontWeight = variant === "old" ? 500 : 700
-  const labelColor = variant === "old" ? "#6b7280" : "#00847C"
-
+function renderNewValueBox(fieldLabel: string, value: string) {
   return `
-    <td width="50%" height="1" valign="top" style="width:50%;height:1px;font-family:${EMAIL_FONT_FAMILY};">
-      <div style="box-sizing:border-box;height:100%;background-color:${bg};border:1px solid ${border};border-radius:8px;padding:8px 10px;-webkit-text-size-adjust:100%;text-size-adjust:100%;">
-        <div style="margin-bottom:4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:${labelColor};-webkit-text-size-adjust:100%;text-size-adjust:100%;">
-          ${escapeHtml(labelPrefix)} - ${escapeHtml(fieldLabel)}
-        </div>
-        <div style="font-size:12px;font-weight:${fontWeight};color:${color};word-break:break-word;-webkit-text-size-adjust:100%;text-size-adjust:100%;">
-          ${escapeHtml(value)}
-        </div>
+    <div style="display:inline-block;width:100%;box-sizing:border-box;background-color:#E5F5F2;border:1px solid #00847C;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-family:${EMAIL_FONT_FAMILY};-webkit-text-size-adjust:100%;text-size-adjust:100%;">
+      <div style="margin-bottom:4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:#00847C;-webkit-text-size-adjust:100%;text-size-adjust:100%;">
+        Nová hodnota – ${escapeHtml(fieldLabel)}
       </div>
-    </td>
+      <div style="font-size:12px;font-weight:700;color:#00847C;word-break:break-word;-webkit-text-size-adjust:100%;text-size-adjust:100%;">
+        ${escapeHtml(value)}
+      </div>
+    </div>
   `
 }
 
@@ -1050,21 +1026,14 @@ function renderEmployeeChangeBubbles(
   record: EmployeeChangeEmailRecord
 ): string {
   if (record.type === "MATERNITY_LEAVE") {
-    const calendarEvent = buildEmployeeChangeCalendarEvent(record)
-
     return `
       <div style="display:inline-block;background-color:#E5F5F2;border:1px solid #00847C;border-radius:8px;padding:8px 10px;font-family:${EMAIL_FONT_FAMILY};">
         <div style="margin-bottom:4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:#00847C;">
-          Změna
+          Nová hodnota
         </div>
         <div style="font-size:12px;font-weight:700;color:#00847C;">
           Odchod na mateřskou dovolenou
         </div>
-        ${
-          calendarEvent
-            ? `<div style="margin-top:6px;">${buildCalendarLinksHtml(calendarEvent)}</div>`
-            : ""
-        }
       </div>
     `
   }
@@ -1076,19 +1045,7 @@ function renderEmployeeChangeBubbles(
   }
 
   return groups
-    .map((group) => {
-      const genitive = labelGenitive(group.label)
-
-      return `
-        <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="width:100%;margin-bottom:10px;font-family:${EMAIL_FONT_FAMILY};">
-          <tr>
-            ${renderChangeValueCell("Původní hodnota", genitive, group.oldValue, "old")}
-            <td width="12" style="width:12px;min-width:12px;font-size:1px;line-height:1px;">&nbsp;</td>
-            ${renderChangeValueCell("Nová hodnota", genitive, group.newValue, "new")}
-          </tr>
-        </table>
-      `
-    })
+    .map((group) => renderNewValueBox(group.label, group.newValue))
     .join("")
 }
 
@@ -1164,24 +1121,45 @@ function renderEmployeeChangeTable(
   if (!records.length) return ""
 
   const { showPersonalNumberColumn } = args
+  const hasAnyCalendarEvent = records.some(
+    (record) => buildEmployeeChangeCalendarEvent(record) !== null
+  )
+
+  const COL_EMPLOYEE = 200
+  const COL_PERSONAL_NUMBER = 90
+  const COL_POSITION_NUM = 90
+  const COL_TYPE = 230
+  const COL_CHANGE = 190
+  const COL_EFFECTIVE = 95
+  const COL_CALENDAR = 105
+
+  let totalWidth =
+    COL_EMPLOYEE + COL_POSITION_NUM + COL_TYPE + COL_CHANGE + COL_EFFECTIVE
+  if (showPersonalNumberColumn) totalWidth += COL_PERSONAL_NUMBER
+  if (hasAnyCalendarEvent) totalWidth += COL_CALENDAR
 
   return wrapWithBottomSpacing(
     `
     <div style="width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;">
-    <table border="0" cellpadding="0" cellspacing="0"
-      style="border-collapse:collapse;font-family:${EMAIL_FONT_FAMILY};font-size:13px;">
+    <table class="eml-change-table" border="0" cellpadding="0" cellspacing="0" width="${totalWidth}"
+      style="border-collapse:collapse;table-layout:fixed;width:${totalWidth}px;font-family:${EMAIL_FONT_FAMILY};font-size:13px;">
       <thead>
         <tr bgcolor="#00847C" style="background-color:#00847C;color:#ffffff;">
-          <th align="left" style="padding:13px;width:150px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:normal;">Zaměstnanec</th>
+          <th align="left" style="box-sizing:border-box;padding:13px;width:${COL_EMPLOYEE}px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:normal;">Zaměstnanec</th>
           ${
             showPersonalNumberColumn
-              ? `<th align="left" style="padding:13px;width:55px;font-size:11px;text-transform:uppercase;color:#ffffff;">Osobní číslo</th>`
+              ? `<th align="left" style="box-sizing:border-box;padding:13px;width:${COL_PERSONAL_NUMBER}px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:nowrap;">Osobní číslo</th>`
               : ""
           }
-          <th align="left" style="padding:13px;width:60px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:nowrap;">Číslo funkce</th>
-          <th align="left" style="padding:13px;width:65px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:normal;">Typ změny</th>
-          <th align="left" style="padding:13px;width:360px;font-size:11px;text-transform:uppercase;color:#ffffff;">Změna</th>
-          <th align="left" style="padding:13px;width:65px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:nowrap;">Účinnost</th>
+          <th align="left" style="box-sizing:border-box;padding:13px;width:${COL_POSITION_NUM}px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:nowrap;">Číslo funkce</th>
+          <th align="left" style="box-sizing:border-box;padding:13px;width:${COL_TYPE}px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:normal;">Typ změny</th>
+          <th align="left" style="box-sizing:border-box;padding:13px;width:${COL_CHANGE}px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:normal;">Změna</th>
+          <th align="left" style="box-sizing:border-box;padding:13px;width:${COL_EFFECTIVE}px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:nowrap;">Účinnost</th>
+          ${
+            hasAnyCalendarEvent
+              ? `<th align="left" style="box-sizing:border-box;padding:13px;width:${COL_CALENDAR}px;font-size:11px;text-transform:uppercase;color:#ffffff;white-space:normal;">Kalendář</th>`
+              : ""
+          }
         </tr>
       </thead>
 
@@ -1190,13 +1168,15 @@ function renderEmployeeChangeTable(
           .map((record, index) => {
             const assignmentSummary = buildEmployeeChangePositionSummary(
               record,
-              true
+              false,
+              { includePositionNum: false }
             )
             const positionNum = record.newPositionNum ?? record.oldPositionNum
+            const calendarEvent = buildEmployeeChangeCalendarEvent(record)
 
             return `
               <tr bgcolor="${index % 2 === 0 ? "#ffffff" : "#f9fafb"}" style="background-color:${index % 2 === 0 ? "#ffffff" : "#f9fafb"};">
-                <td style="padding:13px;border-bottom:1px solid #e5e7eb;vertical-align:top;font-weight:600;color:#111827;">
+                <td style="box-sizing:border-box;padding:13px;border-bottom:1px solid #e5e7eb;vertical-align:top;font-weight:600;color:#111827;">
                   ${escapeHtml(formatEmployeeChangeName(record))}
                   ${
                     !showPersonalNumberColumn && record.personalNumber
@@ -1205,27 +1185,34 @@ function renderEmployeeChangeTable(
                   }
                   ${
                     assignmentSummary && assignmentSummary !== "—"
-                      ? `<div style="margin-top:3px;font-size:11px;font-weight:400;color:#6b7280;">${escapeHtml(assignmentSummary)}</div>`
+                      ? `<div style="margin-top:6px;background-color:#f3f4f6;border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;font-size:11px;font-weight:400;color:#4b5563;">${escapeHtml(assignmentSummary)}</div>`
                       : ""
                   }
                 </td>
                 ${
                   showPersonalNumberColumn
-                    ? `<td style="padding:13px;border-bottom:1px solid #e5e7eb;vertical-align:top;white-space:nowrap;color:#111827;">${escapeHtml(record.personalNumber || "—")}</td>`
+                    ? `<td style="box-sizing:border-box;padding:13px;border-bottom:1px solid #e5e7eb;vertical-align:top;white-space:nowrap;color:#111827;">${escapeHtml(record.personalNumber || "—")}</td>`
                     : ""
                 }
-                <td style="padding:13px;border-bottom:1px solid #e5e7eb;vertical-align:top;white-space:nowrap;color:#111827;">
+                <td style="box-sizing:border-box;padding:13px;border-bottom:1px solid #e5e7eb;vertical-align:top;white-space:nowrap;color:#111827;">
                   ${escapeHtml(positionNum || "—")}
                 </td>
-                <td style="padding:13px;border-bottom:1px solid #e5e7eb;vertical-align:top;color:#111827;">
-                  ${escapeHtml(employeeChangeTypeLabel(record.type))}
+                <td style="box-sizing:border-box;padding:13px;border-bottom:1px solid #e5e7eb;vertical-align:top;color:#111827;">
+                  ${escapeHtml(getEmployeeChangeDetailLabel(record))}
                 </td>
-                <td style="padding:13px;border-bottom:1px solid #e5e7eb;vertical-align:top;">
+                <td style="box-sizing:border-box;padding:13px;border-bottom:1px solid #e5e7eb;vertical-align:top;">
                   ${renderEmployeeChangeBubbles(record)}
                 </td>
-                <td style="padding:13px;border-bottom:1px solid #e5e7eb;vertical-align:top;white-space:nowrap;color:#111827;">
+                <td style="box-sizing:border-box;padding:13px;border-bottom:1px solid #e5e7eb;vertical-align:top;white-space:nowrap;color:#111827;">
                   ${escapeHtml(fmtDate(record.effectiveDate))}
                 </td>
+                ${
+                  hasAnyCalendarEvent
+                    ? `<td style="box-sizing:border-box;padding:13px;border-bottom:1px solid #e5e7eb;vertical-align:top;">
+                        ${calendarEvent ? buildCalendarLinksHtml(calendarEvent) : `<span style="color:#9ca3af;">—</span>`}
+                      </td>`
+                    : ""
+                }
               </tr>
             `
           })
@@ -1265,6 +1252,18 @@ export async function renderEmployeeChangeReportHtml(args: {
         body { margin: 0; padding: 0; }
         table { border-collapse: collapse; }
         ${EMAIL_GLOBAL_FONT_STYLE}
+        @media (max-width: 640px) {
+          .eml-change-table {
+            table-layout: auto !important;
+            width: auto !important;
+            min-width: 100% !important;
+          }
+          .eml-change-table th, .eml-change-table td {
+            white-space: normal !important;
+            word-break: normal !important;
+            overflow-wrap: normal !important;
+          }
+        }
       </style>
     </head>
 
@@ -1574,6 +1573,18 @@ export async function renderCombinedReportHtml(args: {
         }
         [data-ogsc] .eml-intro-pad, [data-ogsc] .eml-intro-pad p {
           color: #ffffff !important;
+        }
+        @media (max-width: 640px) {
+          .eml-change-table {
+            table-layout: auto !important;
+            width: auto !important;
+            min-width: 100% !important;
+          }
+          .eml-change-table th, .eml-change-table td {
+            white-space: normal !important;
+            word-break: normal !important;
+            overflow-wrap: normal !important;
+          }
         }
       </style>
     </head>

@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useTransition } from "react"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { CheckCircle, XCircle } from "lucide-react"
+import { CheckCircle, Loader2, XCircle } from "lucide-react"
 import { useFieldArray, useForm } from "react-hook-form"
 
 import { useToast } from "@/hooks/use-toast"
@@ -185,7 +185,7 @@ export function ExperienceForm(props: ExperienceFormProps) {
           <div className="flex flex-col items-center gap-3 text-center">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src="/assets/images/Logo_Praha%206.svg"
+              src="/assets/images/logo-praha6.svg"
               alt="Městská část Praha 6"
               width={100}
               height={113}
@@ -342,7 +342,14 @@ export function ExperienceForm(props: ExperienceFormProps) {
         </section>
 
         <div className="flex justify-end gap-2">
-          <Button type="submit" disabled={isPending || isDisabled}>
+          <Button
+            type="submit"
+            disabled={isPending || isDisabled}
+            className="bg-[#00847C] text-white hover:bg-[#0B6D73]"
+          >
+            {status === "loading" && (
+              <Loader2 className="mr-2 size-4 animate-spin" />
+            )}
             {status === "loading"
               ? props.mode === "public"
                 ? "Odesílám…"

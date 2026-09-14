@@ -181,9 +181,11 @@ export function isEmployeePositionChange(type: string) {
 }
 
 export function getEmployeeChangeTypeLabel(type: string) {
-  if (type === "NAME") return "Změna jména / titulu"
-  if (type === "POSITION") return "Změna pozice / odboru"
-  if (type === "NAME_AND_POSITION") return "Změna jména i pozice"
+  if (type === "NAME") return "Změna jména/příjmení/titulu"
+  if (type === "POSITION") return "Změna pozice/odboru"
+  if (type === "NAME_AND_POSITION") {
+    return "Změna jména/příjmení/titulu a změna pozice/odboru"
+  }
   if (type === "MATERNITY_LEAVE") return "Mateřská dovolená"
 
   return "Změna"
@@ -193,7 +195,7 @@ function hasChanged(oldValue?: string | null, newValue?: string | null) {
   return (oldValue ?? null) !== (newValue ?? null)
 }
 
-function buildChangedFields(change: MinimalEmployeeChangeLink) {
+export function buildChangedFields(change: MinimalEmployeeChangeLink) {
   const fields: string[] = []
 
   if (isEmployeeNameChange(change.type)) {
@@ -257,6 +259,104 @@ function buildChangedFields(change: MinimalEmployeeChangeLink) {
   }
 
   return fields
+}
+
+const CHANGE_FIELD_LABELS_CZ: Record<string, string> = {
+  name: "jména",
+  surname: "příjmení",
+  titleBefore: "titulu",
+  titleAfter: "titulu",
+  positionName: "pozice",
+  positionNum: "pozice",
+  department: "odboru",
+  unitName: "oddělení",
+}
+
+const CHANGE_FIELD_ORDER = [
+  "name",
+  "surname",
+  "titleBefore",
+  "titleAfter",
+  "positionName",
+  "positionNum",
+  "department",
+  "unitName",
+]
+
+function joinCzechList(items: string[]): string {
+  if (items.length === 0) return ""
+  if (items.length === 1) return items[0]
+  return `${items.slice(0, -1).join(", ")} a ${items[items.length - 1]}`
+}
+
+function buildFieldsLabel(fields: string[]): string | null {
+  const seen = new Set<string>()
+  const labels: string[] = []
+
+  for (const field of CHANGE_FIELD_ORDER) {
+    if (!fields.includes(field)) continue
+    const label = CHANGE_FIELD_LABELS_CZ[field]
+    if (!label || seen.has(label)) continue
+    seen.add(label)
+    labels.push(label)
+  }
+
+  if (!labels.length) return null
+
+  return `Změna ${joinCzechList(labels)}`
+}
+
+/**
+ * Builds a label that reflects which fields actually changed (e.g. "Změna
+ * příjmení a titulu", "Změna pozice a odboru") instead of the generic
+ * category label. Falls back to `getEmployeeChangeTypeLabel` when no
+ * old/new detail is available (e.g. legacy records).
+ */
+export function getEmployeeChangeDetailLabel(
+  change: MinimalEmployeeChangeLink
+): string {
+  if (change.type === "MATERNITY_LEAVE") return "Mateřská dovolená"
+
+  return (
+    buildFieldsLabel(buildChangedFields(change)) ??
+    getEmployeeChangeTypeLabel(change.type)
+  )
+}
+
+const NAME_DETAIL_FIELDS = ["name", "surname", "titleBefore", "titleAfter"]
+const POSITION_DETAIL_FIELDS = [
+  "positionName",
+  "positionNum",
+  "department",
+  "unitName",
+]
+
+/**
+ * Same idea as `getEmployeeChangeDetailLabel`, but scoped to only the
+ * name-related fields (jméno/příjmení/titul) - returns null when none of
+ * them actually changed.
+ */
+export function getEmployeeChangeNameDetailLabel(
+  change: MinimalEmployeeChangeLink
+): string | null {
+  const fields = buildChangedFields(change).filter((field) =>
+    NAME_DETAIL_FIELDS.includes(field)
+  )
+  return buildFieldsLabel(fields)
+}
+
+/**
+ * Same idea as `getEmployeeChangeDetailLabel`, but scoped to only the
+ * position-related fields (pozice/odbor/oddělení) - returns null when none
+ * of them actually changed.
+ */
+export function getEmployeeChangePositionDetailLabel(
+  change: MinimalEmployeeChangeLink
+): string | null {
+  const fields = buildChangedFields(change).filter((field) =>
+    POSITION_DETAIL_FIELDS.includes(field)
+  )
+  return buildFieldsLabel(fields)
 }
 
 function buildChangeSummary(change: MinimalEmployeeChangeLink) {
@@ -430,10 +530,10 @@ export function buildLinkedOffboardingInfo(params: {
 
     const description =
       probationStopDecision === "STOP"
-        ? `Zaměstnanec má ${exitKind} odchod ${formatDateCz(exitDate)} v průběhu zkušební doby. Personální oddělení potvrdilo zastavení hodnocení zkušební doby, formulář ani e-maily se dále neposílají.`
+        ? `Zaměstnanec má ${exitKind} odchod ${formatDateCz(exitDate)} v průběhu zkušební doby. Personální oddělení potvrdilo zastavení vyhodnocení zkušební doby, formulář ani e-maily se dále neposílají.`
         : probationStopDecision === "KEEP"
-          ? `Zaměstnanec má ${exitKind} odchod ${formatDateCz(exitDate)} v průběhu zkušební doby. Personální oddělení se při zakládání odchodu rozhodlo hodnocení zkušební doby nezastavovat, formulář i e-maily běží dál.`
-          : `Zaměstnanec má ${exitKind} odchod ${formatDateCz(exitDate)} v průběhu zkušební doby. Na záznamu odchodu čeká rozhodnutí Personálního oddělení, zda hodnocení zkušební doby zastavit.`
+          ? `Zaměstnanec má ${exitKind} odchod ${formatDateCz(exitDate)} v průběhu zkušební doby. Personální oddělení se při zakládání odchodu rozhodlo vyhodnocení zkušební doby nezastavovat, formulář i e-maily běží dál.`
+          : `Zaměstnanec má ${exitKind} odchod ${formatDateCz(exitDate)} v průběhu zkušební doby. Na záznamu odchodu čeká rozhodnutí Personálního oddělení, zda vyhodnocení zkušební doby zastavit.`
 
     return {
       id: offboarding.id,

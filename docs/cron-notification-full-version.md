@@ -1063,4 +1063,4 @@ Cron pro blížící se konec pracovního poměru automaticky hlídá plánovan�
 
 Mail worker následně bere připravené zprávy z e-mailové fronty a fyzicky je odesílá přes Resend.
 
-Finálně vyplněné hodnocení zkušební doby se řeší samostatně: při finálním uložení se vygeneruje PDF a odešle se HR.
+Finálně vyplněné vyhodnocení zkušební doby se řeší samostatně: při finálním uložení se vygeneruje PDF a odešle se HR.

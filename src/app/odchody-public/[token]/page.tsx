@@ -6,6 +6,8 @@ import {
   isPraha6OrKitt6,
 } from "@/lib/exit-checklist"
 
+import { PublicLinkInvalid } from "@/components/common/public-link-invalid"
+
 import { PublicExitChecklistShell } from "./public-exit-checklist-shell"
 
 type Props = {
@@ -31,14 +33,7 @@ export default async function PublicExitChecklistPage({ params }: Props) {
 
   if (!checklist) {
     return (
-      <div className="flex min-h-screen items-center justify-center px-4 text-center">
-        <div>
-          <h1 className="text-2xl font-bold">Odkaz není platný</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Výstupní list nebyl nalezen nebo už není dostupný.
-          </p>
-        </div>
-      </div>
+      <PublicLinkInvalid description="Výstupní list nebyl nalezen nebo už není dostupný." />
     )
   }
 

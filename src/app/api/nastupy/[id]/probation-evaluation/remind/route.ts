@@ -149,7 +149,7 @@ export async function POST(
         byEmail: authResult.user.email ?? null,
         message: revisionOpen
           ? `Připomínka k úpravě vyhodnocení zkušební doby byla ručně odeslána na ${supervisorEmail}.`
-          : `Připomínka k hodnocení zkušební doby byla ručně odeslána na ${supervisorEmail}.`,
+          : `Připomínka k vyhodnocení zkušební doby byla ručně odeslána na ${supervisorEmail}.`,
         meta: {
           source: "manual",
           directSend: true,

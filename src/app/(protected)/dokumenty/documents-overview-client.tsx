@@ -169,7 +169,7 @@ function PersonRowCard({
 
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="truncate font-medium">{row.fullName}</span>
+                <span className="break-words font-medium">{row.fullName}</span>
                 {status === "cancelled" && (
                   <XCircle className="size-3.5 shrink-0 text-gray-500" />
                 )}
@@ -498,8 +498,8 @@ export function DocumentsOverviewClient() {
       <div className="min-w-0">
         <h1 className="text-3xl font-bold tracking-tight">Dokumenty</h1>
         <p className="text-muted-foreground">
-          Přehled stavu vyplnění nástupních dokumentů, hodnocení zkušební doby a
-          výstupních listů napříč všemi záznamy.
+          Přehled stavu vyplnění nástupních dokumentů, vyhodnocení zkušební doby
+          a výstupních listů napříč všemi záznamy.
         </p>
       </div>
 

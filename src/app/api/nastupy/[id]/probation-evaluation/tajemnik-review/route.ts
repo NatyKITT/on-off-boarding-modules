@@ -7,11 +7,17 @@ import {
   getJsonRecord,
   getNumericId,
   getOrEnsureProbationDetail,
+  getProbationDetailByOnboardingId,
+  getTajemnikReview,
+  isProbationRevisionOpen,
   jsonError,
   requireInternalProbationManage,
+  resolveTajemnikContext,
+  sendTajemnikReviewRequestEmail,
 } from "@/lib/probation-evaluation-api"
 import {
   addProbationEvent,
+  getAppBaseUrlFromRequest,
   getUserKey,
   getUserLabel,
 } from "@/lib/probation-evaluation-request"
@@ -20,6 +26,108 @@ export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
 export const revalidate = 0
+
+export async function POST(
+  req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const authResult = await requireInternalProbationManage()
+  if (!authResult.ok) return authResult.response
+
+  const onboardingId = getNumericId(params.id)
+  if (!onboardingId) return jsonError("Neplatné ID nástupu.", 400)
+
+  try {
+    const existing = await getOrEnsureProbationDetail({
+      onboardingId,
+      user: authResult.user,
+    })
+
+    if (!existing || existing.onboarding.deletedAt) {
+      return jsonError("Nástup nebyl nalezen.", 404)
+    }
+
+    if (existing.status !== "COMPLETED") {
+      return jsonError(
+        "Hodnocení vedoucího zatím není vyplněné, tajemníkovi zatím nelze poslat žádost o vyjádření.",
+        409
+      )
+    }
+
+    if (isProbationRevisionOpen(existing.data)) {
+      return jsonError(
+        "Formulář je otevřený k úpravě. Žádost tajemníkovi lze poslat až po uložení nové verze.",
+        409
+      )
+    }
+
+    if (!existing.tajemnikRequired) {
+      return jsonError(
+        "Tajemník je v tomto případě totožný s vedoucím, samostatné vyjádření není potřeba.",
+        409
+      )
+    }
+
+    const existingReview = getTajemnikReview(
+      getJsonRecord(existing.data).tajemnikReview
+    )
+
+    if (existingReview.signedAt) {
+      return jsonError("Tajemník už své vyjádření odeslal.", 409)
+    }
+
+    const tajemnikContext = await resolveTajemnikContext(existing)
+
+    if (!tajemnikContext.tajemnikEmail) {
+      return jsonError(
+        "Nepodařilo se dohledat e-mail tajemníka. Zkontrolujte nastavení v administraci.",
+        409
+      )
+    }
+
+    await sendTajemnikReviewRequestEmail({
+      request: existing,
+      user: authResult.user,
+      tajemnikEmail: tajemnikContext.tajemnikEmail,
+      tajemnikName: tajemnikContext.tajemnikName,
+      baseUrl: getAppBaseUrlFromRequest(req),
+    })
+
+    const updated = await getProbationDetailByOnboardingId(onboardingId)
+
+    if (!updated) {
+      return jsonError(
+        "Žádost byla odeslána, ale nepodařilo se znovu načíst stav formuláře.",
+        500
+      )
+    }
+
+    if (updated.events?.[0]?.action === "EMAIL_FAILED") {
+      return jsonError(
+        "Odeslání e-mailu tajemníkovi se nezdařilo. Zkuste to prosím znovu.",
+        502
+      )
+    }
+
+    return NextResponse.json(
+      await buildResolvedProbationApiResponse({
+        request: updated,
+        currentUser: authResult.user,
+      })
+    )
+  } catch (error) {
+    console.error("[PROBATION TAJEMNIK INVITE]", error)
+
+    return NextResponse.json(
+      {
+        status: "error",
+        message: "Žádost o vyjádření se tajemníkovi nepodařilo odeslat.",
+        error: error instanceof Error ? error.message : String(error),
+      },
+      { status: 500 }
+    )
+  }
+}
 
 export async function DELETE(
   _req: NextRequest,

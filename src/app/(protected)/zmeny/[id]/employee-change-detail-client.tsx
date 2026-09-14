@@ -17,6 +17,7 @@ import {
 } from "lucide-react"
 
 import { useIsReadonly } from "@/hooks/use-current-role"
+import { getEmployeeChangeDetailLabel } from "@/lib/employment-linking"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -94,14 +95,6 @@ function fmtDate(value?: string | null) {
   return Number.isNaN(date.getTime())
     ? "–"
     : format(date, "d.M.yyyy", { locale: cs })
-}
-
-function typeLabel(type: ChangeData["type"]) {
-  if (type === "NAME") return "Změna jména / titulů"
-  if (type === "POSITION") return "Změna pozice / odboru"
-  if (type === "MATERNITY_LEAVE") return "Mateřská dovolená"
-
-  return "Změna jména i pozice"
 }
 
 function audienceLabel(audience: string | null) {
@@ -332,7 +325,9 @@ export function EmployeeChangeDetailClient({ data }: { data: ChangeData }) {
             <User className="mt-0.5 size-5 text-muted-foreground" />
             <div className="space-y-1 text-sm">
               <p className="font-medium">Typ změny</p>
-              <Badge variant="outline">{typeLabel(data.type)}</Badge>
+              <Badge variant="outline">
+                {getEmployeeChangeDetailLabel(data)}
+              </Badge>
             </div>
           </CardContent>
         </Card>

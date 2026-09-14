@@ -4,6 +4,7 @@ import { z } from "zod"
 import type { ExitChecklistData } from "@/types/exit-checklist"
 
 import { prisma } from "@/lib/db"
+import { getEmployeeChangeDetailLabel } from "@/lib/employment-linking"
 
 import type {
   ChangeReportRow,
@@ -75,14 +76,6 @@ function latestSentAtByRecipient(
   }
 
   return map
-}
-
-function changeTypeLabel(type: string): string {
-  if (type === "NAME") return "Změna jména"
-  if (type === "POSITION") return "Změna pozice"
-  if (type === "NAME_AND_POSITION") return "Změna jména i pozice"
-  if (type === "MATERNITY_LEAVE") return "Mateřská dovolená"
-  return "Zaměstnanecká změna"
 }
 
 function mostRecentSignatureAt(
@@ -327,7 +320,7 @@ export async function getChangeReportRows(
         record.titleAfter,
       ]),
       personalNumber: record.personalNumber,
-      changeTypeLabel: changeTypeLabel(record.type),
+      changeTypeLabel: getEmployeeChangeDetailLabel(record),
       effectiveDate: isoOrNull(record.effectiveDate),
       oldValues,
       newValues,

@@ -116,13 +116,10 @@ export function buildIcsDownloadLink(event: CalendarEvent): string {
 
 export function buildCalendarLinksHtml(event: CalendarEvent): string {
   const googleUrl = buildGoogleCalendarLink(event)
-  const icsUrl = buildIcsDownloadLink(event)
 
   return (
-    `<span style="white-space:nowrap;font-size:11px;">` +
-    `<a href="${googleUrl}" target="_blank" rel="noopener" style="color:#00847C;text-decoration:none;">📅 Google</a>` +
-    `&nbsp;·&nbsp;` +
-    `<a href="${icsUrl}" target="_blank" rel="noopener" style="color:#00847C;text-decoration:none;">.ics (Outlook/Apple)</a>` +
+    `<span style="font-size:11px;">` +
+    `<a href="${googleUrl}" target="_blank" rel="noopener" style="color:#00847C;text-decoration:none;">📅 Přidat do kalendáře</a>` +
     `</span>`
   )
 }

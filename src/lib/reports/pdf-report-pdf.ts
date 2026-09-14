@@ -102,9 +102,14 @@ function positionOrgCell(row: OnboardingReportRow | OffboardingReportRow) {
     .join("\n")
 }
 
-function changeValuesCell(values: ChangeValues): string {
+function changeValuesCell(
+  values: ChangeValues,
+  options?: { includeFullName?: boolean }
+): string {
+  const includeFullName = options?.includeFullName ?? true
+
   const lines = [
-    values.fullName,
+    includeFullName ? values.fullName : null,
     values.positionNum,
     values.positionName,
     values.department,
@@ -802,23 +807,24 @@ const CHANGE_COLUMNS: ColumnDef<ChangeReportRow>[] = [
   },
   {
     label: "Aktuální zařazení",
-    weight: 22,
+    weight: 21,
     wrap: true,
-    cell: (row) => changeValuesCell(row.oldValues),
+    cell: (row) => changeValuesCell(row.oldValues, { includeFullName: false }),
   },
   {
     label: "Typ změny",
-    weight: 14,
+    weight: 20,
+    wrap: true,
     cell: (row) => row.changeTypeLabel,
   },
   {
     label: "Účinnost změny",
-    weight: 12,
+    weight: 10,
     cell: (row) => formatDate(row.effectiveDate),
   },
   {
     label: "Nová hodnota",
-    weight: 22,
+    weight: 21,
     wrap: true,
     cell: (row) =>
       row.changeTypeLabel === "Mateřská dovolená"
@@ -827,7 +833,7 @@ const CHANGE_COLUMNS: ColumnDef<ChangeReportRow>[] = [
   },
   {
     label: "Odeslání reportu",
-    weight: 13,
+    weight: 11,
     cell: (row) =>
       row.emailSentAt ? `Ano (${formatDate(row.emailSentAt)})` : "Ne",
   },

@@ -1,5 +1,11 @@
 import { z } from "zod"
 
+import {
+  CZECH_CITIZENSHIP_VALUE,
+  OTHER_CITIZENSHIP_VALUE,
+} from "@/types/nationality-options"
+import { DEFAULT_PHONE_COUNTRY_CODE } from "@/types/phone-country-codes"
+
 const normalizeString = (v: unknown) => (typeof v === "string" ? v.trim() : v)
 
 const optionalTrimmedString = z
@@ -140,15 +146,13 @@ const refineDateRange = (
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: fromPath,
-      message:
-        "Datum \u201eOd\u201c nemůže být později než datum \u201eDo\u201c.",
+      message: "Datum „Od“ nemůže být později než datum „Do“.",
     })
 
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: toPath,
-      message:
-        "Datum \u201eDo\u201c nemůže být dříve než datum \u201eOd\u201c.",
+      message: "Datum „Do“ nemůže být dříve než datum „Od“.",
     })
   }
 }
@@ -161,23 +165,28 @@ export const experienceTypeEnum = z.enum([
   "OTHER",
 ])
 
+export const workloadTypeEnum = z.enum(["FULL", "HALF", "OTHER"])
+
 const experienceEntrySchema = z
   .object({
     employer: optionalTrimmedString,
+    jobPositionName: optionalTrimmedString,
     jobType: optionalTrimmedString,
     employmentType: experienceTypeEnum.optional(),
     from: optionalDateString,
     to: optionalDateString,
-    ongoing: z.boolean().optional(),
+    workloadType: workloadTypeEnum.optional(),
+    workloadOther: optionalTrimmedString,
   })
   .superRefine((val, ctx) => {
     const any =
       !!val.employer ||
+      !!val.jobPositionName ||
       !!val.jobType ||
       !!val.employmentType ||
       !!val.from ||
       !!val.to ||
-      !!val.ongoing
+      !!val.workloadType
     if (!any) return
 
     if (!val.employer) {
@@ -185,6 +194,13 @@ const experienceEntrySchema = z
         code: z.ZodIssueCode.custom,
         path: ["employer"],
         message: "Uveďte zaměstnavatele.",
+      })
+    }
+    if (!val.jobPositionName) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["jobPositionName"],
+        message: "Uveďte název pracovní pozice.",
       })
     }
     if (!val.jobType) {
@@ -205,13 +221,32 @@ const experienceEntrySchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["from"],
-        message: "Uveďte datum \u201eOd\u201c.",
+        message: "Uveďte datum „Od“.",
+      })
+    }
+    if (!val.to) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["to"],
+        message: "Uveďte datum „Do“.",
+      })
+    }
+    if (!val.workloadType) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["workloadType"],
+        message: "Vyberte rozsah pracovního úvazku.",
+      })
+    }
+    if (val.workloadType === "OTHER" && !val.workloadOther) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["workloadOther"],
+        message: "Uveďte rozsah pracovního úvazku.",
       })
     }
 
-    if (!val.ongoing) {
-      refineDateRange({ from: val.from, to: val.to }, ctx, ["from"], ["to"])
-    }
+    refineDateRange({ from: val.from, to: val.to }, ctx, ["from"], ["to"])
   })
 
 const militaryEntrySchema = z
@@ -219,10 +254,9 @@ const militaryEntrySchema = z
     service: z.enum(["BASIC", "ALTERNATIVE", "CIVIL"]).optional(),
     from: optionalDateString,
     to: optionalDateString,
-    ongoing: z.boolean().optional(),
   })
   .superRefine((val, ctx) => {
-    const any = !!val.service || !!val.from || !!val.to || !!val.ongoing
+    const any = !!val.service || !!val.from || !!val.to
     if (!any) return
 
     if (!val.service) {
@@ -236,20 +270,18 @@ const militaryEntrySchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["from"],
-        message: "Uveďte datum \u201eOd\u201c.",
+        message: "Uveďte datum „Od“.",
       })
     }
-    if (!val.to && !val.ongoing) {
+    if (!val.to) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["to"],
-        message: "Uveďte datum „Do“, nebo zaškrtněte „Stále trvá“.",
+        message: "Uveďte datum „Do“.",
       })
     }
 
-    if (!val.ongoing) {
-      refineDateRange(val, ctx)
-    }
+    refineDateRange(val, ctx)
   })
 
 const childCareSchema = z
@@ -282,14 +314,14 @@ const childCareSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["from"],
-        message: "Uveďte datum \u201eOd\u201c.",
+        message: "Uveďte datum „Od“.",
       })
     }
     if (!val.to) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["to"],
-        message: "Uveďte datum \u201eDo\u201c.",
+        message: "Uveďte datum „Do“.",
       })
     }
 
@@ -326,14 +358,14 @@ const closeRelativeCareSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["from"],
-        message: "Uveďte datum \u201eOd\u201c.",
+        message: "Uveďte datum „Od“.",
       })
     }
     if (!val.to) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["to"],
-        message: "Uveďte datum \u201eDo\u201c.",
+        message: "Uveďte datum „Do“.",
       })
     }
 
@@ -369,14 +401,14 @@ const doctoralStudySchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["from"],
-        message: "Uveďte datum \u201eOd\u201c.",
+        message: "Uveďte datum „Od“.",
       })
     }
     if (!val.to) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["to"],
-        message: "Uveďte datum \u201eDo\u201c.",
+        message: "Uveďte datum „Do“.",
       })
     }
 
@@ -403,14 +435,14 @@ const unpaidLeaveEntrySchema = z
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["from"],
-          message: "Uveďte datum \u201eOd\u201c.",
+          message: "Uveďte datum „Od“.",
         })
       }
       if (!val.to) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["to"],
-          message: "Uveďte datum \u201eDo\u201c.",
+          message: "Uveďte datum „Do“.",
         })
       }
     }
@@ -424,17 +456,40 @@ export const affidavitSchema = z
 
     experience: z.array(experienceEntrySchema).default([]),
 
+    hasMilitaryService: requiredBoolean(
+      "Vyberte prosím Ano/Ne (vojenská nebo civilní služba)."
+    ),
     militaryService: z.array(militaryEntrySchema).default([]),
 
+    hasUnpaidLeave: requiredBoolean(
+      "Vyberte prosím Ano/Ne (pracovní volno bez náhrady platu)."
+    ),
+    unpaidLeave: z.array(unpaidLeaveEntrySchema).default([]),
+
+    hasMaternityParental: requiredBoolean(
+      "Vyberte prosím Ano/Ne (mateřská nebo rodičovská dovolená)."
+    ),
     maternityParental: z.array(childCareSchema).default([]),
+
+    hasContinuousCare: requiredBoolean(
+      "Vyberte prosím Ano/Ne (trvalá péče o dítě)."
+    ),
     continuousCare: z.array(childCareSchema).default([]),
+
+    hasDisabledChildCare: requiredBoolean(
+      "Vyberte prosím Ano/Ne (péče o zdravotně postižené dítě)."
+    ),
     disabledChildCare: z.array(childCareSchema).default([]),
 
+    hasCloseRelativeCare: requiredBoolean(
+      "Vyberte prosím Ano/Ne (péče o osobu blízkou)."
+    ),
     closeRelativeCare: z.array(closeRelativeCareSchema).default([]),
 
+    hasDoctoralStudy: requiredBoolean(
+      "Vyberte prosím Ano/Ne (doktorské studium)."
+    ),
     doctoralStudy: z.array(doctoralStudySchema).default([]),
-
-    unpaidLeave: z.array(unpaidLeaveEntrySchema).default([]),
 
     isTruthful: requiredBoolean("Potvrďte prosím pravdivost údajů.").refine(
       (val) => val,
@@ -442,18 +497,94 @@ export const affidavitSchema = z
     ),
   })
   .superRefine((data, ctx) => {
-    if (data.noExperience) return
+    if (!data.noExperience) {
+      const hasAnyFilled = data.experience.some(
+        (e) => !!e.employer || !!e.jobPositionName || !!e.jobType || !!e.from
+      )
+      if (!hasAnyFilled) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["experience"],
+          message:
+            "Vyplňte alespoň jeden záznam praxe (zaměstnavatel, název pozice, druh práce a datum Od), nebo zaškrtněte „Nemám žádnou praxi“.",
+        })
+      }
+    }
 
-    const hasAnyFilled = data.experience.some(
-      (e) => !!e.employer || !!e.jobType || !!e.from
-    )
-    if (!hasAnyFilled) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["experience"],
-        message:
-          "Vyplňte alespoň jeden záznam praxe (zaměstnavatel, druh práce a datum Od), nebo zaškrtněte \u201eNemám žádnou praxi\u201c.",
-      })
+    if (data.hasMilitaryService) {
+      const any = data.militaryService.some(
+        (m) => !!m.service || !!m.from || !!m.to
+      )
+      if (!any) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["militaryService"],
+          message: "Vyplňte alespoň jeden záznam, nebo zvolte „Ne“.",
+        })
+      }
+    }
+
+    if (data.hasUnpaidLeave) {
+      const any = data.unpaidLeave.some((u) => !!u.reason || !!u.from || !!u.to)
+      if (!any) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["unpaidLeave"],
+          message: "Vyplňte alespoň jeden záznam, nebo zvolte „Ne“.",
+        })
+      }
+    }
+
+    const checkChildCare = (
+      list: z.infer<typeof childCareSchema>[],
+      path: string
+    ) => {
+      const any = list.some(
+        (c) => !!c.childName || !!c.childBirthDate || !!c.from || !!c.to
+      )
+      if (!any) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [path],
+          message: "Vyplňte alespoň jeden záznam, nebo zvolte „Ne“.",
+        })
+      }
+    }
+
+    if (data.hasMaternityParental) {
+      checkChildCare(data.maternityParental, "maternityParental")
+    }
+    if (data.hasContinuousCare) {
+      checkChildCare(data.continuousCare, "continuousCare")
+    }
+    if (data.hasDisabledChildCare) {
+      checkChildCare(data.disabledChildCare, "disabledChildCare")
+    }
+
+    if (data.hasCloseRelativeCare) {
+      const any = data.closeRelativeCare.some(
+        (c) => !!c.personName || !!c.dependencyLevel || !!c.from || !!c.to
+      )
+      if (!any) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["closeRelativeCare"],
+          message: "Vyplňte alespoň jeden záznam, nebo zvolte „Ne“.",
+        })
+      }
+    }
+
+    if (data.hasDoctoralStudy) {
+      const any = data.doctoralStudy.some(
+        (d) => !!d.schoolName || !!d.studyProgram || !!d.from || !!d.to
+      )
+      if (!any) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["doctoralStudy"],
+          message: "Vyplňte alespoň jeden záznam, nebo zvolte „Ne“.",
+        })
+      }
     }
   })
 
@@ -495,38 +626,105 @@ export const payrollChildSchema = z
     }
   })
 
-export const payrollInfoSchema = z.object({
-  fullName: requiredTrimmedString("Jméno a příjmení je povinné."),
-  maidenName: optionalTrimmedString,
-  birthPlace: requiredTrimmedString("Místo narození je povinné."),
-  birthNumber: optionalTrimmedString,
-  birthDay: requiredTrimmedString("Den narození je povinný."),
-  birthMonth: requiredTrimmedString("Měsíc narození je povinný."),
-  birthYear: requiredTrimmedString("Rok narození je povinný."),
-  maritalStatus: maritalStatusEnum,
+export const payrollInfoSchema = z
+  .object({
+    firstName: requiredTrimmedString("Křestní jméno je povinné."),
+    lastName: requiredTrimmedString("Příjmení je povinné."),
 
-  permanentStreet: requiredTrimmedString("Ulice je povinná."),
-  permanentHouseNumber: requiredTrimmedString(
-    "Číslo popisné / orientační je povinné."
-  ),
-  permanentCity: requiredTrimmedString("Obec je povinná."),
-  permanentPostcode: requiredTrimmedString("PSČ je povinné."),
+    birthSurnameDiffers: requiredBoolean(
+      "Vyberte prosím Ano/Ne (rodné příjmení)."
+    ),
+    birthSurname: optionalTrimmedString,
 
-  children: z.array(payrollChildSchema).default([]),
+    titleBefore: optionalTrimmedString,
+    titleAfter: optionalTrimmedString,
+    academicDegrees: optionalTrimmedString,
 
-  healthInsuranceCompany: requiredTrimmedString(
-    "Název zdravotní pojišťovny je povinný."
-  ),
+    maritalStatus: maritalStatusEnum,
 
-  bankAccountNumber: requiredTrimmedString("Číslo účtu je povinné."),
-  bankName: requiredTrimmedString("Název banky je povinný."),
+    birthDate: dateString,
+    birthNumber: optionalTrimmedString,
+    birthPlace: requiredTrimmedString("Místo narození je povinné."),
+    birthDistrict: requiredTrimmedString("Okres narození je povinný."),
+    birthState: requiredTrimmedString("Stát narození je povinný."),
 
-  confirmTruthfulness: requiredBoolean("Potvrďte prosím prohlášení.").refine(
-    (val) => val,
-    "Pro odeslání musíte potvrdit prohlášení."
-  ),
-  signatureDate: requiredTrimmedString("Datum odeslání je povinné."),
-})
+    citizenship: requiredTrimmedString("Státní občanství je povinné."),
+    citizenshipOther: optionalTrimmedString,
+
+    permanentStreet: requiredTrimmedString("Ulice je povinná."),
+    permanentHouseNumber: requiredTrimmedString(
+      "Číslo popisné / orientační je povinné."
+    ),
+    permanentCity: requiredTrimmedString("Obec je povinná."),
+    permanentPostcode: requiredTrimmedString("PSČ je povinné."),
+
+    hasChildren: requiredBoolean("Vyberte prosím Ano/Ne (děti)."),
+    children: z.array(payrollChildSchema).default([]),
+
+    healthInsuranceCompany: requiredTrimmedString(
+      "Vyberte zdravotní pojišťovnu."
+    ),
+    healthInsuranceCompanyOther: optionalTrimmedString,
+
+    bankName: requiredTrimmedString("Vyberte banku."),
+    bankNameOther: optionalTrimmedString,
+    bankAccountNumber: requiredTrimmedString("Číslo účtu je povinné."),
+
+    confirmTruthfulness: requiredBoolean("Potvrďte prosím prohlášení.").refine(
+      (val) => val,
+      "Pro odeslání musíte potvrdit prohlášení."
+    ),
+    signatureDate: requiredTrimmedString("Datum odeslání je povinné."),
+  })
+  .superRefine((val, ctx) => {
+    if (val.birthSurnameDiffers === true && !val.birthSurname) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["birthSurname"],
+        message: "Uveďte rodné příjmení.",
+      })
+    }
+
+    if (val.citizenship === OTHER_CITIZENSHIP_VALUE && !val.citizenshipOther) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["citizenshipOther"],
+        message: "Vypište státní občanství.",
+      })
+    }
+
+    if (
+      val.healthInsuranceCompany === "OTHER" &&
+      !val.healthInsuranceCompanyOther
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["healthInsuranceCompanyOther"],
+        message: "Vypište název zdravotní pojišťovny.",
+      })
+    }
+
+    if (val.bankName === "OTHER" && !val.bankNameOther) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["bankNameOther"],
+        message: "Vypište název banky.",
+      })
+    }
+
+    if (val.hasChildren) {
+      const hasAny = val.children.some(
+        (c) => !!c.childName || !!c.childBirthDate
+      )
+      if (!hasAny) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["children"],
+          message: "Uveďte alespoň jedno dítě, nebo zvolte „Ne“.",
+        })
+      }
+    }
+  })
 
 export type PayrollInfoSchema = z.infer<typeof payrollInfoSchema>
 
@@ -561,6 +759,13 @@ export const educationEntrySchema = z.object({
   ),
   graduationYear: optionalTrimmedString,
   examType: optionalTrimmedString,
+  degreeTitle: requiredTrimmedString(
+    "Uveďte dosažený titul, případně napište „žádný“."
+  ),
+  studyStatus: z.enum(["COMPLETED", "ONGOING"], {
+    required_error: "Vyberte stav studia.",
+    invalid_type_error: "Vyberte stav studia.",
+  }),
 })
 
 export const languageLevelEnum = z.enum([
@@ -573,12 +778,7 @@ export const languageLevelEnum = z.enum([
   "C2",
 ])
 
-const PRESET_LANGUAGES = [
-  "Angličtina",
-  "Němčina",
-  "Španělština",
-  "Francouzština",
-] as const
+const PRESET_LANGUAGES = ["Angličtina"] as const
 
 const isPresetLanguage = (name?: string) => {
   const n = (name ?? "").trim().toLowerCase()
@@ -616,29 +816,64 @@ const languageSchema = z
     }
   })
 
+export const DRIVER_LICENSE_CATEGORIES = [
+  "AM",
+  "A1",
+  "A2",
+  "A",
+  "B1",
+  "B",
+  "BE",
+  "C1",
+  "C1E",
+  "C",
+  "CE",
+  "D1",
+  "D1E",
+  "D",
+  "DE",
+  "T",
+] as const
+
+export const DRIVER_LICENSE_CATEGORY_LABELS: Record<
+  (typeof DRIVER_LICENSE_CATEGORIES)[number],
+  string
+> = {
+  AM: "malý motocykl, moped",
+  A1: "motocykl do 125 ccm",
+  A2: "motocykl středního výkonu",
+  A: "motocykl",
+  B1: "čtyřkolka",
+  B: "osobní automobil",
+  BE: "osobní automobil s přívěsem",
+  C1: "nákladní automobil do 7,5 t",
+  C1E: "nákladní automobil do 7,5 t s přívěsem",
+  C: "nákladní automobil",
+  CE: "nákladní automobil s přívěsem",
+  D1: "minibus",
+  D1E: "minibus s přívěsem",
+  D: "autobus",
+  DE: "autobus s přívěsem",
+  T: "traktor",
+}
+
+const certificateSpecialNameEntrySchema = z.object({
+  name: optionalTrimmedString,
+})
+
 export const personalQuestionnaireSchema = z
   .object({
-    lastName: requiredTrimmedString("Příjmení je povinné."),
     firstName: requiredTrimmedString("Křestní jméno je povinné."),
+    lastName: requiredTrimmedString("Příjmení je povinné."),
+
+    birthSurnameDiffers: requiredBoolean(
+      "Vyberte prosím Ano/Ne (rodné příjmení)."
+    ),
+    birthSurname: optionalTrimmedString,
+
     titleBefore: optionalTrimmedString,
     titleAfter: optionalTrimmedString,
     academicDegrees: optionalTrimmedString,
-    maidenName: optionalTrimmedString,
-    otherSurnames: optionalTrimmedString,
-
-    birthDate: dateString,
-    birthNumber: optionalTrimmedString,
-    birthPlace: requiredTrimmedString("Místo narození je povinné."),
-    birthDistrict: requiredTrimmedString("Okres narození je povinný."),
-    birthState: requiredTrimmedString("Stát narození je povinný."),
-
-    phone: optionalTrimmedString,
-    citizenship: requiredTrimmedString("Státní občanství je povinné."),
-
-    dataBoxId: optionalTrimmedString,
-    dataBoxDelivery: requiredBoolean(
-      "Vyberte prosím Ano/Ne (datová schránka)."
-    ),
 
     maritalStatus: z.enum(
       ["SINGLE", "MARRIED", "DIVORCED", "WIDOWED", "REGISTERED", "UNSTATED"],
@@ -648,9 +883,23 @@ export const personalQuestionnaireSchema = z
       }
     ),
 
+    birthDate: dateString,
+    birthNumber: optionalTrimmedString,
+    birthPlace: requiredTrimmedString("Místo narození je povinné."),
+    birthDistrict: requiredTrimmedString("Okres narození je povinný."),
+    birthState: requiredTrimmedString("Stát narození je povinný."),
+
+    citizenship: requiredTrimmedString("Státní občanství je povinné."),
+    citizenshipOther: optionalTrimmedString,
+
     foreignPermitFrom: optionalDateString,
-    foreignPermitTo: optionalDateString,
     foreignPermitAuthority: optionalTrimmedString,
+    foreignPermitTo: optionalDateString,
+
+    dataBoxId: optionalTrimmedString,
+    dataBoxDelivery: requiredBoolean(
+      "Vyberte prosím Ano/Ne (datová schránka)."
+    ),
 
     permanentStreet: requiredTrimmedString("Ulice je povinná."),
     permanentHouseNumber: requiredTrimmedString(
@@ -659,18 +908,25 @@ export const personalQuestionnaireSchema = z
     permanentCity: requiredTrimmedString("Obec je povinná."),
     permanentPostcode: requiredTrimmedString("PSČ je povinné."),
 
+    useDifferentMailingAddress: requiredBoolean(
+      "Vyberte prosím Ano/Ne (doručovací adresa)."
+    ),
     correspondenceStreet: optionalTrimmedString,
     correspondenceHouseNumber: optionalTrimmedString,
     correspondenceCity: optionalTrimmedString,
     correspondencePostcode: optionalTrimmedString,
 
-    healthInsuranceCompany: requiredTrimmedString(
-      "Zdravotní pojišťovna je povinná."
+    email: requiredTrimmedString("E-mail je povinný.").refine(
+      (val) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val),
+      "Zadejte platný e-mail."
     ),
-    bankAccountNumber: requiredTrimmedString(
-      "Číslo účtu pro výplatu mzdy je povinné."
+    phoneCountryCode: z.string().trim().default(DEFAULT_PHONE_COUNTRY_CODE),
+    phone: optionalTrimmedString,
+
+    hasDriverLicense: requiredBoolean(
+      "Vyberte prosím Ano/Ne (řidičské oprávnění)."
     ),
-    bankName: requiredTrimmedString("Název banky je povinný."),
+    driverLicenseCategories: z.array(z.string()).default([]),
 
     maintenanceInfo: optionalTrimmedString,
 
@@ -682,6 +938,8 @@ export const personalQuestionnaireSchema = z
     ),
     disabilityDegree: z.enum(["NONE", "I", "II", "III"]).default("NONE"),
 
+    familyRelations: optionalTrimmedString,
+
     languages: z.array(languageSchema).default([]),
 
     hasCertificateGeneral: requiredBoolean(
@@ -690,7 +948,9 @@ export const personalQuestionnaireSchema = z
     hasCertificateSpecial: requiredBoolean(
       "Vyberte prosím Ano/Ne (zvláštní odborná způsobilost)."
     ),
-    certificateSpecialName: optionalTrimmedString,
+    certificateSpecialNames: z
+      .array(certificateSpecialNameEntrySchema)
+      .default([]),
     hasCertificateManagement: requiredBoolean(
       "Vyberte prosím Ano/Ne (vedoucí úředníci)."
     ),
@@ -698,16 +958,10 @@ export const personalQuestionnaireSchema = z
       "Vyberte prosím Ano/Ne (vstupní školení)."
     ),
 
-    familyRelations: optionalTrimmedString,
-
     education: z
       .array(educationEntrySchema)
       .min(1, "Uveďte alespoň jedno ukončené vzdělání.")
       .default([]),
-
-    finalRequestPayrollTransfer: requiredBoolean(
-      "Potvrďte prosím souhlas (výplata na účet)."
-    ).refine((val) => val, "Pro odeslání musíte potvrdit souhlas."),
 
     finalReadAndUnderstood: requiredBoolean(
       "Potvrďte prosím prohlášení o pravdivosti údajů."
@@ -718,44 +972,45 @@ export const personalQuestionnaireSchema = z
     ).refine((val) => val, "Pro odeslání musíte potvrdit prohlášení."),
   })
   .superRefine((val, ctx) => {
-    if (val.dataBoxDelivery === true && !val.dataBoxId) {
+    if (val.birthSurnameDiffers === true && !val.birthSurname) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["dataBoxId"],
-        message: "Zadejte ID datové schránky.",
+        path: ["birthSurname"],
+        message: "Uveďte rodné příjmení.",
       })
     }
 
-    if (val.receivesPensionBenefits === true && !val.typePensionBenefits) {
+    if (
+      val.hasDriverLicense === true &&
+      val.driverLicenseCategories.length === 0
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["typePensionBenefits"],
-        message: "Uveďte typ pobíraného důchodu.",
+        path: ["driverLicenseCategories"],
+        message: "Vyberte alespoň jednu skupinu řidičského oprávnění.",
       })
     }
 
-    if (val.isDisabledPerson === true && val.disabilityDegree === "NONE") {
+    if (
+      val.hasCertificateSpecial === true &&
+      !val.certificateSpecialNames.some((c) => !!c.name)
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["disabilityDegree"],
-        message: "Vyberate stupeň invalidity.",
+        path: ["certificateSpecialNames"],
+        message: "Uveďte alespoň jeden typ osvědčení.",
       })
     }
 
-    if (val.hasCertificateSpecial === true && !val.certificateSpecialName) {
+    if (val.citizenship === OTHER_CITIZENSHIP_VALUE && !val.citizenshipOther) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["certificateSpecialName"],
-        message: "Uveďte jaké osvědčení jste získal/a.",
+        path: ["citizenshipOther"],
+        message: "Vypište státní občanství.",
       })
     }
 
-    const anyPermit =
-      !!val.foreignPermitFrom ||
-      !!val.foreignPermitTo ||
-      !!val.foreignPermitAuthority
-
-    if (anyPermit) {
+    if (val.citizenship !== CZECH_CITIZENSHIP_VALUE) {
       if (!val.foreignPermitFrom) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -784,6 +1039,61 @@ export const personalQuestionnaireSchema = z
         ["foreignPermitFrom"],
         ["foreignPermitTo"]
       )
+    }
+
+    if (val.dataBoxDelivery === true && !val.dataBoxId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["dataBoxId"],
+        message: "Zadejte ID datové schránky.",
+      })
+    }
+
+    if (val.useDifferentMailingAddress === true) {
+      if (!val.correspondenceStreet) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["correspondenceStreet"],
+          message: "Uveďte ulici doručovací adresy.",
+        })
+      }
+      if (!val.correspondenceHouseNumber) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["correspondenceHouseNumber"],
+          message: "Uveďte číslo popisné / orientační doručovací adresy.",
+        })
+      }
+      if (!val.correspondenceCity) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["correspondenceCity"],
+          message: "Uveďte obec doručovací adresy.",
+        })
+      }
+      if (!val.correspondencePostcode) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["correspondencePostcode"],
+          message: "Uveďte PSČ doručovací adresy.",
+        })
+      }
+    }
+
+    if (val.receivesPensionBenefits === true && !val.typePensionBenefits) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["typePensionBenefits"],
+        message: "Uveďte typ pobíraného důchodu.",
+      })
+    }
+
+    if (val.isDisabledPerson === true && val.disabilityDegree === "NONE") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["disabilityDegree"],
+        message: "Vyberte stupeň invalidity.",
+      })
     }
 
     if (val.education.length > 0) {
@@ -839,7 +1149,7 @@ export const experienceDocumentSchema = z
         code: z.ZodIssueCode.custom,
         path: ["experience"],
         message:
-          "Uveďte alespoň jednu relevantní pracovní zkušenost, nebo zaškrtněte \u201eZatím nemám žádnou praxi\u201c.",
+          "Uveďte alespoň jednu relevantní pracovní zkušenost, nebo zaškrtněte „Zatím nemám žádnou praxi“.",
       })
     }
   })

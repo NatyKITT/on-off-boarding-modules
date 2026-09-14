@@ -190,8 +190,8 @@ export default function OnboardingDetailPage({ params }: PageProps) {
           ? "Zkušební doba znovu aktivována"
           : "Zkušební doba pozastavena",
         description: isReactivating
-          ? "Hodnocení zkušební doby pokračuje v běžném cyklu."
-          : "Hodnocení zkušební doby je pozastavené, cron nebude posílat další výzvy.",
+          ? "Vyhodnocení zkušební doby pokračuje v běžném cyklu."
+          : "Vyhodnocení zkušební doby je pozastavené, cron nebude posílat další výzvy.",
       })
 
       setDecisionDialog({ open: false, decision: null, note: "" })
@@ -363,7 +363,7 @@ export default function OnboardingDetailPage({ params }: PageProps) {
 
               {data.linkedOffboarding.probationShouldBeStopped && (
                 <p className="font-medium">
-                  Hodnocení zkušební doby se má pro tento nástup zastavit a
+                  Vyhodnocení zkušební doby se má pro tento nástup zastavit a
                   neměly by odcházet navazující e-mailové výzvy.
                 </p>
               )}

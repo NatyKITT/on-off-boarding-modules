@@ -19,6 +19,8 @@ const PROBATION_EVALUATION_EVENT_ACTION_LABEL: Record<string, string> = {
   CANCELLED: "Zrušeno",
   EXPIRED: "Platnost odkazu vypršela",
   EMAIL_FAILED: "Odeslání e-mailu selhalo",
+  TAJEMNIK_REVIEW_SENT: "Žádost o vyjádření odeslána tajemníkovi",
+  TAJEMNIK_REVIEWED: "Tajemník se vyjádřil",
 }
 
 export function probationEvaluationEventActionLabel(action: string) {

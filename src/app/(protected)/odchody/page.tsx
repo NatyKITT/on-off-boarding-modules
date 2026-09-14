@@ -36,6 +36,7 @@ import {
   matchesDayRange,
   type DayRangeValue,
 } from "@/lib/dates"
+import { getEmployeeChangeTypeLabel } from "@/lib/employment-linking"
 import {
   buildDistinctOptions,
   filterAvailableOptions,
@@ -202,12 +203,8 @@ function groupChangesByPersonalNumber(rows: EmployeeChangeInfo[]) {
 }
 
 function changeTypeLabel(type?: EmployeeChangeInfo["type"] | null) {
-  if (type === "NAME") return "Změna jména"
-  if (type === "POSITION") return "Změna pozice"
-  if (type === "NAME_AND_POSITION") return "Změna jména i pozice"
-  if (type === "MATERNITY_LEAVE") return "Mateřská dovolená"
-
-  return "Zaměstnanecká změna"
+  if (!type) return "Zaměstnanecká změna"
+  return getEmployeeChangeTypeLabel(type)
 }
 
 function buildOldFullNameFromChange(change: EmployeeChangeInfo) {
@@ -1495,17 +1492,17 @@ export default function OffboardingPage() {
     [filteredCancelled]
   )
 
-  const plannedExpandInitRef = React.useRef(false)
-  const actualExpandInitRef = React.useRef(false)
-  const cancelledExpandInitRef = React.useRef(false)
+  const plannedDidInitialExpandRef = React.useRef(false)
+  const actualDidInitialExpandRef = React.useRef(false)
+  const cancelledDidInitialExpandRef = React.useRef(false)
+  const plannedPrevFilterActiveRef = React.useRef(isAnyFilterActive)
+  const actualPrevFilterActiveRef = React.useRef(isAnyFilterActive)
+  const cancelledPrevFilterActiveRef = React.useRef(isAnyFilterActive)
 
   useEffect(() => {
-    if (!plannedExpandInitRef.current) {
-      plannedExpandInitRef.current = true
-      if (expandedPlannedYears.length > 0 || expandedPlannedMonths.length > 0) {
-        return
-      }
-    }
+    const filterJustTurnedOff =
+      !isAnyFilterActive && plannedPrevFilterActiveRef.current
+    plannedPrevFilterActiveRef.current = isAnyFilterActive
 
     if (isAnyFilterActive) {
       const { years, months } = getAllYearsAndMonths(plannedGrouped)
@@ -1513,6 +1510,15 @@ export default function OffboardingPage() {
       setExpandedPlannedMonths(months)
       return
     }
+
+    if (
+      !filterJustTurnedOff &&
+      (plannedDidInitialExpandRef.current || !hasLoadedOnce)
+    ) {
+      return
+    }
+
+    plannedDidInitialExpandRef.current = true
 
     const { year, month } = getLatestYearAndMonth(filteredPlanned, "plannedEnd")
     setExpandedPlannedYears(year ? [year] : [])
@@ -1522,17 +1528,15 @@ export default function OffboardingPage() {
     filteredPlanned,
     plannedGrouped,
     isAnyFilterActive,
+    hasLoadedOnce,
     setExpandedPlannedYears,
     setExpandedPlannedMonths,
   ])
 
   useEffect(() => {
-    if (!actualExpandInitRef.current) {
-      actualExpandInitRef.current = true
-      if (expandedActualYears.length > 0 || expandedActualMonths.length > 0) {
-        return
-      }
-    }
+    const filterJustTurnedOff =
+      !isAnyFilterActive && actualPrevFilterActiveRef.current
+    actualPrevFilterActiveRef.current = isAnyFilterActive
 
     if (isAnyFilterActive) {
       const { years, months } = getAllYearsAndMonths(actualGrouped)
@@ -1540,6 +1544,15 @@ export default function OffboardingPage() {
       setExpandedActualMonths(months)
       return
     }
+
+    if (
+      !filterJustTurnedOff &&
+      (actualDidInitialExpandRef.current || !hasLoadedOnce)
+    ) {
+      return
+    }
+
+    actualDidInitialExpandRef.current = true
 
     const { year, month } = getLatestYearAndMonth(filteredActual, "actualEnd")
     setExpandedActualYears(year ? [year] : [])
@@ -1549,20 +1562,15 @@ export default function OffboardingPage() {
     filteredActual,
     actualGrouped,
     isAnyFilterActive,
+    hasLoadedOnce,
     setExpandedActualYears,
     setExpandedActualMonths,
   ])
 
   useEffect(() => {
-    if (!cancelledExpandInitRef.current) {
-      cancelledExpandInitRef.current = true
-      if (
-        expandedCancelledYears.length > 0 ||
-        expandedCancelledMonths.length > 0
-      ) {
-        return
-      }
-    }
+    const filterJustTurnedOff =
+      !isAnyFilterActive && cancelledPrevFilterActiveRef.current
+    cancelledPrevFilterActiveRef.current = isAnyFilterActive
 
     if (isAnyFilterActive) {
       const { years, months } = getAllYearsAndMonths(cancelledGrouped)
@@ -1570,6 +1578,15 @@ export default function OffboardingPage() {
       setExpandedCancelledMonths(months)
       return
     }
+
+    if (
+      !filterJustTurnedOff &&
+      (cancelledDidInitialExpandRef.current || !hasLoadedOnce)
+    ) {
+      return
+    }
+
+    cancelledDidInitialExpandRef.current = true
 
     const { year, month } = getLatestYearAndMonth(
       filteredCancelled,
@@ -1582,6 +1599,7 @@ export default function OffboardingPage() {
     filteredCancelled,
     cancelledGrouped,
     isAnyFilterActive,
+    hasLoadedOnce,
     setExpandedCancelledYears,
     setExpandedCancelledMonths,
   ])

@@ -399,7 +399,7 @@ export async function ensureProbationEvaluationRequest(
         action: "CANCELLED",
         by: args.decisionActorId ?? "system-link",
         byName: args.decisionActorName ?? "Automatické propojení s odchodem",
-        message: `Hodnocení zkušební doby bylo zastaveno – propojený odchod (ID ${linkedOffboarding?.id}) spadá do zkušební doby a Personální oddělení potvrdilo zastavení hodnocení.`,
+        message: `Vyhodnocení zkušební doby bylo zastaveno – propojený odchod (ID ${linkedOffboarding?.id}) spadá do zkušební doby a Personální oddělení potvrdilo zastavení hodnocení.`,
         meta: {
           linkedOffboardingId: linkedOffboarding?.id ?? null,
         },
@@ -413,7 +413,7 @@ export async function ensureProbationEvaluationRequest(
         by: args.decisionActorId ?? "system-link",
         byName: args.decisionActorName ?? "Automatické propojení s odchodem",
         message:
-          "Hodnocení zkušební doby bylo znovu aktivováno – propojený odchod už zkušební dobu nepozastavuje.",
+          "Vyhodnocení zkušební doby bylo znovu aktivováno – propojený odchod už zkušební dobu nepozastavuje.",
         meta: {
           revisionAction: "probation_reactivated",
           previousStatus: "CANCELLED",
@@ -513,7 +513,7 @@ export async function ensureProbationEvaluationRequest(
         action: "CANCELLED",
         by: args.decisionActorId ?? "system-link",
         byName: args.decisionActorName ?? "Automatické propojení s odchodem",
-        message: `Hodnocení zkušební doby bylo rovnou zastaveno – propojený odchod (ID ${linkedOffboarding?.id}) spadá do zkušební doby a Personální oddělení potvrdilo zastavení hodnocení.`,
+        message: `Vyhodnocení zkušební doby bylo rovnou zastaveno – propojený odchod (ID ${linkedOffboarding?.id}) spadá do zkušební doby a Personální oddělení potvrdilo zastavení hodnocení.`,
         meta: {
           linkedOffboardingId: linkedOffboarding?.id ?? null,
         },

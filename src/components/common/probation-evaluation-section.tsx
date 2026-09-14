@@ -569,6 +569,7 @@ export function ProbationEvaluationSection({
   const [resetting, setResetting] = React.useState(false)
   const [sendingPdf, setSendingPdf] = React.useState(false)
   const [clearingTajemnik, setClearingTajemnik] = React.useState(false)
+  const [sendingTajemnik, setSendingTajemnik] = React.useState(false)
 
   const [error, setError] = React.useState<string | null>(null)
   const [confirmReset, setConfirmReset] = React.useState(false)
@@ -744,6 +745,13 @@ export function ProbationEvaluationSection({
   const canSendPdf = Boolean(request) && isCompleted
   const canClearTajemnikReview =
     Boolean(request) && isCompleted && Boolean(tajemnikReview?.signedAt)
+
+  const canSendTajemnik =
+    Boolean(request) &&
+    isCompleted &&
+    tajemnikRequired &&
+    !revisionOpen &&
+    !tajemnikReview?.signedAt
 
   const loadOrEnsure = React.useCallback(
     async (opts?: { silent?: boolean }) => {
@@ -973,6 +981,60 @@ export function ProbationEvaluationSection({
       })
     } finally {
       setLocking(false)
+    }
+  }
+
+  async function handleSendTajemnik() {
+    if (!request) return
+
+    setSendingTajemnik(true)
+    setError(null)
+
+    try {
+      const res = await fetch(
+        `/api/nastupy/${onboardingId}/probation-evaluation/tajemnik-review`,
+        {
+          method: "POST",
+          cache: "no-store",
+          credentials: "include",
+        }
+      )
+
+      const json = (await res
+        .json()
+        .catch(() => null)) as ProbationDetailResponse | null
+
+      if (!res.ok) {
+        throw new Error(
+          getErrorMessage(
+            json,
+            "Žádost o vyjádření se tajemníkovi nepodařilo odeslat."
+          )
+        )
+      }
+
+      await refreshFromJsonOrReload(json)
+
+      toast({
+        title: "Odesláno tajemníkovi",
+        description:
+          "Žádost o vyjádření k formuláři byla znovu odeslána tajemníkovi.",
+      })
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Odeslání se tajemníkovi nezdařilo."
+
+      setError(message)
+
+      toast({
+        title: "Chyba při odesílání",
+        description: message,
+        variant: "destructive",
+      })
+    } finally {
+      setSendingTajemnik(false)
     }
   }
 
@@ -1831,6 +1893,23 @@ export function ProbationEvaluationSection({
                   )}
                   Poslat připomínku
                 </Button>
+
+                {tajemnikRequired && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void handleSendTajemnik()}
+                    disabled={!canSendTajemnik || sendingTajemnik || isReadonly}
+                    className="gap-2"
+                  >
+                    {sendingTajemnik ? (
+                      <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    ) : (
+                      <UserCheck className="size-4" />
+                    )}
+                    Poslat tajemníkovi
+                  </Button>
+                )}
 
                 <Button
                   size="sm"

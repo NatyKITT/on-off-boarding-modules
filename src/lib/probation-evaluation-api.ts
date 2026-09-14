@@ -766,23 +766,14 @@ function samePersonBySavedEvaluatorData(args: {
 }
 
 function isSameTajemnikPerson(args: {
-  tajemnikName: string | null
   tajemnikEmail: string | null
-  candidateName?: string | null
   candidateEmail?: string | null
 }): boolean {
   const tajemnikEmail = cleanEmail(args.tajemnikEmail)
   const candidateEmail = cleanEmail(args.candidateEmail)
 
-  if (!tajemnikEmail || !candidateEmail || tajemnikEmail !== candidateEmail) {
-    return false
-  }
-
-  const tajemnikName = normalizeCompare(stripCommonTitles(args.tajemnikName))
-  const candidateName = normalizeCompare(stripCommonTitles(args.candidateName))
-
   return Boolean(
-    tajemnikName && candidateName && tajemnikName === candidateName
+    tajemnikEmail && candidateEmail && tajemnikEmail === candidateEmail
   )
 }
 
@@ -1339,9 +1330,7 @@ export async function buildResolvedProbationApiResponse(args: {
       overrideName: tajemnikContext.overrideName,
       overrideEmail: tajemnikContext.overrideEmail,
       isCurrentUserTajemnik: isSameTajemnikPerson({
-        tajemnikName: tajemnikContext.tajemnikName,
         tajemnikEmail: tajemnikContext.tajemnikEmail,
-        candidateName: currentUser.name,
         candidateEmail: currentUser.email,
       }),
       review: tajemnikReview,
@@ -1409,9 +1398,7 @@ async function saveTajemnikReview(args: {
 
   const tajemnikContext = await resolveTajemnikContext(request)
   const isCurrentUserTajemnik = isSameTajemnikPerson({
-    tajemnikName: tajemnikContext.tajemnikName,
     tajemnikEmail: tajemnikContext.tajemnikEmail,
-    candidateName: user.name,
     candidateEmail: user.email,
   })
 
@@ -1915,7 +1902,7 @@ export async function buildEarlyExitNote(params: {
     const noteText = mostRelevant?.probationStopNote?.trim()
 
     return [
-      `${baseInfo} Hodnocení zkušební doby bylo zastaveno${
+      `${baseInfo} Vyhodnocení zkušební doby bylo zastaveno${
         decidedByName ? ` (rozhodl(a): ${decidedByName})` : ""
       }.`,
       noteText ? `Poznámka: ${noteText}` : null,
@@ -1929,7 +1916,7 @@ export async function buildEarlyExitNote(params: {
       mostRelevant?.probationStopDecisionBy
     )
 
-    return `${baseInfo} Personální oddělení rozhodlo hodnocení zkušební doby nezastavovat${
+    return `${baseInfo} Personální oddělení rozhodlo vyhodnocení zkušební doby nezastavovat${
       decidedByName ? ` (rozhodl(a): ${decidedByName})` : ""
     } – formulář zůstává v platnosti.`
   }

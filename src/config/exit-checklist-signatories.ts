@@ -21,8 +21,8 @@ export const EXIT_CHECKLIST_SIGNATORIES: ExitChecklistSignatory[] = [
     rowKeys: ["handoverProtocol"],
   },
   {
-    name: "Hana Štičková (vedoucí Odd. spisové služby, Kancelář tajemníka)",
-    emails: ["hstickova@praha6.cz"],
+    name: "Bc. Martin Rokos (vedoucí Odd. spisové služby, Kancelář tajemníka)",
+    emails: ["mrokos@praha6.cz"],
     rowKeys: ["centralRegistry"],
   },
   {

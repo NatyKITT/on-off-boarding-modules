@@ -1489,7 +1489,7 @@ export function OffboardingFormUnified({
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>
-                Zastavit hodnocení zkušební doby?
+                Zastavit vyhodnocení zkušební doby?
               </AlertDialogTitle>
             </AlertDialogHeader>
             <div className="space-y-2 text-sm text-muted-foreground">
@@ -1505,9 +1505,9 @@ export function OffboardingFormUnified({
                 .
               </p>
               <p>
-                Chcete zastavit hodnocení zkušební doby a nerozesílat vedoucímu
-                žádné další e-maily k vyplnění? Pokud zvolíte „Nechat běžet“,
-                formulář i připomínky poběží dál beze změny.
+                Chcete zastavit vyhodnocení zkušební doby a nerozesílat
+                vedoucímu žádné další e-maily k vyplnění? Pokud zvolíte „Nechat
+                běžet“, formulář i připomínky poběží dál beze změny.
               </p>
             </div>
             <AlertDialogFooter>

@@ -51,7 +51,7 @@ export const EXIT_CHECKLIST_ROWS: ExitChecklistRowDefinition[] = [
   {
     key: "centralRegistry",
     organization:
-      "Vedoucí oddělení spisové služby\nKancelář tajemníka\nHana Štičková\nč. dv. 119",
+      "Vedoucí oddělení spisové služby\nKancelář tajemníka\nBc. Martin Rokos\nč. dv. 119",
     obligation: "závazky ve vztahu k centrální spisovně",
   },
   {

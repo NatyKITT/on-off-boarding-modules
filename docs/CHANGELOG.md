@@ -2,6 +2,47 @@
 
 Historie významných změn v aplikaci On-Off-Boarding Modul. Nejnovější verze nahoře.
 
+## 0.13.0 – 2026-09-14
+
+### Nové funkce
+
+- **Redesign tří nástupních dokumentů (čestné prohlášení, osobní dotazník, dotazník pro mzdovou agendu)** – obsahová i vizuální restrukturalizace podle skutečné potřeby HR: čestné prohlášení dostalo nové pole „Název pracovní pozice" u praxe, všech 7 sekcí (vojenská služba, neplacené volno, mateřská/rodičovská, trvalá péče o dítě, péče o zdravotně postižené dítě, péče o osobu blízkou, doktorské studium) je nově schované za přepínač Ano/Ne místo vždy zobrazených polí a závěrečná poučka je vizuálně zvýrazněná tučně. Osobní dotazník má přeuspořádanou sekci Základní údaje (rodné příjmení nově povinné, přepínač „jiné příjmení než rodné", rodinný stav přesunut výš), podmíněnou kartu „Povolení k pobytu" jen pro cizí státní příslušníky, nové povinné pole e-mail a přepínač pro odlišnou doručovací adresu, sloučené sekce kontaktů/vzdělání/doplňujících údajů a zrušené mzdové položky (přesunuté jen do dotazníku pro mzdovou agendu). Státní občanství, banka a zdravotní pojišťovna se nově vybírají ze seznamu (s možností „Jiná, vypište") místo volného textu.
+- **Přepracovaný generátor PDF pro všechny tři dokumenty** – PDF nově zobrazuje úplně všechna pole formuláře (i prázdná nepovinná, s hodnotou „Nevyplněno"), takže z PDF je vždy jasně vidět, co bylo a co nebylo vyplněné. Sekce v PDF byly sjednoceny přesně podle karet na obrazovce (u osobního dotazníku z cca 13 drobných sekcí na 6 přehledných A–F sekcí s podkartami), D. Osvědčení má zpátky plné znění právních otázek, doručovací adresa se zobrazuje vždy (buď konkrétní adresa, nebo „Shodná s adresou trvalého pobytu") a rodné příjmení se v PDF zobrazí, jen když se skutečně liší od aktuálního.
+- **Barva Prahy 6 (#00847C)** na hlavních odesílacích tlačítkách čestného prohlášení, osobního dotazníku, dotazníku pro mzdovou agendu a formuláře praxe, a v barvě načítacího indikátoru vnitřní aplikace.
+- **Vizuální rebrand chybových a přístupových stránek** (404, obecná chybová stránka, „Nemáte oprávnění") na nové ilustrace Prahy 6 a přehlednější texty; sjednocený favicon set a manifest pod `/assets/favicons/`.
+- **Popisek typu zaměstnanecké změny nově odpovídá skutečnému rozdílu** (např. „Změna příjmení a titulu" místo obecného „Změna jména") a je sjednocený napříč přehledem, filtrem, detailem, historií, statistikami, PDF i e-mailovými reporty (sdílené funkce v `employment-linking.ts`).
+- **Vylepšené e-mailové reporty zaměstnaneckých změn** – spolehlivější a čitelnější rozložení tabulky změn na počítači i na mobilu (pevná šířka sloupců, mobilní zalomení bez lámání slov uprostřed), sloupec „Kalendář" jen tam, kde je relevantní (mateřská dovolená), sloupec „Zaměstnanec" ve všech reportech ukazuje osobní číslo pod jménem bez zbytečného opakování ve „Aktuální zařazení".
+- **Odkaz „Přidat do kalendáře" zjednodušen na jediný Google Calendar odkaz** u všech jednotlivých řádků (dřív dvě varianty – Google a univerzální .ics) napříč celou appkou; společná .ics příloha pro hromadný import více událostí najednou zůstává beze změny.
+- **Ruční tlačítko „Poslat tajemníkovi"** na detailu vyhodnocení zkušební doby – umožní žádost o vyjádření tajemníkovi znovu odeslat (např. při chybě doručení), dokud tajemník své vyjádření sám neodešle.
+- **PDF vyhodnocení zkušební doby** – sekce 1.–4. (pracovní výsledky, pracovní chování, sociální chování a spolupráce, dovednosti/znalosti/vlastnosti) i doplňkové poznámky (předčasné ukončení, stanovisko tajemníka při shodě s vedoucím) mají nově ohraničený rámeček stejným stylem jako box doporučení vedoucího/tajemníka.
+- Sjednocený název procesu **„Vyhodnocení zkušební doby"** napříč celou appkou (kód, UI texty i dokumentace) – dřív se na řadě míst nekonzistentně používalo kratší „Hodnocení zkušební doby".
+
+### Opravy
+
+- **Kritická oprava odesílání kombinovaného měsíčního reportu** – souběžné zápisy do stejného řádku `MonthlyReport` mohly při odeslání většího množství záznamů shodného měsíce/typu shodit chybu MySQL 1020 („Record has changed since last read"); zápis stavu odeslání je teď jednorázový na konci, ne opakovaně uvnitř `Promise.all`.
+- **Oprava hromadného odesílání „Poslat vše" v přehledu dokumentů** – dřív se vyplněné dokumenty posílaly ve více samostatných e-mailech místo jednoho, a do odeslání se chybně počítaly i nevyplněné/rozpracované dokumenty (které lze poslat jen jako odkaz). Nově jde jedním e-mailem jen o vyplněné dokumenty, nevyplněné se posílají jen jednotlivě.
+- Oprava PDF hlavičky, kde se u osobního dotazníku a dotazníku pro mzdovou agendu ztrácely tituly před/za jménem v hlavičce, pokud formulář neměl vyplněné příjmení (fallback nebyl zabalený do titulů stejně jako běžná cesta).
+- Oprava chybně se zobrazujícího „Odpověď: Nevyplněno" pod čistě popisnou větou bez skutečné otázky (žádost o zaslání mzdy na bankovní účet).
+- Dlouhé příjmení se v přehledu Dokumentů už nezobrazuje oříznuté (`truncate` nahrazeno zalomením).
+- Název sekce A dotazníku pro mzdovou agendu v PDF opraven na „Základní údaje zaměstnance" podle nadpisu karty na obrazovce.
+- Drobné opravy rozložení filtru typu změny (celý popisek se teď v dropdownu nezobrazuje oříznutý) a tabulky Změn (širší sloupce, zalomení místo oříznutí).
+
+Žádná nová databázová migrace ani proměnná prostředí není v této verzi potřeba.
+
+---
+
+## Deployment checklist k verzi 0.13.0
+
+- [ ] Žádné nové migrace, proměnné prostředí ani npm závislosti nejsou potřeba.
+- [ ] Vygenerovat PDF u všech tří nástupních dokumentů (i staršího, dříve vyplněného záznamu) a ověřit, že se nezobrazí chyba a že prázdná nepovinná pole ukazují „Nevyplněno".
+- [ ] Ověřit, že „Poslat vše" v přehledu Dokumentů pošle vyplněné dokumenty jedním e-mailem a přeskočí nevyplněné.
+- [ ] Odeslat kombinovaný měsíční report s více záznamy ve stejném měsíci/typu a ověřit, že neskončí chybou 1020.
+- [ ] Zkontrolovat popisek typu změny na přehledu, filtru, detailu i v odeslaném PDF/e-mailovém reportu – má odpovídat reálnému rozdílu (jméno/příjmení/titul vs. pozice/odbor).
+- [ ] Na detailu vyhodnocení zkušební doby vyzkoušet tlačítko „Poslat tajemníkovi" a zkontrolovat vygenerované PDF s novými ohraničenými sekcemi.
+- [ ] Projít error/404/no-access stránky a favicon po nasazení (nové cesty pod `/assets/favicons/`).
+
+---
+
 ## 0.12.0 – 2026-08-27
 
 ### Nové funkce

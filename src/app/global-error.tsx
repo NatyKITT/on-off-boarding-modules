@@ -2,7 +2,6 @@
 
 import { useEffect } from "react"
 import * as Sentry from "@sentry/nextjs"
-import { AlertTriangle } from "lucide-react"
 
 export default function GlobalError({
   error,
@@ -20,9 +19,14 @@ export default function GlobalError({
       <body className="bg-background font-sans text-foreground">
         <main className="flex min-h-screen flex-col items-center justify-center p-6">
           <div className="w-full max-w-md rounded-2xl border bg-card p-6 text-center shadow-sm">
-            <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/20">
-              <AlertTriangle className="size-6 text-red-600 dark:text-red-400" />
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/assets/illustrations/praha6_help.svg"
+              alt=""
+              width={243}
+              height={167}
+              className="pointer-events-none mx-auto h-auto w-full max-w-[220px]"
+            />
 
             <h1 className="mt-4 text-2xl font-bold">Něco se pokazilo</h1>
 

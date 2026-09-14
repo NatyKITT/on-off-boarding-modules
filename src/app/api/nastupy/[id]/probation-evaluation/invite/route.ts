@@ -148,7 +148,7 @@ export async function POST(
         byEmail: authResult.user.email ?? null,
         message: revisionOpen
           ? `Odkaz k úpravě vyhodnocení zkušební doby byl ručně odeslán na ${supervisorEmail}.`
-          : `Pozvánka k hodnocení zkušební doby byla ručně odeslána na ${supervisorEmail}.`,
+          : `Pozvánka k vyhodnocení zkušební doby byla ručně odeslána na ${supervisorEmail}.`,
         meta: {
           source: "manual",
           directSend: true,

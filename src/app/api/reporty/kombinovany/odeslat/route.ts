@@ -121,11 +121,6 @@ async function recordSent(args: {
       sentBy: args.sentBy,
     },
   })
-
-  await prisma.monthlyReport.update({
-    where: { id: args.monthlyReportId },
-    data: { sentAt: new Date() },
-  })
 }
 
 function toEmailRecord(
@@ -369,6 +364,16 @@ export async function POST(request: Request) {
         })
       ),
     ])
+
+    const uniqueReportIds = Array.from(new Set(monthlyReportIdByKey.values()))
+    await Promise.all(
+      uniqueReportIds.map((id) =>
+        prisma.monthlyReport.update({
+          where: { id },
+          data: { sentAt: new Date() },
+        })
+      )
+    )
 
     if (changes.length > 0) {
       await prisma.employeeChange.updateMany({

@@ -416,7 +416,7 @@ export function ProbationEvaluationPageClient({
           <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             <p className="font-medium">
               {data?.request?.status === "CANCELLED"
-                ? "Hodnocení zkušební doby bylo zastaveno."
+                ? "Vyhodnocení zkušební doby bylo zastaveno."
                 : "Platnost formuláře vypršela."}
             </p>
             <p className="mt-1 text-amber-800">

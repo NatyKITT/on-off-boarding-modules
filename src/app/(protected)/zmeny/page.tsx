@@ -27,6 +27,13 @@ import { useDismissableHighlight } from "@/hooks/use-dismissable-highlight"
 import { useFacetedFilter } from "@/hooks/use-faceted-filter"
 import { useTextFilter } from "@/hooks/use-text-filter"
 import {
+  buildChangedFields,
+  getEmployeeChangeDetailLabel,
+  getEmployeeChangeNameDetailLabel,
+  getEmployeeChangePositionDetailLabel,
+  getEmployeeChangeTypeLabel,
+} from "@/lib/employment-linking"
+import {
   buildDistinctOptions,
   filterAvailableOptions,
 } from "@/lib/filter-options"
@@ -192,20 +199,16 @@ function formatMonth(month: string) {
     : format(date, "LLLL yyyy", { locale: cs })
 }
 
+function toEmployeeChangeLink(row: ChangeRow) {
+  return { ...row, personalNumber: row.personalNumber ?? null }
+}
+
 function fullName(row: ChangeRow) {
   return [row.titleBefore, row.name, row.surname, row.titleAfter]
     .filter(Boolean)
     .join(" ")
     .replace(/\s+/g, " ")
     .trim()
-}
-
-function typeLabel(type: ChangeType) {
-  if (type === "NAME") return "Změna jména"
-  if (type === "POSITION") return "Změna pozice"
-  if (type === "MATERNITY_LEAVE") return "Mateřská dovolená"
-
-  return "Změna jména i pozice"
 }
 
 type ChangeFacetKey =
@@ -216,10 +219,16 @@ type ChangeFacetKey =
   | "emailSent"
 
 const CHANGE_TYPE_OPTIONS: MultiSelectOption[] = [
-  { value: "NAME", label: "Změna jména" },
-  { value: "POSITION", label: "Změna pozice" },
-  { value: "NAME_AND_POSITION", label: "Změna jména i pozice" },
-  { value: "MATERNITY_LEAVE", label: "Mateřská dovolená" },
+  { value: "NAME", label: getEmployeeChangeTypeLabel("NAME") },
+  { value: "POSITION", label: getEmployeeChangeTypeLabel("POSITION") },
+  {
+    value: "NAME_AND_POSITION",
+    label: getEmployeeChangeTypeLabel("NAME_AND_POSITION"),
+  },
+  {
+    value: "MATERNITY_LEAVE",
+    label: getEmployeeChangeTypeLabel("MATERNITY_LEAVE"),
+  },
 ]
 
 const EMAIL_SENT_OPTIONS: MultiSelectOption[] = [
@@ -294,14 +303,6 @@ function buildNewEmployeeName(row: ChangeRow) {
     .trim()
 }
 
-function hasNameChange(row: ChangeRow) {
-  return row.type === "NAME" || row.type === "NAME_AND_POSITION"
-}
-
-function hasPositionChange(row: ChangeRow) {
-  return row.type === "POSITION" || row.type === "NAME_AND_POSITION"
-}
-
 function relatedRecordsCount(row: ChangeRow) {
   return (
     row.linkCandidateCount ??
@@ -344,13 +345,12 @@ function InfoLine({
   mono?: boolean
 }) {
   return (
-    <div className="grid grid-cols-[78px_minmax(0,1fr)] gap-2 text-xs leading-snug">
+    <div className="grid grid-cols-[96px_minmax(0,1fr)] items-start gap-2 text-xs leading-snug">
       <span className="text-muted-foreground">{label}</span>
       <span
         className={
-          mono ? "truncate font-mono font-medium" : "truncate font-medium"
+          mono ? "break-words font-mono font-medium" : "break-words font-medium"
         }
-        title={displayValue(value)}
       >
         {displayValue(value)}
       </span>
@@ -360,13 +360,13 @@ function InfoLine({
 
 function EmployeeInfoCell({ row }: { row: ChangeRow }) {
   return (
-    <div className="rounded-xl border bg-background p-3 shadow-sm">
+    <div className="rounded-xl border bg-background p-4 shadow-sm">
       <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
         Aktuální zařazení
       </div>
 
       <div className="space-y-1.5">
-        <InfoLine label="Č. funkce" value={row.oldPositionNum} mono />
+        <InfoLine label="Číslo funkce" value={row.oldPositionNum} mono />
         <InfoLine label="Pozice" value={row.oldPositionName} />
         <InfoLine label="Odbor" value={row.oldDepartment} />
         <InfoLine label="Oddělení" value={row.oldUnitName} />
@@ -395,9 +395,21 @@ function NewChangeCell({ row }: { row: ChangeRow }) {
     )
   }
 
-  const showName = hasNameChange(row)
-  const showPosition = hasPositionChange(row)
+  const link = toEmployeeChangeLink(row)
+  const nameFieldLabel = getEmployeeChangeNameDetailLabel(link)
+  const positionFieldLabel = getEmployeeChangePositionDetailLabel(link)
   const newName = buildNewEmployeeName(row)
+
+  const changedFields = buildChangedFields(link)
+  const positionNumChanged = changedFields.includes("positionNum")
+  const positionNameChanged = changedFields.includes("positionName")
+  const departmentChanged = changedFields.includes("department")
+  const unitNameChanged = changedFields.includes("unitName")
+  const showPosition =
+    positionNumChanged ||
+    positionNameChanged ||
+    departmentChanged ||
+    unitNameChanged
 
   const newPositionNum = finalValue({
     oldValue: row.oldPositionNum,
@@ -417,16 +429,16 @@ function NewChangeCell({ row }: { row: ChangeRow }) {
   })
 
   return (
-    <div className="rounded-xl border border-[#00847C]/25 bg-[#00847C]/5 p-3 shadow-sm">
+    <div className="rounded-xl border border-[#00847C]/25 bg-[#00847C]/5 p-4 shadow-sm">
       <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[#00847C]">
         Nově od {formatDate(row.effectiveDate)}
       </div>
 
       <div className="space-y-3">
-        {showName && (
+        {nameFieldLabel && (
           <div>
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Jméno / titul
+              {nameFieldLabel}
             </div>
             <div className="mt-0.5 break-words text-sm font-semibold text-[#00847C]">
               {newName || "–"}
@@ -436,12 +448,29 @@ function NewChangeCell({ row }: { row: ChangeRow }) {
 
         {showPosition && (
           <div className="space-y-1.5">
-            {showName && <div className="h-px bg-[#00847C]/15" />}
-            <InfoLine label="Č. funkce" value={newPositionNum} mono />
-            <InfoLine label="Pozice" value={newPositionName} />
-            <InfoLine label="Odbor" value={newDepartment} />
-            <InfoLine label="Oddělení" value={newUnitName} />
+            {nameFieldLabel && <div className="h-px bg-[#00847C]/15" />}
+            {positionFieldLabel && (
+              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                {positionFieldLabel}
+              </div>
+            )}
+            {positionNumChanged && (
+              <InfoLine label="Číslo funkce" value={newPositionNum} mono />
+            )}
+            {positionNameChanged && (
+              <InfoLine label="Pozice" value={newPositionName} />
+            )}
+            {departmentChanged && (
+              <InfoLine label="Odbor" value={newDepartment} />
+            )}
+            {unitNameChanged && (
+              <InfoLine label="Oddělení" value={newUnitName} />
+            )}
           </div>
+        )}
+
+        {!nameFieldLabel && !showPosition && (
+          <div className="text-xs text-muted-foreground">Beze změny údajů</div>
         )}
       </div>
     </div>
@@ -1018,7 +1047,7 @@ export default function EmployeeChangesPage() {
           </div>
         </TableCell>
 
-        <TableCell className="w-[280px] min-w-[280px] align-top">
+        <TableCell className="w-[320px] min-w-[320px] align-top">
           <EmployeeInfoCell row={row} />
         </TableCell>
 
@@ -1028,7 +1057,7 @@ export default function EmployeeChangesPage() {
               variant="outline"
               className="whitespace-normal text-xs leading-snug"
             >
-              {typeLabel(row.type)}
+              {getEmployeeChangeDetailLabel(toEmployeeChangeLink(row))}
             </Badge>
 
             {((row.onboardingMatchesCount ?? 0) > 0 ||
@@ -1511,13 +1540,13 @@ export default function EmployeeChangesPage() {
                                                 <TableHead className="sticky left-0 z-10 w-[210px] min-w-[210px] border-r bg-background">
                                                   Zaměstnanec
                                                 </TableHead>
-                                                <TableHead className="w-[280px] min-w-[280px]">
+                                                <TableHead className="w-[320px] min-w-[320px]">
                                                   Další info
                                                 </TableHead>
                                                 <TableHead className="w-[190px] min-w-[190px]">
                                                   Typ změny
                                                 </TableHead>
-                                                <TableHead className="w-[130px] min-w-[130px]">
+                                                <TableHead className="w-[130px] min-w-[130px] whitespace-nowrap">
                                                   Účinnost změny
                                                 </TableHead>
                                                 <TableHead className="w-[360px] min-w-[360px]">
@@ -1529,7 +1558,7 @@ export default function EmployeeChangesPage() {
                                                 <TableHead className="w-[200px] min-w-[200px]">
                                                   Vedoucí
                                                 </TableHead>
-                                                <TableHead className="w-[135px] min-w-[135px]">
+                                                <TableHead className="w-[135px] min-w-[135px] whitespace-nowrap">
                                                   Odeslání reportu
                                                 </TableHead>
                                                 <TableHead className="w-[230px] min-w-[230px] text-right">

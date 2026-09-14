@@ -268,32 +268,6 @@ function wrapText(
   return lines
 }
 
-function drawParagraph(args: {
-  page: PDFPage
-  font: PDFFont
-  text: string
-  x: number
-  y: number
-  maxWidth: number
-  fontSize?: number
-  lineHeight?: number
-}) {
-  const fontSize = args.fontSize ?? GENERATED_TEXT_SIZE
-  const lineHeight = args.lineHeight ?? GENERATED_LINE_HEIGHT
-  const lines = wrapText(args.text, args.font, fontSize, args.maxWidth)
-
-  let y = args.y
-
-  for (const line of lines) {
-    if (line) {
-      drawText(args.page, args.font, line, args.x, y, fontSize)
-    }
-    y -= lineHeight
-  }
-
-  return y
-}
-
 function createBlankPage(pdf: PDFDocument) {
   return pdf.addPage([PAGE_WIDTH, PAGE_HEIGHT])
 }
@@ -331,58 +305,6 @@ function ensureSpace(args: {
   return {
     page,
     y: cv(84),
-  }
-}
-
-function drawSection(args: {
-  pdf: PDFDocument
-  page: PDFPage
-  fonts: PdfFontSet
-  y: number
-  title: string
-  text: string
-}) {
-  let activePage = args.page
-  let y = args.y
-
-  const text = args.text || "—"
-  const lines = wrapText(
-    text,
-    args.fonts.regular,
-    GENERATED_TEXT_SIZE,
-    CONTENT_WIDTH
-  )
-
-  const neededHeight = 26 + Math.max(1, lines.length) * GENERATED_LINE_HEIGHT
-
-  const ensured = ensureSpace({
-    pdf: args.pdf,
-    page: activePage,
-    fonts: args.fonts,
-    y,
-    needed: neededHeight,
-  })
-
-  activePage = ensured.page
-  y = ensured.y
-
-  drawText(activePage, args.fonts.bold, args.title, CONTENT_LEFT, y, 11)
-  y -= 16
-
-  y = drawParagraph({
-    page: activePage,
-    font: args.fonts.regular,
-    text,
-    x: CONTENT_LEFT,
-    y,
-    maxWidth: CONTENT_WIDTH,
-  })
-
-  y -= 12
-
-  return {
-    page: activePage,
-    y,
   }
 }
 
@@ -522,6 +444,78 @@ const BOX_GAP_AFTER = 14
 const BOX_LEFT_LINE_HEIGHT = 14
 const BOX_RIGHT_LINE_HEIGHT = 12.5
 const BOX_SIGNATURE_LABEL_GAP = 17
+
+function drawBoxedTextSection(args: {
+  pdf: PDFDocument
+  page: PDFPage
+  fonts: PdfFontSet
+  y: number
+  title: string
+  text: string
+}): { page: PDFPage; y: number } {
+  const innerWidth = CONTENT_WIDTH - BOX_PADDING * 2
+  const text = args.text || "—"
+  const lines = wrapText(
+    text,
+    args.fonts.regular,
+    GENERATED_TEXT_SIZE,
+    innerWidth
+  )
+
+  const contentHeight = Math.max(1, lines.length) * GENERATED_LINE_HEIGHT
+  const totalHeight = BOX_PADDING * 2 + BOX_TITLE_HEIGHT + contentHeight
+
+  const ensured = ensureSpace({
+    pdf: args.pdf,
+    page: args.page,
+    fonts: args.fonts,
+    y: args.y,
+    needed: totalHeight + BOX_GAP_AFTER,
+    withTitle: false,
+  })
+
+  const activePage = ensured.page
+  const boxTop = ensured.y
+  const boxBottom = boxTop - totalHeight
+
+  activePage.drawRectangle({
+    x: CONTENT_LEFT,
+    y: boxBottom,
+    width: CONTENT_WIDTH,
+    height: totalHeight,
+    borderColor: rgb(0.6, 0.6, 0.6),
+    borderWidth: 1,
+  })
+
+  drawText(
+    activePage,
+    args.fonts.bold,
+    args.title,
+    CONTENT_LEFT + BOX_PADDING,
+    boxTop - BOX_PADDING - 9,
+    11
+  )
+
+  let textY = boxTop - BOX_PADDING - BOX_TITLE_HEIGHT
+  for (const line of lines) {
+    if (line) {
+      drawText(
+        activePage,
+        args.fonts.regular,
+        line,
+        CONTENT_LEFT + BOX_PADDING,
+        textY,
+        GENERATED_TEXT_SIZE
+      )
+    }
+    textY -= GENERATED_LINE_HEIGHT
+  }
+
+  return {
+    page: activePage,
+    y: boxBottom - BOX_GAP_AFTER,
+  }
+}
 
 function drawBoxedRecommendationSection(args: {
   pdf: PDFDocument
@@ -674,7 +668,7 @@ export async function renderProbationEvaluationPdfBuffer(
     .join("\n")
 
   if (payload.onboarding.earlyExitNote) {
-    const noteResult = drawSection({
+    const noteResult = drawBoxedTextSection({
       pdf,
       page: activePage,
       fonts,
@@ -707,7 +701,7 @@ export async function renderProbationEvaluationPdfBuffer(
   ]
 
   for (const section of sections) {
-    const result = drawSection({
+    const result = drawBoxedTextSection({
       pdf,
       page: activePage,
       fonts,
@@ -746,7 +740,7 @@ export async function renderProbationEvaluationPdfBuffer(
   const tajemnikRequired = payload.request.tajemnikRequired === true
 
   if (!tajemnikRequired && tajemnikReview.agreement) {
-    const noteResult = drawSection({
+    const noteResult = drawBoxedTextSection({
       pdf,
       page: activePage,
       fonts,

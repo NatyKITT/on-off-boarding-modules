@@ -346,7 +346,10 @@ export function PersonBulkActions({
   const { toast } = useToast()
 
   const downloadable = documents.filter((doc) => getDownloadUrl(doc))
-  const sendable = documents.filter((doc) => getSendConfig(doc))
+  const sendable = documents.filter((doc) => {
+    const config = getSendConfig(doc)
+    return config != null && config.url !== "/api/dokumenty/send-link"
+  })
 
   if (downloadable.length === 0 && sendable.length === 0) return null
 
@@ -366,25 +369,54 @@ export function PersonBulkActions({
     if (!email.trim()) return
     setSending(true)
 
-    const results = await Promise.allSettled(
-      sendable.map(async (doc) => {
-        const config = getSendConfig(doc)
-        if (!config) return
+    const trimmedEmail = email.trim()
 
-        const res = await fetch(config.url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(config.buildBody(email.trim())),
-        })
-
-        if (!res.ok) {
-          const response = await res.json().catch(() => null)
-          throw new Error(
-            response?.message ?? response?.error ?? "Odeslání se nezdařilo."
-          )
-        }
+    async function postJson(url: string, body: unknown) {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       })
+
+      if (!res.ok) {
+        const response = await res.json().catch(() => null)
+        throw new Error(
+          response?.message ?? response?.error ?? "Odeslání se nezdařilo."
+        )
+      }
+    }
+
+    // Completed employment documents (affidavit / personal questionnaire /
+    // payroll info) all go through the same endpoint and the same
+    // onboarding record, so batch them into a single email instead of
+    // sending one email per document.
+    const onboardingDocs = sendable.filter(
+      (doc) =>
+        doc.kind === "onboarding_document" &&
+        doc.status === "completed" &&
+        doc.documentId != null
     )
+    const otherDocs = sendable.filter((doc) => !onboardingDocs.includes(doc))
+
+    const requests: Array<() => Promise<void>> = []
+
+    if (onboardingDocs.length > 0) {
+      requests.push(() =>
+        postJson("/api/dokumenty/send-pdf", {
+          onboardingId: onboardingDocs[0].recordId,
+          email: trimmedEmail,
+          documentIds: onboardingDocs.map((doc) => doc.documentId),
+        })
+      )
+    }
+
+    for (const doc of otherDocs) {
+      const config = getSendConfig(doc)
+      if (!config) continue
+      requests.push(() => postJson(config.url, config.buildBody(trimmedEmail)))
+    }
+
+    const results = await Promise.allSettled(requests.map((run) => run()))
 
     const succeeded = results.filter((r) => r.status === "fulfilled").length
     const failed = results.length - succeeded
@@ -393,8 +425,8 @@ export function PersonBulkActions({
       title: failed === 0 ? "Odesláno" : "Odesláno částečně",
       description:
         failed === 0
-          ? `Všechny dokumenty (${succeeded}) byly odeslány na ${email.trim()}.`
-          : `Odesláno ${succeeded} z ${results.length} dokumentů na ${email.trim()}, ${failed} se nezdařilo.`,
+          ? `Všechny dokumenty (${sendable.length}) byly odeslány na ${trimmedEmail}.`
+          : `Část odeslání se nezdařila (${succeeded} z ${results.length} e-mailů úspěšně) na ${trimmedEmail}.`,
       variant: failed === 0 ? "default" : "destructive",
     })
 

@@ -13,6 +13,7 @@ import {
   Mail,
 } from "lucide-react"
 
+import { getEmployeeChangeDetailLabel } from "@/lib/employment-linking"
 import { cn } from "@/lib/utils"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -147,13 +148,6 @@ function formatFullName(r: {
   if (before) full = `${before} ${full}`
   if (after) full = `${full}, ${after}`
   return full
-}
-
-function changeTypeLabel(type: ChangeRow["type"]) {
-  if (type === "NAME") return "Jméno / titul"
-  if (type === "POSITION") return "Pozice / odbor"
-  if (type === "MATERNITY_LEAVE") return "Mateřská dovolená"
-  return "Jméno i pozice"
 }
 
 function positionWithNum(position: string | null, positionNum: string | null) {
@@ -745,9 +739,12 @@ export function CombinedReportModal({
                             <td className="whitespace-nowrap p-2">
                               {fmt(new Date(r.effectiveDate), "dd.MM.yyyy")}
                             </td>
-                            <td className="p-2">
-                              <Badge variant="secondary">
-                                {changeTypeLabel(r.type)}
+                            <td className="max-w-[170px] p-2">
+                              <Badge
+                                variant="secondary"
+                                className="whitespace-normal text-left"
+                              >
+                                {getEmployeeChangeDetailLabel(r)}
                               </Badge>
                             </td>
                             <td className="p-2">
@@ -985,7 +982,7 @@ export function CombinedReportModal({
                           )
                         }
                       />
-                      Pozice / odbor
+                      Pozice / oddělení / odbor
                     </label>
                     <label className="flex cursor-pointer items-center gap-2 text-sm">
                       <Checkbox
@@ -994,10 +991,11 @@ export function CombinedReportModal({
                           setChangeTypes((prev) => toggleInArray(prev, "NAME"))
                         }
                       />
-                      Jméno / titul
+                      Jméno / příjmení / titul
                     </label>
-                    <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <label className="flex cursor-pointer items-start gap-2 text-sm">
                       <Checkbox
+                        className="mt-0.5"
                         checked={changeTypes.includes("NAME_AND_POSITION")}
                         onCheckedChange={() =>
                           setChangeTypes((prev) =>
@@ -1005,7 +1003,10 @@ export function CombinedReportModal({
                           )
                         }
                       />
-                      Jméno i pozice
+                      <span className="flex flex-col leading-snug">
+                        <span>Jméno / příjmení / titul</span>
+                        <span>a pozice / oddělení / odbor</span>
+                      </span>
                     </label>
                     <label className="flex cursor-pointer items-center gap-2 text-sm">
                       <Checkbox

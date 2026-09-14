@@ -81,7 +81,8 @@ function decisionChip(decision: ProbationDecision): {
 }
 
 function decisionText(decision: ProbationDecision): string {
-  if (decision === "STOP") return "Potvrzeno zastavení hodnocení zkušební doby"
+  if (decision === "STOP")
+    return "Potvrzeno zastavení vyhodnocení zkušební doby"
   if (decision === "KEEP")
     return "Pokračuje (Personální oddělení se rozhodlo nezastavovat)"
   return "Čeká na rozhodnutí Personálního oddělení"
@@ -233,7 +234,7 @@ export function LinkedRecordInfoButton({
                   </p>
                   {offboarding.leftDuringProbation && (
                     <p>
-                      <strong>Hodnocení zkušební doby:</strong>{" "}
+                      <strong>Vyhodnocení zkušební doby:</strong>{" "}
                       {decisionText(decision)}
                     </p>
                   )}
@@ -261,7 +262,7 @@ export function LinkedRecordInfoButton({
                   </p>
                   {onboarding.exitDuringProbation && (
                     <p>
-                      <strong>Hodnocení zkušební doby:</strong>{" "}
+                      <strong>Vyhodnocení zkušební doby:</strong>{" "}
                       {decisionText(decision)}
                     </p>
                   )}

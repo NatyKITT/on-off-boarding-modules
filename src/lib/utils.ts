@@ -13,7 +13,7 @@ export function cn(...inputs: ClassValue[]) {
 export function constructMetadata({
   title = siteConfig.name,
   description = siteConfig.description,
-  icons = "/favicon.ico",
+  icons = "/assets/favicons/favicon.ico",
   noIndex = false,
 }: {
   title?: string

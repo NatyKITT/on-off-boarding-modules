@@ -3,8 +3,20 @@ import path from "path"
 
 import { PDFDocument, rgb, type PDFFont, type PDFPage } from "pdf-lib"
 
+import { BANK_OPTIONS, OTHER_BANK_VALUE } from "@/types/bank-options"
+import {
+  HEALTH_INSURANCE_OPTIONS,
+  OTHER_HEALTH_INSURANCE_VALUE,
+} from "@/types/health-insurance-options"
+import {
+  CZECH_CITIZENSHIP_VALUE,
+  NATIONALITY_OPTIONS,
+  OTHER_CITIZENSHIP_VALUE,
+} from "@/types/nationality-options"
+
 import { prisma } from "@/lib/db"
 import { loadPdfFonts } from "@/lib/pdf-fonts"
+import { DRIVER_LICENSE_CATEGORY_LABELS } from "@/lib/validations/employment-documents"
 
 const BORDER_GRAY = rgb(0.82, 0.82, 0.82)
 const LABEL_GRAY = rgb(0.4, 0.4, 0.4)
@@ -48,15 +60,18 @@ const HEADER_VALUE_Y_OFFSET = 5
 const CONTINUATION_START_Y = 56
 
 const FIELD_LABEL_SIZE = 8.5
-const FIELD_VALUE_SIZE = 10.5
-const FIELD_ROW_HEIGHT = 26
+const FIELD_VALUE_SIZE = 10
+const FIELD_ROW_HEIGHT = 18
+const LABEL_VALUE_GAP = 6
 const ITEM_LABEL_HEIGHT = 16
 const ITEM_DIVIDER_GAP = 10
-const SECTION_HEADER_HEIGHT = 22
-const SECTION_GAP = 12
-const SECTION_PADDING = 10
-const SECTION_TOP_PAD = 14
+const SECTION_HEADER_HEIGHT = 30
+const SECTION_HEADER_RULE_GAP = 14
+const SECTION_GAP = 14
+const SECTION_PADDING = 12
+const SECTION_TOP_PAD = 16
 const SECTION_BOTTOM_PAD = 12
+const COLUMN_GAP = 20
 
 function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
   const { buffer, byteOffset, byteLength } = u8
@@ -140,7 +155,6 @@ type MilitaryServiceItem = {
   service?: "BASIC" | "ALTERNATIVE" | "CIVIL" | string | null
   from?: string | null
   to?: string | null
-  ongoing?: boolean | null
 }
 
 type CloseRelativeCareItem = {
@@ -165,22 +179,31 @@ type UnpaidLeaveItem = {
 
 type ExperienceItem = {
   employer?: string | null
+  jobPositionName?: string | null
   jobType?: string | null
   employmentType?: string | null
   from?: string | null
   to?: string | null
-  ongoing?: boolean | null
+  workloadType?: "FULL" | "HALF" | "OTHER" | string | null
+  workloadOther?: string | null
 }
 
 type AffidavitData = {
   experience?: ExperienceItem[]
   noExperience?: boolean
+  hasMilitaryService?: boolean
   militaryService?: MilitaryServiceItem[]
+  hasMaternityParental?: boolean
   maternityParental?: ChildCareItem[]
+  hasContinuousCare?: boolean
   continuousCare?: ChildCareItem[]
+  hasDisabledChildCare?: boolean
   disabledChildCare?: ChildCareItem[]
+  hasCloseRelativeCare?: boolean
   closeRelativeCare?: CloseRelativeCareItem[]
+  hasDoctoralStudy?: boolean
   doctoralStudy?: DoctoralStudyItem[]
+  hasUnpaidLeave?: boolean
   unpaidLeave?: UnpaidLeaveItem[]
   isTruthful?: boolean
   [key: string]: unknown
@@ -192,13 +215,13 @@ type PayrollChildItem = {
 }
 
 type PayrollInfoData = {
-  fullName?: string | null
-  maidenName?: string | null
-  birthPlace?: string | null
-  birthNumber?: string | null
-  birthDay?: string | null
-  birthMonth?: string | null
-  birthYear?: string | null
+  firstName?: string | null
+  lastName?: string | null
+  birthSurnameDiffers?: boolean
+  birthSurname?: string | null
+  titleBefore?: string | null
+  titleAfter?: string | null
+  academicDegrees?: string | null
   maritalStatus?:
     | "SINGLE"
     | "MARRIED"
@@ -207,14 +230,24 @@ type PayrollInfoData = {
     | "REGISTERED"
     | "UNSTATED"
     | string
+  birthDate?: string | null
+  birthNumber?: string | null
+  birthPlace?: string | null
+  birthDistrict?: string | null
+  birthState?: string | null
+  citizenship?: string | null
+  citizenshipOther?: string | null
   permanentStreet?: string | null
   permanentHouseNumber?: string | null
   permanentCity?: string | null
   permanentPostcode?: string | null
+  hasChildren?: boolean
   children?: PayrollChildItem[]
   healthInsuranceCompany?: string | null
+  healthInsuranceCompanyOther?: string | null
   bankAccountNumber?: string | null
   bankName?: string | null
+  bankNameOther?: string | null
   confirmTruthfulness?: boolean
   signatureDate?: string | null
   [key: string]: unknown
@@ -232,24 +265,22 @@ type EducationEntry = {
   studyForm?: string | null
   graduationYear?: string | null
   examType?: string | null
+  degreeTitle?: string | null
+  studyStatus?: "COMPLETED" | "ONGOING" | string
+}
+
+type CertificateSpecialEntry = {
+  name?: string | null
 }
 
 type PersonalQuestionnaireData = {
-  lastName?: string | null
   firstName?: string | null
+  lastName?: string | null
+  birthSurnameDiffers?: boolean
+  birthSurname?: string | null
   titleBefore?: string | null
   titleAfter?: string | null
   academicDegrees?: string | null
-  maidenName?: string | null
-  otherSurnames?: string | null
-  birthDate?: string | null
-  birthNumber?: string | null
-  birthPlace?: string | null
-  birthDistrict?: string | null
-  birthState?: string | null
-  phone?: string | null
-  citizenship?: string | null
-  dataBoxId?: string | null
   maritalStatus?:
     | "SINGLE"
     | "MARRIED"
@@ -258,35 +289,45 @@ type PersonalQuestionnaireData = {
     | "REGISTERED"
     | "UNSTATED"
     | string
+  birthDate?: string | null
+  birthNumber?: string | null
+  birthPlace?: string | null
+  birthDistrict?: string | null
+  birthState?: string | null
+  citizenship?: string | null
+  citizenshipOther?: string | null
   foreignPermitFrom?: string | null
   foreignPermitTo?: string | null
   foreignPermitAuthority?: string | null
+  email?: string | null
+  phoneCountryCode?: string | null
+  phone?: string | null
+  dataBoxId?: string | null
+  dataBoxDelivery?: boolean
   permanentStreet?: string | null
   permanentHouseNumber?: string | null
   permanentCity?: string | null
   permanentPostcode?: string | null
+  useDifferentMailingAddress?: boolean
   correspondenceStreet?: string | null
   correspondenceHouseNumber?: string | null
   correspondenceCity?: string | null
   correspondencePostcode?: string | null
-  healthInsuranceCompany?: string | null
-  bankAccountNumber?: string | null
-  bankName?: string | null
+  hasDriverLicense?: boolean
+  driverLicenseCategories?: string[]
   maintenanceInfo?: string | null
   receivesPensionBenefits?: boolean
   typePensionBenefits?: string | null
   isDisabledPerson?: boolean
   disabilityDegree?: "NONE" | "I" | "II" | "III" | string
+  familyRelations?: string | null
   education?: EducationEntry[]
   languages?: LanguageEntry[]
-  dataBoxDelivery?: boolean
   hasCertificateManagement?: boolean
   hasCertificateSpecial?: boolean
-  certificateSpecialName?: string | null
+  certificateSpecialNames?: CertificateSpecialEntry[]
   hasCertificateTraining?: boolean
   hasCertificateGeneral?: boolean
-  familyRelations?: string | null
-  finalRequestPayrollTransfer?: boolean
   finalReadAndUnderstood?: boolean
   finalTruthfulnessConfirm?: boolean
   [key: string]: unknown
@@ -339,7 +380,14 @@ function ensureSpace(ctx: PdfCtx, needed: number): PdfCtx {
   return { ...ctx, page, y }
 }
 
-type FieldRow = { label: string; value: string; longLabel?: boolean }
+type FieldRow = {
+  label: string
+  value: string
+  longLabel?: boolean
+  optional?: boolean
+  emphasize?: boolean
+  noAnswer?: boolean
+}
 
 type SectionItem = {
   itemLabel?: string
@@ -381,17 +429,46 @@ function estimateFieldRowHeight(
   maxWidth: number
 ): number {
   if (field.longLabel) {
-    const lines = wrapText(
-      fonts.regular,
-      field.label,
-      LONG_LABEL_SIZE,
-      maxWidth
-    )
-    const answerHeight = field.value ? FIELD_VALUE_SIZE + 8 : 0
+    const labelFont = field.emphasize ? fonts.bold : fonts.regular
+    const lines = wrapText(labelFont, field.label, LONG_LABEL_SIZE, maxWidth)
+    const answerHeight = field.noAnswer ? 0 : FIELD_VALUE_SIZE + 8
     return lines.length * LONG_LABEL_LINE_HEIGHT + answerHeight + 6
   }
 
-  return field.value ? FIELD_ROW_HEIGHT : FIELD_ROW_HEIGHT - 10
+  return FIELD_ROW_HEIGHT
+}
+
+type FieldRowLayout =
+  | { kind: "pair"; a: FieldRow; b: FieldRow }
+  | { kind: "single"; field: FieldRow }
+
+function layoutFieldRows(fields: FieldRow[]): FieldRowLayout[] {
+  const rows: FieldRowLayout[] = []
+  let pending: FieldRow | null = null
+
+  for (const field of fields) {
+    if (field.longLabel) {
+      if (pending) {
+        rows.push({ kind: "single", field: pending })
+        pending = null
+      }
+      rows.push({ kind: "single", field })
+      continue
+    }
+
+    if (pending) {
+      rows.push({ kind: "pair", a: pending, b: field })
+      pending = null
+    } else {
+      pending = field
+    }
+  }
+
+  if (pending) {
+    rows.push({ kind: "single", field: pending })
+  }
+
+  return rows
 }
 
 function estimateItemHeight(
@@ -401,34 +478,18 @@ function estimateItemHeight(
   maxWidth: number
 ): number {
   const labelHeight = showItemLabel && item.itemLabel ? ITEM_LABEL_HEIGHT : 0
-  const fieldsHeight = item.fields.reduce(
-    (sum, f) => sum + estimateFieldRowHeight(fonts, f, maxWidth),
-    0
-  )
-  return labelHeight + fieldsHeight
-}
+  const columnWidth = (maxWidth - COLUMN_GAP) / 2
 
-function estimateSectionHeight(
-  fonts: Fonts,
-  items: SectionItem[],
-  maxWidth: number
-): number {
-  const showItemLabels = items.length > 1
-  const itemsHeight = items.reduce(
-    (sum, item) =>
-      sum + estimateItemHeight(fonts, item, showItemLabels, maxWidth),
-    0
-  )
-  const dividersHeight =
-    items.length > 1 ? (items.length - 1) * ITEM_DIVIDER_GAP : 0
+  const rowsHeight = layoutFieldRows(item.fields).reduce((sum, row) => {
+    if (row.kind === "single") {
+      return sum + estimateFieldRowHeight(fonts, row.field, maxWidth)
+    }
+    const heightA = estimateFieldRowHeight(fonts, row.a, columnWidth)
+    const heightB = estimateFieldRowHeight(fonts, row.b, columnWidth)
+    return sum + Math.max(heightA, heightB)
+  }, 0)
 
-  return (
-    SECTION_HEADER_HEIGHT +
-    itemsHeight +
-    dividersHeight +
-    SECTION_TOP_PAD +
-    SECTION_BOTTOM_PAD
-  )
+  return labelHeight + rowsHeight
 }
 
 function drawFieldRow(
@@ -440,12 +501,10 @@ function drawFieldRow(
   maxWidth: number
 ): number {
   if (field.longLabel) {
-    const lines = wrapText(
-      fonts.regular,
-      field.label,
-      LONG_LABEL_SIZE,
-      maxWidth
-    )
+    const labelFont = field.emphasize ? fonts.bold : fonts.regular
+    const labelColor = field.emphasize ? TEXT_BLACK : LABEL_GRAY
+
+    const lines = wrapText(labelFont, field.label, LONG_LABEL_SIZE, maxWidth)
     let cursorY = y
 
     for (const line of lines) {
@@ -453,14 +512,14 @@ function drawFieldRow(
         x,
         y: cursorY,
         size: LONG_LABEL_SIZE,
-        font: fonts.regular,
-        color: LABEL_GRAY,
+        font: labelFont,
+        color: labelColor,
       })
       cursorY -= LONG_LABEL_LINE_HEIGHT
     }
 
-    if (field.value) {
-      page.drawText(`Odpověď: ${field.value}`, {
+    if (!field.noAnswer) {
+      page.drawText(`Odpověď: ${field.value || "Nevyplněno"}`, {
         x,
         y: cursorY - 2,
         size: FIELD_VALUE_SIZE,
@@ -473,7 +532,10 @@ function drawFieldRow(
     return cursorY - 6
   }
 
-  page.drawText(field.label.toLocaleUpperCase("cs-CZ"), {
+  const displayValue = field.value || "Nevyplněno"
+  const labelText = field.label.toLocaleUpperCase("cs-CZ") + ":"
+
+  page.drawText(labelText, {
     x,
     y,
     size: FIELD_LABEL_SIZE,
@@ -481,20 +543,20 @@ function drawFieldRow(
     color: LABEL_GRAY,
   })
 
-  if (field.value) {
-    drawTextFitted(
-      page,
-      fonts.bold,
-      field.value,
-      x,
-      y - 13,
-      maxWidth,
-      FIELD_VALUE_SIZE
-    )
-    return y - FIELD_ROW_HEIGHT
-  }
+  const labelWidth = fonts.bold.widthOfTextAtSize(labelText, FIELD_LABEL_SIZE)
+  const valueX = x + labelWidth + LABEL_VALUE_GAP
+  const valueMaxWidth = Math.max(30, maxWidth - labelWidth - LABEL_VALUE_GAP)
 
-  return y - (FIELD_ROW_HEIGHT - 10)
+  drawTextFitted(
+    page,
+    fonts.bold,
+    displayValue,
+    valueX,
+    y - 0.5,
+    valueMaxWidth,
+    FIELD_VALUE_SIZE
+  )
+  return y - FIELD_ROW_HEIGHT
 }
 
 function drawNumberedSection(
@@ -505,31 +567,81 @@ function drawNumberedSection(
   if (items.length === 0) return ctx
 
   const fieldMaxWidth = CONTENT_WIDTH - SECTION_PADDING * 2
-  const neededHeight = estimateSectionHeight(ctx.fonts, items, fieldMaxWidth)
-  const next = ensureSpace(ctx, neededHeight)
-  const sectionIndex = next.sectionIndex + 1
-  const letter = letterFor(sectionIndex)
-
-  const boxTop = next.y
-  let y = next.y - SECTION_TOP_PAD
-
-  const headingText = `${letter}. ${sectionTitle}`
-
-  next.page.drawText(headingText, {
-    x: CONTENT_LEFT + SECTION_PADDING,
-    y,
-    size: 11.5,
-    font: next.fonts.bold,
-    color: TEXT_BLACK,
-  })
-
-  y -= SECTION_HEADER_HEIGHT
-
   const showItemLabels = items.length > 1
 
+  const firstItemHeight = estimateItemHeight(
+    ctx.fonts,
+    items[0],
+    showItemLabels,
+    fieldMaxWidth
+  )
+  const minFirstPageHeight =
+    SECTION_HEADER_HEIGHT +
+    firstItemHeight +
+    SECTION_TOP_PAD +
+    SECTION_BOTTOM_PAD
+
+  const cursor = ensureSpace(ctx, minFirstPageHeight)
+  const sectionIndex = cursor.sectionIndex + 1
+  const letter = letterFor(sectionIndex)
+
+  let page = cursor.page
+  let boxTop = cursor.y
+  let y = cursor.y - SECTION_TOP_PAD
+
+  const drawHeading = (continued: boolean) => {
+    const headingText = continued
+      ? `${letter}. ${sectionTitle} (pokračování)`
+      : `${letter}. ${sectionTitle}`
+
+    page.drawText(headingText, {
+      x: CONTENT_LEFT + SECTION_PADDING,
+      y,
+      size: 12,
+      font: cursor.fonts.bold,
+      color: TEXT_BLACK,
+    })
+    y -= SECTION_HEADER_RULE_GAP
+
+    page.drawLine({
+      start: { x: CONTENT_LEFT + SECTION_PADDING, y },
+      end: { x: CONTENT_RIGHT - SECTION_PADDING, y },
+      thickness: 0.75,
+      color: BORDER_GRAY,
+    })
+
+    y -= SECTION_HEADER_HEIGHT - SECTION_HEADER_RULE_GAP
+  }
+
+  const closeBox = () => {
+    const boxBottom = y - SECTION_BOTTOM_PAD
+    page.drawRectangle({
+      x: CONTENT_LEFT,
+      y: boxBottom,
+      width: CONTENT_WIDTH,
+      height: boxTop - boxBottom,
+      borderColor: BORDER_GRAY,
+      borderWidth: 1,
+    })
+    return boxBottom
+  }
+
+  drawHeading(false)
+
   items.forEach((item, itemIndex) => {
-    if (itemIndex > 0) {
-      next.page.drawLine({
+    const itemHeight =
+      estimateItemHeight(cursor.fonts, item, showItemLabels, fieldMaxWidth) +
+      (itemIndex > 0 ? ITEM_DIVIDER_GAP : 0)
+
+    if (y - itemHeight < 50) {
+      closeBox()
+      const continuation = newContinuationPage(cursor.pdf)
+      page = continuation.page
+      boxTop = continuation.y
+      y = continuation.y - SECTION_TOP_PAD
+      drawHeading(true)
+    } else if (itemIndex > 0) {
+      page.drawLine({
         start: { x: CONTENT_LEFT + SECTION_PADDING, y: y + 6 },
         end: { x: CONTENT_RIGHT - SECTION_PADDING, y: y + 6 },
         thickness: 0.5,
@@ -539,40 +651,49 @@ function drawNumberedSection(
     }
 
     if (showItemLabels && item.itemLabel) {
-      next.page.drawText(item.itemLabel, {
+      page.drawText(item.itemLabel, {
         x: CONTENT_LEFT + SECTION_PADDING,
         y,
         size: 9.5,
-        font: next.fonts.bold,
+        font: cursor.fonts.bold,
         color: rgb(0.3, 0.3, 0.3),
       })
       y -= ITEM_LABEL_HEIGHT
     }
 
-    item.fields.forEach((field) => {
-      y = drawFieldRow(
-        next.page,
-        next.fonts,
-        field,
-        CONTENT_LEFT + SECTION_PADDING,
+    const columnWidth = (fieldMaxWidth - COLUMN_GAP) / 2
+    const leftX = CONTENT_LEFT + SECTION_PADDING
+    const rightX = leftX + columnWidth + COLUMN_GAP
+
+    layoutFieldRows(item.fields).forEach((row) => {
+      if (row.kind === "single") {
+        y = drawFieldRow(page, cursor.fonts, row.field, leftX, y, fieldMaxWidth)
+        return
+      }
+
+      const yAfterA = drawFieldRow(
+        page,
+        cursor.fonts,
+        row.a,
+        leftX,
         y,
-        CONTENT_WIDTH - SECTION_PADDING * 2
+        columnWidth
       )
+      const yAfterB = drawFieldRow(
+        page,
+        cursor.fonts,
+        row.b,
+        rightX,
+        y,
+        columnWidth
+      )
+      y = Math.min(yAfterA, yAfterB)
     })
   })
 
-  const boxBottom = y - SECTION_BOTTOM_PAD
+  const boxBottom = closeBox()
 
-  next.page.drawRectangle({
-    x: CONTENT_LEFT,
-    y: boxBottom,
-    width: CONTENT_WIDTH,
-    height: boxTop - boxBottom,
-    borderColor: BORDER_GRAY,
-    borderWidth: 1,
-  })
-
-  return { ...next, sectionIndex, y: boxBottom - SECTION_GAP }
+  return { ...cursor, page, sectionIndex, y: boxBottom - SECTION_GAP }
 }
 
 function drawSignatureBlock(
@@ -637,17 +758,21 @@ function drawSignatureBlock(
   return { ...next, y: boxBottom - SECTION_GAP }
 }
 
-function periodField(
-  from?: string | null,
-  to?: string | null,
-  ongoing?: boolean | null
-): FieldRow {
-  const value = ongoing
-    ? `${formatDate(from ?? "")} – stále trvá`
-    : from || to
-      ? `${formatDate(from ?? "")} – ${formatDate(to ?? "")}`
-      : ""
+function periodField(from?: string | null, to?: string | null): FieldRow {
+  const value =
+    from || to ? `${formatDate(from ?? "")} – ${formatDate(to ?? "")}` : ""
   return { label: "Období", value }
+}
+
+const WORKLOAD_TYPE_LABELS: Record<string, string> = {
+  FULL: "Plný úvazek",
+  HALF: "Poloviční úvazek",
+}
+
+function workloadLabel(type?: string | null, other?: string | null): string {
+  if (!type) return ""
+  if (type === "OTHER") return other ?? ""
+  return WORKLOAD_TYPE_LABELS[type] ?? type
 }
 
 function yesNo(v: boolean | undefined | null) {
@@ -747,6 +872,19 @@ const MILITARY_SERVICE_LABELS: Record<string, string> = {
   CIVIL: "civilní",
 }
 
+function buildYesNoListSection<T>(
+  hasFlag: boolean | undefined,
+  list: T[],
+  noQuestionLabel: string,
+  buildItems: (list: T[]) => SectionItem[]
+): SectionItem[] {
+  const has = hasFlag ?? list.length > 0
+  if (!has) {
+    return [{ fields: [{ label: noQuestionLabel, value: "Ne" }] }]
+  }
+  return buildItems(list)
+}
+
 function generateAffidavitPDF(
   page: PDFPage,
   fonts: Fonts,
@@ -778,6 +916,10 @@ function generateAffidavitPDF(
           itemLabel: `${idx + 1}. Zaměstnání`,
           fields: [
             { label: "Zaměstnavatel", value: exp.employer ?? "" },
+            {
+              label: "Název pracovní pozice",
+              value: exp.jobPositionName ?? "",
+            },
             { label: "Druh práce", value: exp.jobType ?? "" },
             {
               label: "Typ výkonu práce",
@@ -786,44 +928,13 @@ function generateAffidavitPDF(
                   exp.employmentType)
                 : "",
             },
-            periodField(exp.from, exp.to, exp.ongoing),
+            periodField(exp.from, exp.to),
+            {
+              label: "Rozsah pracovního úvazku",
+              value: workloadLabel(exp.workloadType, exp.workloadOther),
+            },
           ],
         }))
-  )
-
-  const militaryList = (data.militaryService ?? []).filter(
-    (m) => m.service || m.from || m.to
-  )
-  ctx = drawNumberedSection(
-    ctx,
-    "Vojenská, náhradní nebo civilní služba",
-    militaryList.map((mil, idx) => ({
-      itemLabel: `${idx + 1}. Služba`,
-      fields: [
-        {
-          label: "Druh služby",
-          value: mil.service
-            ? (MILITARY_SERVICE_LABELS[mil.service] ?? mil.service)
-            : "",
-        },
-        periodField(mil.from, mil.to, mil.ongoing),
-      ],
-    }))
-  )
-
-  const unpaidList = (data.unpaidLeave ?? []).filter(
-    (u) => u.reason || u.from || u.to
-  )
-  ctx = drawNumberedSection(
-    ctx,
-    "Pracovní volno bez náhrady platu/mzdy",
-    unpaidList.map((item, idx) => ({
-      itemLabel: `${idx + 1}. Případ`,
-      fields: [
-        { label: "Důvod", value: item.reason ?? "" },
-        periodField(item.from, item.to),
-      ],
-    }))
   )
 
   const maternityList = (data.maternityParental ?? []).filter(
@@ -832,14 +943,23 @@ function generateAffidavitPDF(
   ctx = drawNumberedSection(
     ctx,
     "Mateřská a rodičovská dovolená",
-    maternityList.map((item, idx) => ({
-      itemLabel: `${idx + 1}. Záznam`,
-      fields: [
-        { label: "Jméno a příjmení dítěte", value: item.childName ?? "" },
-        { label: "Datum narození", value: formatDate(item.childBirthDate) },
-        periodField(item.from, item.to),
-      ],
-    }))
+    buildYesNoListSection(
+      data.hasMaternityParental,
+      maternityList,
+      "Mateřská nebo rodičovská dovolená",
+      (list) =>
+        list.map((item, idx) => ({
+          itemLabel: `${idx + 1}. Záznam`,
+          fields: [
+            { label: "Jméno a příjmení dítěte", value: item.childName ?? "" },
+            {
+              label: "Datum narození",
+              value: formatDate(item.childBirthDate),
+            },
+            periodField(item.from, item.to),
+          ],
+        }))
+    )
   )
 
   const continuousList = (data.continuousCare ?? []).filter(
@@ -848,14 +968,23 @@ function generateAffidavitPDF(
   ctx = drawNumberedSection(
     ctx,
     "Trvalá péče o dítě nebo děti",
-    continuousList.map((item, idx) => ({
-      itemLabel: `${idx + 1}. Záznam`,
-      fields: [
-        { label: "Jméno a příjmení dítěte", value: item.childName ?? "" },
-        { label: "Datum narození", value: formatDate(item.childBirthDate) },
-        periodField(item.from, item.to),
-      ],
-    }))
+    buildYesNoListSection(
+      data.hasContinuousCare,
+      continuousList,
+      "Trvalá péče o dítě nebo děti",
+      (list) =>
+        list.map((item, idx) => ({
+          itemLabel: `${idx + 1}. Záznam`,
+          fields: [
+            { label: "Jméno a příjmení dítěte", value: item.childName ?? "" },
+            {
+              label: "Datum narození",
+              value: formatDate(item.childBirthDate),
+            },
+            periodField(item.from, item.to),
+          ],
+        }))
+    )
   )
 
   const disabledList = (data.disabledChildCare ?? []).filter(
@@ -864,14 +993,23 @@ function generateAffidavitPDF(
   ctx = drawNumberedSection(
     ctx,
     "Péče o dlouhodobě zdravotně postižené dítě",
-    disabledList.map((item, idx) => ({
-      itemLabel: `${idx + 1}. Záznam`,
-      fields: [
-        { label: "Jméno a příjmení dítěte", value: item.childName ?? "" },
-        { label: "Datum narození", value: formatDate(item.childBirthDate) },
-        periodField(item.from, item.to),
-      ],
-    }))
+    buildYesNoListSection(
+      data.hasDisabledChildCare,
+      disabledList,
+      "Péče o dlouhodobě zdravotně postižené dítě",
+      (list) =>
+        list.map((item, idx) => ({
+          itemLabel: `${idx + 1}. Záznam`,
+          fields: [
+            { label: "Jméno a příjmení dítěte", value: item.childName ?? "" },
+            {
+              label: "Datum narození",
+              value: formatDate(item.childBirthDate),
+            },
+            periodField(item.from, item.to),
+          ],
+        }))
+    )
   )
 
   const closeRelativeList = (data.closeRelativeCare ?? []).filter(
@@ -880,22 +1018,75 @@ function generateAffidavitPDF(
   ctx = drawNumberedSection(
     ctx,
     "Péče o osobu blízkou",
-    closeRelativeList.map((item, idx) => ({
-      itemLabel: `${idx + 1}. Záznam`,
-      fields: [
-        { label: "Jméno a příjmení osoby", value: item.personName ?? "" },
-        {
-          label: "Stupeň závislosti",
-          value:
-            item.dependencyLevel === "III"
-              ? "III (těžká závislost)"
-              : item.dependencyLevel === "IV"
-                ? "IV (úplná závislost)"
-                : (item.dependencyLevel ?? ""),
-        },
-        periodField(item.from, item.to),
-      ],
-    }))
+    buildYesNoListSection(
+      data.hasCloseRelativeCare,
+      closeRelativeList,
+      "Péče o osobu blízkou",
+      (list) =>
+        list.map((item, idx) => ({
+          itemLabel: `${idx + 1}. Záznam`,
+          fields: [
+            { label: "Jméno a příjmení osoby", value: item.personName ?? "" },
+            {
+              label: "Stupeň závislosti",
+              value:
+                item.dependencyLevel === "III"
+                  ? "III (těžká závislost)"
+                  : item.dependencyLevel === "IV"
+                    ? "IV (úplná závislost)"
+                    : (item.dependencyLevel ?? ""),
+            },
+            periodField(item.from, item.to),
+          ],
+        }))
+    )
+  )
+
+  const unpaidList = (data.unpaidLeave ?? []).filter(
+    (u) => u.reason || u.from || u.to
+  )
+  ctx = drawNumberedSection(
+    ctx,
+    "Pracovní volno bez náhrady platu/mzdy",
+    buildYesNoListSection(
+      data.hasUnpaidLeave,
+      unpaidList,
+      "Pracovní volno bez náhrady platu/mzdy",
+      (list) =>
+        list.map((item, idx) => ({
+          itemLabel: `${idx + 1}. Případ`,
+          fields: [
+            { label: "Důvod", value: item.reason ?? "" },
+            periodField(item.from, item.to),
+          ],
+        }))
+    )
+  )
+
+  const militaryList = (data.militaryService ?? []).filter(
+    (m) => m.service || m.from || m.to
+  )
+  ctx = drawNumberedSection(
+    ctx,
+    "Vojenská, náhradní nebo civilní služba",
+    buildYesNoListSection(
+      data.hasMilitaryService,
+      militaryList,
+      "Výkon vojenské, náhradní nebo civilní služby",
+      (list) =>
+        list.map((mil, idx) => ({
+          itemLabel: `${idx + 1}. Služba`,
+          fields: [
+            {
+              label: "Druh služby",
+              value: mil.service
+                ? (MILITARY_SERVICE_LABELS[mil.service] ?? mil.service)
+                : "",
+            },
+            periodField(mil.from, mil.to),
+          ],
+        }))
+    )
   )
 
   const doctoralList = (data.doctoralStudy ?? []).filter(
@@ -904,14 +1095,20 @@ function generateAffidavitPDF(
   ctx = drawNumberedSection(
     ctx,
     "Doktorské studium",
-    doctoralList.map((item, idx) => ({
-      itemLabel: `${idx + 1}. Studium`,
-      fields: [
-        { label: "Název vysoké školy", value: item.schoolName ?? "" },
-        { label: "Studijní program", value: item.studyProgram ?? "" },
-        periodField(item.from, item.to),
-      ],
-    }))
+    buildYesNoListSection(
+      data.hasDoctoralStudy,
+      doctoralList,
+      "Doktorské studium",
+      (list) =>
+        list.map((item, idx) => ({
+          itemLabel: `${idx + 1}. Studium`,
+          fields: [
+            { label: "Název vysoké školy", value: item.schoolName ?? "" },
+            { label: "Studijní program", value: item.studyProgram ?? "" },
+            periodField(item.from, item.to),
+          ],
+        }))
+    )
   )
 
   ctx = drawNumberedSection(ctx, "Čestné prohlášení", [
@@ -922,6 +1119,7 @@ function generateAffidavitPDF(
             "Čestně prohlašuji, že mnou uvedené údaje jsou pravdivé. Jsem si plně vědom(a), že budou použity pro zápočet doby rozhodné pro zařazení do plat. stupně při zařazení do platové třídy, tzn. pro stanovení platového tarifu. Rovněž jsem si plně vědom(a), že nepravdivé údaje budou mít za následek mé bezdůvodné obohacení a zaměstnavatel bude žádat vrácení neprávem takto vyplacených finančních prostředků.",
           value: yesNo(data.isTruthful),
           longLabel: true,
+          emphasize: true,
         },
       ],
     },
@@ -946,37 +1144,56 @@ function generatePayrollInfoPDF(
   docInfo: DocumentInfo
 ): void {
   const data = (rawData ?? {}) as PayrollInfoData
+
+  const nameParts = [
+    data.titleBefore,
+    data.firstName,
+    data.lastName,
+    data.titleAfter,
+    data.academicDegrees,
+  ].filter(Boolean)
+  const fallbackDisplayName = [
+    docInfo.titleBefore,
+    docInfo.employeeName,
+    docInfo.titleAfter,
+  ]
+    .filter(Boolean)
+    .join(" ")
+  const displayName = data.lastName ? nameParts.join(" ") : fallbackDisplayName
+
   let ctx = beginDocument(
     page,
     fonts,
     "Dotazník pro vedení mzdové agendy",
     docInfo,
-    { fullNameOverride: data.fullName ?? undefined }
+    { fullNameOverride: displayName }
   )
 
-  const birthDateParts = [
-    data.birthDay,
-    data.birthMonth,
-    data.birthYear,
-  ].filter(Boolean)
-  const birthDateDisplay =
-    birthDateParts.length > 0
-      ? `${data.birthDay ?? ""}. ${data.birthMonth ?? ""}. ${data.birthYear ?? ""}`.trim()
-      : ""
+  const citizenshipLabel =
+    data.citizenship === OTHER_CITIZENSHIP_VALUE
+      ? (data.citizenshipOther ?? "")
+      : (NATIONALITY_OPTIONS.find((n) => n.value === data.citizenship)?.label ??
+        data.citizenship ??
+        "")
 
-  ctx = drawNumberedSection(ctx, "Osobní údaje", [
+  ctx = drawNumberedSection(ctx, "Základní údaje zaměstnance", [
     {
       fields: [
-        { label: "Rodné příjmení", value: data.maidenName ?? "" },
-        { label: "Místo narození", value: data.birthPlace ?? "" },
-        { label: "Rodné číslo", value: data.birthNumber ?? "" },
-        { label: "Datum narození", value: birthDateDisplay },
+        ...(data.birthSurnameDiffers
+          ? [{ label: "Rodné příjmení", value: data.birthSurname ?? "" }]
+          : []),
         {
           label: "Rodinný stav",
           value: data.maritalStatus
             ? (MARITAL_STATUS_LABELS[data.maritalStatus] ?? data.maritalStatus)
             : "",
         },
+        { label: "Datum narození", value: formatDate(data.birthDate) },
+        { label: "Rodné číslo", value: data.birthNumber ?? "" },
+        { label: "Místo narození", value: data.birthPlace ?? "" },
+        { label: "Okres narození", value: data.birthDistrict ?? "" },
+        { label: "Stát narození", value: data.birthState ?? "" },
+        { label: "Státní občanství", value: citizenshipLabel },
       ],
     },
   ])
@@ -990,7 +1207,7 @@ function generatePayrollInfoPDF(
     .filter(Boolean)
     .join(", ")
 
-  ctx = drawNumberedSection(ctx, "Trvalé bydliště", [
+  ctx = drawNumberedSection(ctx, "Adresa trvalého pobytu", [
     { fields: [{ label: "Adresa", value: address }] },
   ])
 
@@ -1000,27 +1217,54 @@ function generatePayrollInfoPDF(
   ctx = drawNumberedSection(
     ctx,
     "Děti (pro účely daňového zvýhodnění)",
-    childrenList.map((child, idx) => ({
-      itemLabel: `${idx + 1}. Dítě`,
-      fields: [
-        { label: "Jméno dítěte", value: child.childName ?? "" },
-        { label: "Datum narození", value: formatDate(child.childBirthDate) },
-      ],
-    }))
+    data.hasChildren && childrenList.length > 0
+      ? childrenList.map((child, idx) => ({
+          itemLabel: `${idx + 1}. Dítě`,
+          fields: [
+            { label: "Jméno dítěte", value: child.childName ?? "" },
+            {
+              label: "Datum narození",
+              value: formatDate(child.childBirthDate),
+            },
+          ],
+        }))
+      : [
+          {
+            fields: [
+              {
+                label: "Má jedno nebo více dětí s daňovým zvýhodněním",
+                value: "Ne",
+              },
+            ],
+          },
+        ]
   )
+
+  const healthInsuranceLabel =
+    data.healthInsuranceCompany === OTHER_HEALTH_INSURANCE_VALUE
+      ? (data.healthInsuranceCompanyOther ?? "")
+      : (HEALTH_INSURANCE_OPTIONS.find(
+          (o) => o.value === data.healthInsuranceCompany
+        )?.label ??
+        data.healthInsuranceCompany ??
+        "")
 
   ctx = drawNumberedSection(ctx, "Zdravotní pojišťovna", [
     {
       fields: [
-        {
-          label: "Název zdravotní pojišťovny",
-          value: data.healthInsuranceCompany ?? "",
-        },
+        { label: "Název zdravotní pojišťovny", value: healthInsuranceLabel },
       ],
     },
   ])
 
-  ctx = drawNumberedSection(ctx, "Bankovní účet pro zasílání platu", [
+  const bankLabel =
+    data.bankName === OTHER_BANK_VALUE
+      ? (data.bankNameOther ?? "")
+      : (BANK_OPTIONS.find((o) => o.value === data.bankName)?.label ??
+        data.bankName ??
+        "")
+
+  ctx = drawNumberedSection(ctx, "Zasílání platu/odměny na bankovní účet", [
     {
       fields: [
         {
@@ -1028,9 +1272,10 @@ function generatePayrollInfoPDF(
             "Žádám s účinností od dne nástupu zasílat na tento bankovní účet",
           value: "",
           longLabel: true,
+          noAnswer: true,
         },
         { label: "Číslo účtu", value: data.bankAccountNumber ?? "" },
-        { label: "Bankovní ústav", value: data.bankName ?? "" },
+        { label: "Bankovní ústav", value: bankLabel },
       ],
     },
   ])
@@ -1040,9 +1285,10 @@ function generatePayrollInfoPDF(
       fields: [
         {
           label:
-            "Stvrzuji svým podpisem, že jsou výše uvedené údaje zcela pravdivé a případnou změnu jsem povinen včas osobně oznámit ve mzdové účtárně. Za způsobené škody nesu plnou odpovědnost.",
+            "Stvrzuji svým podpisem, že jsou výše uvedené údaje zcela pravdivé a případnou změnu jsem povinen včas osobně oznámit na oddělení platové a mzdové účtárny. Za způsobené škody nesu plnou odpovědnost.",
           value: yesNo(data.confirmTruthfulness),
           longLabel: true,
+          emphasize: true,
         },
         { label: "Datum", value: formatDate(data.signatureDate) },
       ],
@@ -1089,87 +1335,72 @@ function generatePersonalQuestionnairePDF(
     data.titleAfter,
     data.academicDegrees,
   ].filter(Boolean)
-  const pqDisplayName =
-    pqNameParts.length > 0 ? pqNameParts.join(" ") : docInfo.employeeName
+  const pqFallbackDisplayName = [
+    docInfo.titleBefore,
+    docInfo.employeeName,
+    docInfo.titleAfter,
+  ]
+    .filter(Boolean)
+    .join(" ")
+  const pqDisplayName = data.lastName
+    ? pqNameParts.join(" ")
+    : pqFallbackDisplayName
 
   let ctx = beginDocument(page, fonts, "Osobní dotazník", docInfo, {
     fullNameOverride: pqDisplayName,
   })
 
-  ctx = drawNumberedSection(ctx, "Osobní údaje", [
-    {
-      fields: [
-        { label: "Rodné příjmení", value: data.maidenName ?? "" },
-        { label: "Všechna další příjmení", value: data.otherSurnames ?? "" },
-        { label: "Datum narození", value: formatDate(data.birthDate) },
-        { label: "Rodné číslo", value: data.birthNumber ?? "" },
-        { label: "Místo narození", value: data.birthPlace ?? "" },
-        { label: "Okres narození", value: data.birthDistrict ?? "" },
-        { label: "Stát narození", value: data.birthState ?? "" },
-        { label: "Telefon", value: data.phone ?? "" },
-        { label: "Státní občanství", value: data.citizenship ?? "" },
-      ],
-    },
-  ])
-
   const yesNoLocal = (v: boolean | undefined) => yesNo(v)
 
-  ctx = drawNumberedSection(ctx, "Datová schránka", [
-    {
-      fields: [
-        {
-          label: "Žádám o doručování datovou schránkou",
-          value: yesNoLocal(data.dataBoxDelivery),
-          longLabel: true,
-        },
-        ...(data.dataBoxDelivery
-          ? [
-              {
-                label:
-                  "Prohlašuji, že se jedná o moji datovou schránku fyzické osoby a datová schránka není pro doručování znepřístupněna.",
-                value: "Ano",
-                longLabel: true,
-              },
-              { label: "ID datové schránky", value: data.dataBoxId ?? "" },
-            ]
-          : []),
-      ],
-    },
-  ])
+  const isForeignCitizenship = Boolean(
+    data.citizenship && data.citizenship !== CZECH_CITIZENSHIP_VALUE
+  )
+  const citizenshipLabel =
+    data.citizenship === OTHER_CITIZENSHIP_VALUE
+      ? (data.citizenshipOther ?? "")
+      : (NATIONALITY_OPTIONS.find((n) => n.value === data.citizenship)?.label ??
+        data.citizenship ??
+        "")
 
-  ctx = drawNumberedSection(ctx, "Rodinný stav", [
+  ctx = drawNumberedSection(ctx, "Základní údaje", [
     {
       fields: [
+        ...(data.birthSurnameDiffers
+          ? [{ label: "Rodné příjmení", value: data.birthSurname ?? "" }]
+          : []),
         {
           label: "Rodinný stav",
           value: data.maritalStatus
             ? (MARITAL_STATUS_LABELS[data.maritalStatus] ?? data.maritalStatus)
             : "",
         },
+        { label: "Datum narození", value: formatDate(data.birthDate) },
+        { label: "Rodné číslo", value: data.birthNumber ?? "" },
+        { label: "Místo narození", value: data.birthPlace ?? "" },
+        { label: "Okres narození", value: data.birthDistrict ?? "" },
+        { label: "Stát narození", value: data.birthState ?? "" },
+        { label: "Státní občanství", value: citizenshipLabel },
       ],
     },
+    ...(isForeignCitizenship
+      ? [
+          {
+            itemLabel: "Povolení k pobytu (cizí státní příslušníci)",
+            fields: [
+              {
+                label: "Vydáno dne",
+                value: formatDate(data.foreignPermitFrom),
+              },
+              {
+                label: "Vydáno kým",
+                value: data.foreignPermitAuthority ?? "",
+              },
+              { label: "Vydáno do", value: formatDate(data.foreignPermitTo) },
+            ],
+          },
+        ]
+      : []),
   ])
-
-  const hasForeignPermit =
-    data.foreignPermitFrom ||
-    data.foreignPermitTo ||
-    data.foreignPermitAuthority
-
-  if (hasForeignPermit) {
-    ctx = drawNumberedSection(
-      ctx,
-      "Povolení k pobytu (cizí státní příslušníci)",
-      [
-        {
-          fields: [
-            { label: "Vydáno od", value: formatDate(data.foreignPermitFrom) },
-            { label: "Vydáno do", value: formatDate(data.foreignPermitTo) },
-            { label: "Vydal", value: data.foreignPermitAuthority ?? "" },
-          ],
-        },
-      ]
-    )
-  }
 
   const permanentAddress = [
     data.permanentStreet,
@@ -1180,10 +1411,6 @@ function generatePersonalQuestionnairePDF(
     .filter(Boolean)
     .join(", ")
 
-  ctx = drawNumberedSection(ctx, "Adresa trvalého pobytu", [
-    { fields: [{ label: "Adresa", value: permanentAddress }] },
-  ])
-
   const correspondenceAddress = [
     data.correspondenceStreet,
     data.correspondenceHouseNumber,
@@ -1193,50 +1420,45 @@ function generatePersonalQuestionnairePDF(
     .filter(Boolean)
     .join(", ")
 
-  if (correspondenceAddress) {
-    ctx = drawNumberedSection(ctx, "Adresa pro doručování", [
-      { fields: [{ label: "Adresa", value: correspondenceAddress }] },
-    ])
-  }
-
-  ctx = drawNumberedSection(ctx, "Zdravotní pojišťovna a bankovní účet", [
+  ctx = drawNumberedSection(ctx, "Kontaktní údaje", [
     {
+      itemLabel: "Datová schránka",
       fields: [
         {
-          label: "Zdravotní pojišťovna",
-          value: data.healthInsuranceCompany ?? "",
+          label: "Žádám o doručování datovou schránkou",
+          value: yesNoLocal(data.dataBoxDelivery),
+          longLabel: true,
         },
-        { label: "Číslo bankovního účtu", value: data.bankAccountNumber ?? "" },
-        { label: "Bankovní instituce", value: data.bankName ?? "" },
+        ...(data.dataBoxDelivery
+          ? [{ label: "ID datové schránky", value: data.dataBoxId ?? "" }]
+          : []),
       ],
     },
-  ])
-
-  const disabilityFields: FieldRow[] = [
     {
-      label: "Pobírá dávky důchodového pojištění",
-      value: yesNoLocal(data.receivesPensionBenefits),
+      itemLabel: "Adresa trvalého pobytu",
+      fields: [{ label: "Adresa", value: permanentAddress }],
     },
-    ...(data.receivesPensionBenefits
-      ? [{ label: "Druh důchodu", value: data.typePensionBenefits ?? "" }]
-      : []),
     {
-      label: "Osoba se zdravotním postižením",
-      value: yesNoLocal(data.isDisabledPerson),
-    },
-    ...(data.isDisabledPerson && data.disabilityDegree !== "NONE"
-      ? [{ label: "Stupeň postižení", value: data.disabilityDegree ?? "" }]
-      : []),
-  ]
-
-  ctx = drawNumberedSection(ctx, "Doplňující údaje", [
-    {
+      itemLabel: "Doručovací adresa",
       fields: [
         {
-          label: "Kontaktní osoba pro mimořádné situace",
-          value: data.maintenanceInfo ?? "",
+          label: "Adresa",
+          value: data.useDifferentMailingAddress
+            ? correspondenceAddress
+            : "Shodná s adresou trvalého pobytu",
         },
-        ...disabilityFields,
+      ],
+    },
+    {
+      itemLabel: "E-mail a telefon",
+      fields: [
+        { label: "E-mail", value: data.email ?? "" },
+        {
+          label: "Telefon",
+          value: data.phone
+            ? `${data.phoneCountryCode ?? ""} ${data.phone}`.trim()
+            : "",
+        },
       ],
     },
   ])
@@ -1250,10 +1472,10 @@ function generatePersonalQuestionnairePDF(
       e.graduationYear ||
       e.examType
   )
-  ctx = drawNumberedSection(
-    ctx,
-    "Vzdělání",
-    educationList.map((edu, idx) => ({
+  const languages = (data.languages ?? []).filter((l) => l.name && l.level)
+
+  const educationAndLanguageItems: SectionItem[] = [
+    ...educationList.map((edu, idx) => ({
       itemLabel: `${idx + 1}. Vzdělání`,
       fields: [
         {
@@ -1272,67 +1494,153 @@ function generatePersonalQuestionnairePDF(
         { label: "Počet tříd (semestrů)", value: edu.semesters ?? "" },
         { label: "Rok ukončení", value: edu.graduationYear ?? "" },
         { label: "Druh zkoušky", value: edu.examType ?? "" },
+        {
+          label: "Dosažený titul",
+          value: edu.degreeTitle ?? "",
+        },
+        {
+          label: "Stav",
+          value: edu.studyStatus === "ONGOING" ? "Probíhající" : "Ukončeno",
+        },
       ],
-    }))
+    })),
+    ...(languages.length > 0
+      ? [
+          {
+            itemLabel: "Znalost cizích jazyků",
+            fields: languages.map((lang) => ({
+              label: lang.name ?? "Jazyk",
+              value: lang.level ?? "",
+            })),
+          },
+        ]
+      : []),
+  ]
+
+  ctx = drawNumberedSection(
+    ctx,
+    "Vzdělání a znalosti",
+    educationAndLanguageItems.length > 0
+      ? educationAndLanguageItems
+      : [{ fields: [{ label: "Vzdělání", value: "" }] }]
   )
 
-  const languages = (data.languages ?? []).filter((l) => l.name && l.level)
-  if (languages.length > 0) {
-    ctx = drawNumberedSection(ctx, "Znalost cizích jazyků", [
-      {
-        fields: languages.map((lang) => ({
-          label: lang.name ?? "Jazyk",
-          value: lang.level ?? "",
-        })),
-      },
-    ])
-  }
+  const certificateSpecialList = (data.certificateSpecialNames ?? []).filter(
+    (c) => !!c.name
+  )
 
   const certificateFields: FieldRow[] = [
     {
-      label: "Osvědčení o vzdělávání vedoucích úředníků",
+      label:
+        "Získal/a jste osvědčení o vzdělávání vedoucích úředníků dle zák. č. 312/2002 Sb.?",
       value: yesNoLocal(data.hasCertificateManagement),
+      longLabel: true,
     },
     {
-      label: "Osvědčení o zvláštní odborné způsobilosti",
+      label:
+        "Získal/a jste osvědčení o zvláštní odborné způsobilosti dle zák. č. 312/2002 Sb.?",
       value: yesNoLocal(data.hasCertificateSpecial),
+      longLabel: true,
     },
     ...(data.hasCertificateSpecial
-      ? [{ label: "Jaké osvědčení", value: data.certificateSpecialName ?? "" }]
+      ? certificateSpecialList.map((c, idx) => ({
+          label: `Typ osvědčení ${idx + 1}`,
+          value: c.name ?? "",
+        }))
       : []),
     {
-      label: "Osvědčení o vstupním školení",
+      label:
+        "Získal/a jste osvědčení o vstupním školení dle zák. č. 312/2002 Sb.?",
       value: yesNoLocal(data.hasCertificateTraining),
+      longLabel: true,
     },
     {
-      label: "Osvědčení o vykonání úřednické zkoušky",
+      label:
+        "Získal/a jste osvědčení o vykonání úřednické zkoušky dle zák. č. 234/2014 Sb.?",
       value: yesNoLocal(data.hasCertificateGeneral),
+      longLabel: true,
     },
   ]
 
   ctx = drawNumberedSection(ctx, "Osvědčení", [{ fields: certificateFields }])
 
-  ctx = drawNumberedSection(ctx, "Závěrečné údaje", [
+  const disabilityFields: FieldRow[] = [
+    {
+      label: "Pobírá dávky důchodového pojištění",
+      value: yesNoLocal(data.receivesPensionBenefits),
+    },
+    ...(data.receivesPensionBenefits
+      ? [{ label: "Druh důchodu", value: data.typePensionBenefits ?? "" }]
+      : []),
+    {
+      label: "Osoba se zdravotním postižením",
+      value: yesNoLocal(data.isDisabledPerson),
+    },
+    ...(data.isDisabledPerson && data.disabilityDegree !== "NONE"
+      ? [{ label: "Stupeň postižení", value: data.disabilityDegree ?? "" }]
+      : []),
+  ]
+
+  ctx = drawNumberedSection(ctx, "Doplňující informace", [
+    {
+      itemLabel: "Řidičské oprávnění",
+      fields: [
+        {
+          label: "Jsem vlastníkem řidičského oprávnění",
+          value: yesNoLocal(data.hasDriverLicense),
+        },
+        ...(data.hasDriverLicense
+          ? [
+              {
+                label: "Skupiny",
+                value: (data.driverLicenseCategories ?? [])
+                  .map((cat) => {
+                    const label = (
+                      DRIVER_LICENSE_CATEGORY_LABELS as Record<string, string>
+                    )[cat]
+                    return label ? `${cat} (${label})` : cat
+                  })
+                  .join(", "),
+              },
+            ]
+          : []),
+      ],
+    },
+    {
+      itemLabel: "Kontaktní osoba",
+      fields: [
+        {
+          label: "Kontaktní osoba pro mimořádné situace",
+          value: data.maintenanceInfo ?? "",
+        },
+      ],
+    },
+    {
+      itemLabel: "Důchod a zdravotní znevýhodnění",
+      fields: disabilityFields,
+    },
+    {
+      itemLabel: "Příbuzní zaměstnaní na ÚMČ Praha 6",
+      fields: [{ label: "Příbuzní", value: data.familyRelations ?? "" }],
+    },
+  ])
+
+  ctx = drawNumberedSection(ctx, "Prohlášení", [
     {
       fields: [
-        { label: "Příbuzní na ÚMČ Praha 6", value: data.familyRelations ?? "" },
-        {
-          label:
-            "Žádám ve smyslu ust. § 143 ZP, aby mé vyúčtování platu bylo převáděno na platební účet, který jsem uvedl/a v tomto dotazníku.",
-          value: yesNoLocal(data.finalRequestPayrollTransfer),
-          longLabel: true,
-        },
         {
           label:
             "Prohlašuji, že jsem nic nezamlčel(a) a všechny mnou uvedené údaje jsou pravdivé.",
           value: yesNoLocal(data.finalReadAndUnderstood),
           longLabel: true,
+          emphasize: true,
         },
         {
           label:
-            "Prohlašuji, že změnu jakéhokoli z mnou uvedených údajů oznámím bezodkladně na personálním oddělení a na mzdové účtárně. Pokud by nesplnění této povinnosti způsobilo škodu, nesu za ni plnou odpovědnost.",
+            "Prohlašuji, že změnu jakéhokoli z mnou uvedených údajů oznámím bezodkladně na oddělení platové a mzdové účtárny. Pokud by nesplnění této povinnosti způsobilo škodu, nesu za ni plnou odpovědnost.",
           value: yesNoLocal(data.finalTruthfulnessConfirm),
           longLabel: true,
+          emphasize: true,
         },
       ],
     },

@@ -1,7 +1,43 @@
 {
-  "name": "On-Off-Boarding-Module",
-  "short_name": "On-OffBoarding app",
-  "theme_color": "#ffffff",
+  "name": "Onboarding & Offboarding — ÚMČ Praha 6",
+  "short_name": "On-Off-Boarding",
+  "description": "Jednotná správa zaměstnanců a dokumentů",
+  "start_url": "/",
+  "display": "standalone",
   "background_color": "#ffffff",
-  "display": "standalone"
+  "theme_color": "#00af9b",
+  "icons": [
+    {
+      "src": "/assets/favicons/icon-144.png",
+      "sizes": "144x144",
+      "type": "image/png"
+    },
+    {
+      "src": "/assets/favicons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/assets/favicons/icon-384.png",
+      "sizes": "384x384",
+      "type": "image/png"
+    },
+    {
+      "src": "/assets/favicons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/assets/favicons/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/assets/favicons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
 }

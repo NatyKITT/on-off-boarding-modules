@@ -213,15 +213,15 @@ const CZ_VALUE_LABEL: Record<string, string> = {
 
   EMPLOYEE_INFO: "E-mail zaměstnanci",
   MONTHLY_SUMMARY: "Měsíční souhrn",
-  PROBATION_EVALUATION_INVITE: "Pozvánka k hodnocení zkušební doby",
-  PROBATION_EVALUATION_REMINDER: "Připomínka hodnocení zkušební doby",
+  PROBATION_EVALUATION_INVITE: "Pozvánka k vyhodnocení zkušební doby",
+  PROBATION_EVALUATION_REMINDER: "Připomínka vyhodnocení zkušební doby",
   PROBATION_EVALUATION_HR_INFO:
-    "Info pro Personální oddělení o hodnocení zkušební doby",
+    "Info pro Personální oddělení o vyhodnocení zkušební doby",
   PROBATION_EVALUATION_HR_MISSING_SUPERVISOR:
     "Info pro Personální oddělení – chybí vedoucí",
   PROBATION_EVALUATION_HR_NOT_COMPLETED:
     "Info pro Personální oddělení – hodnocení nedokončeno",
-  PROBATION_EVALUATION_COMPLETED: "Hodnocení zkušební doby dokončeno",
+  PROBATION_EVALUATION_COMPLETED: "Vyhodnocení zkušební doby dokončeno",
   NOTICE_WARNING: "Upozornění na výpověď",
   NOTICE_ENDING: "Konec výpovědní lhůty",
   SIGNATURE_INVITE: "Pozvánka k podpisu",
@@ -255,9 +255,9 @@ const CZ_VALUE_LABEL: Record<string, string> = {
   planned_offboarding: "Plánovaný odchod",
   actual_offboarding: "Skutečný odchod",
 
-  POSITION: "Změna pozice",
-  NAME: "Změna jména",
-  NAME_AND_POSITION: "Změna jména a pozice",
+  POSITION: "Změna pozice/odboru",
+  NAME: "Změna jména/příjmení/titulu",
+  NAME_AND_POSITION: "Změna jména/příjmení/titulu a změna pozice/odboru",
   MATERNITY_LEAVE: "Mateřská dovolená",
 
   DRAFT: "Koncept",

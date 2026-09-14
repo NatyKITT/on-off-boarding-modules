@@ -7,6 +7,8 @@ import {
   isAllowedEmployeeEmail,
 } from "@/lib/probation-evaluation-request"
 
+import { PublicLinkInvalid } from "@/components/common/public-link-invalid"
+
 import { PublicProbationEvaluationShell } from "./public-probation-evaluation-shell"
 
 type Props = {
@@ -15,15 +17,7 @@ type Props = {
 
 function InvalidLink() {
   return (
-    <div className="flex min-h-screen items-center justify-center px-4 text-center">
-      <div>
-        <h1 className="text-2xl font-bold">Odkaz není platný</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Formulář vyhodnocení zkušební doby nebyl nalezen nebo už není
-          dostupný.
-        </p>
-      </div>
-    </div>
+    <PublicLinkInvalid description="Formulář vyhodnocení zkušební doby nebyl nalezen nebo už není dostupný." />
   )
 }
 

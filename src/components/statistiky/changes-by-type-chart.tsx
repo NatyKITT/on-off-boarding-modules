@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation"
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
+import { getEmployeeChangeTypeLabel } from "@/lib/employment-linking"
 import type { ChangesByTypeMonthPoint } from "@/lib/statistics/types"
 
 import {
@@ -36,10 +37,16 @@ function formatMonth(month: string) {
 }
 
 const chartConfig = {
-  POSITION: { label: "Změna pozice", color: "#00847C" },
-  NAME: { label: "Změna jména", color: "#2563eb" },
-  NAME_AND_POSITION: { label: "Jméno i pozice", color: "#d97706" },
-  MATERNITY_LEAVE: { label: "Mateřská dovolená", color: "#db2777" },
+  POSITION: { label: getEmployeeChangeTypeLabel("POSITION"), color: "#00847C" },
+  NAME: { label: getEmployeeChangeTypeLabel("NAME"), color: "#2563eb" },
+  NAME_AND_POSITION: {
+    label: getEmployeeChangeTypeLabel("NAME_AND_POSITION"),
+    color: "#d97706",
+  },
+  MATERNITY_LEAVE: {
+    label: getEmployeeChangeTypeLabel("MATERNITY_LEAVE"),
+    color: "#db2777",
+  },
 } satisfies ChartConfig
 
 type Props = {

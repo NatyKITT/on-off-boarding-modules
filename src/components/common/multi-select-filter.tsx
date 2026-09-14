@@ -15,7 +15,11 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 
 export type MultiSelectOption = {
   value: string
@@ -78,7 +82,7 @@ export function MultiSelectFilter({
         </Button>
       </PopoverTrigger>
 
-      <PopoverContent className="w-64 p-0" align="start">
+      <PopoverContent className="w-80 p-0" align="start">
         <Command>
           <CommandInput placeholder={searchPlaceholder} />
           <CommandList>
@@ -103,7 +107,9 @@ export function MultiSelectFilter({
                     >
                       {isSelected && <Check className="size-3" />}
                     </div>
-                    <span className="truncate">{option.label}</span>
+                    <span className="whitespace-normal break-words">
+                      {option.label}
+                    </span>
                   </CommandItem>
                 )
               })}

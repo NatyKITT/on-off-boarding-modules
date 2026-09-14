@@ -183,11 +183,11 @@ společně s Dokumenty:
 
 ### Veřejné odkazy (bez přihlášení do vnitřní aplikace)
 
-| Adresa                               | Popis                                       | Přístup                             |
-| ------------------------------------ | ------------------------------------------- | ----------------------------------- |
-| `/dokumenty/[hash]`                  | Vyplnění osobních dokumentů zaměstnancem    | Odkaz z e-mailu                     |
-| `/odchody-public/[token]`            | Vyplnění a podpis exit checklistu           | Odkaz z e-mailu                     |
-| `/vyhodnoceni-zkusebni-doby/[token]` | Vyplnění hodnocení zkušební doby nadřízeným | Odkaz z e-mailu + Google přihlášení |
+| Adresa                               | Popis                                         | Přístup                             |
+| ------------------------------------ | --------------------------------------------- | ----------------------------------- |
+| `/dokumenty/[hash]`                  | Vyplnění osobních dokumentů zaměstnancem      | Odkaz z e-mailu                     |
+| `/odchody-public/[token]`            | Vyplnění a podpis exit checklistu             | Odkaz z e-mailu                     |
+| `/vyhodnoceni-zkusebni-doby/[token]` | Vyplnění vyhodnocení zkušební doby nadřízeným | Odkaz z e-mailu + Google přihlášení |
 
 Adresy ve tvaru `[id]`, `[hash]` a `[token]` jsou vždy vázané na
 konkrétní záznam – nejde o pevné, zapamatovatelné odkazy, ale o adresy
@@ -231,7 +231,14 @@ Z detailu nástupu se dále řídí:
 - **Interní dokumenty** – osobní dotazník, čestné prohlášení, doklady
   o vzdělání a praxi, mzdové údaje. Dokumenty lze vyplnit přímo
   v aplikaci, nebo zaměstnanci zaslat odkaz či PDF e-mailem k
-  samostatnému vyplnění (kapitola 6).
+  samostatnému vyplnění (kapitola 6). Osobní dotazník i dotazník pro
+  mzdovou agendu mají u státního občanství, banky a zdravotní
+  pojišťovny místo volného textu výběr ze seznamu (s možností „Jiná,
+  vypište" pro netypickou hodnotu) – omezuje se tím riziko překlepů.
+  Vygenerované PDF u všech tří dokumentů zobrazuje všechna pole
+  formuláře včetně nevyplněných nepovinných (s hodnotou „Nevyplněno"),
+  aby bylo na první pohled jasné, co ještě chybí, a jeho rozložení
+  sekcí odpovídá 1:1 kartám na obrazovce.
 - **Vyhodnocení zkušební doby** – formulář vyplňovaný nadřízeným
   zaměstnance na konci zkušební doby, prostřednictvím veřejného
   odkazu (kapitola 6). HR/IT v aplikaci sledují stav, odesílají
@@ -268,10 +275,14 @@ Z detailu nástupu se dále řídí:
      dostane HR znovu e-mail s aktuálním PDF; tajemníkovi ani
      nadřízenému se v tomto kroku nic automaticky neposílá.
 
+  Pokud se tajemníkovi žádost o vyjádření z nějakého důvodu nedoručila
+  (chybný e-mail, výpadek) nebo je potřeba mu ji jen znovu připomenout,
+  jde na detailu tlačítkem **„Poslat tajemníkovi"** žádost kdykoli
+  ručně odeslat/zopakovat, dokud tajemník své vyjádření sám neodešle.
+
   Všechny tyto e-maily (pozvánka, připomínky i navazující zprávy)
   obsahují u konce zkušební doby i odkaz/tlačítko **„Přidat do
-  kalendáře"** – zvlášť pro Google kalendář a zvlášť univerzální soubor
-  .ics pro Outlook nebo Apple Kalendář.
+  kalendáře"** (Google kalendář).
 
   Tajemníka lze pro testovací nebo přechodné účely ručně přepsat
   (jméno a e-mail) přímo v detailu vyhodnocení zkušební doby, vedle
@@ -446,8 +457,7 @@ výstupní list ještě není kompletně podepsaný, aplikace automaticky
   do historie výstupního listu.
 
 Pozvánky i tyto připomínky obsahují u data konce pracovního poměru i
-odkaz/tlačítko **„Přidat do kalendáře"** (Google kalendář i univerzální
-soubor .ics pro Outlook nebo Apple Kalendář).
+odkaz/tlačítko **„Přidat do kalendáře"** (Google kalendář).
 
 Jakmile se odchod potvrdí jako **skutečný**, tahle automatizace se pro
 daný záznam úplně zastaví – smysl má jen dokud je odchod ještě
@@ -497,6 +507,15 @@ v EOS. Tyto údaje se zobrazují jako samostatné sloupce **„Kontakt"** a
 **„Vedoucí"** v přehledu Změn a jako karta na detailu záznamu – do
 e-mailových reportů (kapitola 5.6) se nepropisují.
 
+**Popisek typu změny** ve sloupci „Typ změny", ve filtru, na detailu
+i v PDF/e-mailových reportech vždy odpovídá tomu, co se u dané změny
+skutečně změnilo, ne jen obecné kategorii – např. „Změna příjmení a
+titulu" místo obecného „Změna jména", nebo „Změna pozice/oddělení/
+odboru", případně kombinace obojího. Popisek je napříč celou appkou
+(přehled, filtr, detail, historie, statistiky, PDF i e-mailové
+reporty) vždy sestavený stejným způsobem, takže se stejná změna
+všude popisuje stejnými slovy.
+
 **Odchod na mateřskou dovolenou** je samostatný typ změny – nemá
 starou/novou hodnotu, jen datum účinnosti (den odchodu). V přehledu,
 detailu i propojených záznamech se zobrazuje jako zvýrazněný, ale
@@ -539,8 +558,7 @@ jen ADMIN, HR a IT – READONLY jej může prohlížet, ale ne odesílat
 kapitola 3).
 
 Každý řádek v reportu (nástup, odchod i odchod na mateřskou dovolenou)
-má vlastní odkaz **„Přidat do kalendáře"** – zvlášť pro Google kalendář
-a zvlášť univerzální soubor .ics pro Outlook nebo Apple Kalendář.
+má vlastní odkaz **„Přidat do kalendáře"** (Google kalendář).
 Celý e-mail navíc obsahuje jednu společnou přílohu .ics se všemi
 událostmi z reportu najednou, kterou jde v Outlooku nebo Apple
 Kalendáři otevřít a naimportovat vše hromadně jedním krokem (u Google
@@ -581,8 +599,11 @@ orientovat.
   nenačte), stáhnout, poslat e-mailem nebo zobrazit historii.
 - **Hromadné akce u jedné osoby** – po rozbalení detailu lze tlačítkem
   **„Stáhnout vše"** stáhnout najednou všechny dostupné dokumenty dané
-  osoby, nebo tlačítkem **„Poslat vše"** je všechny najednou odeslat na
-  jeden zadaný e-mail.
+  osoby, nebo tlačítkem **„Poslat vše"** odeslat na jeden zadaný e-mail
+  jedním e-mailem s PDF v příloze všechny **vyplněné** dokumenty
+  najednou. Dokumenty, které zaměstnanec ještě nevyplnil (jen rozpracované
+  nebo zatím prázdné), se do „Poslat vše" nepočítají – ty jde poslat
+  jen jednotlivě tlačítkem „Poslat odkaz" u konkrétního dokumentu.
 - **Krátká poznámka u každého dokumentu** – pod stavem dokumentu je
   drobný text s tím, na čem dokument je: „Zatím neodesláno", „Odesláno 12. 8. 2026 (Jan Novák)", případně i s poslední automatickou
   připomínkou, nebo „Vyplněno 10. 8. 2026". U automaticky odeslaných
@@ -605,7 +626,7 @@ záznam, na kterém nepotřebuje mít v aplikaci účet ani roli:
 - **Vyhodnocení zkušební doby**
   (`/vyhodnoceni-zkusebni-doby/[token]`) – nadřízený zde po
   přihlášení přes Google (ověřeném proti konkrétnímu zaměstnanci)
-  vyplní hodnocení zkušební doby. Je-li potřeba i vyjádření
+  vyplní vyhodnocení zkušební doby. Je-li potřeba i vyjádření
   tajemníka, otevře se mu po odeslání stejný odkaz s hlavičkou
   (koho se vyhodnocení týká), vyplněným hodnocením nadřízeného a
   odděleným rámečkem pro jeho vlastní vyjádření (souhlas/nesouhlas,

@@ -898,7 +898,7 @@ export function EmployeeDocumentsDialog({
             Dokumenty k nástupu{employeeName ? ` – ${employeeName}` : ""}
           </DialogTitle>
           <DialogDescription>
-            Správa nástupních dokumentů a hodnocení zkušební doby.
+            Správa nástupních dokumentů a vyhodnocení zkušební doby.
           </DialogDescription>
         </DialogHeader>
 
