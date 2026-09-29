@@ -82,6 +82,7 @@ const baseDefaultValues: Partial<AffidavitSchema> = {
       jobPositionName: "",
       jobType: "",
       employmentType: undefined,
+      employmentTypeOther: "",
       from: "",
       to: "",
       workloadType: undefined,
@@ -559,10 +560,11 @@ export function AffidavitForm(props: AffidavitFormProps) {
                     <Label>
                       Zaměstnavatel <span className="text-destructive">*</span>
                     </Label>
-                    <Input
+                    <Textarea
                       {...register(`experience.${index}.employer` as const)}
                       placeholder="např. ÚMČ Praha 6"
                       disabled={isDisabled}
+                      rows={2}
                     />
                     {errors.experience?.[index]?.employer && (
                       <p className="text-xs text-destructive">
@@ -571,49 +573,6 @@ export function AffidavitForm(props: AffidavitFormProps) {
                     )}
                   </div>
 
-                  <div className="space-y-1">
-                    <Label>
-                      Typ výkonu práce{" "}
-                      <span className="text-destructive">*</span>
-                    </Label>
-                    <Select
-                      value={
-                        form.watch(
-                          `experience.${index}.employmentType` as const
-                        ) ?? ""
-                      }
-                      onValueChange={(value) =>
-                        setValue(
-                          `experience.${index}.employmentType` as const,
-                          value as ExperienceEntry["employmentType"],
-                          { shouldValidate: true }
-                        )
-                      }
-                      disabled={isDisabled}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Vyberte typ" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {experienceTypeEnum.options.map((opt) => (
-                          <SelectItem key={opt} value={opt}>
-                            {EXPERIENCE_TYPE_LABELS[opt]}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {errors.experience?.[index]?.employmentType && (
-                      <p className="text-xs text-destructive">
-                        {
-                          errors.experience[index]?.employmentType
-                            ?.message as string
-                        }
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="grid gap-3 md:grid-cols-2">
                   <div className="space-y-1">
                     <Label>
                       Název pracovní pozice{" "}
@@ -633,24 +592,6 @@ export function AffidavitForm(props: AffidavitFormProps) {
                           errors.experience[index]?.jobPositionName
                             ?.message as string
                         }
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="space-y-1">
-                    <Label>
-                      Druh práce (pracovní činnost){" "}
-                      <span className="text-destructive">*</span>
-                    </Label>
-                    <Textarea
-                      {...register(`experience.${index}.jobType` as const)}
-                      placeholder="např. administrativní činnost"
-                      disabled={isDisabled}
-                      rows={2}
-                    />
-                    {errors.experience?.[index]?.jobType && (
-                      <p className="text-xs text-destructive">
-                        {errors.experience[index]?.jobType?.message as string}
                       </p>
                     )}
                   </div>
@@ -688,6 +629,66 @@ export function AffidavitForm(props: AffidavitFormProps) {
                       </p>
                     )}
                   </div>
+                </div>
+
+                <div className="space-y-1">
+                  <Label>
+                    Typ výkonu práce <span className="text-destructive">*</span>
+                  </Label>
+                  <Select
+                    value={
+                      form.watch(
+                        `experience.${index}.employmentType` as const
+                      ) ?? ""
+                    }
+                    onValueChange={(value) =>
+                      setValue(
+                        `experience.${index}.employmentType` as const,
+                        value as ExperienceEntry["employmentType"],
+                        { shouldValidate: true }
+                      )
+                    }
+                    disabled={isDisabled}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Vyberte typ" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {experienceTypeEnum.options.map((opt) => (
+                        <SelectItem key={opt} value={opt}>
+                          {EXPERIENCE_TYPE_LABELS[opt]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {errors.experience?.[index]?.employmentType && (
+                    <p className="text-xs text-destructive">
+                      {
+                        errors.experience[index]?.employmentType
+                          ?.message as string
+                      }
+                    </p>
+                  )}
+                  {form.watch(`experience.${index}.employmentType`) ===
+                    "OTHER" && (
+                    <div className="space-y-1 pt-1">
+                      <Input
+                        {...register(
+                          `experience.${index}.employmentTypeOther` as const
+                        )}
+                        placeholder="Uveďte typ výkonu práce"
+                        disabled={isDisabled}
+                      />
+                      {errors.experience?.[index]?.employmentTypeOther && (
+                        <p className="text-xs text-destructive">
+                          {
+                            errors.experience[index]?.employmentTypeOther
+                              ?.message as string
+                          }
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-1.5 border-t pt-3">
@@ -774,6 +775,26 @@ export function AffidavitForm(props: AffidavitFormProps) {
                   )}
                 </div>
 
+                <div className="space-y-1 border-t pt-3">
+                  <Label>
+                    Druh práce <span className="text-destructive">*</span>
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Popište druh vaší pracovní činnosti.
+                  </p>
+                  <Textarea
+                    {...register(`experience.${index}.jobType` as const)}
+                    placeholder="např. administrativní činnost"
+                    disabled={isDisabled}
+                    rows={3}
+                  />
+                  {errors.experience?.[index]?.jobType && (
+                    <p className="text-xs text-destructive">
+                      {errors.experience[index]?.jobType?.message as string}
+                    </p>
+                  )}
+                </div>
+
                 <div className="flex justify-end">
                   {experienceArray.fields.length > 1 && (
                     <Button
@@ -801,6 +822,7 @@ export function AffidavitForm(props: AffidavitFormProps) {
                   jobPositionName: "",
                   jobType: "",
                   employmentType: undefined,
+                  employmentTypeOther: "",
                   from: "",
                   to: "",
                   workloadType: undefined,

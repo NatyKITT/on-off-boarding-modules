@@ -2,28 +2,15 @@ import { NextRequest, NextResponse } from "next/server"
 import { EmploymentDocumentType, Prisma } from "@prisma/client"
 
 import { prisma } from "@/lib/db"
-import { EMAIL_FOOTER_HTML, logEmailHistory, sendMail } from "@/lib/email"
-import { buildEmployeeMeta, type EmployeeMeta } from "@/lib/employee-meta"
+import {
+  logEmailHistory,
+  sendEmploymentDocumentFilledHrEmail,
+  sendEmploymentDocumentFilledPayrollEmail,
+} from "@/lib/email"
+import { buildEmployeeMeta } from "@/lib/employee-meta"
 import { logEmploymentDocumentEvent } from "@/lib/employment-document-events"
+import { detectIdentityMismatch } from "@/lib/employment-document-identity-check"
 import { buildEmploymentDocumentPdf } from "@/lib/employment-document-pdf"
-
-const EMAIL_FOOTER = `
-  <p style="margin: 14px 0 0 0; color: #6b7280; font-size: 12px; line-height: 1.5;">
-    ${EMAIL_FOOTER_HTML}
-  </p>
-`
-
-function buildOrgInfoHtml(meta: EmployeeMeta | undefined) {
-  if (!meta?.position && !meta?.department && !meta?.unitName) return ""
-
-  return `
-    <p style="margin: 0 0 12px 0; color: #374151;">
-      ${meta?.position ? `<strong>Pozice:</strong> ${meta.position}<br/>` : ""}
-      ${meta?.department ? `<strong>Odbor:</strong> ${meta.department}<br/>` : ""}
-      ${meta?.unitName ? `<strong>Oddělení:</strong> ${meta.unitName}` : ""}
-    </p>
-  `
-}
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -103,6 +90,7 @@ export async function PATCH(
           department: true,
           unitName: true,
           positionName: true,
+          email: true,
           userEmail: true,
         },
       },
@@ -149,6 +137,14 @@ export async function PATCH(
   const employeeName = meta?.fullName ?? "neznámý zaměstnanec"
   const typeText = docTypeLabel(body.type)
 
+  const identityMismatches = document.onboarding
+    ? detectIdentityMismatch(
+        body.type,
+        body.data as Record<string, unknown>,
+        document.onboarding
+      )
+    : []
+
   const updated = await prisma.employmentDocument.update({
     where: { id: document.id },
     data: {
@@ -161,13 +157,24 @@ export async function PATCH(
     select: { id: true },
   })
 
+  const mismatchSummary =
+    identityMismatches.length > 0
+      ? ` NESHODA ÚDAJŮ s nástupem: ${identityMismatches
+          .map(
+            (m) =>
+              `${m.label} (nástup: „${m.expected}“, dotazník: „${m.actual}“)`
+          )
+          .join("; ")}.`
+      : ""
+
   await logEmploymentDocumentEvent({
     documentId: updated.id,
     action: "FILLED",
     by: null,
     byName: employeeName,
     byEmail: document.onboarding?.userEmail ?? null,
-    message: "Zaměstnanec vyplnil dokument přes veřejný odkaz.",
+    message: `Zaměstnanec vyplnil dokument přes veřejný odkaz.${mismatchSummary}`,
+    meta: identityMismatches.length > 0 ? { identityMismatches } : undefined,
   })
 
   const hrRecipients = [
@@ -186,34 +193,7 @@ export async function PATCH(
     .map((s) => s.trim())
     .filter(Boolean)
 
-  const subject = `Vyplněný dokument – ${employeeName} – ${typeText}`
-
   if (hrRecipients.length > 0) {
-    const htmlHR = `
-      <div style="font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #111827;">
-        <h2 style="margin: 0 0 10px 0;">Vyplněný dokument</h2>
-
-        <p style="margin: 0 0 12px 0;">
-          Dobrý den,<br/>
-          zaměstnanec <strong>${employeeName}</strong> právě vyplnil dokument typu
-          <strong>${typeText}</strong>.
-        </p>
-
-        ${buildOrgInfoHtml(meta)}
-
-        <p style="margin: 0 0 12px 0; color: #374151;">
-          <strong>Datum a čas vyplnění:</strong> ${now.toLocaleString("cs-CZ")}
-        </p>
-
-        <p style="margin: 0 0 12px 0;">
-          Dokument je k dispozici v interní aplikaci v detailu nástupu a je
-          přiložen k tomuto e-mailu ve formátu PDF.
-        </p>
-
-        ${EMAIL_FOOTER}
-      </div>
-    `
-
     let hrPdfBuffer: Buffer | null = null
     try {
       const result = await buildEmploymentDocumentPdf(document.id)
@@ -223,26 +203,26 @@ export async function PATCH(
     }
 
     try {
-      await sendMail({
+      const { subject, html } = await sendEmploymentDocumentFilledHrEmail({
         to: hrRecipients,
-        subject,
-        html: htmlHR,
-        attachments: hrPdfBuffer
-          ? [
-              {
-                filename: `${employeeName}-${typeText}.pdf`,
-                content: hrPdfBuffer,
-                contentType: "application/pdf",
-              },
-            ]
-          : undefined,
+        employeeName,
+        employeePosition: meta?.position,
+        employeeDepartment: meta?.department,
+        employeeUnitName: meta?.unitName,
+        documentTypeLabel: typeText,
+        filledAt: now,
+        identityMismatches:
+          identityMismatches.length > 0 ? identityMismatches : undefined,
+        pdfBuffer: hrPdfBuffer,
+        pdfFilename: hrPdfBuffer ? `${employeeName}-${typeText}.pdf` : null,
       })
+
       await logEmailHistory({
         onboardingEmployeeId: document.onboarding?.id,
         emailType: "SYSTEM_NOTIFICATION",
         recipients: hrRecipients,
         subject,
-        content: htmlHR,
+        content: html,
         status: "SENT",
         createdBy: "public-document-hr",
       })
@@ -252,7 +232,7 @@ export async function PATCH(
         onboardingEmployeeId: document.onboarding?.id,
         emailType: "SYSTEM_NOTIFICATION",
         recipients: hrRecipients,
-        subject,
+        subject: `Vyplněný dokument – ${employeeName} – ${typeText}`,
         content: "",
         status: "FAILED",
         error: error instanceof Error ? error.message : String(error),
@@ -272,49 +252,25 @@ export async function PATCH(
     }
 
     if (pdfBuffer) {
-      const htmlPayroll = `
-        <div style="font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #111827;">
-          <h2 style="margin: 0 0 10px 0;">Vyplněný dotazník pro mzdovou agendu</h2>
-
-          <p style="margin: 0 0 12px 0;">
-            Dobrý den,<br/>
-            zaměstnanec <strong>${employeeName}</strong> vyplnil <strong>Dotazník pro vedení mzdové agendy</strong>.
-          </p>
-
-          ${buildOrgInfoHtml(meta)}
-
-          <p style="margin: 0 0 12px 0; color: #374151;">
-            <strong>Datum vyplnění:</strong> ${now.toLocaleString("cs-CZ")}
-          </p>
-
-          <p style="margin: 0 0 12px 0;">
-            Vyplněný dokument je přiložen k tomuto e-mailu ve formátu PDF.
-          </p>
-
-          ${EMAIL_FOOTER}
-        </div>
-      `
-
       try {
-        await sendMail({
-          to: payrollRecipients,
-          subject: `Vyplněný dotazník pro mzdovou agendu – ${employeeName}`,
-          html: htmlPayroll,
-          attachments: [
-            {
-              filename: `${employeeName}-Dotaznik-mzdova-agenda.pdf`,
-              content: pdfBuffer,
-              contentType: "application/pdf",
-            },
-          ],
-        })
+        const { subject, html } =
+          await sendEmploymentDocumentFilledPayrollEmail({
+            to: payrollRecipients,
+            employeeName,
+            employeePosition: meta?.position,
+            employeeDepartment: meta?.department,
+            employeeUnitName: meta?.unitName,
+            filledAt: now,
+            pdfBuffer,
+            pdfFilename: `${employeeName}-Dotaznik-mzdova-agenda.pdf`,
+          })
 
         await logEmailHistory({
           onboardingEmployeeId: document.onboarding?.id,
           emailType: "SYSTEM_NOTIFICATION",
           recipients: payrollRecipients,
-          subject: `Vyplněný dotazník pro mzdovou agendu – ${employeeName}`,
-          content: htmlPayroll,
+          subject,
+          content: html,
           status: "SENT",
           createdBy: "public-document-payroll",
         })
@@ -324,7 +280,7 @@ export async function PATCH(
           onboardingEmployeeId: document.onboarding?.id,
           emailType: "SYSTEM_NOTIFICATION",
           recipients: payrollRecipients,
-          subject: `Vyplněný dotazník pro mzdovou agendu – ${employeeName}`,
+          subject: `Vyplněný dotazník pro vedení mzdové agendy – ${employeeName}`,
           content: "",
           status: "FAILED",
           error: error instanceof Error ? error.message : String(error),
@@ -337,7 +293,7 @@ export async function PATCH(
         onboardingEmployeeId: document.onboarding?.id,
         emailType: "SYSTEM_NOTIFICATION",
         recipients: payrollRecipients,
-        subject: `Vyplněný dotazník pro mzdovou agendu – ${employeeName}`,
+        subject: `Vyplněný dotazník pro vedení mzdové agendy – ${employeeName}`,
         content: "",
         status: "FAILED",
         error: "PDF generation failed",

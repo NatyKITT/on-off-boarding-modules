@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { DocumentStatus, EmploymentDocumentType } from "@prisma/client"
 import { format } from "date-fns"
 import { cs } from "date-fns/locale"
@@ -18,6 +18,9 @@ import { useCurrentRole } from "@/hooks/use-current-role"
 import { useToast } from "@/hooks/use-toast"
 import {
   documentEventActionLabel,
+  EMPLOYMENT_DOCUMENT_STATUS_COLOR_CLASSES,
+  EMPLOYMENT_DOCUMENT_STATUS_LABELS,
+  getEmploymentDocumentStatusKind,
   ONBOARDING_TYPES,
   typeLabel,
 } from "@/lib/employment-documents"
@@ -48,6 +51,13 @@ import { DocumentHistoryDialog } from "@/components/history/document-history-dia
 
 import { ProbationEvaluationSection } from "./probation-evaluation-section"
 
+type IdentityMismatchItem = {
+  field: string
+  label: string
+  expected: string
+  actual: string
+}
+
 type EmploymentDocumentLite = {
   id: number
   type: EmploymentDocumentType
@@ -58,8 +68,20 @@ type EmploymentDocumentLite = {
   publicUrl: string | null
   isLocked: boolean
   accessHash: string | null
+  expiresAt?: string | null
+  sentAt?: string | null
+  sentBy?: string | null
+  identityMismatches?: IdentityMismatchItem[] | null
   lastEditedBy?: string | null
   lastEditedAt?: string | null
+}
+
+function isDocExpired(doc: EmploymentDocumentLite) {
+  return getEmploymentDocumentStatusKind(doc) === "SENT_EXPIRED"
+}
+
+function needsSending(doc: EmploymentDocumentLite) {
+  return getEmploymentDocumentStatusKind(doc) === "NOT_SENT"
 }
 
 type EmployeeDocumentsDialogProps = {
@@ -71,6 +93,7 @@ type EmployeeDocumentsDialogProps = {
   probationEvaluationSentAt?: string | Date | null
   probationEvaluationSentBy?: string | null
   onSent?: () => void
+  onDocumentsChanged?: () => void
   readOnly?: boolean
 }
 
@@ -178,7 +201,12 @@ function DocumentCard({
 }: DocumentCardProps) {
   const submittedAt = formatDateTime(doc.completedAt)
   const lastEditedAt = formatDateTime(doc.lastEditedAt)
+  const sentAtLabel = formatDateTime(doc.sentAt)
   const edited = wasEditedAfterCompletion(doc.completedAt, doc.lastEditedAt)
+  const statusKind = getEmploymentDocumentStatusKind(doc)
+  const expired = statusKind === "SENT_EXPIRED"
+  const expiresAtLabel = formatDateTime(doc.expiresAt)
+  const hasMismatch = Boolean(doc.identityMismatches?.length)
 
   function stopDialogActionEvent(event: React.SyntheticEvent) {
     event.preventDefault()
@@ -186,13 +214,22 @@ function DocumentCard({
   }
 
   return (
-    <div className="space-y-2 rounded-md border px-3 py-2.5">
+    <div
+      className={`space-y-2 rounded-md border px-3 py-2.5 ${EMPLOYMENT_DOCUMENT_STATUS_COLOR_CLASSES[statusKind].card}`}
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 space-y-0.5">
           <span className="text-sm font-medium">{typeLabel(doc.type)}</span>
 
           <div className="space-y-0.5 text-xs text-muted-foreground">
             <div>Vytvořeno: {formatDateTime(doc.createdAt) ?? "—"}</div>
+
+            {sentAtLabel && (
+              <div>
+                Odesláno: {sentAtLabel}
+                {doc.sentBy ? `, ${doc.sentBy}` : ""}
+              </div>
+            )}
 
             {submittedAt && (
               <div>
@@ -207,16 +244,40 @@ function DocumentCard({
                 {doc.lastEditedBy ? `, ${doc.lastEditedBy}` : ""}
               </div>
             )}
+
+            {doc.status === "DRAFT" && expiresAtLabel && (
+              <div className={expired ? "font-medium text-red-600" : ""}>
+                {expired
+                  ? `Platnost odkazu vypršela: ${expiresAtLabel}`
+                  : `Odkaz platný do: ${expiresAtLabel}`}
+              </div>
+            )}
           </div>
         </div>
 
         <Badge
-          variant={doc.status === "DRAFT" ? "outline" : "default"}
-          className="shrink-0"
+          variant="outline"
+          className={`shrink-0 ${EMPLOYMENT_DOCUMENT_STATUS_COLOR_CLASSES[statusKind].badge}`}
         >
-          {statusLabel(doc.status)}
+          {EMPLOYMENT_DOCUMENT_STATUS_LABELS[statusKind]}
         </Badge>
       </div>
+
+      {hasMismatch && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+          <div className="font-medium">
+            ⚠ Neshoda údajů se zadáním v nástupu:
+          </div>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4">
+            {doc.identityMismatches!.map((item) => (
+              <li key={item.field}>
+                <span className="font-medium">{item.label}:</span> v nástupu „
+                {item.expected}“, zaměstnanec vyplnil „{item.actual}“
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div
         className="flex flex-wrap items-center gap-2"
@@ -343,6 +404,7 @@ export function EmployeeDocumentsDialog({
   probationEvaluationSentAt,
   probationEvaluationSentBy,
   onSent,
+  onDocumentsChanged,
   readOnly = false,
 }: EmployeeDocumentsDialogProps) {
   const [open, setOpen] = useState(false)
@@ -382,6 +444,9 @@ export function EmployeeDocumentsDialog({
   )
   const [docToRegenerate, setDocToRegenerate] =
     useState<EmploymentDocumentLite | null>(null)
+  const [renewingExpired, setRenewingExpired] = useState(false)
+
+  const emailSectionRef = useRef<HTMLElement | null>(null)
 
   const { toast } = useToast()
 
@@ -393,6 +458,11 @@ export function EmployeeDocumentsDialog({
   const onboardingDocuments = useMemo(
     () => knownDocuments.filter((doc) => ONBOARDING_TYPES.includes(doc.type)),
     [knownDocuments]
+  )
+
+  const expiredOnboardingDocuments = useMemo(
+    () => onboardingDocuments.filter(isDocExpired),
+    [onboardingDocuments]
   )
 
   const completedOnboardingDocuments = useMemo(
@@ -469,7 +539,7 @@ export function EmployeeDocumentsDialog({
       const list = await loadDocuments()
       const defaultSelection = list
         .filter((doc) => ONBOARDING_TYPES.includes(doc.type))
-        .filter((doc) => Boolean(getPublicUrlForDoc(doc)))
+        .filter((doc) => Boolean(getPublicUrlForDoc(doc)) && needsSending(doc))
         .map((doc) => doc.type)
 
       setEmailSelection(defaultSelection)
@@ -512,7 +582,7 @@ export function EmployeeDocumentsDialog({
       const refreshed = await loadDocuments()
       const defaultSelection = refreshed
         .filter((doc) => ONBOARDING_TYPES.includes(doc.type))
-        .filter((doc) => Boolean(getPublicUrlForDoc(doc)))
+        .filter((doc) => Boolean(getPublicUrlForDoc(doc)) && needsSending(doc))
         .map((doc) => doc.type)
 
       setEmailSelection(defaultSelection)
@@ -763,6 +833,8 @@ export function EmployeeDocumentsDialog({
         previous.includes(updated.type) ? previous : [...previous, updated.type]
       )
 
+      onDocumentsChanged?.()
+
       toast({
         title: "Dokument obnoven",
         description: "Vyplněná data byla smazána. Odkaz zůstává stejný.",
@@ -808,14 +880,19 @@ export function EmployeeDocumentsDialog({
       setNeedsResendTypes((previous) =>
         previous.includes(doc.type) ? previous : [...previous, doc.type]
       )
-      setEmailSelection((previous) =>
-        previous.includes(doc.type) ? previous : [...previous, doc.type]
-      )
+      setEmailSelection([doc.type])
+
+      onDocumentsChanged?.()
 
       toast({
         title: "Odkaz obnoven",
         description:
           "Byl vygenerován nový odkaz. Nezapomeňte znovu odeslat e-mail.",
+      })
+
+      emailSectionRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
       })
     } catch (error) {
       const message =
@@ -834,6 +911,85 @@ export function EmployeeDocumentsDialog({
       setRegeneratingId(null)
       setDocToRegenerate(null)
     }
+  }
+
+  async function handleRenewExpiredAndPrepareSend() {
+    const expired = expiredOnboardingDocuments
+
+    if (!expired.length || renewingExpired) return
+
+    setRenewingExpired(true)
+    setError(null)
+
+    const failed: string[] = []
+
+    for (const doc of expired) {
+      setRegeneratingId(doc.id)
+
+      try {
+        const res = await fetch(
+          `/api/dokumenty/internal/${doc.id}/regenerate`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+
+        if (!res.ok) {
+          const response = await res.json().catch(() => null)
+
+          throw new Error(response?.message ?? "Obnovení odkazu se nezdařilo.")
+        }
+      } catch (error) {
+        failed.push(typeLabel(doc.type))
+        console.error("Renew expired document failed:", error)
+      }
+    }
+
+    setRegeneratingId(null)
+    await loadDocuments({ silent: true })
+
+    const renewedTypes = expired
+      .map((doc) => doc.type)
+      .filter((type) => !failed.includes(typeLabel(type)))
+
+    setSentTypes((previous) =>
+      previous.filter((type) => !renewedTypes.includes(type))
+    )
+    setNeedsResendTypes((previous) => {
+      const next = new Set(previous)
+      renewedTypes.forEach((type) => next.add(type))
+      return Array.from(next)
+    })
+    setEmailSelection(renewedTypes)
+
+    onDocumentsChanged?.()
+
+    setRenewingExpired(false)
+
+    if (renewedTypes.length > 0) {
+      toast({
+        title: "Odkazy obnoveny",
+        description: `Nové odkazy byly vygenerovány pro: ${renewedTypes
+          .map((type) => typeLabel(type))
+          .join(
+            ", "
+          )}. Zkontrolujte e-mail níže a odešlete ho tlačítkem „Odeslat e-mail s odkazy".`,
+      })
+    }
+
+    if (failed.length > 0) {
+      toast({
+        title: "Některé odkazy se obnovit nepodařilo",
+        description: failed.join(", "),
+        variant: "destructive",
+      })
+    }
+
+    emailSectionRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    })
   }
 
   function openDocument(doc: EmploymentDocumentLite) {
@@ -1014,6 +1170,36 @@ export function EmployeeDocumentsDialog({
                 <section className="space-y-2 text-sm">
                   <div className="font-medium">Nástupní dokumenty</div>
 
+                  {expiredOnboardingDocuments.length > 0 && !readOnly && (
+                    <div className="flex flex-col gap-2 rounded-md border border-red-300 bg-red-50 px-3 py-2.5 text-sm dark:border-red-900 dark:bg-red-950/20 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="text-red-800 dark:text-red-300">
+                        <span className="font-medium">
+                          Platnost odkazu vypršela u:
+                        </span>{" "}
+                        {expiredOnboardingDocuments
+                          .map((doc) => typeLabel(doc.type))
+                          .join(", ")}
+                        . Zaměstnanec se přes tyto odkazy už nedostane k
+                        vyplnění.
+                      </div>
+
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="shrink-0 gap-1.5 bg-red-600 text-white hover:bg-red-700"
+                        onClick={() => void handleRenewExpiredAndPrepareSend()}
+                        disabled={renewingExpired}
+                      >
+                        {renewingExpired ? (
+                          <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                        ) : (
+                          <RotateCw className="size-3" />
+                        )}
+                        Vygenerovat nové odkazy
+                      </Button>
+                    </div>
+                  )}
+
                   {loading ? (
                     <div className="flex items-center justify-center py-4 text-sm text-muted-foreground">
                       Načítám dokumenty…
@@ -1047,7 +1233,10 @@ export function EmployeeDocumentsDialog({
                   )}
                 </section>
 
-                <section className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm">
+                <section
+                  ref={emailSectionRef}
+                  className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm"
+                >
                   <div className="font-medium">
                     Odeslat odkaz na vybrané dokumenty e-mailem
                   </div>
@@ -1056,6 +1245,16 @@ export function EmployeeDocumentsDialog({
                     Na níže uvedenou adresu bude odeslán e-mail s odkazy na
                     vybrané nástupní dokumenty.
                   </p>
+
+                  {needsResendTypes.length > 0 && (
+                    <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+                      ⚠ Je potřeba znovu odeslat:{" "}
+                      {needsResendTypes
+                        .map((type) => typeLabel(type))
+                        .join(", ")}
+                      .
+                    </div>
+                  )}
 
                   <Input
                     type="email"
@@ -1067,14 +1266,27 @@ export function EmployeeDocumentsDialog({
                   <div className="mt-2 grid gap-2 md:grid-cols-2">
                     {ONBOARDING_TYPES.map((type) => {
                       const doc = documentsByType.get(type)
+                      const publicUrl = doc ? getPublicUrlForDoc(doc) : null
 
-                      if (!doc) return null
+                      if (!doc || !publicUrl) {
+                        return (
+                          <label
+                            key={type}
+                            className="flex items-center gap-2 rounded-md border bg-muted/30 px-2 py-1.5 text-xs text-muted-foreground md:text-sm"
+                          >
+                            <Checkbox checked={false} disabled />
 
-                      const publicUrl = getPublicUrlForDoc(doc)
+                            <span className="flex-1">{typeLabel(type)}</span>
 
-                      if (!publicUrl) return null
+                            <span className="text-[10px]">
+                              Dokument ještě nebyl vygenerován
+                            </span>
+                          </label>
+                        )
+                      }
 
                       const checked = emailSelection.includes(type)
+                      const statusKind = getEmploymentDocumentStatusKind(doc)
 
                       return (
                         <label
@@ -1096,8 +1308,10 @@ export function EmployeeDocumentsDialog({
 
                           <span className="flex-1">{typeLabel(type)}</span>
 
-                          <span className="text-[10px] text-muted-foreground">
-                            {statusLabel(doc.status)}
+                          <span
+                            className={`text-[10px] ${EMPLOYMENT_DOCUMENT_STATUS_COLOR_CLASSES[statusKind].icon}`}
+                          >
+                            {EMPLOYMENT_DOCUMENT_STATUS_LABELS[statusKind]}
                           </span>
                         </label>
                       )

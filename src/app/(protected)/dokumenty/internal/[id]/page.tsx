@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation"
 import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
+import { getSiblingPrefillSuggestion } from "@/lib/employment-document-prefill"
 import {
   canManageEmploymentDocuments,
   canReadEmploymentDocuments,
@@ -70,6 +71,11 @@ export default async function InternalDocumentPage({ params }: PageProps) {
 
   const canEditInternalDocument = canManageEmploymentDocuments(role)
 
+  const prefillSuggestion =
+    doc.status === "DRAFT" && doc.onboarding
+      ? await getSiblingPrefillSuggestion(doc.onboarding.id, doc.type)
+      : null
+
   return (
     <main className="flex min-h-screen flex-col items-center bg-slate-50 py-10">
       <div className="w-full max-w-3xl rounded-xl bg-white p-6 shadow-sm">
@@ -77,6 +83,7 @@ export default async function InternalDocumentPage({ params }: PageProps) {
           document={doc}
           canEdit={canEditInternalDocument}
           role={role}
+          prefillSuggestion={prefillSuggestion}
         />
       </div>
     </main>

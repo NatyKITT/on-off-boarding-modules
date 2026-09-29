@@ -7,6 +7,10 @@ import { env } from "@/env.mjs"
 
 import { prisma } from "@/lib/db"
 import {
+  ONBOARDING_TYPES,
+  summarizeEmploymentDocumentsStatus,
+} from "@/lib/employment-documents"
+import {
   buildLinkedEmployeeChangeInfos,
   buildLinkedOffboardingInfo,
   normalizePersonalNumber,
@@ -275,7 +279,11 @@ function serializeOnboardingRecord(
   record: OnboardingRecord,
   linkedOffboarding: ReturnType<typeof buildLinkedOffboardingInfo> = null,
   linkedChanges: ReturnType<typeof buildLinkedEmployeeChangeInfos> = [],
-  cancelledByNamesById: Map<string, string> = new Map()
+  cancelledByNamesById: Map<string, string> = new Map(),
+  documentsSummary: ReturnType<typeof summarizeEmploymentDocumentsStatus> = {
+    overall: "NONE",
+    documents: [],
+  }
 ) {
   const cancelledByName = record.cancelledBy
     ? (cancelledByNamesById.get(record.cancelledBy) ?? record.cancelledBy)
@@ -320,6 +328,7 @@ function serializeOnboardingRecord(
     mentorEmail: record.mentorEmail ?? null,
     linkedOffboarding,
     linkedChanges,
+    documentsSummary,
   }
 }
 
@@ -535,6 +544,36 @@ export async function GET() {
       records.map((record) => record.cancelledBy)
     )
 
+    const onboardingIds = records.map((record) => record.id)
+
+    const employmentDocuments =
+      onboardingIds.length > 0
+        ? await prisma.employmentDocument.findMany({
+            where: {
+              onboardingId: { in: onboardingIds },
+              type: { in: ONBOARDING_TYPES },
+            },
+            select: {
+              onboardingId: true,
+              type: true,
+              status: true,
+              sentAt: true,
+              expiresAt: true,
+            },
+          })
+        : []
+
+    const documentsByOnboardingId = new Map<
+      number,
+      typeof employmentDocuments
+    >()
+
+    for (const document of employmentDocuments) {
+      const list = documentsByOnboardingId.get(document.onboardingId) ?? []
+      list.push(document)
+      documentsByOnboardingId.set(document.onboardingId, list)
+    }
+
     const data = records.map((record) => {
       const personalNumber = normalizePersonalNumber(record.personalNumber)
 
@@ -550,6 +589,10 @@ export async function GET() {
           : []
       )
 
+      const documentsSummary = summarizeEmploymentDocumentsStatus(
+        documentsByOnboardingId.get(record.id) ?? []
+      )
+
       return serializeOnboardingRecord(
         record,
         buildLinkedOffboardingInfo({
@@ -557,7 +600,8 @@ export async function GET() {
           probationEnd: record.probationEnd,
         }),
         linkedChanges,
-        cancelledByNamesById
+        cancelledByNamesById,
+        documentsSummary
       )
     })
 

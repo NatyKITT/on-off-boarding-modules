@@ -4,6 +4,7 @@ import { useState } from "react"
 import type { EmploymentDocumentType } from "@prisma/client"
 
 import { EmployeeMeta } from "@/lib/employee-meta"
+import type { PrefillSuggestion } from "@/lib/employment-document-prefill"
 
 import { PublicDocumentForm } from "./public-document-form"
 import { PublicDocumentThankYou } from "./public-document-status"
@@ -13,6 +14,7 @@ type Props = {
   hash: string
   type: EmploymentDocumentType
   employeeMeta?: EmployeeMeta
+  prefillSuggestion?: PrefillSuggestion | null
 }
 
 export function PublicDocumentShell({
@@ -20,6 +22,7 @@ export function PublicDocumentShell({
   hash,
   type,
   employeeMeta,
+  prefillSuggestion,
 }: Props) {
   const [submitted, setSubmitted] = useState(false)
 
@@ -33,6 +36,7 @@ export function PublicDocumentShell({
       hash={hash}
       type={type}
       employeeMeta={employeeMeta}
+      prefillSuggestion={prefillSuggestion}
       onSubmitted={() => setSubmitted(true)}
     />
   )

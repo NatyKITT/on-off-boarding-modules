@@ -4,13 +4,13 @@ Tento dokument shrnuje, co je potřeba vědět pro převzetí, nasazení a kontr
 
 ## 1. K čemu crony slouží
 
-Aplikace používá cron endpointy pro automatickou práci se zkušební dobou, s blížícím se koncem pracovního poměru a s e-mailovou frontou.
+Aplikace používá cron endpointy pro automatickou práci s vypršením odkazů k vyplnění nástupních dokumentů, s blížícím se koncem pracovního poměru a s e-mailovou frontou. Automatika k vyhodnocení zkušební doby je od verze 0.14.0 dočasně vypnutá (bude řešena přes jinou aplikaci).
 
 Crony se nespouští automaticky jen tím, že je kód v GitHubu. Musí je volat externí plánovač, například GitHub Actions, hostingový scheduler, serverový cron nebo ruční HTTP request.
 
 Základní tok:
 
-1. Cron `probation-notifications` projde nástupy a konce zkušebních dob.
+1. Cron `probation-notifications` projde nástupní dokumenty a hlídá jak vypršení odkazů k jejich vyplnění, tak dokumenty, které ještě vůbec nebyly odeslány (automatika zkušební doby je dočasně vypnutá).
 2. Cron `offboarding-notifications` projde **plánované** odchody (dosud bez potvrzeného skutečného konce) a blížící se konec pracovního poměru u nedokončených výstupních listů – jak souhrnně pro HR, tak cíleně pro konkrétní lidi ze skupiny naposledy uložené přes „Odeslat všem k podpisu", kteří ještě nepodepsali.
 3. Podle pravidel oba vytvoří e-mailové úlohy v `MailQueue`.
 4. Cron `mail-worker` zpracuje čekající položky z `MailQueue`.
@@ -21,15 +21,30 @@ Oba kontrolní crony (`probation-notifications`, `offboarding-notifications`) b�
 
 ## 2. Hlavní endpointy
 
-### Kontrola zkušebních dob
+### Kontrola vypršení odkazů k vyplnění nástupních dokumentů
 
 ```txt
 GET /api/cron/probation-notifications
 ```
 
-Slouží ke kontrole nástupů a konců zkušebních dob. Typicky připravuje e-mailové úlohy pro zaslání formuláře vedoucímu, připomínky, upozornění HR při chybějícím vedoucím nebo informaci HR, pokud vyhodnocení není dokončené.
+Název je historický – dřív kontroloval zkušební doby. Od verze 0.14.0
+je tahle automatika (`@/lib/probation-cron-jobs`) odebraná a dočasně
+vypnutá (bude řešena přes jinou aplikaci), kód zůstal beze změny jen
+se nevolá. E-mailové šablony a zbytek logiky k vyhodnocení zkušební
+doby (finální PDF, vyjádření tajemníka) fungují dál při ručním
+odeslání.
 
-Důležité: tento endpoint běžně e-maily přímo neposílá, pouze vytváří úlohy do `MailQueue`.
+Endpoint teď hlídá vypršení odkazů k vyplnění nástupních dokumentů
+(čestné prohlášení, osobní dotazník, mzdový dotazník) –
+`@/lib/employment-document-cron-jobs`. 3 dny před vypršením pošle
+upozornění zaměstnanci, v den vypršení (pokud pořád není vyplněno)
+upozorní HR – tyto dvě připomínky počítají jen u dokumentů, které už
+byly opravdu odeslané. Navíc 3 dny před plánovaným nástupem (i zpětně
+po termínu) upozorní HR i na dokumenty, které ještě vůbec nebyly
+zaměstnanci odeslané.
+
+Důležité: na rozdíl od dřívějšího chování posílá e-maily přímo, ne
+přes `MailQueue`.
 
 ### Kontrola blížícího se konce pracovního poměru
 
@@ -44,7 +59,7 @@ Slouží ke kontrole **plánovaných** odchodů (dosud bez potvrzeného skutečn
    - Pokud ano, ale někdo ještě nepodepsal → HR se jen informuje, že list stále není kompletní, a e-mail obsahuje i konkrétní seznam jmen a e-mailů, kdo ještě nepodepsal.
 2. **Cílená připomínka konkrétním lidem** – v okamžicích **14, 7, 3, 2 a 1 den** před koncem (bez 30denního okna). Posílá se přímo každému příjemci ze skupiny naposledy uložené (`ExitChecklist.header.signatureRecipients`), kdo ještě nepodepsal, na stejný odkaz, jaký dostal v pozvánce. Skupina se pro každý odchod může lišit (zaměstnanec, vedoucí i libovolní další signatáři, včetně lidí přidaných "v zastoupení") a cron ji vždy počítá podle posledního uloženého stavu. Do skupiny se přidává jak přes „Odeslat všem k podpisu" (tam jde i "v zastoupení" a i tam jde kohokoli zrušit), tak automaticky každou jednotlivou pozvánkou a přes okno „Osoby k podpisu" (dřív „Příjemci k podpisu"). Zrušený (odebraný) člověk se nemaže, jen se vynechá z připomínek, dokud není tlačítkem „Vrátit" vrácen zpět – zrušení mu zároveň odebere i právo výstupní list podepsat. Stejný e-mail může mít ve skupině dvě nezávislé role (přímo za sebe a k tomu v zastoupení za jinou osobu) – cron je počítá odděleně. Odcházející zaměstnanec a lidé „v zastoupení" dostávají jinak znějící verzi připomínky než ostatní signatáři. Cron nikoho nezve poprvé sám od sebe.
 
-Stejně jako u `probation-notifications`: endpoint přímo neposílá e-maily, pouze vytváří úlohy typu `NOTICE_WARNING` do `MailQueue`.
+Endpoint přímo neposílá e-maily, pouze vytváří úlohy typu `NOTICE_WARNING` do `MailQueue` (na rozdíl od `probation-notifications`, který od verze 0.14.0 posílá připomínky přímo).
 
 ### Mail worker
 
@@ -175,7 +190,7 @@ GitHub Actions nebo jiný scheduler musí být schopný zavolat veřejnou URL ap
 
 ### Databáze
 
-Crony pracují s databází, hlavně s nástupy, zkušební dobou a tabulkou `MailQueue`. Prostředí musí mít správnou `DATABASE_URL` a nasazené migrace.
+Crony pracují s databází, hlavně s nástupními dokumenty (`EmploymentDocument`), plánovanými odchody a tabulkou `MailQueue`. Prostředí musí mít správnou `DATABASE_URL` a nasazené migrace.
 
 ### Resend / e-mailová služba
 
@@ -375,6 +390,6 @@ Před spuštěním cronů v novém prostředí ověřit:
 - databáze má správnou `DATABASE_URL`,
 - migrace jsou nasazené,
 - endpointy lze ručně zavolat přes curl,
-- `probation-notifications` vytváří úlohy do `MailQueue`,
+- `probation-notifications` posílá připomínky k dokumentům (vypršení i nezaslané) přímo (ne přes `MailQueue`),
 - `offboarding-notifications` vytváří úlohy do `MailQueue`,
 - `mail-worker` dokáže úlohy z `MailQueue` odeslat.

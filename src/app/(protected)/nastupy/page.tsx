@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { addMonths, format, parseISO } from "date-fns"
 import { cs } from "date-fns/locale"
+import { useLenis } from "lenis/react"
 import {
   AlertTriangle,
   ArrowLeftRight,
@@ -18,6 +19,7 @@ import {
   History as HistoryIcon,
   Info,
   Mail,
+  Minus,
   RotateCcw,
   Trash2,
   User,
@@ -40,6 +42,13 @@ import {
   matchesDayRange,
   type DayRangeValue,
 } from "@/lib/dates"
+import {
+  EMPLOYMENT_DOCUMENT_STATUS_COLOR_CLASSES,
+  EMPLOYMENT_DOCUMENT_STATUS_LABELS,
+  typeLabel as employmentDocumentTypeLabel,
+  ONBOARDING_TYPES,
+  type EmploymentDocumentsSummary,
+} from "@/lib/employment-documents"
 import { getEmployeeChangeTypeLabel } from "@/lib/employment-linking"
 import {
   buildDistinctOptions,
@@ -154,6 +163,7 @@ type Arrival = {
   cancelReason?: string | null
 
   linkedOffboarding?: LinkedOffboardingInfo | null
+  documentsSummary?: EmploymentDocumentsSummary | null
 }
 
 const managerialKeywords = ["vedení", "ředitel", "vedoucí", "tajemník"]
@@ -171,6 +181,69 @@ function isManagerialPosition(positionName?: string | null) {
 
   return managerialKeywords.some((keyword) =>
     normalized.includes(stripAccents(keyword))
+  )
+}
+
+function DocumentStatusIcon({
+  status,
+}: {
+  status: keyof typeof EMPLOYMENT_DOCUMENT_STATUS_COLOR_CLASSES
+}) {
+  const colorClass = EMPLOYMENT_DOCUMENT_STATUS_COLOR_CLASSES[status]?.icon
+
+  switch (status) {
+    case "SENT_EXPIRED":
+      return <AlertTriangle className={`size-3 shrink-0 ${colorClass}`} />
+    case "NOT_SENT":
+      return <Mail className={`size-3 shrink-0 ${colorClass}`} />
+    case "SENT_PENDING":
+      return <Clock className={`size-3 shrink-0 ${colorClass}`} />
+    case "SENT_COMPLETED":
+      return <CheckCircle className={`size-3 shrink-0 ${colorClass}`} />
+    default:
+      return null
+  }
+}
+
+function DocumentsStatusCell({
+  summary,
+}: {
+  summary?: EmploymentDocumentsSummary | null
+}) {
+  if (!summary || summary.documents.length === 0) {
+    return (
+      <div className="space-y-1">
+        {ONBOARDING_TYPES.map((type) => (
+          <div
+            key={type}
+            title="Dokument ještě nebyl vygenerován – je potřeba ho vygenerovat"
+            className="flex items-center gap-1.5 text-xs text-slate-400"
+          >
+            <Minus className="size-3 shrink-0" />
+            <span className="truncate">
+              {employmentDocumentTypeLabel(type)}
+            </span>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-1">
+      {summary.documents.map((document) => (
+        <div
+          key={document.type}
+          title={EMPLOYMENT_DOCUMENT_STATUS_LABELS[document.status]}
+          className="flex items-center gap-1.5 text-xs"
+        >
+          <DocumentStatusIcon status={document.status} />
+          <span className="truncate">
+            {employmentDocumentTypeLabel(document.type)}
+          </span>
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -797,6 +870,7 @@ export default function OnboardingPage() {
   const sp = useSearchParams()
   const router = useRouter()
   const isReadonly = useIsReadonly()
+  const lenis = useLenis()
 
   const [planned, setPlanned] = useState<Arrival[]>([])
   const [actual, setActual] = useState<Arrival[]>([])
@@ -1026,11 +1100,17 @@ export default function OnboardingPage() {
     [planned, actual, cancelled]
   )
 
+  const isSearching = searchQuery.trim() !== ""
+
   const dateFilteredArrivals = useMemo(() => {
     const hasProbationFilter =
       probationPresets.length > 0 || isDayRangeActive(probationDayRange)
 
-    if (!arrivalDateFilter && !hasProbationFilter) return allArrivals
+    // Při aktivním hledání jménem se měsíční filtr ignoruje - vyhledávání
+    // musí najít člověka bez ohledu na to, jaký měsíc/rok je zrovna vybraný.
+    if ((!arrivalDateFilter || isSearching) && !hasProbationFilter) {
+      return allArrivals
+    }
 
     return allArrivals.filter((arrival) => {
       const variant = arrivalStatus(arrival)
@@ -1039,6 +1119,7 @@ export default function OnboardingPage() {
 
       if (
         arrivalDateFilter &&
+        !isSearching &&
         relevantDate?.slice(0, 7) !== arrivalDateFilter
       ) {
         return false
@@ -1061,7 +1142,13 @@ export default function OnboardingPage() {
 
       return true
     })
-  }, [allArrivals, arrivalDateFilter, probationPresets, probationDayRange])
+  }, [
+    allArrivals,
+    arrivalDateFilter,
+    isSearching,
+    probationPresets,
+    probationDayRange,
+  ])
 
   const searchedArrivals = useMemo(
     () => filterRows(dateFilteredArrivals),
@@ -1385,12 +1472,21 @@ export default function OnboardingPage() {
 
   const appliedHighlightRef = React.useRef<string | null>(null)
   const previousHighlightIdRef = React.useRef<string | null>(null)
+  const selfClearedHighlightRef = React.useRef(false)
 
   useEffect(() => {
     const previous = previousHighlightIdRef.current
     previousHighlightIdRef.current = qpHighlightId
 
     if (!previous || qpHighlightId) return
+
+    // Zmizení "?highlight=" z URL může způsobit i naše vlastní
+    // router.replace() hned po úspěšném zvýraznění záznamu (viz níže) -
+    // v tom případě se zvýraznění nemá rušit, jen se spotřebuje příznak.
+    if (selfClearedHighlightRef.current) {
+      selfClearedHighlightRef.current = false
+      return
+    }
 
     if (!isAnyFilterActive) {
       if (highlightedArrivalVariant === "planned") {
@@ -1455,32 +1551,27 @@ export default function OnboardingPage() {
     router,
   ])
 
-  const expandVariant = React.useCallback(
-    (variant: "planned" | "actual" | "cancelled") => {
+  const expandOnlyArrivalMonth = React.useCallback(
+    (variant: "planned" | "actual" | "cancelled", arrival: Arrival) => {
+      const dateField = variant === "actual" ? "actualStart" : "plannedStart"
+      const dateStr = arrival[dateField] || arrival.plannedStart
+      if (!dateStr) return
+
+      const year = dateStr.slice(0, 4)
+      const month = dateStr.slice(0, 7)
+
       if (variant === "planned") {
-        const { years, months } = getAllYearsAndMonths(
-          groupByYearAndMonth(planned, "plannedStart")
-        )
-        setExpandedPlannedYears(years)
-        setExpandedPlannedMonths(months)
+        setExpandedPlannedYears([year])
+        setExpandedPlannedMonths([month])
       } else if (variant === "actual") {
-        const { years, months } = getAllYearsAndMonths(
-          groupByYearAndMonth(actual, "actualStart")
-        )
-        setExpandedActualYears(years)
-        setExpandedActualMonths(months)
+        setExpandedActualYears([year])
+        setExpandedActualMonths([month])
       } else {
-        const { years, months } = getAllYearsAndMonths(
-          groupByYearAndMonth(cancelled, "plannedStart")
-        )
-        setExpandedCancelledYears(years)
-        setExpandedCancelledMonths(months)
+        setExpandedCancelledYears([year])
+        setExpandedCancelledMonths([month])
       }
     },
     [
-      planned,
-      actual,
-      cancelled,
       setExpandedPlannedYears,
       setExpandedPlannedMonths,
       setExpandedActualYears,
@@ -1499,6 +1590,7 @@ export default function OnboardingPage() {
     if (!arrival) return
 
     appliedHighlightRef.current = qpHighlightId
+    selfClearedHighlightRef.current = true
 
     setSearchQuery("")
     clearAllFacetFilters()
@@ -1508,7 +1600,7 @@ export default function OnboardingPage() {
 
     const variant = qpHighlightStatus ?? arrivalStatus(arrival)
     setActiveTab(variant)
-    expandVariant(variant)
+    expandOnlyArrivalMonth(variant, arrival)
 
     setHighlightedArrivalVariant(variant)
     setHighlightedArrivalId(id)
@@ -1522,7 +1614,7 @@ export default function OnboardingPage() {
     qpHighlightId,
     qpHighlightStatus,
     allArrivals,
-    expandVariant,
+    expandOnlyArrivalMonth,
     clearAllFacetFilters,
     setSearchQuery,
     setArrivalDateFilter,
@@ -1542,13 +1634,22 @@ export default function OnboardingPage() {
 
       const el = document.getElementById(targetId)
       if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" })
+        if (lenis) {
+          const offset = Math.max(
+            0,
+            window.innerHeight / 2 - el.getBoundingClientRect().height / 2
+          )
+          lenis.scrollTo(el, { offset: -offset, duration: 1.2 })
+        } else {
+          el.scrollIntoView({ behavior: "smooth", block: "center" })
+        }
         return
       }
 
       if (highlightedArrivalVariant) {
         setActiveTab(highlightedArrivalVariant)
-        expandVariant(highlightedArrivalVariant)
+        const arrival = allArrivals.find((a) => a.id === highlightedArrivalId)
+        if (arrival) expandOnlyArrivalMonth(highlightedArrivalVariant, arrival)
       }
 
       attempts += 1
@@ -1568,7 +1669,9 @@ export default function OnboardingPage() {
     isCombinedStatusMode,
     activeTab,
     highlightedArrivalVariant,
-    expandVariant,
+    allArrivals,
+    expandOnlyArrivalMonth,
+    lenis,
   ])
 
   const clearArrivalRing = React.useCallback(
@@ -1943,11 +2046,17 @@ export default function OnboardingPage() {
           id={`arrival-row-${arrival.id}`}
           className={
             isHighlighted
-              ? "bg-amber-50 ring-2 ring-inset ring-amber-400 dark:bg-amber-950/30"
+              ? "border-y-2 border-amber-400 bg-amber-50 dark:border-amber-600 dark:bg-amber-950/30"
               : undefined
           }
         >
-          <TableCell className="sticky left-0 z-10 w-[220px] min-w-[220px] border-r bg-background">
+          <TableCell
+            className={`sticky left-0 z-10 w-[220px] min-w-[220px] border-r ${
+              isHighlighted
+                ? "bg-amber-50 dark:bg-amber-950/30"
+                : "bg-background"
+            }`}
+          >
             <div className="flex items-start gap-2">
               <User className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
               <div className="min-w-0">
@@ -2096,11 +2205,15 @@ export default function OnboardingPage() {
         id={`arrival-row-${arrival.id}`}
         className={
           isHighlighted
-            ? "bg-amber-50 ring-2 ring-inset ring-amber-400 dark:bg-amber-950/30"
+            ? "border-y-2 border-amber-400 bg-amber-50 dark:border-amber-600 dark:bg-amber-950/30"
             : undefined
         }
       >
-        <TableCell className="sticky left-0 z-10 w-[220px] min-w-[220px] border-r bg-background">
+        <TableCell
+          className={`sticky left-0 z-10 w-[220px] min-w-[220px] border-r ${
+            isHighlighted ? "bg-amber-50 dark:bg-amber-950/30" : "bg-background"
+          }`}
+        >
           <div className="flex items-start gap-2">
             <User className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0">
@@ -2254,6 +2367,10 @@ export default function OnboardingPage() {
           </div>
         </TableCell>
 
+        <TableCell className="w-[190px] min-w-[190px]">
+          <DocumentsStatusCell summary={arrival.documentsSummary} />
+        </TableCell>
+
         <TableCell className="w-[300px] min-w-[300px] whitespace-nowrap text-right">
           <div className="flex justify-end gap-1">
             <EmployeeChangeInfoButton
@@ -2352,6 +2469,7 @@ export default function OnboardingPage() {
                   )
                   void reload()
                 }}
+                onDocumentsChanged={() => void reload()}
                 readOnly={isReadonly}
               />
             )}
@@ -2625,6 +2743,9 @@ export default function OnboardingPage() {
                                             <TableHead className="w-[220px] min-w-[220px]">
                                               Kontakt
                                             </TableHead>
+                                            <TableHead className="w-[190px] min-w-[190px]">
+                                              Nástupní dokumenty
+                                            </TableHead>
                                             <TableHead className="w-[300px] min-w-[300px] text-right">
                                               Akce
                                             </TableHead>
@@ -2881,6 +3002,9 @@ export default function OnboardingPage() {
                                             </TableHead>
                                             <TableHead className="w-[220px] min-w-[220px]">
                                               Kontakt
+                                            </TableHead>
+                                            <TableHead className="w-[190px] min-w-[190px]">
+                                              Nástupní dokumenty
                                             </TableHead>
                                             <TableHead className="w-[300px] min-w-[300px] text-right">
                                               Akce

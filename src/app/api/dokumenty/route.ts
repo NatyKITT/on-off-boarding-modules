@@ -47,17 +47,43 @@ export async function GET(req: NextRequest) {
       accessHash: true,
       isLocked: true,
       expiresAt: true,
+      sentAt: true,
+      sentBy: true,
       lastEditedBy: true,
       lastEditedAt: true,
     },
     orderBy: { createdAt: "desc" },
   })
 
+  const filledEvents = await prisma.employmentDocumentEvent.findMany({
+    where: {
+      documentId: { in: documents.map((document) => document.id) },
+      action: "FILLED",
+    },
+    orderBy: { createdAt: "desc" },
+    select: { documentId: true, meta: true },
+  })
+
+  const identityMismatchByDocumentId = new Map<number, unknown>()
+
+  for (const event of filledEvents) {
+    if (identityMismatchByDocumentId.has(event.documentId)) continue
+
+    const meta = event.meta as { identityMismatches?: unknown } | null
+    if (meta?.identityMismatches) {
+      identityMismatchByDocumentId.set(
+        event.documentId,
+        meta.identityMismatches
+      )
+    }
+  }
+
   const docsWithUrl = documents.map((document) => ({
     ...document,
     publicUrl: document.accessHash
       ? `${baseUrl}/dokumenty/${document.accessHash}`
       : null,
+    identityMismatches: identityMismatchByDocumentId.get(document.id) ?? null,
   }))
 
   return NextResponse.json({ documents: docsWithUrl })

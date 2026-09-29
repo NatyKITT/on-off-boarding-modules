@@ -62,6 +62,7 @@ const CONTINUATION_START_Y = 56
 const FIELD_LABEL_SIZE = 8.5
 const FIELD_VALUE_SIZE = 10
 const FIELD_ROW_HEIGHT = 18
+const FIELD_VALUE_LINE_HEIGHT = 12
 const LABEL_VALUE_GAP = 6
 const ITEM_LABEL_HEIGHT = 16
 const ITEM_DIVIDER_GAP = 10
@@ -107,27 +108,58 @@ function formatDateTime(value: string | Date | null | undefined): string {
   }
 }
 
-function drawTextFitted(
+const HEADER_VALUE_MIN_SIZE = 6.5
+
+function fitHeaderFontSize(
+  font: PDFFont,
+  text: string,
+  maxWidth: number,
+  startSize: number
+): number {
+  let size = startSize
+
+  while (
+    size > HEADER_VALUE_MIN_SIZE &&
+    font.widthOfTextAtSize(text, size) > maxWidth
+  ) {
+    size -= 0.5
+  }
+
+  return size
+}
+
+function drawHeaderValue(
   page: PDFPage,
   font: PDFFont,
   text: string,
   x: number,
   y: number,
   maxWidth: number,
-  baseSize: number,
-  minSize = 6
+  size: number
 ) {
   const normalized = (text ?? "").trim()
   if (!normalized) return
 
-  let size = baseSize
-  const width = font.widthOfTextAtSize(normalized, size)
+  const fittedSize = fitHeaderFontSize(font, normalized, maxWidth, size)
+  let display = normalized
 
-  if (width > maxWidth) {
-    size = Math.max(minSize, (maxWidth / width) * size)
+  if (font.widthOfTextAtSize(display, fittedSize) > maxWidth) {
+    while (
+      display.length > 1 &&
+      font.widthOfTextAtSize(`${display}…`, fittedSize) > maxWidth
+    ) {
+      display = display.slice(0, -1)
+    }
+    display = `${display}…`
   }
 
-  page.drawText(normalized, { x, y, size, font, color: TEXT_BLACK })
+  page.drawText(display, {
+    x,
+    y,
+    size: fittedSize,
+    font,
+    color: TEXT_BLACK,
+  })
 }
 
 type DocumentInfo = {
@@ -182,6 +214,7 @@ type ExperienceItem = {
   jobPositionName?: string | null
   jobType?: string | null
   employmentType?: string | null
+  employmentTypeOther?: string | null
   from?: string | null
   to?: string | null
   workloadType?: "FULL" | "HALF" | "OTHER" | string | null
@@ -294,6 +327,7 @@ type PersonalQuestionnaireData = {
   birthPlace?: string | null
   birthDistrict?: string | null
   birthState?: string | null
+  birthStateOther?: string | null
   citizenship?: string | null
   citizenshipOther?: string | null
   foreignPermitFrom?: string | null
@@ -315,11 +349,14 @@ type PersonalQuestionnaireData = {
   correspondencePostcode?: string | null
   hasDriverLicense?: boolean
   driverLicenseCategories?: string[]
-  maintenanceInfo?: string | null
+  maintenanceContactName?: string | null
+  maintenancePhoneCountryCode?: string | null
+  maintenancePhone?: string | null
   receivesPensionBenefits?: boolean
   typePensionBenefits?: string | null
   isDisabledPerson?: boolean
   disabilityDegree?: "NONE" | "I" | "II" | "III" | string
+  hasFamilyRelations?: boolean
   familyRelations?: string | null
   education?: EducationEntry[]
   languages?: LanguageEntry[]
@@ -387,6 +424,7 @@ type FieldRow = {
   optional?: boolean
   emphasize?: boolean
   noAnswer?: boolean
+  standalone?: boolean
 }
 
 type SectionItem = {
@@ -396,6 +434,34 @@ type SectionItem = {
 
 const LONG_LABEL_SIZE = 9
 const LONG_LABEL_LINE_HEIGHT = 11.5
+
+function splitLongToken(
+  font: PDFFont,
+  token: string,
+  size: number,
+  firstWidth: number,
+  restWidth: number
+): string[] {
+  const chunks: string[] = []
+  let current = ""
+  let width = firstWidth
+
+  for (const char of token) {
+    const candidate = current + char
+
+    if (current && font.widthOfTextAtSize(candidate, size) > width) {
+      chunks.push(current)
+      current = char
+      width = restWidth
+    } else {
+      current = candidate
+    }
+  }
+
+  if (current) chunks.push(current)
+
+  return chunks
+}
 
 function wrapText(
   font: PDFFont,
@@ -408,6 +474,20 @@ function wrapText(
   let current = ""
 
   for (const word of words) {
+    if (font.widthOfTextAtSize(word, size) > maxWidth) {
+      if (current) {
+        lines.push(current)
+        current = ""
+      }
+
+      const pieces = splitLongToken(font, word, size, maxWidth, maxWidth)
+      for (let i = 0; i < pieces.length - 1; i++) {
+        lines.push(pieces[i])
+      }
+      current = pieces[pieces.length - 1] ?? ""
+      continue
+    }
+
     const candidate = current ? `${current} ${word}` : word
 
     if (current && font.widthOfTextAtSize(candidate, size) > maxWidth) {
@@ -423,6 +503,69 @@ function wrapText(
   return lines
 }
 
+function wrapValueLines(
+  font: PDFFont,
+  text: string,
+  size: number,
+  firstLineWidth: number,
+  restWidth: number
+): string[] {
+  const words = text.split(/\s+/).filter(Boolean)
+  const lines: string[] = []
+  let current = ""
+  let maxWidth = firstLineWidth
+
+  for (const word of words) {
+    if (font.widthOfTextAtSize(word, size) > maxWidth) {
+      if (current) {
+        lines.push(current)
+        current = ""
+      }
+
+      const pieces = splitLongToken(font, word, size, maxWidth, restWidth)
+      for (let i = 0; i < pieces.length - 1; i++) {
+        lines.push(pieces[i])
+      }
+      current = pieces[pieces.length - 1] ?? ""
+      maxWidth = restWidth
+      continue
+    }
+
+    const candidate = current ? `${current} ${word}` : word
+
+    if (current && font.widthOfTextAtSize(candidate, size) > maxWidth) {
+      lines.push(current)
+      current = word
+      maxWidth = restWidth
+    } else {
+      current = candidate
+    }
+  }
+
+  if (current) lines.push(current)
+
+  return lines
+}
+
+function fieldValueLines(
+  fonts: Fonts,
+  field: FieldRow,
+  maxWidth: number
+): string[] {
+  const displayValue = field.value || "Nevyplněno"
+  const labelText = field.label.toLocaleUpperCase("cs-CZ") + ":"
+  const labelWidth = fonts.bold.widthOfTextAtSize(labelText, FIELD_LABEL_SIZE)
+  const firstLineWidth = Math.max(30, maxWidth - labelWidth - LABEL_VALUE_GAP)
+
+  return wrapValueLines(
+    fonts.bold,
+    displayValue,
+    FIELD_VALUE_SIZE,
+    firstLineWidth,
+    maxWidth
+  )
+}
+
 function estimateFieldRowHeight(
   fonts: Fonts,
   field: FieldRow,
@@ -435,7 +578,11 @@ function estimateFieldRowHeight(
     return lines.length * LONG_LABEL_LINE_HEIGHT + answerHeight + 6
   }
 
-  return FIELD_ROW_HEIGHT
+  const extraLines = Math.max(
+    0,
+    fieldValueLines(fonts, field, maxWidth).length - 1
+  )
+  return FIELD_ROW_HEIGHT + extraLines * FIELD_VALUE_LINE_HEIGHT
 }
 
 type FieldRowLayout =
@@ -447,7 +594,7 @@ function layoutFieldRows(fields: FieldRow[]): FieldRowLayout[] {
   let pending: FieldRow | null = null
 
   for (const field of fields) {
-    if (field.longLabel) {
+    if (field.longLabel || field.standalone) {
       if (pending) {
         rows.push({ kind: "single", field: pending })
         pending = null
@@ -532,7 +679,6 @@ function drawFieldRow(
     return cursorY - 6
   }
 
-  const displayValue = field.value || "Nevyplněno"
   const labelText = field.label.toLocaleUpperCase("cs-CZ") + ":"
 
   page.drawText(labelText, {
@@ -545,18 +691,22 @@ function drawFieldRow(
 
   const labelWidth = fonts.bold.widthOfTextAtSize(labelText, FIELD_LABEL_SIZE)
   const valueX = x + labelWidth + LABEL_VALUE_GAP
-  const valueMaxWidth = Math.max(30, maxWidth - labelWidth - LABEL_VALUE_GAP)
+  const valueLines = fieldValueLines(fonts, field, maxWidth)
 
-  drawTextFitted(
-    page,
-    fonts.bold,
-    displayValue,
-    valueX,
-    y - 0.5,
-    valueMaxWidth,
-    FIELD_VALUE_SIZE
-  )
-  return y - FIELD_ROW_HEIGHT
+  let cursorY = y - 0.5
+  valueLines.forEach((line, index) => {
+    page.drawText(line, {
+      x: index === 0 ? valueX : x,
+      y: cursorY,
+      size: FIELD_VALUE_SIZE,
+      font: fonts.bold,
+      color: TEXT_BLACK,
+    })
+    if (index < valueLines.length - 1) cursorY -= FIELD_VALUE_LINE_HEIGHT
+  })
+
+  const extraLines = Math.max(0, valueLines.length - 1)
+  return y - FIELD_ROW_HEIGHT - extraLines * FIELD_VALUE_LINE_HEIGHT
 }
 
 function drawNumberedSection(
@@ -696,49 +846,114 @@ function drawNumberedSection(
   return { ...cursor, page, sectionIndex, y: boxBottom - SECTION_GAP }
 }
 
-function drawSignatureBlock(
+function drawFinalDeclarationSection(
   ctx: PdfCtx,
+  sectionTitle: string,
+  fields: FieldRow[],
   completedAt: Date | string | null | undefined
 ): PdfCtx {
-  const maxWidth = CONTENT_WIDTH - SECTION_PADDING * 2
+  const fieldMaxWidth = CONTENT_WIDTH - SECTION_PADDING * 2
+  const item: SectionItem = { fields }
+
+  const fieldsHeight = estimateItemHeight(ctx.fonts, item, false, fieldMaxWidth)
+
   const signedLine = `Elektronicky podepsáno: ${ctx.employeeDisplayName || "—"}, ${formatDateTime(completedAt) || "—"}`
   const confirmLine =
     "Odesláním tohoto formuláře v elektronické podobě zaměstnanec potvrzuje pravdivost, úplnost a souhlas s výše uvedenými údaji a prohlášeními."
-
   const confirmLines = wrapText(
     ctx.fonts.regular,
     confirmLine,
     LONG_LABEL_SIZE,
-    maxWidth
+    fieldMaxWidth
   )
+  const signatureHeight =
+    FIELD_VALUE_SIZE + 6 + confirmLines.length * LONG_LABEL_LINE_HEIGHT
 
-  const neededHeight =
+  const totalHeight =
     SECTION_TOP_PAD +
-    SECTION_BOTTOM_PAD +
-    FIELD_VALUE_SIZE +
-    6 +
-    confirmLines.length * LONG_LABEL_LINE_HEIGHT
+    SECTION_HEADER_HEIGHT +
+    fieldsHeight +
+    ITEM_DIVIDER_GAP +
+    signatureHeight +
+    SECTION_BOTTOM_PAD
 
-  const next = ensureSpace(ctx, neededHeight)
-  const boxTop = next.y
-  let y = next.y - SECTION_TOP_PAD
+  const cursor = ensureSpace(ctx, totalHeight)
+  const sectionIndex = cursor.sectionIndex + 1
+  const letter = letterFor(sectionIndex)
 
-  next.page.drawText(signedLine, {
-    x: CONTENT_LEFT + SECTION_PADDING,
+  const page = cursor.page
+  const boxTop = cursor.y
+  let y = boxTop - SECTION_TOP_PAD
+
+  const leftX = CONTENT_LEFT + SECTION_PADDING
+
+  page.drawText(`${letter}. ${sectionTitle}`, {
+    x: leftX,
     y,
-    size: FIELD_VALUE_SIZE,
-    font: next.fonts.bold,
+    size: 12,
+    font: cursor.fonts.bold,
     color: TEXT_BLACK,
   })
+  y -= SECTION_HEADER_RULE_GAP
 
+  page.drawLine({
+    start: { x: leftX, y },
+    end: { x: CONTENT_RIGHT - SECTION_PADDING, y },
+    thickness: 0.75,
+    color: BORDER_GRAY,
+  })
+  y -= SECTION_HEADER_HEIGHT - SECTION_HEADER_RULE_GAP
+
+  const columnWidth = (fieldMaxWidth - COLUMN_GAP) / 2
+  const rightX = leftX + columnWidth + COLUMN_GAP
+
+  layoutFieldRows(fields).forEach((row) => {
+    if (row.kind === "single") {
+      y = drawFieldRow(page, cursor.fonts, row.field, leftX, y, fieldMaxWidth)
+      return
+    }
+    const yAfterA = drawFieldRow(
+      page,
+      cursor.fonts,
+      row.a,
+      leftX,
+      y,
+      columnWidth
+    )
+    const yAfterB = drawFieldRow(
+      page,
+      cursor.fonts,
+      row.b,
+      rightX,
+      y,
+      columnWidth
+    )
+    y = Math.min(yAfterA, yAfterB)
+  })
+
+  page.drawLine({
+    start: { x: leftX, y: y + 6 },
+    end: { x: CONTENT_RIGHT - SECTION_PADDING, y: y + 6 },
+    thickness: 0.5,
+    color: BORDER_GRAY,
+  })
+  y -= ITEM_DIVIDER_GAP
+
+  page.drawText(signedLine, {
+    x: leftX,
+    y,
+    size: FIELD_VALUE_SIZE,
+    font: cursor.fonts.bold,
+    color: TEXT_BLACK,
+  })
   y -= FIELD_VALUE_SIZE + 6
 
   for (const line of confirmLines) {
-    next.page.drawText(line, {
-      x: CONTENT_LEFT + SECTION_PADDING,
+    page.drawText(line, {
+      x: leftX,
       y,
       size: LONG_LABEL_SIZE,
-      font: next.fonts.regular,
+      font: cursor.fonts.regular,
       color: LABEL_GRAY,
     })
     y -= LONG_LABEL_LINE_HEIGHT
@@ -746,7 +961,7 @@ function drawSignatureBlock(
 
   const boxBottom = y - SECTION_BOTTOM_PAD + LONG_LABEL_LINE_HEIGHT
 
-  next.page.drawRectangle({
+  page.drawRectangle({
     x: CONTENT_LEFT,
     y: boxBottom,
     width: CONTENT_WIDTH,
@@ -755,7 +970,7 @@ function drawSignatureBlock(
     borderWidth: 1,
   })
 
-  return { ...next, y: boxBottom - SECTION_GAP }
+  return { ...cursor, page, sectionIndex, y: boxBottom - SECTION_GAP }
 }
 
 function periodField(from?: string | null, to?: string | null): FieldRow {
@@ -803,7 +1018,7 @@ function fillHeaderTable(
   ]
 
   for (const [rowKey, value, font] of rows) {
-    drawTextFitted(
+    drawHeaderValue(
       page,
       font,
       value,
@@ -920,18 +1135,27 @@ function generateAffidavitPDF(
               label: "Název pracovní pozice",
               value: exp.jobPositionName ?? "",
             },
-            { label: "Druh práce", value: exp.jobType ?? "" },
+            { ...periodField(exp.from, exp.to), standalone: true },
             {
               label: "Typ výkonu práce",
-              value: exp.employmentType
-                ? (EXPERIENCE_TYPE_LABELS[exp.employmentType] ??
-                  exp.employmentType)
-                : "",
+              value:
+                exp.employmentType === "OTHER"
+                  ? (exp.employmentTypeOther ?? "")
+                  : exp.employmentType
+                    ? (EXPERIENCE_TYPE_LABELS[exp.employmentType] ??
+                      exp.employmentType)
+                    : "",
+              standalone: true,
             },
-            periodField(exp.from, exp.to),
             {
               label: "Rozsah pracovního úvazku",
               value: workloadLabel(exp.workloadType, exp.workloadOther),
+              standalone: true,
+            },
+            {
+              label: "Druh práce",
+              value: exp.jobType ?? "",
+              standalone: true,
             },
           ],
         }))
@@ -1111,21 +1335,20 @@ function generateAffidavitPDF(
     )
   )
 
-  ctx = drawNumberedSection(ctx, "Čestné prohlášení", [
-    {
-      fields: [
-        {
-          label:
-            "Čestně prohlašuji, že mnou uvedené údaje jsou pravdivé. Jsem si plně vědom(a), že budou použity pro zápočet doby rozhodné pro zařazení do plat. stupně při zařazení do platové třídy, tzn. pro stanovení platového tarifu. Rovněž jsem si plně vědom(a), že nepravdivé údaje budou mít za následek mé bezdůvodné obohacení a zaměstnavatel bude žádat vrácení neprávem takto vyplacených finančních prostředků.",
-          value: yesNo(data.isTruthful),
-          longLabel: true,
-          emphasize: true,
-        },
-      ],
-    },
-  ])
-
-  drawSignatureBlock(ctx, docInfo.completedAt)
+  drawFinalDeclarationSection(
+    ctx,
+    "Čestné prohlášení",
+    [
+      {
+        label:
+          "Čestně prohlašuji, že mnou uvedené údaje jsou pravdivé. Jsem si plně vědom(a), že budou použity pro zápočet doby rozhodné pro zařazení do plat. stupně při zařazení do platové třídy, tzn. pro stanovení platového tarifu. Rovněž jsem si plně vědom(a), že nepravdivé údaje budou mít za následek mé bezdůvodné obohacení a zaměstnavatel bude žádat vrácení neprávem takto vyplacených finančních prostředků.",
+        value: yesNo(data.isTruthful),
+        longLabel: true,
+        emphasize: true,
+      },
+    ],
+    docInfo.completedAt
+  )
 }
 
 const MARITAL_STATUS_LABELS: Record<string, string> = {
@@ -1280,22 +1503,21 @@ function generatePayrollInfoPDF(
     },
   ])
 
-  ctx = drawNumberedSection(ctx, "Prohlášení", [
-    {
-      fields: [
-        {
-          label:
-            "Stvrzuji svým podpisem, že jsou výše uvedené údaje zcela pravdivé a případnou změnu jsem povinen včas osobně oznámit na oddělení platové a mzdové účtárny. Za způsobené škody nesu plnou odpovědnost.",
-          value: yesNo(data.confirmTruthfulness),
-          longLabel: true,
-          emphasize: true,
-        },
-        { label: "Datum", value: formatDate(data.signatureDate) },
-      ],
-    },
-  ])
-
-  drawSignatureBlock(ctx, docInfo.completedAt)
+  drawFinalDeclarationSection(
+    ctx,
+    "Prohlášení",
+    [
+      {
+        label:
+          "Stvrzuji svým podpisem, že jsou výše uvedené údaje zcela pravdivé a případnou změnu jsem povinen včas osobně oznámit na oddělení platové a mzdové účtárny. Za způsobené škody nesu plnou odpovědnost.",
+        value: yesNo(data.confirmTruthfulness),
+        longLabel: true,
+        emphasize: true,
+      },
+      { label: "Datum", value: formatDate(data.signatureDate) },
+    ],
+    docInfo.completedAt
+  )
 }
 
 const EDUCATION_LEVEL_LABELS: Record<string, string> = {
@@ -1361,6 +1583,12 @@ function generatePersonalQuestionnairePDF(
       : (NATIONALITY_OPTIONS.find((n) => n.value === data.citizenship)?.label ??
         data.citizenship ??
         "")
+  const birthStateLabel =
+    data.birthState === OTHER_CITIZENSHIP_VALUE
+      ? (data.birthStateOther ?? "")
+      : (NATIONALITY_OPTIONS.find((n) => n.value === data.birthState)?.label ??
+        data.birthState ??
+        "")
 
   ctx = drawNumberedSection(ctx, "Základní údaje", [
     {
@@ -1378,7 +1606,7 @@ function generatePersonalQuestionnairePDF(
         { label: "Rodné číslo", value: data.birthNumber ?? "" },
         { label: "Místo narození", value: data.birthPlace ?? "" },
         { label: "Okres narození", value: data.birthDistrict ?? "" },
-        { label: "Stát narození", value: data.birthState ?? "" },
+        { label: "Stát narození", value: birthStateLabel },
         { label: "Státní občanství", value: citizenshipLabel },
       ],
     },
@@ -1610,8 +1838,14 @@ function generatePersonalQuestionnairePDF(
       itemLabel: "Kontaktní osoba",
       fields: [
         {
-          label: "Kontaktní osoba pro mimořádné situace",
-          value: data.maintenanceInfo ?? "",
+          label: "Jméno a příjmení",
+          value: data.maintenanceContactName ?? "",
+        },
+        {
+          label: "Telefon",
+          value: data.maintenancePhone
+            ? `${data.maintenancePhoneCountryCode ?? ""} ${data.maintenancePhone}`.trim()
+            : "",
         },
       ],
     },
@@ -1621,32 +1855,45 @@ function generatePersonalQuestionnairePDF(
     },
     {
       itemLabel: "Příbuzní zaměstnaní na ÚMČ Praha 6",
-      fields: [{ label: "Příbuzní", value: data.familyRelations ?? "" }],
-    },
-  ])
-
-  ctx = drawNumberedSection(ctx, "Prohlášení", [
-    {
       fields: [
         {
-          label:
-            "Prohlašuji, že jsem nic nezamlčel(a) a všechny mnou uvedené údaje jsou pravdivé.",
-          value: yesNoLocal(data.finalReadAndUnderstood),
-          longLabel: true,
-          emphasize: true,
+          label: "Má příbuzné na ÚMČ Praha 6",
+          value: yesNoLocal(data.hasFamilyRelations),
         },
-        {
-          label:
-            "Prohlašuji, že změnu jakéhokoli z mnou uvedených údajů oznámím bezodkladně na oddělení platové a mzdové účtárny. Pokud by nesplnění této povinnosti způsobilo škodu, nesu za ni plnou odpovědnost.",
-          value: yesNoLocal(data.finalTruthfulnessConfirm),
-          longLabel: true,
-          emphasize: true,
-        },
+        ...(data.hasFamilyRelations
+          ? [
+              {
+                label: "Jméno, pozice a odbor",
+                value: data.familyRelations ?? "",
+                standalone: true,
+              },
+            ]
+          : []),
       ],
     },
   ])
 
-  drawSignatureBlock(ctx, docInfo.completedAt)
+  drawFinalDeclarationSection(
+    ctx,
+    "Prohlášení",
+    [
+      {
+        label:
+          "Prohlašuji, že jsem nic nezamlčel(a) a všechny mnou uvedené údaje jsou pravdivé.",
+        value: yesNoLocal(data.finalReadAndUnderstood),
+        longLabel: true,
+        emphasize: true,
+      },
+      {
+        label:
+          "Prohlašuji, že změnu jakéhokoli z mnou uvedených údajů oznámím bezodkladně personálnímu oddělení. Pokud by nesplnění této povinnosti způsobilo škodu, nesu za ni plnou odpovědnost.",
+        value: yesNoLocal(data.finalTruthfulnessConfirm),
+        longLabel: true,
+        emphasize: true,
+      },
+    ],
+    docInfo.completedAt
+  )
 }
 
 export async function buildEmploymentDocumentPdf(id: number): Promise<{

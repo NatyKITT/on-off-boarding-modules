@@ -22,6 +22,8 @@ import {
 
 import { useToast } from "@/hooks/use-toast"
 import { EmployeeMeta } from "@/lib/employee-meta"
+import type { PrefillSuggestion } from "@/lib/employment-document-prefill"
+import { getPrefillDisplayLabels } from "@/lib/employment-document-shared-fields"
 import { ServerValidationError } from "@/lib/server-validation-error"
 import {
   DRIVER_LICENSE_CATEGORIES,
@@ -51,14 +53,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
 import { DocumentEmployeeHeader } from "@/components/common/document-employee-header"
+import { DocumentPrefillBanner } from "@/components/forms/document-prefill-banner"
 
 type PersonalQuestionnaireBaseProps = {
   documentId: number
   initialData?: unknown
   readOnly?: boolean
   employeeMeta?: EmployeeMeta
+  prefillSuggestion?: PrefillSuggestion | null
 }
 
 type PersonalQuestionnairePublicProps = PersonalQuestionnaireBaseProps & {
@@ -138,6 +141,7 @@ function buildBaseDefaultValues(
     birthPlace: "",
     birthDistrict: "",
     birthState: "",
+    birthStateOther: "",
     citizenship: "",
     citizenshipOther: "",
     foreignPermitFrom: "",
@@ -159,7 +163,9 @@ function buildBaseDefaultValues(
     phone: "",
     hasDriverLicense: undefined,
     driverLicenseCategories: [],
-    maintenanceInfo: "",
+    maintenanceContactName: "",
+    maintenancePhoneCountryCode: DEFAULT_PHONE_COUNTRY_CODE,
+    maintenancePhone: "",
     isDisabledPerson: undefined,
     receivesPensionBenefits: undefined,
     typePensionBenefits: "",
@@ -184,6 +190,7 @@ function buildBaseDefaultValues(
         studyStatus: "COMPLETED",
       },
     ],
+    hasFamilyRelations: undefined,
     familyRelations: "",
     finalReadAndUnderstood: undefined,
     finalTruthfulnessConfirm: undefined,
@@ -224,6 +231,21 @@ export function PersonalQuestionnaireForm(
     formState: { errors },
   } = form
 
+  const [prefillResolved, setPrefillResolved] = React.useState(false)
+
+  function handleAcceptPrefill() {
+    if (!props.prefillSuggestion) return
+
+    for (const [key, value] of Object.entries(props.prefillSuggestion.data)) {
+      setValue(key as keyof PersonalQuestionnaireSchema, value as never, {
+        shouldValidate: true,
+        shouldDirty: true,
+      })
+    }
+
+    setPrefillResolved(true)
+  }
+
   React.useEffect(() => {
     const subscription = watch(() => {
       setResultModal((previous) => (previous === "error" ? null : previous))
@@ -243,6 +265,7 @@ export function PersonalQuestionnaireForm(
   const isForeignCitizenship = Boolean(
     citizenship && citizenship !== CZECH_CITIZENSHIP_VALUE
   )
+  const birthState = watch("birthState")
 
   const dataBoxDelivery = watch("dataBoxDelivery") as boolean | undefined
   const useDifferentMailingAddress = watch("useDifferentMailingAddress") as
@@ -273,6 +296,7 @@ export function PersonalQuestionnaireForm(
   const finalTruthfulnessConfirm = watch("finalTruthfulnessConfirm") as
     | boolean
     | undefined
+  const hasFamilyRelations = watch("hasFamilyRelations") as boolean | undefined
 
   const isCompleted = status === "completed"
   const isFormDisabled =
@@ -424,6 +448,15 @@ export function PersonalQuestionnaireForm(
             povinné.
           </p>
         </header>
+
+        {props.prefillSuggestion && !prefillResolved && !isFormDisabled && (
+          <DocumentPrefillBanner
+            sourceLabel={props.prefillSuggestion.sourceLabel}
+            fieldLabels={getPrefillDisplayLabels(props.prefillSuggestion.data)}
+            onAccept={handleAcceptPrefill}
+            onDismiss={() => setPrefillResolved(true)}
+          />
+        )}
 
         <section className="space-y-4 rounded-md border p-4">
           <h2 className="text-lg font-semibold">A. Základní údaje</h2>
@@ -621,11 +654,42 @@ export function PersonalQuestionnaireForm(
               <Label>
                 Stát narození <span className="text-destructive">*</span>
               </Label>
-              <Input {...register("birthState")} disabled={isFormDisabled} />
+              <Select
+                value={birthState || ""}
+                onValueChange={(value) =>
+                  setValue("birthState", value, { shouldValidate: true })
+                }
+                disabled={isFormDisabled}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Vyberte stát narození" />
+                </SelectTrigger>
+                <SelectContent>
+                  {NATIONALITY_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               {errors.birthState && (
                 <p className="text-xs text-destructive">
                   {errors.birthState.message as string}
                 </p>
+              )}
+              {birthState === OTHER_CITIZENSHIP_VALUE && (
+                <div className="space-y-1 pt-1">
+                  <Input
+                    {...register("birthStateOther")}
+                    placeholder="Vypište stát narození"
+                    disabled={isFormDisabled}
+                  />
+                  {errors.birthStateOther && (
+                    <p className="text-xs text-destructive">
+                      {errors.birthStateOther.message as string}
+                    </p>
+                  )}
+                </div>
               )}
             </div>
             <div className="space-y-1">
@@ -1651,21 +1715,52 @@ export function PersonalQuestionnaireForm(
                 Kontaktní osoba (dobrovolný údaj)
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-1">
-              <Label>
-                Jméno, příjmení a telefon osoby, která má být kontaktována z
-                důvodu ochrany životně důležitých zájmů Vaší osoby nebo jiné
-                fyzické osoby
-              </Label>
+            <CardContent className="space-y-3">
               <p className="text-xs text-muted-foreground">
-                Vypište prosím všechny údaje (jméno, příjmení, telefon) do pole
-                níže za sebou.
+                Osoba, která má být kontaktována z důvodu ochrany životně
+                důležitých zájmů Vaší osoby nebo jiné fyzické osoby.
               </p>
-              <Textarea
-                {...register("maintenanceInfo")}
-                disabled={isFormDisabled}
-                rows={2}
-              />
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>Jméno a příjmení</Label>
+                  <Input
+                    {...register("maintenanceContactName")}
+                    disabled={isFormDisabled}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Telefon</Label>
+                  <div className="grid grid-cols-[minmax(0,110px)_1fr] gap-2">
+                    <Select
+                      value={
+                        watch("maintenancePhoneCountryCode") ||
+                        DEFAULT_PHONE_COUNTRY_CODE
+                      }
+                      onValueChange={(value) =>
+                        setValue("maintenancePhoneCountryCode", value, {
+                          shouldValidate: true,
+                        })
+                      }
+                      disabled={isFormDisabled}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Předvolba" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PHONE_COUNTRY_CODE_OPTIONS.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      {...register("maintenancePhone")}
+                      disabled={isFormDisabled}
+                    />
+                  </div>
+                </div>
+              </div>
             </CardContent>
           </Card>
 
@@ -1787,23 +1882,55 @@ export function PersonalQuestionnaireForm(
                 Příbuzní zaměstnaní na ÚMČ Praha 6
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-1">
-              <p className="text-xs text-muted-foreground">
-                Napište jméno a uveďte název pozice a odbor.
-              </p>
+            <CardContent className="space-y-3">
               <p className="text-xs text-muted-foreground">
                 <strong>Osoba blízká:</strong> je příbuzný v řadě přímé -
                 manžel/manželka nebo partner/partnerka.
               </p>
-              <Input
-                {...register("familyRelations")}
-                disabled={isFormDisabled}
-              />
+              <div className="space-y-2">
+                <Label>
+                  Máte na ÚMČ Praha 6 zaměstnané osoby blízké?{" "}
+                  <span className="text-destructive">*</span>
+                </Label>
+                <YesNoToggle
+                  idPrefix="family-relations"
+                  value={hasFamilyRelations}
+                  disabled={isFormDisabled}
+                  onChange={(next) =>
+                    setValue("hasFamilyRelations", next, {
+                      shouldValidate: true,
+                    })
+                  }
+                />
+                {errors.hasFamilyRelations && (
+                  <p className="text-xs text-destructive">
+                    {errors.hasFamilyRelations.message as string}
+                  </p>
+                )}
+              </div>
+
+              {hasFamilyRelations === true && (
+                <div className="space-y-1 pt-1">
+                  <Label>
+                    Jméno a příjmení, pozice a odbor{" "}
+                    <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    {...register("familyRelations")}
+                    disabled={isFormDisabled}
+                  />
+                  {errors.familyRelations && (
+                    <p className="text-xs text-destructive">
+                      {errors.familyRelations.message as string}
+                    </p>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </section>
 
-        <section className="space-y-4 rounded-md border p-4">
+        <section className="space-y-4 rounded-md border-l-4 border-l-[#00847C] p-4">
           <h2 className="text-lg font-semibold">F. Prohlášení</h2>
 
           {[
@@ -1819,7 +1946,7 @@ export function PersonalQuestionnaireForm(
               field: "finalTruthfulnessConfirm" as const,
               value: finalTruthfulnessConfirm,
               label:
-                "Prohlašuji, že změnu jakéhokoli z mnou uvedených údajů oznámím bezodkladně na oddělení platové a mzdové účtárny. Pokud by nesplnění této povinnosti způsobilo škodu, nesu za ni plnou odpovědnost.",
+                "Prohlašuji, že změnu jakéhokoli z mnou uvedených údajů oznámím bezodkladně personálnímu oddělení. Pokud by nesplnění této povinnosti způsobilo škodu, nesu za ni plnou odpovědnost.",
             },
           ].map(({ id, field, value, label }) => (
             <div key={id} className="space-y-2">
@@ -1842,30 +1969,6 @@ export function PersonalQuestionnaireForm(
             </div>
           ))}
         </section>
-
-        <Card className="border-l-4 border-l-[#00847C]">
-          <CardHeader>
-            <CardTitle className="text-base font-medium">
-              Informace o dalším postupu
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm text-muted-foreground">
-            <p>
-              <b>
-                Vyžádejte si prosím co nejdříve výpis ze své zdravotní
-                dokumentace u Vašeho praktického lékaře.
-              </b>{" "}
-              Výpis je nezbytným podkladem pro provedení pracovnělékařské
-              prohlídky, náklady za jeho vystavení Vám budou uhrazeny
-              zaměstnavatelem po předložení potvrzení o platbě.
-            </p>
-            <p>
-              Na pracovnělékařskou prohlídku obdržíte termín i příslušný
-              formulář na personálním oddělení ÚMČ Praha 6.
-            </p>
-            <p>Děkujeme za vyplnění a přejeme krásný a úspěšný den.</p>
-          </CardContent>
-        </Card>
 
         <div className="flex justify-end gap-2">
           <Button

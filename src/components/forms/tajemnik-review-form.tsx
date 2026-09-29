@@ -153,6 +153,11 @@ export function TajemnikReviewForm({
       return
     }
 
+    if (agreement === "no" && !comment.trim()) {
+      setError("U nesouhlasu je komentář povinný.")
+      return
+    }
+
     if (!signedAt) {
       setError("Před odesláním je potřeba se podepsat.")
       return
@@ -376,14 +381,18 @@ export function TajemnikReviewForm({
               htmlFor="tajemnik-comment"
               className="mb-2 block text-sm font-medium"
             >
-              Komentář (nepovinné)
+              Komentář {agreement === "no" ? "*" : "(nepovinné)"}
             </Label>
             <Textarea
               id="tajemnik-comment"
               value={comment}
               onChange={(event) => setComment(event.target.value)}
               disabled={!canSubmit || isSubmitting}
-              placeholder="Volitelný komentář k vyjádření..."
+              placeholder={
+                agreement === "no"
+                  ? "Uveďte prosím důvod nesouhlasu..."
+                  : "Volitelný komentář k vyjádření..."
+              }
               className="resize-y"
             />
           </div>

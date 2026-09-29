@@ -232,25 +232,66 @@ Z detailu nástupu se dále řídí:
   o vzdělání a praxi, mzdové údaje. Dokumenty lze vyplnit přímo
   v aplikaci, nebo zaměstnanci zaslat odkaz či PDF e-mailem k
   samostatnému vyplnění (kapitola 6). Osobní dotazník i dotazník pro
-  mzdovou agendu mají u státního občanství, banky a zdravotní
-  pojišťovny místo volného textu výběr ze seznamu (s možností „Jiná,
-  vypište" pro netypickou hodnotu) – omezuje se tím riziko překlepů.
-  Vygenerované PDF u všech tří dokumentů zobrazuje všechna pole
-  formuláře včetně nevyplněných nepovinných (s hodnotou „Nevyplněno"),
-  aby bylo na první pohled jasné, co ještě chybí, a jeho rozložení
-  sekcí odpovídá 1:1 kartám na obrazovce.
+  mzdovou agendu mají u státního občanství, banky, zdravotní
+  pojišťovny a (jen osobní dotazník) státu narození místo volného
+  textu výběr ze seznamu (s možností „Jiná, vypište" pro netypickou
+  hodnotu) – omezuje se tím riziko překlepů. Vygenerované PDF u všech
+  tří dokumentů zobrazuje všechna pole formuláře včetně nevyplněných
+  nepovinných (s hodnotou „Nevyplněno"), aby bylo na první pohled
+  jasné, co ještě chybí, a jeho rozložení sekcí odpovídá 1:1 kartám na
+  obrazovce.
+
+  Sloupec **„Nástupní dokumenty"** v přehledu Nástupů ukazuje u
+  každého zaměstnance ikonku a název všech tří dokumentů najednou,
+  barevně podle stavu (červená = platnost odkazu vypršela, oranžová =
+  zasláno a čeká na vyplnění, zelená = zasláno a vyplněno, šedá = ještě
+  nezasláno a odkaz má stále čas) – přesný stav se zobrazí po najetí
+  myší na ikonku, bez nutnosti otvírat detail. Pokud dokument nebyl
+  odeslán vůbec (např. se na něj zapomnělo) a mezitím uplynulo 14 dní
+  od jeho vytvoření, zobrazí se rovnou červeně jako vypršelý – je
+  potřeba nejdřív vygenerovat nový odkaz, teprve pak ho odeslat.
+  Stejné barvy vidíte i na kartě dokumentu v okně „Dokumenty" u
+  nástupu, včetně data posledního odeslání.
+
+  Pokud platnost odkazu vyprší dřív, než ho zaměstnanec vyplní,
+  objeví se v okně „Dokumenty" nahoře upozornění s tlačítkem
+  „Vygenerovat nové odkazy", které obnoví najednou jen dosud
+  nevyplněné dokumenty (vyplněné/podepsané se nedotkne) a rovnou
+  připraví e-mail k opětovnému odeslání. Odkaz po vypršení platnosti
+  už nejde znovu otevřít – je vždy potřeba nový.
+
+  Appka sama upozorní na tři situace: zaměstnance 3 dny před
+  vypršením odkazu, Personální oddělení v den vypršení (pokud
+  dokument pořád není vyplněný), a nově i Personální oddělení 3 dny
+  před plánovaným nástupem (případně zpětně i po jeho termínu), pokud
+  dokument ještě vůbec nebyl zaměstnanci odeslán. První dvě připomínky
+  se počítají jen od chvíle, kdy byl odkaz opravdu odeslán.
+
+  Pokud se osobní dotazník i dotazník pro mzdovou agendu vyplňují
+  odděleně, appka při otevření druhého z nich nabídne převzetí
+  společných údajů (jméno, rodné příjmení, rodinný stav, datum a místo
+  narození, rodné číslo, státní občanství, adresa trvalého pobytu) už
+  vyplněných v tom prvním – stačí potvrdit, údaje zůstávají
+  editovatelné. Pokud si zaměstnanec při vyplňování zadá jiné jméno,
+  příjmení, tituly nebo e-mail, než má uvedené v nástupu, upozorní se
+  na to Personální oddělení v e-mailu o vyplnění i v historii
+  dokumentu.
+
 - **Vyhodnocení zkušební doby** – formulář vyplňovaný nadřízeným
   zaměstnance na konci zkušební doby, prostřednictvím veřejného
   odkazu (kapitola 6). HR/IT v aplikaci sledují stav, odesílají
   pozvánku i upomínky a po vyplnění mohou formulář znovu odemknout
   k opravě.
 
+  Automatické zakládání pozvánek a připomínek podle blížícího se
+  konce zkušební doby je **dočasně vypnuté** (bude řešeno přes jinou
+  aplikaci) – pozvánku i případné opakované odeslání je teď potřeba
+  poslat ručně z detailu nástupu. Zbytek procesu (vyplnění, tajemník,
+  finální PDF) funguje beze změny.
+
   **Kdo dostane e-mail a kdy** (přehled pro HR):
-  1. HR odešle nadřízenému **pozvánku** k vyplnění (ručně, nebo ji
-     automaticky připraví cron podle blížícího se konce zkušební
-     doby). Dokud formulář není vyplněný, chodí nadřízenému
-     automaticky i **připomínky** a HR informace, pokud nadřízený
-     chybí nebo formulář stále není hotový.
+  1. HR odešle nadřízenému **pozvánku** k vyplnění ručně z detailu
+     nástupu.
   2. Jakmile nadřízený formulář **finálně odešle**, HR ihned dostane
      e-mail s vygenerovaným **PDF v příloze**.
      - Pokud nadřízený **není** zároveň tajemník úřadu, dostane ve
@@ -263,7 +304,7 @@ Z detailu nástupu se dále řídí:
   3. Tajemník na svém odkaze vidí kompletní kontext (koho se
      vyhodnocení týká) i vyplněné hodnocení nadřízeného, a odděleně
      doplní souhlas nebo nesouhlas s doporučením, případný komentář a
-     podpis. Po odeslání:
+     podpis. Při volbě „Nesouhlasím" je komentář povinný. Po odeslání:
      - HR dostane **nový** e-mail s aktualizovaným PDF, ve kterém je
        vidět **obojí stanovisko najednou** – doporučení nadřízeného
        (ano/ne) i vyjádření tajemníka (souhlasí/nesouhlasí),
@@ -545,11 +586,20 @@ Z Nástupů, Odchodů i Změn lze otevřít společné okno pro odeslání
 souhrnného e-mailu. V něm se volí:
 
 - jeden nebo více měsíců současně,
-- skupina příjemců – buď „vybraná skupina" (typicky plánované údaje),
-  nebo „všichni zaměstnanci" (typicky skutečné údaje),
+- příjemce – „vybraná skupina" (typicky plánované údaje), „všichni
+  zaměstnanci" (typicky skutečné údaje), nebo „vlastní e-mail". U
+  vlastního e-mailu lze tlačítkem „Přidat e-maily" přidat najednou
+  víc adres (otevře se okno pro přidávání, přidané adresy jdou
+  jednotlivě i odebrat). U „vybrané skupiny" a „všech zaměstnanců" jde
+  ikonkou oka vedle popisku zobrazit v okně skutečný seznam adres, na
+  které se pošle (podle nastavení v appce),
 - u změn navíc typ změny, který má být do reportu zahrnut,
 - forma odeslání – jeden souhrnný e-mail se všemi tabulkami pod
   sebou, nebo samostatné e-maily po jednotlivých typech.
+
+Tlačítko **„Stáhnout PDF"** v okně vygeneruje PDF se stejným obsahem a
+vzhledem, jaký by měl odeslaný e-mail podle aktuálního výběru – vhodné
+pro archivaci nebo přeposlání mimo appku.
 
 Aplikace eviduje, které záznamy již byly v daném měsíci odeslány, a
 před opětovným odesláním na to upozorní. Tento report smí **odeslat**

@@ -899,7 +899,10 @@ export type EmployeeChangeEmailRecord = {
   newPositionNum: string | null
 }
 
-export type EmployeeChangeReportAudience = "ONBOARDING_GROUP" | "ALL_EMPLOYEES"
+export type EmployeeChangeReportAudience =
+  | "ONBOARDING_GROUP"
+  | "ALL_EMPLOYEES"
+  | "CUSTOM_EMAIL"
 
 function isEmployeePositionChange(type: EmployeeChangeEmailRecord["type"]) {
   return type === "POSITION" || type === "NAME_AND_POSITION"
@@ -1524,7 +1527,7 @@ export async function renderCombinedReportHtml(args: {
         } 0 4px 0; font-weight: 700;">Personální změny</h2>
         ${changesNote}
         ${renderEmployeeChangeTable(changes, {
-          showPersonalNumberColumn: changeAudience === "ONBOARDING_GROUP",
+          showPersonalNumberColumn: changeAudience !== "ALL_EMPLOYEES",
         })}
       `)
     } else {
@@ -1544,7 +1547,7 @@ export async function renderCombinedReportHtml(args: {
               } 0 4px 0; font-weight: 700;">Personální změny${escapeHtml(monthLabel)}</h2>
               ${changesNote}
               ${renderEmployeeChangeTable(monthRows, {
-                showPersonalNumberColumn: changeAudience === "ONBOARDING_GROUP",
+                showPersonalNumberColumn: changeAudience !== "ALL_EMPLOYEES",
               })}
             `
           })
@@ -1588,11 +1591,12 @@ export async function renderCombinedReportHtml(args: {
         }
       </style>
     </head>
-    <body style="margin: 0; padding: 0; background-color: ${bgLight}; width: 100% !important; font-family: ${EMAIL_FONT_FAMILY}; -webkit-text-size-adjust: 100%; text-size-adjust: 100%;">
-      <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
+    <body class="eml-print-page" style="margin: 0; padding: 0; background-color: ${bgLight}; width: 100% !important; font-family: ${EMAIL_FONT_FAMILY}; -webkit-text-size-adjust: 100%; text-size-adjust: 100%;">
+      <table class="eml-print-page" border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
         <tr>
           <td align="center" style="padding: 30px 10px;">
             <table
+              class="eml-print-card"
               border="0"
               cellpadding="0"
               cellspacing="0"
@@ -4503,10 +4507,79 @@ type EmploymentDocumentEmailInfo = {
   employeeUnitName?: string | null
 }
 
+const NEXT_STEPS_INFO_TEXT = {
+  intro:
+    "Vyžádejte si prosím co nejdříve výpis ze své zdravotní dokumentace u Vašeho praktického lékaře.",
+  intro2:
+    "Výpis je nezbytným podkladem pro provedení pracovnělékařské prohlídky, náklady za jeho vystavení Vám budou uhrazeny zaměstnavatelem po předložení potvrzení o platbě.",
+  appointment:
+    "Na pracovnělékařskou prohlídku obdržíte termín i příslušný formulář na personálním oddělení ÚMČ Praha 6.",
+}
+
+const DOCUMENT_LINK_NOTES: Record<string, string> = {
+  AFFIDAVIT: "Důležitý podklad pro řádný zápočet praxe.",
+  PERSONAL_QUESTIONNAIRE: "Pro účely zpracování personální agendy.",
+  PAYROLL_INFO: "Zákonné údaje pro řádné vedení mzdové agendy.",
+}
+
+const HR_CONTACTS = [
+  {
+    name: "Mgr. Michaela Aronová",
+    role: "vedoucí personálního oddělení",
+    org: "Kancelář tajemníka, Personální oddělení",
+    email: "maronova@praha6.cz",
+    phone: "+420 220189350",
+  },
+  {
+    name: "Terezie Machková",
+    role: "referent personální agendy",
+    org: "Kancelář tajemníka, Personální oddělení",
+    email: "tmachkova@praha6.cz",
+    phone: "+420 220189956",
+  },
+]
+
+function renderHrContactCardsHtml(primary: string): string {
+  return `
+    <table border="0" cellpadding="0" cellspacing="0" width="100%" role="presentation">
+      <tr>
+        ${HR_CONTACTS.map(
+          (contact, index) => `
+        <td width="50%" valign="top" style="${index === 0 ? "padding-right:6px;" : "padding-left:6px;"}">
+          <div style="border:1px solid #d9ece7;border-radius:8px;padding:10px 12px;font-size:12px;color:#374151;line-height:1.5;">
+            <div style="font-weight:700;color:#082B2A;">${escapeHtml(contact.name)}</div>
+            <div>${escapeHtml(contact.role)}</div>
+            <div style="color:#6b7280;">${escapeHtml(contact.org)}</div>
+            <div style="margin-top:4px;">
+              <a href="mailto:${escapeHtml(contact.email)}" style="color:${primary};">${escapeHtml(contact.email)}</a>
+            </div>
+            <div>T: ${escapeHtml(contact.phone)}</div>
+          </div>
+        </td>
+        `
+        ).join("")}
+      </tr>
+    </table>
+  `
+}
+
+function renderHrContactsText(): string[] {
+  return [
+    "V případě potřeby je Vám Personální oddělení plně k dispozici.",
+    "",
+    ...HR_CONTACTS.flatMap((contact) => [
+      `${contact.name}, ${contact.role}`,
+      `${contact.org}`,
+      `${contact.email} · T: ${contact.phone}`,
+      "",
+    ]),
+  ]
+}
+
 export async function sendEmploymentDocumentLinkEmail(
   args: EmploymentDocumentEmailInfo & {
     to: string
-    documents: Array<{ label: string; url: string }>
+    documents: Array<{ label: string; url: string; type?: string }>
   }
 ): Promise<{ subject: string; html: string }> {
   const primary = "#00847C"
@@ -4514,6 +4587,9 @@ export async function sendEmploymentDocumentLinkEmail(
   const subject = args.employeeName
     ? `Dokumenty k nástupu – ${args.employeeName}`
     : "Dokumenty k nástupu"
+  const includesPersonalQuestionnaire = args.documents.some(
+    (document) => document.type === "PERSONAL_QUESTIONNAIRE"
+  )
 
   const html = `
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
@@ -4551,11 +4627,11 @@ export async function sendEmploymentDocumentLinkEmail(
               <tr>
                 <td bgcolor="#ffffff" style="padding:26px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};">
                   <p style="margin:0 0 16px 0;font-size:14px;color:#082B2A;">
-                    Dobrý den${args.employeeName ? `, ${escapeHtml(args.employeeName)}` : ""},
+                    Dobrý den,
                   </p>
 
                   <p style="margin:0 0 18px 0;font-size:14px;color:#374151;line-height:1.6;">
-                    prosíme o vyplnění následujících dokumentů pro uvedenou pozici.
+                    v souvislosti s Vaším nástupem na uvedenou pozici Vás prosíme o vyplnění následujících dokumentů. Pracovní vztah se řídí zejména zákonem o úřednících územních samosprávných celků (zákon č. 312/2002 Sb.) a zákoníkem práce (zákon č. 262/2006 Sb.) a dalšími právními předpisy.
                   </p>
 
                   ${renderEmploymentDocumentInfoTable({
@@ -4570,18 +4646,29 @@ export async function sendEmploymentDocumentLinkEmail(
                   <table border="0" cellpadding="0" cellspacing="0" width="100%"
                     style="border:1px solid #d9ece7;border-radius:8px;overflow:hidden;border-collapse:separate;margin-bottom:24px;">
                     ${args.documents
-                      .map(
-                        (document, index) => `
+                      .map((document, index) => {
+                        const note = document.type
+                          ? DOCUMENT_LINK_NOTES[document.type]
+                          : undefined
+
+                        return `
                       <tr bgcolor="${index % 2 === 0 ? bgLight : "#ffffff"}" style="background-color:${index % 2 === 0 ? bgLight : "#ffffff"};">
-                        <td style="padding:10px 16px;font-size:14px;color:#082B2A;font-weight:700;">
-                          ${escapeHtml(document.label)}
-                        </td>
-                        <td style="padding:10px 16px;font-size:12px;">
-                          <a href="${escapeHtml(document.url)}" style="color:${primary};word-break:break-all;">${escapeHtml(document.url)}</a>
+                        <td style="padding:10px 16px;">
+                          <div style="font-size:14px;color:#082B2A;font-weight:700;">
+                            ${escapeHtml(document.label)}
+                          </div>
+                          ${
+                            note
+                              ? `<div style="margin-top:2px;font-size:11px;color:#6b7280;">${escapeHtml(note)}</div>`
+                              : ""
+                          }
+                          <div style="margin-top:6px;font-size:12px;">
+                            <a href="${escapeHtml(document.url)}" style="color:${primary};word-break:break-all;">${escapeHtml(document.url)}</a>
+                          </div>
                         </td>
                       </tr>
                     `
-                      )
+                      })
                       .join("")}
                   </table>
 
@@ -4599,6 +4686,34 @@ export async function sendEmploymentDocumentLinkEmail(
                       </td>
                     </tr>
                   </table>
+
+                  ${
+                    includesPersonalQuestionnaire
+                      ? `
+                  <table border="0" cellpadding="0" cellspacing="0" width="100%"
+                    style="border:1px solid #d9ece7;border-radius:8px;overflow:hidden;border-collapse:separate;margin-top:16px;border-left:4px solid ${primary};">
+                    <tr bgcolor="${bgLight}" style="background-color:${bgLight};">
+                      <td style="padding:14px 16px;font-size:12px;color:#082B2A;line-height:1.6;">
+                        <strong>Informace o dalším postupu</strong>
+                        <p style="margin:8px 0 0 0;">
+                          <strong>${escapeHtml(NEXT_STEPS_INFO_TEXT.intro)}</strong>
+                          ${escapeHtml(NEXT_STEPS_INFO_TEXT.intro2)}
+                        </p>
+                        <p style="margin:8px 0 0 0;">
+                          ${escapeHtml(NEXT_STEPS_INFO_TEXT.appointment)}
+                        </p>
+                      </td>
+                    </tr>
+                  </table>
+                  `
+                      : ""
+                  }
+
+                  <p style="margin:20px 0 10px 0;font-size:13px;color:#374151;">
+                    V případě potřeby je Vám Personální oddělení plně k dispozici.
+                  </p>
+
+                  ${renderHrContactCardsHtml(primary)}
                 </td>
               </tr>
 
@@ -4615,9 +4730,9 @@ export async function sendEmploymentDocumentLinkEmail(
   </html>`
 
   const text = [
-    `Dobrý den${args.employeeName ? `, ${args.employeeName}` : ""},`,
+    "Dobrý den,",
     "",
-    "prosíme o vyplnění následujících dokumentů pro uvedenou pozici:",
+    "v souvislosti s Vaším nástupem na uvedenou pozici Vás prosíme o vyplnění následujících dokumentů. Pracovní vztah se řídí zejména zákonem o úřednících územních samosprávných celků (zákon č. 312/2002 Sb.) a zákoníkem práce (zákon č. 262/2006 Sb.) a dalšími právními předpisy.",
     "",
     `Zaměstnanec: ${args.employeeName}`,
     args.employeePersonalNumber
@@ -4627,9 +4742,25 @@ export async function sendEmploymentDocumentLinkEmail(
     `Odbor: ${args.employeeDepartment || "—"}`,
     `Oddělení: ${args.employeeUnitName || "—"}`,
     "",
-    ...args.documents.map((document) => `${document.label}: ${document.url}`),
-    "",
+    ...args.documents.flatMap((document) => {
+      const note = document.type
+        ? DOCUMENT_LINK_NOTES[document.type]
+        : undefined
+
+      return [document.label, ...(note ? [note] : []), document.url, ""]
+    }),
     "Odkazy jsou určeny pouze pro vás – nepřeposílejte je dalším osobám.",
+    ...(includesPersonalQuestionnaire
+      ? [
+          "",
+          "Informace o dalším postupu:",
+          NEXT_STEPS_INFO_TEXT.intro,
+          NEXT_STEPS_INFO_TEXT.intro2,
+          NEXT_STEPS_INFO_TEXT.appointment,
+        ]
+      : []),
+    "",
+    ...renderHrContactsText(),
   ]
     .filter(Boolean)
     .join("\n")
@@ -4637,6 +4768,358 @@ export async function sendEmploymentDocumentLinkEmail(
   await sendMail({ to: [args.to], subject, html, text })
 
   return { subject, html }
+}
+
+type EmploymentDocumentExpiryItem = { label: string; url: string }
+
+export async function sendEmploymentDocumentExpiryWarningEmail(
+  args: EmploymentDocumentEmailInfo & {
+    to: string
+    documents: EmploymentDocumentExpiryItem[]
+    expiresAt: Date
+  }
+): Promise<void> {
+  const primary = "#00847C"
+  const bgLight = "#E5F5F2"
+  const expiresAtLabel = args.expiresAt.toLocaleDateString("cs-CZ")
+  const subject = args.employeeName
+    ? `Brzy vyprší odkaz k vyplnění dokumentů – ${args.employeeName}`
+    : "Brzy vyprší odkaz k vyplnění dokumentů"
+
+  const html = `
+  <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+  <html xmlns="http://www.w3.org/1999/xhtml" lang="cs">
+    <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <meta name="color-scheme" content="light" />
+      <meta name="supported-color-schemes" content="light" />
+      <title>${escapeHtml(subject)}</title>
+      <style type="text/css">
+        body { margin: 0; padding: 0; }
+        table { border-collapse: collapse; }
+        ${EMAIL_GLOBAL_FONT_STYLE}
+      </style>
+    </head>
+
+    <body style="margin:0;padding:0;background-color:${bgLight};font-family:${EMAIL_FONT_FAMILY};">
+      <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
+        <tr>
+          <td align="center" style="padding:30px 10px;">
+            <table border="0" cellpadding="0" cellspacing="0" width="600"
+              bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
+              <tr bgcolor="${primary}">
+                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};border-radius:12px 12px 0 0;">
+                  <div style="color:#ffffff;font-size:12px;text-transform:uppercase;letter-spacing:2px;margin-bottom:10px;opacity:.9;">
+                    Nástup&nbsp;·&nbsp;Upozornění
+                  </div>
+                  <div style="color:#ffffff;font-size:20px;font-weight:bold;line-height:1.3;">
+                    Brzy vyprší odkaz k vyplnění dokumentů
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="#ffffff" style="padding:26px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};">
+                  <p style="margin:0 0 16px 0;font-size:14px;color:#082B2A;">
+                    Dobrý den,
+                  </p>
+
+                  <p style="margin:0 0 18px 0;font-size:14px;color:#374151;line-height:1.6;">
+                    platnost odkazu k vyplnění níže uvedených dokumentů brzy vyprší (${escapeHtml(expiresAtLabel)}). Prosíme o jejich vyplnění co nejdříve, po vypršení platnosti bude potřeba požádat Personální oddělení o nový odkaz.
+                  </p>
+
+                  <table border="0" cellpadding="0" cellspacing="0" width="100%"
+                    style="border:1px solid #d9ece7;border-radius:8px;overflow:hidden;border-collapse:separate;">
+                    ${args.documents
+                      .map(
+                        (document, index) => `
+                      <tr bgcolor="${index % 2 === 0 ? bgLight : "#ffffff"}" style="background-color:${index % 2 === 0 ? bgLight : "#ffffff"};">
+                        <td style="padding:10px 16px;">
+                          <div style="font-size:14px;color:#082B2A;font-weight:700;">
+                            ${escapeHtml(document.label)}
+                          </div>
+                          <div style="margin-top:6px;font-size:12px;">
+                            <a href="${escapeHtml(document.url)}" style="color:${primary};word-break:break-all;">${escapeHtml(document.url)}</a>
+                          </div>
+                        </td>
+                      </tr>
+                    `
+                      )
+                      .join("")}
+                  </table>
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;">
+                  ${EMAIL_FOOTER_HTML}
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+  </html>`
+
+  const text = [
+    "Dobrý den,",
+    "",
+    `platnost odkazu k vyplnění níže uvedených dokumentů brzy vyprší (${expiresAtLabel}). Prosíme o jejich vyplnění co nejdříve, po vypršení platnosti bude potřeba požádat Personální oddělení o nový odkaz.`,
+    "",
+    ...args.documents.flatMap((document) => [document.label, document.url, ""]),
+  ]
+    .filter(Boolean)
+    .join("\n")
+
+  await sendMail({ to: [args.to], subject, html, text })
+}
+
+export async function sendEmploymentDocumentExpiredHrReminderEmail(
+  args: EmploymentDocumentEmailInfo & {
+    to: string[]
+    documents: EmploymentDocumentExpiryItem[]
+  }
+): Promise<void> {
+  const recipients = normalizeEmailList(args.to)
+
+  if (!recipients.length) return
+
+  const primary = "#00847C"
+  const bgLight = "#E5F5F2"
+  const subject = args.employeeName
+    ? `Vypršel odkaz k vyplnění dokumentů, stále nevyplněno – ${args.employeeName}`
+    : "Vypršel odkaz k vyplnění dokumentů, stále nevyplněno"
+
+  const html = `
+  <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+  <html xmlns="http://www.w3.org/1999/xhtml" lang="cs">
+    <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <meta name="color-scheme" content="light" />
+      <meta name="supported-color-schemes" content="light" />
+      <title>${escapeHtml(subject)}</title>
+      <style type="text/css">
+        body { margin: 0; padding: 0; }
+        table { border-collapse: collapse; }
+        ${EMAIL_GLOBAL_FONT_STYLE}
+      </style>
+    </head>
+
+    <body style="margin:0;padding:0;background-color:${bgLight};font-family:${EMAIL_FONT_FAMILY};">
+      <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
+        <tr>
+          <td align="center" style="padding:30px 10px;">
+            <table border="0" cellpadding="0" cellspacing="0" width="600"
+              bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
+              <tr bgcolor="${primary}">
+                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};border-radius:12px 12px 0 0;">
+                  <div style="color:#ffffff;font-size:12px;text-transform:uppercase;letter-spacing:2px;margin-bottom:10px;opacity:.9;">
+                    Nástup&nbsp;·&nbsp;Upozornění pro HR
+                  </div>
+                  <div style="color:#ffffff;font-size:20px;font-weight:bold;line-height:1.3;">
+                    Vypršel odkaz k vyplnění dokumentů${
+                      args.employeeName
+                        ? ` – ${escapeHtml(args.employeeName)}`
+                        : ""
+                    }
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="#ffffff" style="padding:26px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};">
+                  <p style="margin:0 0 16px 0;font-size:14px;color:#082B2A;">
+                    Dobrý den,
+                  </p>
+
+                  <p style="margin:0 0 18px 0;font-size:14px;color:#374151;line-height:1.6;">
+                    zaměstnanci vypršela platnost odkazu k vyplnění níže uvedených dokumentů a stále je nevyplnil(a). Pro nové odeslání je potřeba dokument nejdříve obnovit tlačítkem „Nový odkaz“.
+                  </p>
+
+                  ${renderEmploymentDocumentInfoTable({
+                    bgLight,
+                    employeeName: args.employeeName,
+                    employeePersonalNumber: args.employeePersonalNumber,
+                    employeePosition: args.employeePosition,
+                    employeeDepartment: args.employeeDepartment,
+                    employeeUnitName: args.employeeUnitName,
+                  })}
+
+                  <table border="0" cellpadding="0" cellspacing="0" width="100%"
+                    style="border:1px solid #d9ece7;border-radius:8px;overflow:hidden;border-collapse:separate;">
+                    ${args.documents
+                      .map(
+                        (document, index) => `
+                      <tr bgcolor="${index % 2 === 0 ? bgLight : "#ffffff"}" style="background-color:${index % 2 === 0 ? bgLight : "#ffffff"};">
+                        <td style="padding:10px 16px;font-size:14px;color:#082B2A;font-weight:700;">
+                          ${escapeHtml(document.label)}
+                        </td>
+                      </tr>
+                    `
+                      )
+                      .join("")}
+                  </table>
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;">
+                  ${EMAIL_FOOTER_HTML}
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+  </html>`
+
+  const text = [
+    "Dobrý den,",
+    "",
+    "zaměstnanci vypršela platnost odkazu k vyplnění níže uvedených dokumentů a stále je nevyplnil(a). Pro nové odeslání je potřeba dokument nejdříve obnovit tlačítkem „Nový odkaz“.",
+    "",
+    `Zaměstnanec: ${args.employeeName}`,
+    args.employeePersonalNumber
+      ? `Osobní číslo: ${args.employeePersonalNumber}`
+      : "",
+    args.employeePosition ? `Pozice: ${args.employeePosition}` : "",
+    args.employeeDepartment ? `Odbor: ${args.employeeDepartment}` : "",
+    args.employeeUnitName ? `Oddělení: ${args.employeeUnitName}` : "",
+    "",
+    ...args.documents.map((document) => document.label),
+  ]
+    .filter(Boolean)
+    .join("\n")
+
+  await sendMail({ to: recipients, subject, html, text })
+}
+
+export async function sendEmploymentDocumentNotSentHrReminderEmail(
+  args: EmploymentDocumentEmailInfo & {
+    to: string[]
+    documents: Array<{ label: string }>
+    plannedStart: Date
+  }
+): Promise<void> {
+  const recipients = normalizeEmailList(args.to)
+
+  if (!recipients.length) return
+
+  const primary = "#00847C"
+  const bgLight = "#E5F5F2"
+  const plannedStartLabel = args.plannedStart.toLocaleDateString("cs-CZ")
+  const subject = args.employeeName
+    ? `Nástupní dokumenty stále nebyly odeslány – ${args.employeeName}`
+    : "Nástupní dokumenty stále nebyly odeslány"
+
+  const html = `
+  <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+  <html xmlns="http://www.w3.org/1999/xhtml" lang="cs">
+    <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <meta name="color-scheme" content="light" />
+      <meta name="supported-color-schemes" content="light" />
+      <title>${escapeHtml(subject)}</title>
+      <style type="text/css">
+        body { margin: 0; padding: 0; }
+        table { border-collapse: collapse; }
+        ${EMAIL_GLOBAL_FONT_STYLE}
+      </style>
+    </head>
+
+    <body style="margin:0;padding:0;background-color:${bgLight};font-family:${EMAIL_FONT_FAMILY};">
+      <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
+        <tr>
+          <td align="center" style="padding:30px 10px;">
+            <table border="0" cellpadding="0" cellspacing="0" width="600"
+              bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
+              <tr bgcolor="${primary}">
+                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};border-radius:12px 12px 0 0;">
+                  <div style="color:#ffffff;font-size:12px;text-transform:uppercase;letter-spacing:2px;margin-bottom:10px;opacity:.9;">
+                    Nástup&nbsp;·&nbsp;Upozornění pro HR
+                  </div>
+                  <div style="color:#ffffff;font-size:20px;font-weight:bold;line-height:1.3;">
+                    Nástupní dokumenty stále nebyly odeslány${
+                      args.employeeName
+                        ? ` – ${escapeHtml(args.employeeName)}`
+                        : ""
+                    }
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="#ffffff" style="padding:26px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};">
+                  <p style="margin:0 0 16px 0;font-size:14px;color:#082B2A;">
+                    Dobrý den,
+                  </p>
+
+                  <p style="margin:0 0 18px 0;font-size:14px;color:#374151;line-height:1.6;">
+                    zaměstnanci s plánovaným nástupem ${escapeHtml(plannedStartLabel)} stále nebyl odeslán odkaz k vyplnění níže uvedených nástupních dokumentů. Prosíme o odeslání odkazů co nejdříve.
+                  </p>
+
+                  ${renderEmploymentDocumentInfoTable({
+                    bgLight,
+                    employeeName: args.employeeName,
+                    employeePersonalNumber: args.employeePersonalNumber,
+                    employeePosition: args.employeePosition,
+                    employeeDepartment: args.employeeDepartment,
+                    employeeUnitName: args.employeeUnitName,
+                  })}
+
+                  <table border="0" cellpadding="0" cellspacing="0" width="100%"
+                    style="border:1px solid #d9ece7;border-radius:8px;overflow:hidden;border-collapse:separate;">
+                    ${args.documents
+                      .map(
+                        (document, index) => `
+                      <tr bgcolor="${index % 2 === 0 ? bgLight : "#ffffff"}" style="background-color:${index % 2 === 0 ? bgLight : "#ffffff"};">
+                        <td style="padding:10px 16px;font-size:14px;color:#082B2A;font-weight:700;">
+                          ${escapeHtml(document.label)}
+                        </td>
+                      </tr>
+                    `
+                      )
+                      .join("")}
+                  </table>
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;">
+                  ${EMAIL_FOOTER_HTML}
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+  </html>`
+
+  const text = [
+    "Dobrý den,",
+    "",
+    `zaměstnanci s plánovaným nástupem ${plannedStartLabel} stále nebyl odeslán odkaz k vyplnění níže uvedených nástupních dokumentů. Prosíme o odeslání odkazů co nejdříve.`,
+    "",
+    `Zaměstnanec: ${args.employeeName}`,
+    args.employeePersonalNumber
+      ? `Osobní číslo: ${args.employeePersonalNumber}`
+      : "",
+    args.employeePosition ? `Pozice: ${args.employeePosition}` : "",
+    args.employeeDepartment ? `Odbor: ${args.employeeDepartment}` : "",
+    args.employeeUnitName ? `Oddělení: ${args.employeeUnitName}` : "",
+    "",
+    ...args.documents.map((document) => document.label),
+  ]
+    .filter(Boolean)
+    .join("\n")
+
+  await sendMail({ to: recipients, subject, html, text })
 }
 
 export async function sendEmploymentDocumentPdfEmail(
@@ -4767,6 +5250,322 @@ export async function sendEmploymentDocumentPdfEmail(
     html,
     text,
     attachments: args.attachments,
+  })
+
+  return { subject, html }
+}
+
+type EmploymentDocumentIdentityMismatch = {
+  label: string
+  expected: string
+  actual: string
+}
+
+function renderEmploymentDocumentMismatchHtml(
+  mismatches?: EmploymentDocumentIdentityMismatch[]
+) {
+  if (!mismatches?.length) return ""
+
+  return `
+    <div style="margin:0 0 18px 0;padding:12px 14px;border:1px solid #fed7aa;background:#fff7ed;border-radius:8px;color:#9a3412;">
+      <strong>⚠ Neshoda údajů s nástupem:</strong>
+      <ul style="margin:8px 0 0 18px;padding:0;">
+        ${mismatches
+          .map(
+            (m) =>
+              `<li><strong>${escapeHtml(m.label)}:</strong> v nástupu „${escapeHtml(m.expected)}“, v dokumentu vyplnil(a) „${escapeHtml(m.actual)}“</li>`
+          )
+          .join("")}
+      </ul>
+    </div>
+  `
+}
+
+function renderEmploymentDocumentMismatchText(
+  mismatches?: EmploymentDocumentIdentityMismatch[]
+) {
+  if (!mismatches?.length) return []
+
+  return [
+    "",
+    "NESHODA ÚDAJŮ s nástupem:",
+    ...mismatches.map(
+      (m) => `- ${m.label}: v nástupu „${m.expected}“, vyplnil(a) „${m.actual}“`
+    ),
+  ]
+}
+
+export async function sendEmploymentDocumentFilledHrEmail(
+  args: EmploymentDocumentEmailInfo & {
+    to: string[]
+    documentTypeLabel: string
+    filledAt: Date
+    identityMismatches?: EmploymentDocumentIdentityMismatch[]
+    pdfBuffer?: Buffer | null
+    pdfFilename?: string | null
+  }
+): Promise<{ subject: string; html: string }> {
+  const recipients = normalizeEmailList(args.to)
+
+  if (!recipients.length) {
+    throw new Error("Chybí příjemce e-mailu.")
+  }
+
+  const primary = "#00847C"
+  const bgLight = "#E5F5F2"
+  const hasMismatch = (args.identityMismatches?.length ?? 0) > 0
+  const subject = `${hasMismatch ? "⚠ Neshoda údajů – " : ""}Vyplněný dokument – ${args.employeeName} – ${args.documentTypeLabel}`
+
+  const html = `
+  <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+  <html xmlns="http://www.w3.org/1999/xhtml" lang="cs">
+    <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <meta name="color-scheme" content="light" />
+      <meta name="supported-color-schemes" content="light" />
+      <title>${escapeHtml(subject)}</title>
+      <style type="text/css">
+        body { margin: 0; padding: 0; }
+        table { border-collapse: collapse; }
+        ${EMAIL_GLOBAL_FONT_STYLE}
+      </style>
+    </head>
+
+    <body style="margin:0;padding:0;background-color:${bgLight};font-family:${EMAIL_FONT_FAMILY};">
+      <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
+        <tr>
+          <td align="center" style="padding:30px 10px;">
+            <table border="0" cellpadding="0" cellspacing="0" width="600"
+              bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
+              <tr bgcolor="${primary}">
+                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};border-radius:12px 12px 0 0;">
+                  <div style="color:#ffffff;font-size:12px;text-transform:uppercase;letter-spacing:2px;margin-bottom:10px;opacity:.9;">
+                    Nástup&nbsp;·&nbsp;Vyplněný dokument
+                  </div>
+                  <div style="color:#ffffff;font-size:20px;font-weight:bold;line-height:1.3;">
+                    Vyplněný dokument${args.employeeName ? ` – ${escapeHtml(args.employeeName)}` : ""}
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="#ffffff" style="padding:26px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};">
+                  <p style="margin:0 0 16px 0;font-size:14px;color:#082B2A;">
+                    Dobrý den,
+                  </p>
+
+                  <p style="margin:0 0 18px 0;font-size:14px;color:#374151;line-height:1.6;">
+                    zaměstnanec <strong>${escapeHtml(args.employeeName)}</strong> právě vyplnil dokument typu
+                    <strong>${escapeHtml(args.documentTypeLabel)}</strong>.
+                  </p>
+
+                  ${renderEmploymentDocumentInfoTable({
+                    bgLight,
+                    employeeName: args.employeeName,
+                    employeePersonalNumber: args.employeePersonalNumber,
+                    employeePosition: args.employeePosition,
+                    employeeDepartment: args.employeeDepartment,
+                    employeeUnitName: args.employeeUnitName,
+                  })}
+
+                  ${renderEmploymentDocumentMismatchHtml(args.identityMismatches)}
+
+                  <p style="margin:0 0 12px 0;font-size:13px;color:#6b7280;">
+                    Datum a čas vyplnění: ${args.filledAt.toLocaleString("cs-CZ")}
+                  </p>
+
+                  <p style="margin:0;font-size:14px;color:#374151;line-height:1.6;">
+                    Dokument je k dispozici v interní aplikaci v detailu nástupu${
+                      args.pdfBuffer
+                        ? " a je přiložen k tomuto e-mailu ve formátu PDF."
+                        : "."
+                    }
+                  </p>
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;">
+                  ${EMAIL_FOOTER_HTML}
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+  </html>`
+
+  const text = [
+    "Dobrý den,",
+    "",
+    `zaměstnanec ${args.employeeName} právě vyplnil dokument typu ${args.documentTypeLabel}.`,
+    "",
+    `Zaměstnanec: ${args.employeeName}`,
+    args.employeePersonalNumber
+      ? `Osobní číslo: ${args.employeePersonalNumber}`
+      : "",
+    args.employeePosition ? `Pozice: ${args.employeePosition}` : "",
+    args.employeeDepartment ? `Odbor: ${args.employeeDepartment}` : "",
+    args.employeeUnitName ? `Oddělení: ${args.employeeUnitName}` : "",
+    ...renderEmploymentDocumentMismatchText(args.identityMismatches),
+    "",
+    `Datum a čas vyplnění: ${args.filledAt.toLocaleString("cs-CZ")}`,
+    "",
+    `Dokument je k dispozici v interní aplikaci v detailu nástupu${args.pdfBuffer ? " a je přiložen k tomuto e-mailu ve formátu PDF." : "."}`,
+  ]
+    .filter(Boolean)
+    .join("\n")
+
+  await sendMail({
+    to: recipients,
+    subject,
+    html,
+    text,
+    attachments:
+      args.pdfBuffer && args.pdfFilename
+        ? [
+            {
+              filename: args.pdfFilename,
+              content: args.pdfBuffer,
+              contentType: "application/pdf",
+            },
+          ]
+        : undefined,
+  })
+
+  return { subject, html }
+}
+
+export async function sendEmploymentDocumentFilledPayrollEmail(
+  args: EmploymentDocumentEmailInfo & {
+    to: string[]
+    filledAt: Date
+    pdfBuffer: Buffer
+    pdfFilename: string
+  }
+): Promise<{ subject: string; html: string }> {
+  const recipients = normalizeEmailList(args.to)
+
+  if (!recipients.length) {
+    throw new Error("Chybí příjemce e-mailu.")
+  }
+
+  const primary = "#00847C"
+  const bgLight = "#E5F5F2"
+  const subject = `Vyplněný dotazník pro vedení mzdové agendy – ${args.employeeName}`
+
+  const html = `
+  <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+  <html xmlns="http://www.w3.org/1999/xhtml" lang="cs">
+    <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <meta name="color-scheme" content="light" />
+      <meta name="supported-color-schemes" content="light" />
+      <title>${escapeHtml(subject)}</title>
+      <style type="text/css">
+        body { margin: 0; padding: 0; }
+        table { border-collapse: collapse; }
+        ${EMAIL_GLOBAL_FONT_STYLE}
+      </style>
+    </head>
+
+    <body style="margin:0;padding:0;background-color:${bgLight};font-family:${EMAIL_FONT_FAMILY};">
+      <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="${bgLight}">
+        <tr>
+          <td align="center" style="padding:30px 10px;">
+            <table border="0" cellpadding="0" cellspacing="0" width="600"
+              bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;border:1px solid #d9ece7;border-radius:12px;overflow:hidden;">
+              <tr bgcolor="${primary}">
+                <td bgcolor="${primary}" style="padding:25px 30px;background-color:${primary};border-radius:12px 12px 0 0;">
+                  <div style="color:#ffffff;font-size:12px;text-transform:uppercase;letter-spacing:2px;margin-bottom:10px;opacity:.9;">
+                    Nástup&nbsp;·&nbsp;Mzdová agenda
+                  </div>
+                  <div style="color:#ffffff;font-size:20px;font-weight:bold;line-height:1.3;">
+                    Vyplněný dotazník pro vedení mzdové agendy${
+                      args.employeeName
+                        ? ` – ${escapeHtml(args.employeeName)}`
+                        : ""
+                    }
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="#ffffff" style="padding:26px 30px;background-color:#ffffff;font-family:${EMAIL_FONT_FAMILY};">
+                  <p style="margin:0 0 16px 0;font-size:14px;color:#082B2A;">
+                    Dobrý den,
+                  </p>
+
+                  <p style="margin:0 0 18px 0;font-size:14px;color:#374151;line-height:1.6;">
+                    zaměstnanec <strong>${escapeHtml(args.employeeName)}</strong> vyplnil <strong>Dotazník pro vedení mzdové agendy</strong>.
+                  </p>
+
+                  ${renderEmploymentDocumentInfoTable({
+                    bgLight,
+                    employeeName: args.employeeName,
+                    employeePersonalNumber: args.employeePersonalNumber,
+                    employeePosition: args.employeePosition,
+                    employeeDepartment: args.employeeDepartment,
+                    employeeUnitName: args.employeeUnitName,
+                  })}
+
+                  <p style="margin:0 0 12px 0;font-size:13px;color:#6b7280;">
+                    Datum a čas vyplnění: ${args.filledAt.toLocaleString("cs-CZ")}
+                  </p>
+
+                  <p style="margin:0;font-size:14px;color:#374151;line-height:1.6;">
+                    Vyplněný dokument je přiložen k tomuto e-mailu ve formátu PDF.
+                  </p>
+                </td>
+              </tr>
+
+              <tr>
+                <td bgcolor="${bgLight}" style="padding:16px 30px;font-family:${EMAIL_FONT_FAMILY};font-size:12px;color:#6b7280;border-top:1px solid #d9ece7;border-radius:0 0 12px 12px;">
+                  ${EMAIL_FOOTER_HTML}
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+  </html>`
+
+  const text = [
+    "Dobrý den,",
+    "",
+    `zaměstnanec ${args.employeeName} vyplnil Dotazník pro vedení mzdové agendy.`,
+    "",
+    `Zaměstnanec: ${args.employeeName}`,
+    args.employeePersonalNumber
+      ? `Osobní číslo: ${args.employeePersonalNumber}`
+      : "",
+    args.employeePosition ? `Pozice: ${args.employeePosition}` : "",
+    args.employeeDepartment ? `Odbor: ${args.employeeDepartment}` : "",
+    args.employeeUnitName ? `Oddělení: ${args.employeeUnitName}` : "",
+    "",
+    `Datum a čas vyplnění: ${args.filledAt.toLocaleString("cs-CZ")}`,
+    "",
+    "Vyplněný dokument je přiložen k tomuto e-mailu ve formátu PDF.",
+  ]
+    .filter(Boolean)
+    .join("\n")
+
+  await sendMail({
+    to: recipients,
+    subject,
+    html,
+    text,
+    attachments: [
+      {
+        filename: args.pdfFilename,
+        content: args.pdfBuffer,
+        contentType: "application/pdf",
+      },
+    ],
   })
 
   return { subject, html }

@@ -176,34 +176,34 @@ function drawText(
   })
 }
 
-function drawTextFitted(args: {
+function drawHeaderValueWrapped(args: {
   page: PDFPage
   font: PDFFont
   text?: string | null
   x: number
   y: number
   maxWidth: number
-  baseSize?: number
-  minSize?: number
+  size?: number
+  lineHeight?: number
 }) {
   const normalized = nfc(cleanText(args.text))
   if (!normalized) return
 
-  let size = args.baseSize ?? GENERATED_TEXT_SIZE
-  const minSize = args.minSize ?? 6.2
-  const width = args.font.widthOfTextAtSize(normalized, size)
+  const size = args.size ?? GENERATED_TEXT_SIZE
+  const lineHeight = args.lineHeight ?? size + 1.5
+  const lines = wrapText(normalized, args.font, size, args.maxWidth)
 
-  if (width > args.maxWidth) {
-    size = Math.max(minSize, (args.maxWidth / width) * size)
+  let cursorY = args.y
+  for (const line of lines) {
+    args.page.drawText(line, {
+      x: args.x,
+      y: cursorY,
+      size,
+      font: args.font,
+      color: BLACK,
+    })
+    cursorY -= lineHeight
   }
-
-  args.page.drawText(normalized, {
-    x: args.x,
-    y: args.y,
-    size,
-    font: args.font,
-    color: BLACK,
-  })
 }
 
 function wrapSingleLine(
@@ -340,54 +340,59 @@ function drawHeader(
     " / "
   )
 
-  drawTextFitted({
+  drawHeaderValueWrapped({
     page,
     font: fonts.bold,
     text: payload.onboarding.fullName || "—",
     x: HEADER_VALUE_X,
     y: cv(158.2),
     maxWidth: HEADER_VALUE_MAX_WIDTH,
-    baseSize: GENERATED_TEXT_SIZE,
+    size: GENERATED_TEXT_SIZE,
+    lineHeight: 11,
   })
 
-  drawTextFitted({
+  drawHeaderValueWrapped({
     page,
     font: fonts.regular,
     text: payload.onboarding.personalNumber || "—",
     x: HEADER_VALUE_X,
     y: cv(179.8),
     maxWidth: HEADER_VALUE_MAX_WIDTH,
-    baseSize: GENERATED_TEXT_SIZE,
+    size: GENERATED_TEXT_SIZE,
+    lineHeight: 11,
   })
 
-  drawTextFitted({
+  drawHeaderValueWrapped({
     page,
     font: fonts.regular,
     text: payload.onboarding.positionName || "—",
     x: HEADER_VALUE_X,
     y: cv(201.4),
     maxWidth: HEADER_VALUE_MAX_WIDTH,
-    baseSize: GENERATED_TEXT_SIZE,
+    size: GENERATED_TEXT_SIZE,
+    lineHeight: 11,
   })
 
-  drawTextFitted({
+  drawHeaderValueWrapped({
     page,
     font: fonts.regular,
     text: payload.onboarding.department || "—",
     x: HEADER_VALUE_X,
     y: cv(223),
     maxWidth: HEADER_VALUE_MAX_WIDTH,
-    baseSize: GENERATED_TEXT_SIZE,
+    size: GENERATED_TEXT_SIZE,
+    lineHeight: 11,
   })
 
-  drawTextFitted({
+  drawHeaderValueWrapped({
     page,
     font: fonts.regular,
     text: payload.onboarding.unitName || "—",
     x: HEADER_VALUE_X,
     y: cv(244.6),
     maxWidth: HEADER_VALUE_MAX_WIDTH,
-    baseSize: GENERATED_TEXT_SIZE,
+    size: GENERATED_TEXT_SIZE,
+    lineHeight: 11,
   })
 
   drawText(
@@ -406,34 +411,37 @@ function drawHeader(
     cv(287.8)
   )
 
-  drawTextFitted({
+  drawHeaderValueWrapped({
     page,
     font: fonts.bold,
     text: supervisorName,
     x: HEADER_VALUE_X,
     y: cv(316.5),
     maxWidth: HEADER_VALUE_MAX_WIDTH,
-    baseSize: 9.5,
+    size: 9.5,
+    lineHeight: 10,
   })
 
-  drawTextFitted({
+  drawHeaderValueWrapped({
     page,
     font: fonts.regular,
     text: supervisorPosition || "—",
     x: HEADER_VALUE_X,
     y: cv(330.5),
     maxWidth: HEADER_VALUE_MAX_WIDTH,
-    baseSize: 9.2,
+    size: 9.2,
+    lineHeight: 10,
   })
 
-  drawTextFitted({
+  drawHeaderValueWrapped({
     page,
     font: fonts.regular,
     text: supervisorOrg || "—",
     x: HEADER_VALUE_X,
     y: cv(344.5),
     maxWidth: HEADER_VALUE_MAX_WIDTH,
-    baseSize: 9.2,
+    size: 9.2,
+    lineHeight: 10,
   })
 }
 
@@ -541,25 +549,14 @@ function drawBoxedRecommendationSection(args: {
 
   const signedAtLabel = formatCzDateTime(args.signedAt)
 
-  const signatureNameLines = wrapText(
-    args.signatureName || "—",
+  const signedLines = wrapText(
+    `Elektronicky podepsáno: ${args.signatureName || "—"}, ${signedAtLabel || "—"}`,
     args.fonts.regular,
     9,
     rightWidth
   )
 
-  const disclaimerLines = wrapText(
-    "Elektronicky podepsáno v aplikaci On-Off-Boarding ÚMČ Praha 6.",
-    args.fonts.regular,
-    7,
-    rightWidth
-  )
-
-  const rightLines = [
-    ...signatureNameLines.map((text) => ({ text, size: 9 })),
-    ...(signedAtLabel ? [{ text: signedAtLabel, size: 9 }] : []),
-    ...disclaimerLines.map((text) => ({ text, size: 7 })),
-  ]
+  const rightLines = signedLines.map((text) => ({ text, size: 9 }))
 
   const leftBlockHeight = Math.max(1, leftLines.length) * BOX_LEFT_LINE_HEIGHT
   const rightBlockHeight =

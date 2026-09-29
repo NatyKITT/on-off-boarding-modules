@@ -2,7 +2,7 @@
   "private": true,
   "name": "On-Off-Boarding-Module",
   "description": "",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "type": "module",
   "scripts": {
     "dev": "next dev -p 3001",
@@ -91,6 +91,7 @@
     "next-auth": "5.0.0-beta.30",
     "next-themes": "^0.3.0",
     "pdf-lib": "^1.17.1",
+    "puppeteer": "^25.11.0",
     "react": "^18.3.1",
     "react-big-calendar": "^1.19.4",
     "react-calendar": "^6.0.0",
@@ -148,7 +149,8 @@
     "onlyBuiltDependencies": [
       "@prisma/client",
       "prisma",
-      "@prisma/engines"
+      "@prisma/engines",
+      "puppeteer"
     ]
   },
   "engines": {

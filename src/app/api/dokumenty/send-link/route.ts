@@ -118,12 +118,31 @@ export async function POST(req: NextRequest) {
     },
   })
 
+  const skipped: { label: string; reason: string }[] = []
+
   const mapped = docsFromDb
     .filter((document) => {
-      if (!document.accessHash) return false
-      if (document.isLocked) return false
-      if (document.status !== "DRAFT") return false
-      if (document.expiresAt && document.expiresAt < now) return false
+      const label = docTypeLabel(document.type)
+
+      if (!document.accessHash) {
+        skipped.push({ label, reason: "chybí veřejný odkaz" })
+        return false
+      }
+      if (document.isLocked) {
+        skipped.push({ label, reason: "dokument je uzamčený" })
+        return false
+      }
+      if (document.status !== "DRAFT") {
+        skipped.push({ label, reason: "dokument je již vyplněný" })
+        return false
+      }
+      if (document.expiresAt && document.expiresAt < now) {
+        skipped.push({
+          label,
+          reason: `platnost odkazu vypršela ${document.expiresAt.toLocaleDateString("cs-CZ")} – obnovte ho tlačítkem "Nový odkaz"`,
+        })
+        return false
+      }
 
       return true
     })
@@ -135,10 +154,15 @@ export async function POST(req: NextRequest) {
     }))
 
   if (!mapped.length) {
+    const detail = skipped
+      .map((item) => `${item.label} – ${item.reason}`)
+      .join("; ")
+
     return NextResponse.json(
       {
-        message:
-          "Vybrané dokumenty nejsou připravené k odeslání. Zkontrolujte, že mají veřejný odkaz, nejsou uzamčené, nejsou vyplněné a nevypršely.",
+        message: detail
+          ? `Vybrané dokumenty nejsou připravené k odeslání: ${detail}.`
+          : "Vybrané dokumenty nejsou připravené k odeslání.",
       },
       { status: 400 }
     )
@@ -154,6 +178,7 @@ export async function POST(req: NextRequest) {
     documents: mapped.map((document) => ({
       label: document.label,
       url: document.url,
+      type: document.type,
     })),
   })
 

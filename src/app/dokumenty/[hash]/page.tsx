@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db"
 import { buildEmployeeMeta } from "@/lib/employee-meta"
+import { getSiblingPrefillSuggestion } from "@/lib/employment-document-prefill"
 
 import { PublicDocumentShell } from "./public-document-shell"
 import {
@@ -23,6 +24,7 @@ export default async function PublicDocumentPage({ params }: PageProps) {
       type: true,
       status: true,
       expiresAt: true,
+      onboardingId: true,
       onboarding: {
         select: {
           titleBefore: true,
@@ -51,6 +53,11 @@ export default async function PublicDocumentPage({ params }: PageProps) {
     ? buildEmployeeMeta(doc.onboarding)
     : undefined
 
+  const prefillSuggestion = await getSiblingPrefillSuggestion(
+    doc.onboardingId,
+    doc.type
+  )
+
   return (
     <main className="flex min-h-screen flex-col items-center bg-slate-50 py-10">
       <div className="w-full max-w-3xl rounded-xl bg-white p-6 shadow-sm">
@@ -59,6 +66,7 @@ export default async function PublicDocumentPage({ params }: PageProps) {
           hash={hash}
           type={doc.type}
           employeeMeta={employeeMeta}
+          prefillSuggestion={prefillSuggestion}
         />
       </div>
     </main>

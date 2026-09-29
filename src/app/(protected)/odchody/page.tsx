@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { format, parseISO, subMonths } from "date-fns"
 import { cs } from "date-fns/locale"
+import { useLenis } from "lenis/react"
 import {
   AlertTriangle,
   CalendarDays,
@@ -662,11 +663,15 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
         id={`departure-row-${departure.id}`}
         className={
           highlighted
-            ? "bg-amber-50 ring-2 ring-inset ring-amber-400 dark:bg-amber-950/30"
+            ? "border-y-2 border-amber-400 bg-amber-50 dark:border-amber-600 dark:bg-amber-950/30"
             : undefined
         }
       >
-        <TableCell className="sticky left-0 z-10 w-[240px] border-r bg-background">
+        <TableCell
+          className={`sticky left-0 z-10 w-[240px] border-r ${
+            highlighted ? "bg-amber-50 dark:bg-amber-950/30" : "bg-background"
+          }`}
+        >
           <div className="flex items-center gap-2">
             <User className="size-4 shrink-0 text-muted-foreground" />
             <div className="flex flex-col">
@@ -811,11 +816,15 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
       id={`departure-row-${departure.id}`}
       className={
         highlighted
-          ? "bg-amber-50 ring-2 ring-inset ring-amber-400 dark:bg-amber-950/30"
+          ? "border-y-2 border-amber-400 bg-amber-50 dark:border-amber-600 dark:bg-amber-950/30"
           : undefined
       }
     >
-      <TableCell className="sticky left-0 z-10 w-[240px] border-r bg-background">
+      <TableCell
+        className={`sticky left-0 z-10 w-[240px] border-r ${
+          highlighted ? "bg-amber-50 dark:bg-amber-950/30" : "bg-background"
+        }`}
+      >
         <div className="flex items-center gap-2">
           <User className="size-4 shrink-0 text-muted-foreground" />
           <div className="flex flex-col">
@@ -1053,6 +1062,7 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
 export default function OffboardingPage() {
   const sp = useSearchParams()
   const router = useRouter()
+  const lenis = useLenis()
   const { data: session, status } = useSession()
 
   const [planned, setPlanned] = useState<Departure[]>([])
@@ -1299,17 +1309,24 @@ export default function OffboardingPage() {
     filterRows,
   } = useTextFilter(getDepartureSearchableText)
 
+  const isSearching = searchQuery.trim() !== ""
+
   const dateFilteredDepartures = useMemo(() => {
     const hasProgressFilter =
       departurePresets.length > 0 || isDayRangeActive(departureDayRange)
 
-    if (!departureDateFilter && !hasProgressFilter) return allDepartures
+    // Při aktivním hledání jménem se měsíční filtr ignoruje - vyhledávání
+    // musí najít člověka bez ohledu na to, jaký měsíc/rok je zrovna vybraný.
+    if ((!departureDateFilter || isSearching) && !hasProgressFilter) {
+      return allDepartures
+    }
 
     return allDepartures.filter((departure) => {
       const targetDate = departureTargetDate(departure)
 
       if (
         departureDateFilter &&
+        !isSearching &&
         targetDate?.slice(0, 7) !== departureDateFilter
       ) {
         return false
@@ -1329,7 +1346,13 @@ export default function OffboardingPage() {
 
       return true
     })
-  }, [allDepartures, departureDateFilter, departurePresets, departureDayRange])
+  }, [
+    allDepartures,
+    departureDateFilter,
+    isSearching,
+    departurePresets,
+    departureDayRange,
+  ])
 
   const searchedDepartures = useMemo(
     () => filterRows(dateFilteredDepartures),
@@ -1606,12 +1629,21 @@ export default function OffboardingPage() {
 
   const appliedHighlightRef = React.useRef<string | null>(null)
   const previousHighlightIdRef = React.useRef<string | null>(null)
+  const selfClearedHighlightRef = React.useRef(false)
 
   useEffect(() => {
     const previous = previousHighlightIdRef.current
     previousHighlightIdRef.current = qpHighlightId
 
     if (!previous || qpHighlightId) return
+
+    // Zmizení "?highlight=" z URL může způsobit i naše vlastní
+    // router.replace() hned po úspěšném zvýraznění záznamu (viz níže) -
+    // v tom případě se zvýraznění nemá rušit, jen se spotřebuje příznak.
+    if (selfClearedHighlightRef.current) {
+      selfClearedHighlightRef.current = false
+      return
+    }
 
     if (!isAnyFilterActive) {
       if (highlightedDepartureVariant === "planned") {
@@ -1673,32 +1705,27 @@ export default function OffboardingPage() {
     router,
   ])
 
-  const expandVariant = React.useCallback(
-    (variant: "planned" | "actual" | "cancelled") => {
+  const expandOnlyDepartureMonth = React.useCallback(
+    (variant: "planned" | "actual" | "cancelled", departure: Departure) => {
+      const dateField = variant === "actual" ? "actualEnd" : "plannedEnd"
+      const dateStr = departure[dateField] || departure.plannedEnd
+      if (!dateStr) return
+
+      const year = dateStr.slice(0, 4)
+      const month = dateStr.slice(0, 7)
+
       if (variant === "planned") {
-        const { years, months } = getAllYearsAndMonths(
-          groupByYearAndMonth(planned, "plannedEnd")
-        )
-        setExpandedPlannedYears(years)
-        setExpandedPlannedMonths(months)
+        setExpandedPlannedYears([year])
+        setExpandedPlannedMonths([month])
       } else if (variant === "actual") {
-        const { years, months } = getAllYearsAndMonths(
-          groupByYearAndMonth(actual, "actualEnd")
-        )
-        setExpandedActualYears(years)
-        setExpandedActualMonths(months)
+        setExpandedActualYears([year])
+        setExpandedActualMonths([month])
       } else {
-        const { years, months } = getAllYearsAndMonths(
-          groupByYearAndMonth(cancelled, "plannedEnd")
-        )
-        setExpandedCancelledYears(years)
-        setExpandedCancelledMonths(months)
+        setExpandedCancelledYears([year])
+        setExpandedCancelledMonths([month])
       }
     },
     [
-      planned,
-      actual,
-      cancelled,
       setExpandedPlannedYears,
       setExpandedPlannedMonths,
       setExpandedActualYears,
@@ -1717,6 +1744,7 @@ export default function OffboardingPage() {
     if (!departure) return
 
     appliedHighlightRef.current = qpHighlightId
+    selfClearedHighlightRef.current = true
 
     setSearchQuery("")
     clearAllFacetFilters()
@@ -1726,7 +1754,7 @@ export default function OffboardingPage() {
 
     const variant = qpHighlightStatus ?? departureStatus(departure)
     setActiveTab(variant)
-    expandVariant(variant)
+    expandOnlyDepartureMonth(variant, departure)
 
     setHighlightedDepartureVariant(variant)
     setHighlightedDepartureId(id)
@@ -1734,7 +1762,7 @@ export default function OffboardingPage() {
     qpHighlightId,
     qpHighlightStatus,
     allDepartures,
-    expandVariant,
+    expandOnlyDepartureMonth,
     clearAllFacetFilters,
     setSearchQuery,
     setDepartureDateFilter,
@@ -1752,13 +1780,26 @@ export default function OffboardingPage() {
 
       const el = document.getElementById(targetId)
       if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" })
+        if (lenis) {
+          const offset = Math.max(
+            0,
+            window.innerHeight / 2 - el.getBoundingClientRect().height / 2
+          )
+          lenis.scrollTo(el, { offset: -offset, duration: 1.2 })
+        } else {
+          el.scrollIntoView({ behavior: "smooth", block: "center" })
+        }
         return
       }
 
       if (highlightedDepartureVariant) {
         setActiveTab(highlightedDepartureVariant)
-        expandVariant(highlightedDepartureVariant)
+        const departure = allDepartures.find(
+          (d) => d.id === highlightedDepartureId
+        )
+        if (departure) {
+          expandOnlyDepartureMonth(highlightedDepartureVariant, departure)
+        }
       }
 
       attempts += 1
@@ -1778,7 +1819,9 @@ export default function OffboardingPage() {
     isCombinedStatusMode,
     activeTab,
     highlightedDepartureVariant,
-    expandVariant,
+    allDepartures,
+    expandOnlyDepartureMonth,
+    lenis,
   ])
 
   const clearDepartureRing = React.useCallback(

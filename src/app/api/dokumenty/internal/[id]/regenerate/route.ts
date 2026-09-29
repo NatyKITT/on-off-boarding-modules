@@ -81,6 +81,8 @@ export async function PATCH(_req: NextRequest, { params }: Params) {
           fileUrl: null,
           isLocked: false,
           data: {} as Prisma.InputJsonValue,
+          sentAt: null,
+          sentBy: null,
         },
         select: {
           id: true,

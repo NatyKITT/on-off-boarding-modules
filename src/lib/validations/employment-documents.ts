@@ -173,6 +173,7 @@ const experienceEntrySchema = z
     jobPositionName: optionalTrimmedString,
     jobType: optionalTrimmedString,
     employmentType: experienceTypeEnum.optional(),
+    employmentTypeOther: optionalTrimmedString,
     from: optionalDateString,
     to: optionalDateString,
     workloadType: workloadTypeEnum.optional(),
@@ -207,7 +208,7 @@ const experienceEntrySchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["jobType"],
-        message: "Uveďte druh práce / činnosti.",
+        message: "Uveďte popis pracovní činnosti.",
       })
     }
     if (!val.employmentType) {
@@ -215,6 +216,13 @@ const experienceEntrySchema = z
         code: z.ZodIssueCode.custom,
         path: ["employmentType"],
         message: "Vyberte typ výkonu práce (zaměstnání, OSVČ, DPP, DPČ, jiné).",
+      })
+    }
+    if (val.employmentType === "OTHER" && !val.employmentTypeOther) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["employmentTypeOther"],
+        message: "Uveďte typ výkonu práce.",
       })
     }
     if (!val.from) {
@@ -888,6 +896,7 @@ export const personalQuestionnaireSchema = z
     birthPlace: requiredTrimmedString("Místo narození je povinné."),
     birthDistrict: requiredTrimmedString("Okres narození je povinný."),
     birthState: requiredTrimmedString("Stát narození je povinný."),
+    birthStateOther: optionalTrimmedString,
 
     citizenship: requiredTrimmedString("Státní občanství je povinné."),
     citizenshipOther: optionalTrimmedString,
@@ -928,7 +937,12 @@ export const personalQuestionnaireSchema = z
     ),
     driverLicenseCategories: z.array(z.string()).default([]),
 
-    maintenanceInfo: optionalTrimmedString,
+    maintenanceContactName: optionalTrimmedString,
+    maintenancePhoneCountryCode: z
+      .string()
+      .trim()
+      .default(DEFAULT_PHONE_COUNTRY_CODE),
+    maintenancePhone: optionalTrimmedString,
 
     receivesPensionBenefits: requiredBoolean("Vyberte prosím Ano/Ne (důchod)."),
     typePensionBenefits: optionalTrimmedString,
@@ -938,6 +952,9 @@ export const personalQuestionnaireSchema = z
     ),
     disabilityDegree: z.enum(["NONE", "I", "II", "III"]).default("NONE"),
 
+    hasFamilyRelations: requiredBoolean(
+      "Vyberte prosím Ano/Ne (příbuzní zaměstnaní na ÚMČ Praha 6)."
+    ),
     familyRelations: optionalTrimmedString,
 
     languages: z.array(languageSchema).default([]),
@@ -1010,6 +1027,14 @@ export const personalQuestionnaireSchema = z
       })
     }
 
+    if (val.birthState === OTHER_CITIZENSHIP_VALUE && !val.birthStateOther) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["birthStateOther"],
+        message: "Vypište stát narození.",
+      })
+    }
+
     if (val.citizenship !== CZECH_CITIZENSHIP_VALUE) {
       if (!val.foreignPermitFrom) {
         ctx.addIssue({
@@ -1046,6 +1071,14 @@ export const personalQuestionnaireSchema = z
         code: z.ZodIssueCode.custom,
         path: ["dataBoxId"],
         message: "Zadejte ID datové schránky.",
+      })
+    }
+
+    if (val.hasFamilyRelations === true && !val.familyRelations) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["familyRelations"],
+        message: "Uveďte jméno příbuzného.",
       })
     }
 

@@ -5,7 +5,7 @@ import { endOfMonth, startOfMonth } from "date-fns"
 import { prisma } from "@/lib/db"
 import { canReadMonthlyReports } from "@/lib/rbac"
 
-type Audience = "ONBOARDING_GROUP" | "ALL_EMPLOYEES"
+type Audience = "ONBOARDING_GROUP" | "ALL_EMPLOYEES" | "CUSTOM_EMAIL"
 type RecordKind = "planned" | "actual"
 type ChangeType = "POSITION" | "NAME" | "NAME_AND_POSITION" | "MATERNITY_LEAVE"
 
@@ -167,7 +167,9 @@ export async function GET(req: Request) {
 
   const audienceParam = searchParams.get("audience")
   const audience: Audience =
-    audienceParam === "ALL_EMPLOYEES" ? "ALL_EMPLOYEES" : "ONBOARDING_GROUP"
+    audienceParam === "ALL_EMPLOYEES" || audienceParam === "CUSTOM_EMAIL"
+      ? audienceParam
+      : "ONBOARDING_GROUP"
 
   const onboardingKinds = parseCsvKinds(searchParams.get("onboardingKinds"))
   const offboardingKinds = parseCsvKinds(searchParams.get("offboardingKinds"))

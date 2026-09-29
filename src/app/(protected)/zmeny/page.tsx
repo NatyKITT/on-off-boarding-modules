@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { format } from "date-fns"
 import { cs } from "date-fns/locale"
+import { useLenis } from "lenis/react"
 import {
   AlertTriangle,
   CalendarDays,
@@ -528,6 +529,7 @@ function ResponsiveTableShell({ children }: { children: React.ReactNode }) {
 export default function EmployeeChangesPage() {
   const sp = useSearchParams()
   const router = useRouter()
+  const lenis = useLenis()
   const qpHighlightId = sp.get("highlight")
   const isReadonly = useIsReadonly()
 
@@ -666,14 +668,17 @@ export default function EmployeeChangesPage() {
   )
 
   const { query, setQuery, filterRows } = useTextFilter(getSearchableText)
+  const isSearching = query.trim() !== ""
 
   const dateFilteredRows = useMemo(() => {
-    if (!monthFilter) return activeRows
+    // Při aktivním hledání jménem se měsíční filtr ignoruje - vyhledávání
+    // musí najít člověka bez ohledu na to, jaký měsíc/rok je zrovna vybraný.
+    if (!monthFilter || isSearching) return activeRows
 
     return activeRows.filter(
       (row) => row.effectiveDate?.slice(0, 7) === monthFilter
     )
-  }, [activeRows, monthFilter])
+  }, [activeRows, monthFilter, isSearching])
 
   const searchedRows = useMemo(
     () => filterRows(dateFilteredRows),
@@ -793,12 +798,21 @@ export default function EmployeeChangesPage() {
 
   const appliedHighlightRef = React.useRef<string | null>(null)
   const previousHighlightIdRef = React.useRef<string | null>(null)
+  const selfClearedHighlightRef = React.useRef(false)
 
   useEffect(() => {
     const previous = previousHighlightIdRef.current
     previousHighlightIdRef.current = qpHighlightId
 
     if (!previous || qpHighlightId) return
+
+    // Zmizení "?highlight=" z URL může způsobit i naše vlastní
+    // router.replace() hned po úspěšném zvýraznění záznamu (viz níže) -
+    // v tom případě se zvýraznění nemá rušit, jen se spotřebuje příznak.
+    if (selfClearedHighlightRef.current) {
+      selfClearedHighlightRef.current = false
+      return
+    }
 
     if (!isAnyFilterActive) {
       const latest = getLatestYearAndMonth(activeRows)
@@ -833,13 +847,15 @@ export default function EmployeeChangesPage() {
     }
   }, [qpHighlightId, query, monthFilter, facetFilters, router])
 
-  const expandAllMonths = React.useCallback(() => {
-    const { years, months } = getAllYearsAndMonths(
-      groupByYearAndMonth(activeRows)
-    )
-    setExpandedYears(years)
-    setExpandedMonths(months)
-  }, [activeRows, setExpandedYears, setExpandedMonths])
+  const expandOnlyChangeMonth = React.useCallback((row: ChangeRow) => {
+    if (!row.effectiveDate) return
+
+    const year = row.effectiveDate.slice(0, 4)
+    const month = row.effectiveDate.slice(0, 7)
+
+    setExpandedYears([year])
+    setExpandedMonths([month])
+  }, [])
 
   useEffect(() => {
     if (!qpHighlightId) return
@@ -850,17 +866,18 @@ export default function EmployeeChangesPage() {
     if (!row) return
 
     appliedHighlightRef.current = qpHighlightId
+    selfClearedHighlightRef.current = true
 
     setQuery("")
     clearAllFacetFilters()
     setMonthFilter("")
-    expandAllMonths()
+    expandOnlyChangeMonth(row)
 
     setHighlightedRowId(id)
   }, [
     qpHighlightId,
     rows,
-    expandAllMonths,
+    expandOnlyChangeMonth,
     clearAllFacetFilters,
     setQuery,
     setMonthFilter,
@@ -878,11 +895,20 @@ export default function EmployeeChangesPage() {
 
       const el = document.getElementById(targetId)
       if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" })
+        if (lenis) {
+          const offset = Math.max(
+            0,
+            window.innerHeight / 2 - el.getBoundingClientRect().height / 2
+          )
+          lenis.scrollTo(el, { offset: -offset, duration: 1.2 })
+        } else {
+          el.scrollIntoView({ behavior: "smooth", block: "center" })
+        }
         return
       }
 
-      expandAllMonths()
+      const row = rows.find((r) => r.id === highlightedRowId)
+      if (row) expandOnlyChangeMonth(row)
 
       attempts += 1
       if (attempts < 40) {
@@ -896,7 +922,7 @@ export default function EmployeeChangesPage() {
       cancelled = true
       clearTimeout(initial)
     }
-  }, [highlightedRowId, expandAllMonths])
+  }, [highlightedRowId, rows, expandOnlyChangeMonth, lenis])
 
   const clearRowRing = React.useCallback(() => setHighlightedRowId(null), [])
   useDismissableHighlight(highlightedRowId, clearRowRing)
@@ -1024,11 +1050,15 @@ export default function EmployeeChangesPage() {
         id={`change-row-${row.id}`}
         className={
           isHighlighted
-            ? "bg-amber-50 ring-2 ring-inset ring-amber-400 dark:bg-amber-950/30"
+            ? "border-y-2 border-amber-400 bg-amber-50 dark:border-amber-600 dark:bg-amber-950/30"
             : undefined
         }
       >
-        <TableCell className="sticky left-0 z-10 w-[210px] min-w-[210px] border-r bg-background align-top">
+        <TableCell
+          className={`sticky left-0 z-10 w-[210px] min-w-[210px] border-r align-top ${
+            isHighlighted ? "bg-amber-50 dark:bg-amber-950/30" : "bg-background"
+          }`}
+        >
           <div className="flex items-start gap-2">
             <User className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0">

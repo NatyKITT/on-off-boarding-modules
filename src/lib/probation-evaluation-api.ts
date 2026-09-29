@@ -127,6 +127,17 @@ export const probationSaveSchema = z
         })
       }
 
+      if (
+        values.tajemnikAgreement === "no" &&
+        !values.tajemnikComment?.trim()
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["tajemnikComment"],
+          message: "U nesouhlasu je komentář povinný.",
+        })
+      }
+
       return
     }
 

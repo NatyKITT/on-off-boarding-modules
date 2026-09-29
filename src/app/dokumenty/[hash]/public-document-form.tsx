@@ -3,6 +3,7 @@
 import { EmploymentDocumentType } from "@prisma/client"
 
 import { EmployeeMeta } from "@/lib/employee-meta"
+import type { PrefillSuggestion } from "@/lib/employment-document-prefill"
 
 import { AffidavitForm } from "@/components/forms/affidavit-form"
 import { PayrollInfoForm } from "@/components/forms/payroll-info-form"
@@ -14,6 +15,7 @@ type PublicDocumentFormProps = {
   type: EmploymentDocumentType
   onSubmitted?: () => void
   employeeMeta?: EmployeeMeta
+  prefillSuggestion?: PrefillSuggestion | null
 }
 
 export function PublicDocumentForm({
@@ -22,6 +24,7 @@ export function PublicDocumentForm({
   type,
   onSubmitted,
   employeeMeta,
+  prefillSuggestion,
 }: PublicDocumentFormProps) {
   switch (type) {
     case EmploymentDocumentType.AFFIDAVIT:
@@ -43,6 +46,7 @@ export function PublicDocumentForm({
           hash={hash}
           onSubmitted={onSubmitted}
           employeeMeta={employeeMeta}
+          prefillSuggestion={prefillSuggestion}
         />
       )
 
@@ -54,6 +58,7 @@ export function PublicDocumentForm({
           hash={hash}
           onSubmitted={onSubmitted}
           employeeMeta={employeeMeta}
+          prefillSuggestion={prefillSuggestion}
         />
       )
 

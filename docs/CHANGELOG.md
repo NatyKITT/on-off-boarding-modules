@@ -2,6 +2,58 @@
 
 Historie významných změn v aplikaci On-Off-Boarding Modul. Nejnovější verze nahoře.
 
+## 0.14.0 – 2026-09-29
+
+### Nové funkce
+
+- **Přehlednější odkazy k vyplnění nástupních dokumentů** – karta dokumentu nově ukazuje jeden ze 4 jasných stavů („Nezasláno, je potřeba zaslat" / „Zasláno, čeká na vyplnění" / „Zasláno a vyplněno" / „Platnost odkazu vypršela, je potřeba nový odkaz"), barevně odlišených (šedá/oranžová/zelená/červená), a datum posledního odeslání natrvalo z databáze (dřív se ztrácelo po zavření okna). U vypršených odkazů se nahoře v seznamu dokumentů objeví upozornění s tlačítkem „Vygenerovat nové odkazy", které obnoví najednou jen dosud nevyplněné dokumenty (vyplněné/podepsané se nedotkne) a rovnou připraví e-mail k odeslání. Sekce „Odeslat e-mail s odkazy" navíc při otevření okna Dokumenty automaticky předvybere k odeslání jen dokumenty, které opravdu čekají na odeslání (ne ty, co jsou už v pořádku odeslané nebo vypršelé a čekají na obnovu odkazu).
+- **Automatické e-mailové připomínky k nástupním dokumentům** – zaměstnanci přijde upozornění 3 dny před vypršením odkazu k vyplnění, Personálnímu oddělení přijde upozornění v den vypršení, pokud dotazník pořád není vyplněný. Nově navíc dostane Personální oddělení upozornění i na dokumenty, které ještě vůbec nebyly zaměstnanci odeslány (3 dny před plánovaným nástupem, případně i zpětně po termínu nástupu). Počítá se jen od chvíle, kdy byl odkaz opravdu odeslán, ne od jeho vytvoření. Běží na stejném stávajícím denním spouštěči jako dřívější cron pro zkušební dobu, žádné nové nastavení plánovače není potřeba.
+- **Kontrola shody jména a e-mailu s nástupem** – pokud si zaměstnanec při vyplňování osobního nebo mzdového dotazníku zadá jiné jméno/příjmení/tituly (nebo e-mail) než má v nástupu, upozorní se na to Personální oddělení v notifikačním e-mailu a informace se zapíše i do historie dokumentu v appce.
+- **Automatické předvyplnění společných údajů** mezi osobním a mzdovým dotazníkem – když je jeden z nich už vyplněný, druhý nabídne převzetí shodných údajů (jméno, rodné příjmení, rodinný stav, datum a místo narození, rodné číslo, státní občanství, adresa trvalého pobytu) jedním kliknutím, stále editovatelné.
+- **Nový sloupec „Nástupní dokumenty" v přehledu Nástupů** – u každého ze tří dokumentů (čestné prohlášení, osobní dotazník, mzdový dotazník) barevná ikonka a jeho název rovnou v tabulce, bez nutnosti otvírat detail; přesný stav (zasláno/vyplněno/vypršelo) se zobrazí po najetí myší. Barvy jsou sjednocené i v modálním okně Dokumenty: červená = vypršelo, oranžová = zasláno a čeká na vyplnění, zelená = zasláno a vyplněno, šedá = zatím nezasláno.
+- **Osobní dotazník** – „Stát narození" je nově výběr ze seznamu zemí (dřív volný text), telefon kontaktní osoby má předvolbu země stejně jako hlavní telefonní pole.
+- **Čestné prohlášení** – „Typ výkonu práce" zabírá celou šířku řádku a doplněno chybějící pole „Jiné" pro upřesnění; „Zaměstnavatel" sjednocen na stejný typ pole jako „Název pracovní pozice"; „Popis pracovní činnosti" přejmenováno na „Druh práce" s vysvětlující poznámkou.
+- **E-maily pro HR a mzdovou účtárnu o vyplněném dokumentu** předělané na standardní branding appky (dřív měly zjednodušený vzhled neodpovídající ostatním e-mailům).
+- **Kombinovaný měsíční report** – podpora více vlastních e-mailů najednou u „Vlastní e-mail" (dřív jen jeden), modální náhled skutečného seznamu příjemců pro „Vybraná skupina" a „Všichni zaměstnanci".
+- **Vyjádření tajemníka u vyhodnocení zkušební doby** – komentář je nově povinný při volbě „Nesouhlasím", podpis vedoucího i tajemníka má stejný formát „Elektronicky podepsáno: jméno, datum" jako u nástupních dokumentů.
+
+### Opravy
+
+- **Skutečná oprava přetékání dlouhého textu v PDF** u všech tří nástupních dokumentů – zalamování textu dřív fungovalo jen mezi slovy; pokud bylo jedno „slovo" (nebo nepřerušený řetězec znaků) samo o sobě širší než sloupec, nemělo se jak zalomit a přeteklo mimo rámeček nebo do sousedního pole. Nově se zalomí i uvnitř takového textu.
+- Odstraněno omylem přidané duplicitní pole „Druh práce" z osobního dotazníku (patří jen do čestného prohlášení jako popis pracovní činnosti).
+- **Oprava stahování PDF kombinovaného měsíčního reportu** – při delším obsahu (víc řádků, více stránek) selhávalo generování PDF na tomto počítači kvůli lokálnímu omezení Windows, které blokovalo spouštění vlastní staženého prohlížeče Puppeteru (nyní se na Windows použije systémově nainstalovaný Chrome/Edge, na produkci beze změny). Zároveň opravena chybně obarvená poslední stránka PDF (tiskový spád barvy z patičky přes celou zbylou plochu stránky u víc-stránkového obsahu) a pozadí kolem reportu v PDF je nově bílé (dřív bledě zelené na každé stránce) – zelená zůstává jen v patičce.
+- **Oprava stavu dokumentu, který nebyl nikdy odeslán a mezitím mu doběhla platnost odkazu** – takový dokument se dřív tvářil jako obyčejné „Nezasláno" (šedě, bez varování), ale při pokusu o odeslání e-mailem ho appka tiše přeskočila jako vypršelý. Nově se rovnou zobrazí jako vypršelý (červeně) a nabídne se u něj „Vygenerovat nové odkazy" stejně jako u dokumentů, které vypršely až po odeslání.
+- **Oprava „Nový odkaz"/„Vygenerovat nové odkazy" mylně zobrazujícího dokument jako už odeslaný** – obnovení odkazu dřív ponechávalo v databázi datum předchozího odeslání, takže se nový (ještě neodeslaný) odkaz tvářil jako „Zasláno, čeká na vyplnění" (oranžově). Nově se datum odeslání při obnově odkazu vymaže, takže dokument správně ukazuje „Nezasláno" (šedě), dokud se opravdu neodešle znovu.
+- **Sekce „Odeslat odkaz na vybrané dokumenty e-mailem"** po obnově odkazu (jednoho i hromadně u vypršelých) nově automaticky vybere k odeslání jen ten dokument, který se právě obnovil (dřív zůstávaly zaškrtnuté i jiné, s obnovou nesouvisející dokumenty) a okno se k této sekci samo posune i při obnově jednoho dokumentu (dřív jen u hromadné obnovy). Sekce navíc zobrazuje i dokumenty, které ještě vůbec nebyly vygenerovány (šedě, s popiskem), a u vygenerovaných ukazuje stejný přesný a barevně odlišený stav jako sloupec „Nástupní dokumenty".
+- **Oprava neaktualizující se ikonky ve sloupci „Nástupní dokumenty"** – obnovení odkazu, reset dat nebo odeslání e-mailu v okně „Dokumenty" se dřív neprojevilo v přehledu Nástupů, dokud se stránka ručně neobnovila. Nově se přehled po každé takové akci sám aktualizuje.
+- **PDF ke stažení kombinovaného měsíčního reportu se nově generuje na šířku (landscape)** – tabulky mají víc místa a jsou přehlednější. Šířky sloupců (širší sloupec se jménem) i zákaz dělení řádku a opakování záhlaví tabulky na každé stránce se řeší jen při generování PDF (přímo v Puppeteru), takže se to netýká vzhledu skutečně zasílaných e-mailů – ty zůstávají na původním, ověřeném rozložení, které funguje spolehlivě na malých i velkých obrazovkách ve všech e-mailových klientech. Opravena i buňka „Přidat do kalendáře", která v PDF s užším sloupcem přetékala mimo ohraničení tabulky (text se v PDF nyní zalomí).
+- **Oprava e-mailových připomínek k nástupním dokumentům, které se po obnově odkazu už nikdy neposlaly znovu** – všechny tři automatické připomínky (zaměstnanci před vypršením, HR po vypršení, HR na nezaslané) si „už bylo upozorněno" pamatovaly natrvalo podle ID dokumentu, takže po vygenerování nového odkazu (a novém běhu stejného cyklu odeslání/vypršení) by se stejná připomínka podruhé v životě dokumentu už neposlala. Nově se počítání připomínek při každém vygenerování nového odkazu vynuluje.
+
+### Ostatní
+
+- **Automatizace k vyhodnocení zkušební doby je dočasně vypnutá** – bude nově řešena přes jinou aplikaci. Cron endpoint `/api/cron/probation-notifications` na stejném denním spouštění nově hlídá jen vypršení odkazů k vyplnění nástupních dokumentů (viz výše). E-mailové šablony a zbytek logiky k vyhodnocení zkušební doby (finální PDF, vyjádření tajemníka) zůstávají funkční a dál se používají při ručním odeslání, jen se automaticky nezakládají nové pozvánky/připomínky k vyplnění.
+
+Žádná nová databázová migrace není v této verzi potřeba.
+
+---
+
+## Deployment checklist k verzi 0.14.0
+
+- [ ] Žádné nové migrace nejsou potřeba.
+- [ ] Ověřit, že se denní cron (`/api/cron/probation-notifications`) spouští dál – nyní zakládá jen připomínky k vypršení odkazů nástupních dokumentů, ne pozvánky ke zkušební době.
+- [ ] Vyzkoušet odeslání odkazu k vyplnění, nechat ho vypršet (nebo ručně upravit datum v DB) a ověřit zobrazení upozornění i tlačítko hromadné obnovy.
+- [ ] Vygenerovat PDF u všech tří nástupních dokumentů s velmi dlouhým textem (i bez mezer) v libovolném poli a ověřit, že nepřeteče.
+- [ ] Odeslat kombinovaný měsíční report na více vlastních e-mailů najednou a ověřit zobrazení náhledu příjemců pro skupinové odeslání.
+- [ ] Vyzkoušet vyjádření tajemníka s volbou „Nesouhlasím" bez komentáře – má vyžadovat jeho vyplnění.
+- [ ] Stáhnout PDF kombinovaného měsíčního reportu s vyšším počtem řádků (víc stránek) a zkontrolovat, že poslední stránka není celá zbarvená.
+- [ ] Ověřit, že Personální oddělení dostane e-mail i na nástupní dokumenty, které ještě nebyly vůbec odeslány (ne jen na vypršelé).
+- [ ] Vytvořit dokument, nechat ho 14+ dní neodeslaný, a ověřit, že se zobrazí červeně jako vypršelý (ne šedě jako „Nezasláno").
+- [ ] Obnovit odkaz u jednoho dokumentu a ověřit, že se zobrazí šedě jako „Nezasláno" (ne oranžově jako už odeslaný) a že se ikonka v přehledu Nástupů hned změní bez ručního obnovení stránky.
+- [ ] Stáhnout PDF kombinovaného měsíčního reportu se sloupcem „Kalendář" a zkontrolovat, že text odkazu na kalendář nepřetéká mimo ohraničení tabulky.
+- [ ] Nechat vypršet stejný dokument dvakrát po sobě (odeslat, nechat vypršet, obnovit odkaz, znovu odeslat, znovu nechat vypršet) a ověřit, že HR dostane připomínku i podruhé, ne jen při prvním cyklu.
+
+---
+
 ## 0.13.0 – 2026-09-14
 
 ### Nové funkce

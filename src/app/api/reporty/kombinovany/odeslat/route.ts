@@ -7,60 +7,21 @@ import {
   logEmailHistory,
   renderCombinedReportHtml,
   sendMail,
-  type EmailRecord,
   type EmployeeChangeEmailRecord,
   type EmployeeChangeReportAudience,
 } from "@/lib/email"
 import { recipientsFor } from "@/lib/email-config"
 import { canSendMonthlyReports } from "@/lib/rbac"
 
-type Audience = "ONBOARDING_GROUP" | "ALL_EMPLOYEES"
-type Mode = "selected" | "all" | "unsentOnly"
-type RecordKind = "planned" | "actual"
-
-type IncomingOnboarding = {
-  id: number
-  name: string
-  surname: string
-  titleBefore: string | null
-  titleAfter: string | null
-  date: string | null
-  position: string | null
-  department: string | null
-  personalNumber: string | null
-  positionNum: string | null
-  month: string
-  kind: RecordKind
-  wasSent: boolean
-}
-
-type IncomingOffboarding = IncomingOnboarding
-
-type IncomingChange = {
-  id: number
-  type: "POSITION" | "NAME" | "NAME_AND_POSITION" | "MATERNITY_LEAVE"
-  status: string
-  personalNumber: string | null
-  effectiveDate: string
-  month: string
-  oldTitleBefore: string | null
-  newTitleBefore: string | null
-  oldName: string | null
-  newName: string | null
-  oldSurname: string | null
-  newSurname: string | null
-  oldTitleAfter: string | null
-  newTitleAfter: string | null
-  oldDepartment: string | null
-  newDepartment: string | null
-  oldUnitName: string | null
-  newUnitName: string | null
-  oldPositionName: string | null
-  newPositionName: string | null
-  oldPositionNum: string | null
-  newPositionNum: string | null
-  wasSent: boolean
-}
+import {
+  isValidEmail,
+  toEmailRecord,
+  type Audience,
+  type IncomingChange,
+  type IncomingOffboarding,
+  type IncomingOnboarding,
+  type Mode,
+} from "../shared"
 
 function getUserKey(user: { id?: string | null; email?: string | null }) {
   return user.id ?? user.email ?? "unknown"
@@ -123,25 +84,6 @@ async function recordSent(args: {
   })
 }
 
-function toEmailRecord(
-  r: IncomingOnboarding,
-  type: "onboarding" | "offboarding"
-): EmailRecord {
-  return {
-    id: r.id,
-    type,
-    name: r.name,
-    surname: r.surname,
-    titleBefore: r.titleBefore,
-    titleAfter: r.titleAfter,
-    position: r.position,
-    department: r.department,
-    date: r.date,
-    personalNumber: r.personalNumber,
-    positionNum: r.positionNum,
-  }
-}
-
 export async function POST(request: Request) {
   const session = await auth()
 
@@ -159,6 +101,7 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as {
     months: string[]
     audience: Audience
+    customEmails?: string[]
     mode: Mode
     onboardings: IncomingOnboarding[]
     offboardings: IncomingOffboarding[]
@@ -171,6 +114,20 @@ export async function POST(request: Request) {
 
   const { months, audience, mode } = body
   const changeAudience: EmployeeChangeReportAudience = audience
+
+  const customEmails = Array.from(
+    new Set((body.customEmails ?? []).map((email) => email.trim()))
+  ).filter(Boolean)
+
+  if (
+    audience === "CUSTOM_EMAIL" &&
+    (customEmails.length === 0 || !customEmails.every(isValidEmail))
+  ) {
+    return NextResponse.json(
+      { error: "Zadejte alespoň jeden platný e-mail příjemce." },
+      { status: 400 }
+    )
+  }
 
   const onboardings = filterByMode(body.onboardings ?? [], mode)
   const offboardings = filterByMode(body.offboardings ?? [], mode)
@@ -193,15 +150,19 @@ export async function POST(request: Request) {
   let subject: string
 
   try {
-    recipients = Array.from(
-      new Set(
-        (
-          await recipientsFor(
-            audience === "ONBOARDING_GROUP" ? "planned" : "all"
-          )
-        ).filter(Boolean)
+    if (audience === "CUSTOM_EMAIL") {
+      recipients = customEmails
+    } else {
+      recipients = Array.from(
+        new Set(
+          (
+            await recipientsFor(
+              audience === "ONBOARDING_GROUP" ? "planned" : "all"
+            )
+          ).filter(Boolean)
+        )
       )
-    )
+    }
 
     if (!recipients.length) {
       return NextResponse.json({ error: "Žádní příjemci" }, { status: 400 })

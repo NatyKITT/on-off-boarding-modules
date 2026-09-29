@@ -18,6 +18,8 @@ import {
 
 import { useToast } from "@/hooks/use-toast"
 import { EmployeeMeta } from "@/lib/employee-meta"
+import type { PrefillSuggestion } from "@/lib/employment-document-prefill"
+import { getPrefillDisplayLabels } from "@/lib/employment-document-shared-fields"
 import { ServerValidationError } from "@/lib/server-validation-error"
 import {
   payrollInfoSchema,
@@ -43,12 +45,14 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { DocumentEmployeeHeader } from "@/components/common/document-employee-header"
+import { DocumentPrefillBanner } from "@/components/forms/document-prefill-banner"
 
 type PayrollInfoFormBaseProps = {
   documentId: number
   initialData?: unknown
   readOnly?: boolean
   employeeMeta?: EmployeeMeta
+  prefillSuggestion?: PrefillSuggestion | null
 }
 
 type PayrollInfoFormPublicProps = PayrollInfoFormBaseProps & {
@@ -194,6 +198,21 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
     control,
     formState: { errors },
   } = form
+
+  const [prefillResolved, setPrefillResolved] = React.useState(false)
+
+  function handleAcceptPrefill() {
+    if (!props.prefillSuggestion) return
+
+    for (const [key, value] of Object.entries(props.prefillSuggestion.data)) {
+      setValue(key as keyof PayrollInfoSchema, value as never, {
+        shouldValidate: true,
+        shouldDirty: true,
+      })
+    }
+
+    setPrefillResolved(true)
+  }
 
   React.useEffect(() => {
     const subscription = watch(() => {
@@ -354,6 +373,15 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
             povinné.
           </p>
         </header>
+
+        {props.prefillSuggestion && !prefillResolved && !isDisabled && (
+          <DocumentPrefillBanner
+            sourceLabel={props.prefillSuggestion.sourceLabel}
+            fieldLabels={getPrefillDisplayLabels(props.prefillSuggestion.data)}
+            onAccept={handleAcceptPrefill}
+            onDismiss={() => setPrefillResolved(true)}
+          />
+        )}
 
         <section className="space-y-4 rounded-md border p-4">
           <h2 className="text-lg font-semibold">

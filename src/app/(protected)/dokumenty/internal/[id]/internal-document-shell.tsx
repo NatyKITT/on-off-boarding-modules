@@ -10,6 +10,7 @@ import type {
 import { AlertCircle, CheckCircle, Lock, Pencil } from "lucide-react"
 
 import { buildEmployeeMeta } from "@/lib/employee-meta"
+import type { PrefillSuggestion } from "@/lib/employment-document-prefill"
 import { ServerValidationError } from "@/lib/server-validation-error"
 
 import { Button } from "@/components/ui/button"
@@ -60,6 +61,7 @@ type Props = {
   document: InternalDocument
   canEdit: boolean
   role?: Role | null
+  prefillSuggestion?: PrefillSuggestion | null
 }
 
 function docTypeLabel(type: EmploymentDocumentType) {
@@ -102,7 +104,12 @@ function wasEditedAfterCompletion(
   return edited - completed > 60_000
 }
 
-export function InternalDocumentShell({ document, canEdit, role }: Props) {
+export function InternalDocumentShell({
+  document,
+  canEdit,
+  role,
+  prefillSuggestion,
+}: Props) {
   const [doc, setDoc] = useState(document)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -214,10 +221,20 @@ export function InternalDocumentShell({ document, canEdit, role }: Props) {
         return <AffidavitForm {...commonProps} />
 
       case "PAYROLL_INFO":
-        return <PayrollInfoForm {...commonProps} />
+        return (
+          <PayrollInfoForm
+            {...commonProps}
+            prefillSuggestion={prefillSuggestion}
+          />
+        )
 
       case "PERSONAL_QUESTIONNAIRE":
-        return <PersonalQuestionnaireForm {...commonProps} />
+        return (
+          <PersonalQuestionnaireForm
+            {...commonProps}
+            prefillSuggestion={prefillSuggestion}
+          />
+        )
 
       default:
         return (

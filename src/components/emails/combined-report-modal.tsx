@@ -10,7 +10,10 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Download,
+  Eye,
   Mail,
+  Plus,
 } from "lucide-react"
 
 import { getEmployeeChangeDetailLabel } from "@/lib/employment-linking"
@@ -31,6 +34,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   Popover,
@@ -40,7 +44,11 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ReportsHistoryButton } from "@/components/history/reports-history-button"
 
-type Audience = "ONBOARDING_GROUP" | "ALL_EMPLOYEES"
+type Audience = "ONBOARDING_GROUP" | "ALL_EMPLOYEES" | "CUSTOM_EMAIL"
+
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
+}
 type Mode = "selected" | "all" | "unsentOnly"
 type RecordKind = "planned" | "actual"
 type ChangeType = "POSITION" | "NAME" | "NAME_AND_POSITION" | "MATERNITY_LEAVE"
@@ -195,6 +203,22 @@ export function CombinedReportModal({
     Number(defaultMonth.slice(0, 4))
   )
   const [audience, setAudience] = useState<Audience>(defaultAudience)
+  const [customEmails, setCustomEmails] = useState<string[]>([])
+  const [customEmailDialogOpen, setCustomEmailDialogOpen] = useState(false)
+  const [customEmailDraft, setCustomEmailDraft] = useState("")
+  const [customEmailDraftError, setCustomEmailDraftError] = useState<
+    string | null
+  >(null)
+  const [recipientsPreviewOpen, setRecipientsPreviewOpen] = useState(false)
+  const [recipientsPreview, setRecipientsPreview] = useState<{
+    onboardingGroup: string[]
+    allEmployees: string[]
+  } | null>(null)
+  const [recipientsPreviewLoading, setRecipientsPreviewLoading] =
+    useState(false)
+  const [recipientsPreviewError, setRecipientsPreviewError] = useState<
+    string | null
+  >(null)
   const [onboardingKinds, setOnboardingKinds] = useState<RecordKind[]>(
     context === "nastupy" ? [defaultKind] : []
   )
@@ -215,6 +239,7 @@ export function CombinedReportModal({
 
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
+  const [downloading, setDownloading] = useState(false)
 
   const [confirmState, setConfirmState] = useState<{
     open: boolean
@@ -251,6 +276,7 @@ export function CombinedReportModal({
 
     setOpen(true)
     setAudience(defaultAudience)
+    setCustomEmails([])
     setOnboardingKinds(context === "nastupy" ? [defaultKind] : [])
     setOffboardingKinds(context === "odchody" ? [defaultKind] : [])
     setChangeTypes(context === "zmeny" ? ALL_CHANGE_TYPES : [])
@@ -348,6 +374,65 @@ export function CombinedReportModal({
     void loadRecords()
   }, [loadRecords])
 
+  const customEmailInvalid =
+    audience === "CUSTOM_EMAIL" && customEmails.length === 0
+
+  const openRecipientsPreview = useCallback(async () => {
+    setRecipientsPreviewOpen(true)
+    setRecipientsPreviewError(null)
+
+    if (recipientsPreview) return
+
+    setRecipientsPreviewLoading(true)
+    try {
+      const res = await fetch("/api/reporty/kombinovany/prijemci", {
+        cache: "no-store",
+      })
+      const json = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        throw new Error(json?.error ?? "Nepodařilo se načíst seznam příjemců.")
+      }
+
+      setRecipientsPreview({
+        onboardingGroup: Array.isArray(json?.onboardingGroup)
+          ? json.onboardingGroup
+          : [],
+        allEmployees: Array.isArray(json?.allEmployees)
+          ? json.allEmployees
+          : [],
+      })
+    } catch (error) {
+      setRecipientsPreviewError(
+        error instanceof Error
+          ? error.message
+          : "Nepodařilo se načíst seznam příjemců."
+      )
+    } finally {
+      setRecipientsPreviewLoading(false)
+    }
+  }, [recipientsPreview])
+
+  function handleAddCustomEmailDraft() {
+    const value = customEmailDraft.trim()
+
+    if (!value) return
+
+    if (!isValidEmail(value)) {
+      setCustomEmailDraftError("Zadejte platný e-mail.")
+      return
+    }
+
+    if (customEmails.includes(value)) {
+      setCustomEmailDraftError("Tento e-mail je už v seznamu.")
+      return
+    }
+
+    setCustomEmails((prev) => [...prev, value])
+    setCustomEmailDraft("")
+    setCustomEmailDraftError(null)
+  }
+
   const totalRecords = onboardings.length + offboardings.length + changes.length
   const totalSelected =
     selectedOnboarding.length +
@@ -407,6 +492,14 @@ export function CombinedReportModal({
 
     if (total === 0) return
 
+    if (audience === "CUSTOM_EMAIL" && customEmails.length === 0) {
+      setErrorState({
+        open: true,
+        message: "Přidejte alespoň jeden platný e-mail příjemce.",
+      })
+      return
+    }
+
     const alreadySentInPayload =
       payloadOnboardings.filter((r) => r.wasSent).length +
       payloadOffboardings.filter((r) => r.wasSent).length +
@@ -430,6 +523,7 @@ export function CombinedReportModal({
         body: JSON.stringify({
           months,
           audience,
+          ...(audience === "CUSTOM_EMAIL" ? { customEmails } : {}),
           mode,
           onboardings: payloadOnboardings,
           offboardings: payloadOffboardings,
@@ -454,6 +548,69 @@ export function CombinedReportModal({
       })
     } finally {
       setSending(false)
+    }
+  }
+
+  async function handleDownloadPdf() {
+    const payloadOnboardings = onboardings.filter((r) =>
+      selectedOnboarding.includes(personKey("on", r))
+    )
+    const payloadOffboardings = offboardings.filter((r) =>
+      selectedOffboarding.includes(personKey("off", r))
+    )
+    const payloadChanges = changes.filter((r) =>
+      selectedChanges.includes(changeKey(r))
+    )
+
+    if (
+      payloadOnboardings.length +
+        payloadOffboardings.length +
+        payloadChanges.length ===
+      0
+    ) {
+      return
+    }
+
+    setDownloading(true)
+    try {
+      const res = await fetch("/api/reporty/kombinovany/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          months,
+          audience,
+          onboardings: payloadOnboardings,
+          offboardings: payloadOffboardings,
+          changes: payloadChanges,
+        }),
+      })
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => null)
+        throw new Error(json?.error ?? "Generování PDF selhalo.")
+      }
+
+      const disposition = res.headers.get("Content-Disposition") ?? ""
+      const filenameMatch = disposition.match(/filename="([^"]+)"/)
+      const filename = filenameMatch?.[1] ?? "kombinovany-report.pdf"
+
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      setErrorState({
+        open: true,
+        message:
+          error instanceof Error ? error.message : "Generování PDF selhalo.",
+      })
+    } finally {
+      setDownloading(false)
     }
   }
 
@@ -892,18 +1049,78 @@ export function CombinedReportModal({
                     onValueChange={(v) => setAudience(v as Audience)}
                     className="mt-1"
                   >
-                    <TabsList className="grid w-full grid-cols-2">
+                    <TabsList className="grid w-full grid-cols-3">
                       <TabsTrigger value="ONBOARDING_GROUP">
                         Vybraná skupina
                       </TabsTrigger>
                       <TabsTrigger value="ALL_EMPLOYEES">
                         Všichni zaměstnanci
                       </TabsTrigger>
+                      <TabsTrigger value="CUSTOM_EMAIL">
+                        Vlastní e-mail
+                      </TabsTrigger>
                     </TabsList>
                   </Tabs>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Určuje jen komu se e-mail pošle (seznam z nastavení).
-                  </p>
+                  {audience === "CUSTOM_EMAIL" ? (
+                    <div className="mt-1.5 space-y-1.5">
+                      {customEmails.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {customEmails.map((email) => (
+                            <Badge
+                              key={email}
+                              variant="secondary"
+                              className="gap-1 pr-1.5 font-normal"
+                            >
+                              {email}
+                              <button
+                                type="button"
+                                className="text-muted-foreground hover:text-foreground"
+                                onClick={() =>
+                                  setCustomEmails((prev) =>
+                                    prev.filter((item) => item !== email)
+                                  )
+                                }
+                              >
+                                ×
+                              </button>
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 gap-1.5"
+                        onClick={() => {
+                          setCustomEmailDraft("")
+                          setCustomEmailDraftError(null)
+                          setCustomEmailDialogOpen(true)
+                        }}
+                      >
+                        <Plus className="size-3.5" />
+                        {customEmails.length > 0
+                          ? "Přidat další e-mail"
+                          : "Přidat e-maily"}
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="mt-1 flex items-center gap-1">
+                      <p className="text-xs text-muted-foreground">
+                        Určuje jen komu se e-mail pošle (seznam z nastavení).
+                      </p>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-6 shrink-0"
+                        title="Zobrazit seznam příjemců"
+                        onClick={() => void openRecipientsPreview()}
+                      >
+                        <Eye className="size-3.5" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1101,8 +1318,17 @@ export function CombinedReportModal({
               </Button>
               <Button
                 variant="outline"
+                onClick={() => void handleDownloadPdf()}
+                disabled={totalSelected === 0 || downloading || loading}
+                className="inline-flex items-center gap-1.5"
+              >
+                <Download className="size-4 shrink-0" />
+                Stáhnout PDF
+              </Button>
+              <Button
+                variant="outline"
                 onClick={() => handleSend("unsentOnly")}
-                disabled={sending || loading}
+                disabled={sending || loading || customEmailInvalid}
                 className="inline-flex items-center gap-1.5"
               >
                 <Mail className="size-4 shrink-0" />
@@ -1110,7 +1336,12 @@ export function CombinedReportModal({
               </Button>
               <Button
                 onClick={() => handleSend("selected")}
-                disabled={totalSelected === 0 || sending || loading}
+                disabled={
+                  totalSelected === 0 ||
+                  sending ||
+                  loading ||
+                  customEmailInvalid
+                }
                 className="inline-flex items-center gap-1.5"
               >
                 <Mail className="size-4 shrink-0" />
@@ -1118,7 +1349,7 @@ export function CombinedReportModal({
               </Button>
               <Button
                 onClick={() => handleSend("all")}
-                disabled={sending || loading}
+                disabled={sending || loading || customEmailInvalid}
                 className="inline-flex items-center gap-1.5"
               >
                 <Mail className="size-4 shrink-0" />
@@ -1215,6 +1446,141 @@ export function CombinedReportModal({
               }
             >
               Zavřít
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={recipientsPreviewOpen}
+        onOpenChange={setRecipientsPreviewOpen}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              {audience === "ALL_EMPLOYEES"
+                ? "Příjemci – všichni zaměstnanci"
+                : "Příjemci – vybraná skupina"}
+            </DialogTitle>
+          </DialogHeader>
+
+          {recipientsPreviewLoading && (
+            <p className="text-sm text-muted-foreground">Načítám…</p>
+          )}
+
+          {recipientsPreviewError && (
+            <p className="text-sm text-destructive">{recipientsPreviewError}</p>
+          )}
+
+          {!recipientsPreviewLoading &&
+            !recipientsPreviewError &&
+            recipientsPreview &&
+            (() => {
+              const list =
+                audience === "ALL_EMPLOYEES"
+                  ? recipientsPreview.allEmployees
+                  : recipientsPreview.onboardingGroup
+
+              return list.length > 0 ? (
+                <ul className="max-h-64 space-y-1 overflow-y-auto text-sm">
+                  {list.map((email) => (
+                    <li
+                      key={email}
+                      className="rounded-md border bg-muted/40 px-2 py-1 font-mono text-xs"
+                    >
+                      {email}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Pro tuto skupinu nejsou v nastavení uvedeni žádní příjemci.
+                </p>
+              )
+            })()}
+
+          <div className="mt-2 flex justify-end">
+            <Button
+              variant="outline"
+              onClick={() => setRecipientsPreviewOpen(false)}
+            >
+              Zavřít
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={customEmailDialogOpen}
+        onOpenChange={setCustomEmailDialogOpen}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Přidat e-mail příjemce</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            {customEmails.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {customEmails.map((email) => (
+                  <Badge
+                    key={email}
+                    variant="secondary"
+                    className="gap-1 pr-1.5 font-normal"
+                  >
+                    {email}
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-foreground"
+                      onClick={() =>
+                        setCustomEmails((prev) =>
+                          prev.filter((item) => item !== email)
+                        )
+                      }
+                    >
+                      ×
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <Input
+                type="email"
+                value={customEmailDraft}
+                onChange={(event) => {
+                  setCustomEmailDraft(event.target.value)
+                  setCustomEmailDraftError(null)
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault()
+                    handleAddCustomEmailDraft()
+                  }
+                }}
+                placeholder="jmeno@praha6.cz"
+                className="h-9"
+              />
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleAddCustomEmailDraft}
+              >
+                Přidat
+              </Button>
+            </div>
+
+            {customEmailDraftError && (
+              <p className="text-xs text-destructive">
+                {customEmailDraftError}
+              </p>
+            )}
+          </div>
+
+          <div className="mt-2 flex justify-end">
+            <Button onClick={() => setCustomEmailDialogOpen(false)}>
+              Hotovo
             </Button>
           </div>
         </DialogContent>
