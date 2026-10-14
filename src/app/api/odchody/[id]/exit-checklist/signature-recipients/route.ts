@@ -1,10 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server"
-import { Prisma } from "@prisma/client"
+import { ChecklistResolution, Prisma } from "@prisma/client"
 import { z, ZodError } from "zod"
 
 import { prisma } from "@/lib/db"
+import {
+  sendSignatureAccessRestoredEmail,
+  sendSignatureAccessRevokedEmail,
+} from "@/lib/email"
 import { mergeSignatureRecipients } from "@/lib/exit-checklist"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
+import { recipientIdentityKey } from "@/lib/exit-checklist-recipient-key"
 import { canAdminExitChecklist } from "@/lib/rbac"
 import { getSession } from "@/lib/session"
 
@@ -23,6 +28,9 @@ const bodySchema = z.object({
         behalfLabel: z.string().optional(),
         invitedAt: z.string().optional(),
         revokedAt: z.string().optional(),
+        substituteForKey: z.string().optional(),
+        position: z.string().optional(),
+        department: z.string().optional(),
       })
     )
     .min(1)
@@ -34,6 +42,28 @@ function getHeaderObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {}
+}
+
+function normalizeEmail(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : ""
+}
+
+function signatureSignedByEmail(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null
+  const email = (value as { signedByEmail?: unknown }).signedByEmail
+  return typeof email === "string" && email ? email : null
+}
+
+function emptySignature(): Prisma.InputJsonValue {
+  return { signedByName: null, signedByEmail: null, signedAt: null }
+}
+
+function getAppBaseUrl(req: NextRequest) {
+  return (
+    process.env.NEXT_PUBLIC_APP_URL ??
+    process.env.AUTH_URL ??
+    req.nextUrl.origin
+  ).replace(/\/$/, "")
 }
 
 export async function POST(
@@ -77,7 +107,22 @@ export async function POST(
       where: { id: offboardingId, deletedAt: null },
       select: {
         id: true,
-        exitChecklist: { select: { id: true, header: true } },
+        name: true,
+        surname: true,
+        titleBefore: true,
+        titleAfter: true,
+        positionName: true,
+        department: true,
+        actualEnd: true,
+        plannedEnd: true,
+        exitChecklist: {
+          select: {
+            id: true,
+            header: true,
+            publicToken: true,
+            items: { select: { key: true, signedByEmail: true } },
+          },
+        },
       },
     })
 
@@ -99,15 +144,13 @@ export async function POST(
     }
 
     const header = getHeaderObject(offboarding.exitChecklist.header)
+    const existingRecipients = Array.isArray(header.signatureRecipients)
+      ? header.signatureRecipients
+      : []
 
     const uniqueRecipients =
       mode === "merge"
-        ? mergeSignatureRecipients(
-            Array.isArray(header.signatureRecipients)
-              ? header.signatureRecipients
-              : [],
-            recipients
-          )
+        ? mergeSignatureRecipients(existingRecipients, recipients)
         : mergeSignatureRecipients(null, recipients)
 
     if (uniqueRecipients.length === 0) {
@@ -120,18 +163,205 @@ export async function POST(
       )
     }
 
+    const existingByKey = new Map<string, { revokedAt?: string }>()
+    existingRecipients.forEach((recipient) => {
+      if (recipient && typeof recipient === "object") {
+        existingByKey.set(
+          recipientIdentityKey(recipient as { email: string }),
+          recipient as { revokedAt?: string }
+        )
+      }
+    })
+
+    const newlyRevoked = uniqueRecipients.filter((recipient) => {
+      const key = recipientIdentityKey(recipient)
+      const before = existingByKey.get(key)
+      return Boolean(recipient.revokedAt) && !before?.revokedAt
+    })
+    const newlyRestored = uniqueRecipients.filter((recipient) => {
+      const key = recipientIdentityKey(recipient)
+      const before = existingByKey.get(key)
+      return !recipient.revokedAt && Boolean(before?.revokedAt)
+    })
+
+    const stillActiveEmails = new Set(
+      uniqueRecipients
+        .filter((recipient) => !recipient.revokedAt)
+        .map((recipient) => normalizeEmail(recipient.email))
+    )
+    const newlyRevokedEmails = new Set(
+      newlyRevoked
+        .map((recipient) => normalizeEmail(recipient.email))
+        .filter((email) => !stillActiveEmails.has(email))
+    )
+
+    const recipientsToStore = uniqueRecipients.filter(
+      (recipient) => !(recipient.revokedAt && recipient.behalfLabel)
+    )
+
+    const itemsToClear =
+      newlyRevokedEmails.size > 0
+        ? offboarding.exitChecklist.items.filter(
+            (item) =>
+              item.signedByEmail &&
+              newlyRevokedEmails.has(normalizeEmail(item.signedByEmail))
+          )
+        : []
+
+    const signaturesObj = getHeaderObject(header.signatures)
+    const nextSignatures: Record<string, unknown> = { ...signaturesObj }
+    const signatureClearedEmails = new Set<string>()
+    let headerSignatureCleared = false
+
+    if (newlyRevokedEmails.size > 0) {
+      for (const slot of ["employee", "manager", "issuer"] as const) {
+        const signedByEmail = signatureSignedByEmail(signaturesObj[slot])
+        if (
+          signedByEmail &&
+          newlyRevokedEmails.has(normalizeEmail(signedByEmail))
+        ) {
+          nextSignatures[slot] = emptySignature()
+          signatureClearedEmails.add(normalizeEmail(signedByEmail))
+          headerSignatureCleared = true
+        }
+      }
+    }
+
+    let nextHandoverManagerSignature = header.handoverManagerSignature
+    const handoverManagerSignedByEmail = signatureSignedByEmail(
+      header.handoverManagerSignature
+    )
+    if (
+      newlyRevokedEmails.size > 0 &&
+      handoverManagerSignedByEmail &&
+      newlyRevokedEmails.has(normalizeEmail(handoverManagerSignedByEmail))
+    ) {
+      nextHandoverManagerSignature = emptySignature()
+      signatureClearedEmails.add(normalizeEmail(handoverManagerSignedByEmail))
+      headerSignatureCleared = true
+    }
+
+    itemsToClear.forEach((item) => {
+      if (item.signedByEmail) {
+        signatureClearedEmails.add(normalizeEmail(item.signedByEmail))
+      }
+    })
+
     const nextHeader: Prisma.InputJsonObject = {
       ...(header as Prisma.InputJsonObject),
-      signatureRecipients: uniqueRecipients as unknown as Prisma.InputJsonValue,
+      signatureRecipients:
+        recipientsToStore as unknown as Prisma.InputJsonValue,
       signatureRecipientsSentAt: new Date().toISOString(),
       signatureRecipientsSentByName: user.name ?? user.email ?? null,
       signatureRecipientsSentByEmail: user.email ?? null,
+      ...(headerSignatureCleared
+        ? {
+            signatures: nextSignatures as unknown as Prisma.InputJsonValue,
+            handoverManagerSignature:
+              nextHandoverManagerSignature as unknown as Prisma.InputJsonValue,
+          }
+        : {}),
     }
 
-    await prisma.exitChecklist.update({
-      where: { id: offboarding.exitChecklist.id },
-      data: { header: nextHeader },
-    })
+    await prisma.$transaction([
+      ...(itemsToClear.length > 0
+        ? [
+            prisma.exitChecklistItem.updateMany({
+              where: {
+                checklistId: offboarding.exitChecklist.id,
+                key: { in: itemsToClear.map((item) => item.key) },
+              },
+              data: {
+                resolution: ChecklistResolution.NOT_APPLICABLE,
+                signedById: null,
+                signedByName: null,
+                signedByEmail: null,
+                signedAt: null,
+              },
+            }),
+          ]
+        : []),
+      prisma.exitChecklist.update({
+        where: { id: offboarding.exitChecklist.id },
+        data: { header: nextHeader },
+      }),
+    ])
+
+    const employeeName = [
+      offboarding.titleBefore,
+      offboarding.name,
+      offboarding.surname,
+      offboarding.titleAfter,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .trim()
+
+    const endDate = offboarding.actualEnd ?? offboarding.plannedEnd
+    const employmentEndDate = endDate
+      ? new Date(endDate).toLocaleDateString("cs-CZ")
+      : null
+    const signUrl = offboarding.exitChecklist.publicToken
+      ? `${getAppBaseUrl(req)}/odchody-public/${offboarding.exitChecklist.publicToken}`
+      : null
+
+    for (const recipient of newlyRevoked) {
+      try {
+        await sendSignatureAccessRevokedEmail({
+          to: recipient.email,
+          employeeName,
+          employeePosition: offboarding.positionName,
+          employeeDepartment: offboarding.department,
+          employmentEndDate,
+          behalfLabel: recipient.behalfLabel ?? null,
+          stillHasOtherAccess: stillActiveEmails.has(
+            normalizeEmail(recipient.email)
+          ),
+        })
+      } catch (error) {
+        console.error(
+          "[SIGNATURE-RECIPIENTS] E-mail o odebrání se nepodařilo odeslat:",
+          error
+        )
+      }
+    }
+
+    if (signUrl) {
+      for (const recipient of newlyRestored) {
+        try {
+          await sendSignatureAccessRestoredEmail({
+            to: recipient.email,
+            employeeName,
+            employeePosition: offboarding.positionName,
+            employeeDepartment: offboarding.department,
+            employmentEndDate,
+            signUrl,
+          })
+        } catch (error) {
+          console.error(
+            "[SIGNATURE-RECIPIENTS] E-mail o návratu se nepodařilo odeslat:",
+            error
+          )
+        }
+      }
+    }
+
+    const notifyParts: string[] = []
+    if (newlyRevoked.length > 0) {
+      notifyParts.push(
+        `odebráno a informováno: ${newlyRevoked.map((r) => r.email).join(", ")}`
+      )
+    }
+    if (newlyRestored.length > 0) {
+      notifyParts.push(
+        `vráceno a informováno: ${newlyRestored.map((r) => r.email).join(", ")}`
+      )
+    }
+    if (signatureClearedEmails.size > 0) {
+      notifyParts.push(
+        `podpis zrušen u: ${Array.from(signatureClearedEmails).join(", ")}`
+      )
+    }
 
     await logExitChecklistEvent({
       checklistId: offboarding.exitChecklist.id,
@@ -139,12 +369,14 @@ export async function POST(
       by: user.id,
       byName: user.name ?? user.email ?? null,
       byEmail: user.email ?? null,
-      message: `Seznam příjemců k podpisu uložen (${uniqueRecipients.length}): ${uniqueRecipients.map((recipient) => `${recipient.name} <${recipient.email}>`).join(", ")}`,
+      message: `Seznam příjemců k podpisu uložen (${recipientsToStore.length}): ${recipientsToStore.map((recipient) => `${recipient.name} <${recipient.email}>`).join(", ")}${
+        notifyParts.length > 0 ? `. ${notifyParts.join("; ")}.` : ""
+      }`,
     })
 
     return NextResponse.json({
       status: "success",
-      recipients: uniqueRecipients,
+      recipients: recipientsToStore,
     })
   } catch (error) {
     if (error instanceof ZodError) {

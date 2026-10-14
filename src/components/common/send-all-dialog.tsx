@@ -63,14 +63,14 @@ type Props = {
   employeeName: string
   employeeEmail?: string | null
   publicToken: string
-  conflictOfInterest: boolean
+  conflictOfInterest: boolean | null
   positionNum?: string | null
   managerEmail?: string | null
   managerName?: string | null
 }
 
 function buildInitialRecipients(
-  conflictOfInterest: boolean,
+  conflictOfInterest: boolean | null,
   employeeName: string,
   employeeEmail?: string | null,
   managerEmail?: string | null,
@@ -445,7 +445,8 @@ export function SendAllDialog({
   }
 
   async function handleSendSelected() {
-    if (sending || selectedKeys.size === 0) return
+    if (sending || selectedKeys.size === 0 || conflictOfInterest === null)
+      return
     setSending(true)
     setSaveError(null)
 
@@ -790,7 +791,7 @@ export function SendAllDialog({
                     placeholder="Jméno (nepovinné)"
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
-                    className="h-8 text-sm"
+                    className="h-8 py-1 text-sm"
                   />
                   <Input
                     placeholder="email@praha6.cz"
@@ -802,7 +803,7 @@ export function SendAllDialog({
                     onKeyDown={(e) => {
                       if (e.key === "Enter") addRecipient()
                     }}
-                    className="h-8 text-sm"
+                    className="h-8 py-1 text-sm"
                   />
                   <Button
                     type="button"
@@ -827,8 +828,8 @@ export function SendAllDialog({
                     htmlFor="send-all-behalf-mode"
                     className="text-xs font-normal text-muted-foreground"
                   >
-                    Přidat v zastoupení (podepíše místo jiné zodpovědné osoby /
-                    odboru – dostane odlišný e-mail s pozvánkou)
+                    Přidat jako zastupujícího za (podepíše místo jiné zodpovědné
+                    osoby / odboru – dostane odlišný e-mail s pozvánkou)
                   </Label>
                 </div>
 
@@ -904,6 +905,12 @@ export function SendAllDialog({
                 {saveError}
               </p>
             )}
+
+            {!done && conflictOfInterest === null && (
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                Nejdřív ve výstupním listu rozhodněte, zda obsahuje střet zájmů.
+              </p>
+            )}
           </div>
         </div>
 
@@ -923,7 +930,12 @@ export function SendAllDialog({
                 type="button"
                 className="gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73]"
                 onClick={() => void handleSendSelected()}
-                disabled={sending || loadingExisting || selectedKeys.size === 0}
+                disabled={
+                  sending ||
+                  loadingExisting ||
+                  selectedKeys.size === 0 ||
+                  conflictOfInterest === null
+                }
               >
                 {sending ? (
                   <>

@@ -9,10 +9,13 @@ import {
   CheckCircle,
   ChevronDown,
   History as HistoryIcon,
+  Info,
   Loader2,
   Lock,
+  Plus,
   Printer,
   RefreshCcw,
+  Save,
   Search,
   Send,
   Undo2,
@@ -32,13 +35,21 @@ import type {
   HandoverSendHistoryEntry,
 } from "@/types/exit-checklist"
 import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
+import {
+  EXIT_CHECKLIST_SIGNATORIES,
+  LAW_SIGNATORY,
+} from "@/config/exit-checklist-signatories"
 
 import { useSignatureName } from "@/hooks/use-signature-name"
+import { looksLikePersonName } from "@/lib/exit-checklist-behalf-options"
+import { getExitChecklistCompletionState } from "@/lib/exit-checklist-completion"
 import { exitChecklistEventActionLabel } from "@/lib/exit-checklist-event-labels"
+import { recipientIdentityKey } from "@/lib/exit-checklist-recipient-key"
 import { joinNameWithTitles } from "@/lib/format-name"
 
 import {
   AlertDialog,
+  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -77,9 +88,6 @@ import {
   PositionCombobox,
   type PositionSearchItem,
 } from "@/components/common/position-combobox"
-import { SendAllDialog } from "@/components/common/send-all-dialog"
-import { SendInviteBehalfDialog } from "@/components/common/send-invite-behalf-dialog"
-import { SendInviteDialog } from "@/components/common/send-invite-dialog"
 import { SignatureRecipientsDialog } from "@/components/common/signature-recipients-dialog"
 import { DocumentHistoryDialog } from "@/components/history/document-history-dialog"
 
@@ -91,6 +99,7 @@ type Props = {
   onDirtyChange?: (dirty: boolean) => void
   onSaved?: (data: ExitChecklistData, requestClose?: boolean) => void
   externalSaveTrigger?: number
+  onRequestSave?: () => void
 }
 
 type HeaderSignatureKey = "employee" | "manager" | "issuer"
@@ -138,6 +147,7 @@ function mergeItemsWithConfig(
     return {
       ...row,
       resolved: found?.resolved ?? null,
+      note: found?.note ?? null,
       signedByName: found?.signedByName ?? null,
       signedByEmail: found?.signedByEmail ?? null,
       signedAt: found?.signedAt ?? null,
@@ -168,11 +178,16 @@ function cleanPositionName(value?: string | null, positionNum?: string | null) {
 
 function formatHandoverPositionLabel(
   positionNum?: string | null,
-  positionName?: string | null
+  positionName?: string | null,
+  department?: string | null,
+  unitName?: string | null
 ) {
   const cleanName = cleanPositionName(positionName, positionNum)
+  const deptUnit = [department?.trim(), unitName?.trim()]
+    .filter(Boolean)
+    .join(" – ")
 
-  return [positionNum?.trim(), cleanName].filter(Boolean).join(" — ")
+  return [positionNum?.trim(), cleanName, deptUnit].filter(Boolean).join(" — ")
 }
 
 function renderOrganization(text: string, managerName?: string | null) {
@@ -184,10 +199,17 @@ function renderOrganization(text: string, managerName?: string | null) {
     <div className="leading-snug">
       <div className="font-semibold">{lines[0]}</div>
       {lines[0] === "Vedoucí odboru" && managerName && (
-        <div className="text-xs text-muted-foreground">{managerName}</div>
+        <div className="text-xs font-medium text-foreground">{managerName}</div>
       )}
       {lines.slice(1).map((line, i) => (
-        <div key={i} className="text-xs text-muted-foreground">
+        <div
+          key={i}
+          className={
+            looksLikePersonName(line)
+              ? "text-xs font-medium text-foreground"
+              : "text-xs text-muted-foreground"
+          }
+        >
           {line}
         </div>
       ))}
@@ -195,8 +217,30 @@ function renderOrganization(text: string, managerName?: string | null) {
   )
 }
 
+function HeaderDetailTile({
+  label,
+  value,
+}: {
+  label: string
+  value: React.ReactNode
+}) {
+  return (
+    <div className="rounded-xl border bg-background px-3 py-2.5">
+      <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </div>
+      <div className="text-sm font-medium leading-snug">{value || "–"}</div>
+    </div>
+  )
+}
+
 type HeaderSignatureBlockProps = {
   label: string
+  note?: React.ReactNode
+  identityName?: string | null
+  identityEmail?: string | null
+  interactive?: boolean
+  signDisabledReason?: string
   value: ExitChecklistSignatureValue
   isLocked: boolean
   isAdmin: boolean
@@ -209,6 +253,11 @@ type HeaderSignatureBlockProps = {
 
 function HeaderSignatureBlock({
   label,
+  note,
+  identityName,
+  identityEmail,
+  interactive = true,
+  signDisabledReason,
   value,
   isLocked,
   isAdmin,
@@ -222,9 +271,13 @@ function HeaderSignatureBlock({
   const currentUserIsSigner =
     normalizeEmail(value.signedByEmail) === normalizeEmail(currentUserEmail)
 
-  const canRevoke = !isLocked && isSigned && (isAdmin || currentUserIsSigner)
+  const canRevoke =
+    interactive && !isLocked && isSigned && (isAdmin || currentUserIsSigner)
   const canSign =
-    !isLocked && !isSigned && Boolean(currentUserName || currentUserEmail)
+    interactive &&
+    !isLocked &&
+    !isSigned &&
+    Boolean(currentUserName || currentUserEmail)
 
   const signedAtDate = value.signedAt
     ? format(new Date(value.signedAt), "d.M.yyyy HH:mm")
@@ -232,16 +285,30 @@ function HeaderSignatureBlock({
 
   return (
     <div
-      className="flex flex-col rounded-md border p-3"
+      className={`flex flex-col rounded-md border bg-background p-3 ${
+        interactive ? "" : "opacity-60"
+      }`}
       style={{ minHeight: "130px" }}
     >
       <Label className="mb-2 text-sm font-medium">{label}</Label>
 
+      {identityName && (
+        <div className="mb-2 rounded-md bg-muted/50 px-3 py-2 text-xs">
+          <div className="font-semibold text-foreground">{identityName}</div>
+          {identityEmail && (
+            <div className="text-muted-foreground">{identityEmail}</div>
+          )}
+        </div>
+      )}
+
       <div style={{ minHeight: "52px" }} className="flex-1">
         {isSigned ? (
           <div className="rounded-md bg-muted/50 px-3 py-2 text-sm">
-            <div className="font-medium">
+            <div className="font-semibold text-foreground">
               {value.signedByName ?? "Podepsáno"}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Elektronicky podepsáno
             </div>
             <div className="text-xs text-muted-foreground">{signedAtDate}</div>
           </div>
@@ -264,6 +331,8 @@ function HeaderSignatureBlock({
               variant="outline"
               className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs"
               onClick={onSign}
+              disabled={Boolean(signDisabledReason)}
+              title={signDisabledReason}
             >
               <Check className="size-3 shrink-0" />
               <span className="text-left">Podepsat</span>
@@ -276,6 +345,8 @@ function HeaderSignatureBlock({
                 variant="outline"
                 className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs text-muted-foreground"
                 onClick={onSignBehalf}
+                disabled={Boolean(signDisabledReason)}
+                title={signDisabledReason}
               >
                 <Check className="size-3 shrink-0" />
                 <span className="text-left">Podepsat v zastoupení</span>
@@ -305,6 +376,8 @@ function HeaderSignatureBlock({
           </>
         )}
       </div>
+
+      {note}
     </div>
   )
 }
@@ -321,11 +394,11 @@ function TableSignatureCell({
   signedAt: string
 }) {
   return (
-    <div className="flex h-[68px] min-w-0 flex-col justify-center overflow-hidden">
+    <div className="flex h-[78px] min-w-0 flex-col justify-center overflow-hidden">
       {isSigned && !isMuted ? (
         <>
           <span
-            className="min-w-0 break-words text-sm font-medium leading-tight"
+            className="min-w-0 break-words text-sm font-semibold leading-tight text-foreground"
             style={{
               display: "-webkit-box",
               WebkitBoxOrient: "vertical",
@@ -336,7 +409,10 @@ function TableSignatureCell({
           >
             {signedByName}
           </span>
-          <span className="mt-1 truncate text-xs text-muted-foreground">
+          <span className="mt-1 truncate text-[11px] text-muted-foreground">
+            Elektronicky podepsáno
+          </span>
+          <span className="truncate text-[11px] text-muted-foreground">
             {signedAt}
           </span>
         </>
@@ -352,12 +428,14 @@ function TableSignatureCell({
 function TableActionCell({
   showSignButton,
   showRevokeButton,
+  isOwnRow,
   onSign,
   onSignBehalf,
   onRevoke,
 }: {
   showSignButton: boolean
   showRevokeButton: boolean
+  isOwnRow?: boolean
   onSign: () => void
   onSignBehalf: () => void
   onRevoke: () => void
@@ -370,7 +448,7 @@ function TableActionCell({
             type="button"
             size="sm"
             variant="outline"
-            className="h-8 w-full justify-start gap-1 px-2 text-xs"
+            className="h-8 w-full justify-start gap-1 px-1.5 text-xs"
             onClick={onSign}
           >
             <Check className="size-3 shrink-0" />
@@ -381,7 +459,11 @@ function TableActionCell({
             type="button"
             size="sm"
             variant="outline"
-            className="h-8 w-full justify-start gap-1 px-2 text-xs text-muted-foreground"
+            className={`h-8 w-full justify-start gap-1 px-1.5 text-xs ${
+              isOwnRow
+                ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                : "text-muted-foreground"
+            }`}
             onClick={onSignBehalf}
           >
             <Check className="size-3 shrink-0" />
@@ -498,6 +580,7 @@ export function ExitChecklistForm({
   onDirtyChange,
   onSaved,
   externalSaveTrigger,
+  onRequestSave,
 }: Props) {
   const { data: session } = useSession()
 
@@ -510,15 +593,17 @@ export function ExitChecklistForm({
   const [assets, setAssets] = useState<ExitAssetItem[]>(
     initialData.assets ?? []
   )
-  const [conflictOfInterest, setConflictOfInterest] = useState(
-    initialData.conflictOfInterest ?? false
+  const [noAssets, setNoAssets] = useState(initialData.noAssets ?? false)
+  const [confirmClearAssetsOpen, setConfirmClearAssetsOpen] = useState(false)
+  const [conflictOfInterest, setConflictOfInterest] = useState<boolean | null>(
+    initialData.conflictOfInterest ?? null
   )
 
-  const [includeHandoverAgenda, setIncludeHandoverAgenda] = useState(
-    initialData.handover?.includeHandoverAgenda ?? false
-  )
   const [handoverOption1, setHandoverOption1] = useState(
     initialData.handover?.option1 ?? false
+  )
+  const [handoverOption1Note, setHandoverOption1Note] = useState(
+    initialData.handover?.option1Note ?? ""
   )
   const [handoverOption2, setHandoverOption2] = useState(
     initialData.handover?.option2 ?? false
@@ -533,18 +618,44 @@ export function ExitChecklistForm({
     handoverOption2TargetPositionNum,
     setHandoverOption2TargetPositionNum,
   ] = useState(initialData.handover?.option2TargetPositionNum ?? "")
+  const [handoverOption2TargetDepartment, setHandoverOption2TargetDepartment] =
+    useState(initialData.handover?.option2TargetDepartment ?? "")
+  const [handoverOption2TargetUnitName, setHandoverOption2TargetUnitName] =
+    useState(initialData.handover?.option2TargetUnitName ?? "")
   const [handoverOption3, setHandoverOption3] = useState(
     initialData.handover?.option3 ?? false
   )
   const [handoverOption3Reason, setHandoverOption3Reason] = useState(
     initialData.handover?.option3Reason ?? ""
   )
-  const [, setResponsibleParty] = useState<"KITT6" | "OSS_KT" | null>(
-    initialData.handover?.responsibleParty ?? null
-  )
   const [handoverRecipients, setHandoverRecipients] = useState<
     HandoverRecipient[]
   >(initialData.handover?.handoverRecipients ?? [])
+  const includeHandoverAgenda =
+    handoverOption1 || handoverOption2 || handoverOption3
+  const assetsComplete = noAssets || assets.length > 0
+  const handoverChoiceReady =
+    handoverOption1 ||
+    (handoverOption2 &&
+      Boolean(
+        handoverOption2Target.trim() || handoverOption2TargetPositionNum.trim()
+      )) ||
+    (handoverOption3 &&
+      Boolean(handoverOption3Reason.trim()) &&
+      handoverRecipients.length > 0)
+  const handoverSignReady = includeHandoverAgenda && handoverChoiceReady
+  const handoverSignBlockedReason = !includeHandoverAgenda
+    ? "Nejdřív v sekci C vyberte způsob předání agendy."
+    : !handoverChoiceReady
+      ? handoverOption2
+        ? "Nejdřív vyberte cílové funkční místo pro předání agendy."
+        : !handoverOption3Reason.trim()
+          ? "Nejdřív vyplňte důvod, proč agenda zatím zůstává na neobsazeném funkčním místě."
+          : "Nejdřív vyplňte, kdo za dokumenty odpovídá."
+      : undefined
+  const [, setResponsibleParty] = useState<"KITT6" | "OSS_KT" | null>(
+    initialData.handover?.responsibleParty ?? null
+  )
 
   const [handoverSendHistory, setHandoverSendHistory] = useState<
     HandoverSendHistoryEntry[]
@@ -579,12 +690,30 @@ export function ExitChecklistForm({
     useState<ExitChecklistSignatureValue>(
       initialData.handoverManagerSignature ?? emptySignature()
     )
+  const [assetsEditedByHR, setAssetsEditedByHR] = useState(
+    initialData.assetsEditedByHR ?? null
+  )
+  const [handoverEditedByHR, setHandoverEditedByHR] = useState(
+    initialData.handoverEditedByHR ?? null
+  )
 
   const [managerName, setManagerName] = useState<string>(
     initialData.managerName ?? ""
   )
   const [managerEmail, setManagerEmail] = useState<string>(
     initialData.managerEmail ?? ""
+  )
+  const [managerPosition, setManagerPosition] = useState<string>(
+    initialData.managerPosition ?? ""
+  )
+  const [managerDepartment, setManagerDepartment] = useState<string>(
+    initialData.managerDepartment ?? ""
+  )
+  const [sectionBResponsible, setSectionBResponsible] = useState(
+    initialData.sectionBResponsible ?? null
+  )
+  const [kitt6OptionContact, setKitt6OptionContact] = useState(
+    initialData.kitt6OptionContact ?? null
   )
   const [managerLoading, setManagerLoading] = useState(false)
   const [managerLoadError, setManagerLoadError] = useState<string | null>(null)
@@ -601,7 +730,6 @@ export function ExitChecklistForm({
   const [dirty, setDirty] = useState(false)
   const dirtyRef = useRef(false)
   const [saving, setSaving] = useState(false)
-  const [sendingHandoverInfo, setSendingHandoverInfo] = useState(false)
   const [lastSaveTrigger, setLastSaveTrigger] = useState<number | undefined>(
     externalSaveTrigger
   )
@@ -611,16 +739,22 @@ export function ExitChecklistForm({
     title: "",
     message: "",
   })
-  const [handoverSendDialogOpen, setHandoverSendDialogOpen] = useState(false)
-  const [handoverSendDialogMode, setHandoverSendDialogMode] = useState<
-    "first-send" | "resend"
-  >("first-send")
   const [sendPdfDialogOpen, setSendPdfDialogOpen] = useState(false)
+  const [pendingDirtyAction, setPendingDirtyAction] = useState<
+    { type: "generate" } | { type: "send" } | null
+  >(null)
   const [pdfRecipientName, setPdfRecipientName] = useState("")
   const [pdfRecipientEmail, setPdfRecipientEmail] = useState("")
   const [pdfMessage, setPdfMessage] = useState("")
   const [sendingPdf, setSendingPdf] = useState(false)
   const [pdfPickerOpen, setPdfPickerOpen] = useState(false)
+  const [foreignSignTarget, setForeignSignTarget] = useState<{
+    key: ExitChecklistItem["key"]
+    behalf: boolean
+  } | null>(null)
+  const [pendingSaveAction, setPendingSaveAction] = useState<
+    (() => void) | null
+  >(null)
 
   function handlePdfPersonSelected(employee: EmployeeItem) {
     setPdfRecipientName(
@@ -639,6 +773,7 @@ export function ExitChecklistForm({
   const resolvedOffboardingId = offboardingId ?? initialData.offboardingId
   const role = session?.user.role ?? "USER"
   const isAdmin = role === "ADMIN" || role === "HR" || role === "IT"
+  const canOverrideOthersSignature = isInternalMode && isAdmin
   const canInvite =
     isInternalMode && isAdmin && Boolean(resolvedOffboardingId) && !isLocked
 
@@ -675,8 +810,88 @@ export function ExitChecklistForm({
   const currentUserEmail = session?.user?.email ?? ""
   const currentUserEmailNormalized = normalizeEmail(currentUserEmail)
 
-  const isPrivilegedRole = role !== "USER"
-  const signatureRecipients = initialData.signatureRecipients ?? []
+  const isEmployeeVisitor =
+    !isInternalMode &&
+    Boolean(initialData.employeeEmail) &&
+    currentUserEmailNormalized === normalizeEmail(initialData.employeeEmail)
+
+  const signatureRecipients = useMemo(
+    () => initialData.signatureRecipients ?? [],
+    [initialData.signatureRecipients]
+  )
+
+  function isVisitorOrSubstituteFor(targetEmail: string | null | undefined) {
+    if (!targetEmail) return false
+    const targetEmailNormalized = normalizeEmail(targetEmail)
+    if (currentUserEmailNormalized === targetEmailNormalized) return true
+
+    const targetKey = recipientIdentityKey({
+      email: targetEmailNormalized,
+      behalfLabel: undefined,
+    })
+    return signatureRecipients.some(
+      (recipient) =>
+        !recipient.revokedAt &&
+        recipient.substituteForKey === targetKey &&
+        normalizeEmail(recipient.email) === currentUserEmailNormalized
+    )
+  }
+
+  const isManagerVisitor =
+    !isInternalMode && isVisitorOrSubstituteFor(managerEmail)
+
+  const isSectionBResponsibleVisitor =
+    !isInternalMode &&
+    (isManagerVisitor || isVisitorOrSubstituteFor(sectionBResponsible?.email))
+
+  const assetsSignedByOther =
+    Boolean(signatures.issuer.signedAt) &&
+    normalizeEmail(signatures.issuer.signedByEmail) !==
+      currentUserEmailNormalized
+  const assetsFieldsLocked =
+    isLocked ||
+    isEmployeeVisitor ||
+    (assetsSignedByOther && !canOverrideOthersSignature)
+
+  const handoverSignedByOther =
+    Boolean(handoverManagerSignature.signedAt) &&
+    normalizeEmail(handoverManagerSignature.signedByEmail) !==
+      currentUserEmailNormalized
+  const handoverFieldsLocked =
+    isLocked ||
+    isEmployeeVisitor ||
+    (handoverSignedByOther && !canOverrideOthersSignature) ||
+    (!isInternalMode && !isManagerVisitor)
+
+  function markAssetsHrEdit() {
+    if (isInternalMode && isAdmin && assetsSignedByOther) {
+      setAssetsEditedByHR({
+        name: currentUserName || currentUserEmail,
+        email: currentUserEmail,
+        role,
+        at: new Date().toISOString(),
+      })
+    }
+  }
+
+  function markHandoverHrEdit() {
+    if (isInternalMode && isAdmin && handoverSignedByOther) {
+      setHandoverEditedByHR({
+        name: currentUserName || currentUserEmail,
+        email: currentUserEmail,
+        role,
+        at: new Date().toISOString(),
+      })
+    }
+  }
+
+  function hrEditRoleLabel(marker: { role?: string }) {
+    if (marker.role === "ADMIN") return "administrátorem"
+    if (marker.role === "IT") return "IT"
+    return "Personálním oddělením"
+  }
+
+  const isPrivilegedRole = isInternalMode && role !== "USER"
   const isCurrentUserAuthorizedSigner =
     isPrivilegedRole ||
     signatureRecipients.some(
@@ -703,8 +918,6 @@ export function ExitChecklistForm({
     [validHandoverRecipients]
   )
 
-  const handoverRecipientsWereSent = Boolean(handoverRecipientsSentAt)
-
   const displayedHandoverSendHistory = useMemo(() => {
     return [...handoverSendHistory].sort((a, b) => {
       const aTime = a.lastSentAt ? new Date(a.lastSentAt).getTime() : 0
@@ -713,14 +926,6 @@ export function ExitChecklistForm({
       return bTime - aTime
     })
   }, [handoverSendHistory])
-
-  const canSendHandoverInfo =
-    Boolean(resolvedOffboardingId) &&
-    Boolean(currentUserEmail) &&
-    !isLocked &&
-    includeHandoverAgenda &&
-    handoverOption3 &&
-    validHandoverRecipients.length > 0
 
   const cleanHandoverOption2Target = useMemo(
     () =>
@@ -735,9 +940,16 @@ export function ExitChecklistForm({
     () =>
       formatHandoverPositionLabel(
         handoverOption2TargetPositionNum,
-        handoverOption2Target
+        handoverOption2Target,
+        handoverOption2TargetDepartment,
+        handoverOption2TargetUnitName
       ),
-    [handoverOption2Target, handoverOption2TargetPositionNum]
+    [
+      handoverOption2Target,
+      handoverOption2TargetPositionNum,
+      handoverOption2TargetDepartment,
+      handoverOption2TargetUnitName,
+    ]
   )
 
   const initialDataIdentity = useMemo(
@@ -771,11 +983,10 @@ export function ExitChecklistForm({
     setLockedAt(initialData.lockedAt ?? null)
     setItems(mergeItemsWithConfig(initialData.items ?? []))
     setAssets(initialData.assets ?? [])
-    setConflictOfInterest(initialData.conflictOfInterest ?? false)
-    setIncludeHandoverAgenda(
-      initialData.handover?.includeHandoverAgenda ?? false
-    )
+    setNoAssets(initialData.noAssets ?? false)
+    setConflictOfInterest(initialData.conflictOfInterest ?? null)
     setHandoverOption1(initialData.handover?.option1 ?? false)
+    setHandoverOption1Note(initialData.handover?.option1Note ?? "")
     setHandoverOption2(initialData.handover?.option2 ?? false)
     setHandoverOption2Target(
       cleanPositionName(
@@ -785,6 +996,12 @@ export function ExitChecklistForm({
     )
     setHandoverOption2TargetPositionNum(
       initialData.handover?.option2TargetPositionNum ?? ""
+    )
+    setHandoverOption2TargetDepartment(
+      initialData.handover?.option2TargetDepartment ?? ""
+    )
+    setHandoverOption2TargetUnitName(
+      initialData.handover?.option2TargetUnitName ?? ""
     )
     setHandoverOption3(initialData.handover?.option3 ?? false)
     setHandoverOption3Reason(initialData.handover?.option3Reason ?? "")
@@ -815,8 +1032,14 @@ export function ExitChecklistForm({
     setHandoverManagerSignature(
       initialData.handoverManagerSignature ?? emptySignature()
     )
+    setAssetsEditedByHR(initialData.assetsEditedByHR ?? null)
+    setHandoverEditedByHR(initialData.handoverEditedByHR ?? null)
     setManagerName(initialData.managerName ?? "")
     setManagerEmail(initialData.managerEmail ?? "")
+    setManagerPosition(initialData.managerPosition ?? "")
+    setManagerDepartment(initialData.managerDepartment ?? "")
+    setSectionBResponsible(initialData.sectionBResponsible ?? null)
+    setKitt6OptionContact(initialData.kitt6OptionContact ?? null)
     markClean()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialDataIdentity])
@@ -826,7 +1049,7 @@ export function ExitChecklistForm({
     if (externalSaveTrigger === lastSaveTrigger) return
     setLastSaveTrigger(externalSaveTrigger)
     if (!dirtyRef.current) return
-    void handleSave(false)
+    requestSave(() => void handleSave(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalSaveTrigger])
 
@@ -882,6 +1105,8 @@ export function ExitChecklistForm({
 
       setManagerName(fullName)
       setManagerEmail(sup.email ?? "")
+      setManagerPosition(sup.position ?? "")
+      setManagerDepartment(sup.department ?? "")
       setManagerLoadError(null)
       markDirty()
     } catch {
@@ -913,6 +1138,15 @@ export function ExitChecklistForm({
         "error",
         "Nejste v seznamu příjemců",
         "Byli jste odebráni ze seznamu příjemců k podpisu tohoto výstupního listu. Požádejte Personální oddělení o opětovné přidání do seznamu."
+      )
+      return
+    }
+
+    if (key === "issuer" && !assetsComplete) {
+      showFeedback(
+        "error",
+        "Nelze podepsat",
+        "Nejdřív v sekci B vyplňte zapůjčený majetek, nebo zaškrtněte, že zaměstnanec žádný nemá."
       )
       return
     }
@@ -963,6 +1197,15 @@ export function ExitChecklistForm({
       return
     }
 
+    if (key === "issuer" && !assetsComplete) {
+      showFeedback(
+        "error",
+        "Nelze podepsat",
+        "Nejdřív v sekci B vyplňte zapůjčený majetek, nebo zaškrtněte, že zaměstnanec žádný nemá."
+      )
+      return
+    }
+
     const now = new Date().toISOString()
 
     setSignatures((prev) => {
@@ -1007,13 +1250,21 @@ export function ExitChecklistForm({
 
       const signerEmail = normalizeEmail(current.signedByEmail)
 
-      if (!isAdmin && signerEmail !== currentUserEmailNormalized) return prev
+      if (
+        !canOverrideOthersSignature &&
+        signerEmail !== currentUserEmailNormalized
+      )
+        return prev
 
       return {
         ...prev,
         [key]: emptySignature(),
       }
     })
+
+    if (key === "issuer") {
+      setAssetsEditedByHR(null)
+    }
 
     if (key === "manager") {
       setItems((prev) =>
@@ -1022,7 +1273,10 @@ export function ExitChecklistForm({
 
           const signerEmail = normalizeEmail(item.signedByEmail)
 
-          if (!isAdmin && signerEmail !== currentUserEmailNormalized) {
+          if (
+            !canOverrideOthersSignature &&
+            signerEmail !== currentUserEmailNormalized
+          ) {
             return item
           }
 
@@ -1051,17 +1305,7 @@ export function ExitChecklistForm({
     setItems((prev) =>
       prev.map((item) => {
         if (item.key !== key) return item
-
-        const signerEmail = normalizeEmail(item.signedByEmail)
-
-        if (
-          !isAdmin &&
-          signerEmail &&
-          signerEmail !== currentUserEmailNormalized
-        ) {
-          return item
-        }
-
+        if (item.signedAt) return item
         if (item.resolved === value) return item
 
         changed = true
@@ -1074,6 +1318,17 @@ export function ExitChecklistForm({
     )
 
     if (changed) markDirty()
+  }
+
+  function updateItemNote(key: ExitChecklistItem["key"], value: string) {
+    if (isLocked || signingDisabledKeys.includes(key)) return
+
+    setItems((prev) =>
+      prev.map((item) =>
+        item.key === key && !item.signedAt ? { ...item, note: value } : item
+      )
+    )
+    markDirty()
   }
 
   function signRow(key: ExitChecklistItem["key"]) {
@@ -1185,7 +1440,11 @@ export function ExitChecklistForm({
     if (!target?.signedAt) return
 
     const signerEmail = normalizeEmail(target.signedByEmail)
-    if (!isAdmin && signerEmail !== currentUserEmailNormalized) return
+    if (
+      !canOverrideOthersSignature &&
+      signerEmail !== currentUserEmailNormalized
+    )
+      return
 
     setItems((prev) =>
       prev.map((item) =>
@@ -1209,7 +1468,10 @@ export function ExitChecklistForm({
 
         const managerSignerEmail = normalizeEmail(current.signedByEmail)
 
-        if (!isAdmin && managerSignerEmail !== currentUserEmailNormalized) {
+        if (
+          !canOverrideOthersSignature &&
+          managerSignerEmail !== currentUserEmailNormalized
+        ) {
           return prev
         }
 
@@ -1225,6 +1487,7 @@ export function ExitChecklistForm({
 
   function signHandoverManagerSignature(behalf = false) {
     if (isLocked || (!currentUserName && !currentUserEmail)) return
+    if (!isInternalMode && !isManagerVisitor) return
 
     if (!isCurrentUserAuthorizedSigner) {
       showFeedback(
@@ -1232,6 +1495,11 @@ export function ExitChecklistForm({
         "Nejste v seznamu příjemců",
         "Byli jste odebráni ze seznamu příjemců k podpisu tohoto výstupního listu. Požádejte Personální oddělení o opětovné přidání do seznamu."
       )
+      return
+    }
+
+    if (!handoverSignReady) {
+      showFeedback("error", "Nelze podepsat", handoverSignBlockedReason ?? "")
       return
     }
 
@@ -1254,22 +1522,28 @@ export function ExitChecklistForm({
 
   function revokeHandoverManagerSignature() {
     if (isLocked) return
+    if (!isInternalMode && !isManagerVisitor) return
 
     setHandoverManagerSignature((prev) => {
       if (!prev.signedAt) return prev
 
       const signerEmail = normalizeEmail(prev.signedByEmail)
 
-      if (!isAdmin && signerEmail !== currentUserEmailNormalized) return prev
+      if (
+        !canOverrideOthersSignature &&
+        signerEmail !== currentUserEmailNormalized
+      )
+        return prev
 
       return emptySignature()
     })
 
+    setHandoverEditedByHR(null)
     markDirty()
   }
 
   function addAssetRow() {
-    if (isLocked) return
+    if (assetsFieldsLocked) return
 
     setAssets((prev) => [
       ...prev,
@@ -1280,6 +1554,7 @@ export function ExitChecklistForm({
       },
     ])
 
+    markAssetsHrEdit()
     markDirty()
   }
 
@@ -1288,23 +1563,26 @@ export function ExitChecklistForm({
     field: "subject" | "inventoryNumber",
     value: string
   ) {
-    if (isLocked) return
+    if (assetsFieldsLocked) return
 
     setAssets((prev) =>
       prev.map((a) => (a.id === id ? { ...a, [field]: value } : a))
     )
 
+    markAssetsHrEdit()
     markDirty()
   }
 
   function removeAsset(id: string) {
-    if (isLocked) return
+    if (assetsFieldsLocked) return
 
     setAssets((prev) => prev.filter((a) => a.id !== id))
+    markAssetsHrEdit()
     markDirty()
   }
 
   function addRecipientManually() {
+    if (handoverFieldsLocked) return
     setNewRecipientError(null)
 
     const name = newRecipientName.trim()
@@ -1346,50 +1624,8 @@ export function ExitChecklistForm({
     setNewRecipientEmail("")
     setNewRecipientPersonalNumber("")
     setNewRecipientDepartment("")
+    markHandoverHrEdit()
     markDirty()
-  }
-
-  function openHandoverSendDialog() {
-    if (!resolvedOffboardingId || !currentUserEmail) {
-      showFeedback(
-        "error",
-        "Odeslání není dostupné",
-        "Informace může odeslat pouze přihlášený uživatel s oprávněním k výstupnímu listu."
-      )
-      return
-    }
-
-    if (isLocked) {
-      showFeedback(
-        "error",
-        "Výstupní list je uzamčený",
-        "Po uzamčení už nelze odesílat informace příjemcům předávané agendy."
-      )
-      return
-    }
-
-    if (!includeHandoverAgenda || !handoverOption3) {
-      showFeedback(
-        "error",
-        "Předávaná agenda není připravena",
-        "Nejdříve zaškrtněte možnost „Zůstává zatím na neobsazeném funkčním místě“ a doplňte osobu do pole „Za dokumenty odpovídá“."
-      )
-      return
-    }
-
-    if (validHandoverRecipients.length === 0) {
-      showFeedback(
-        "error",
-        "Chybí příjemci",
-        "Přidejte alespoň jednoho příjemce s platným e-mailem."
-      )
-      return
-    }
-
-    setHandoverSendDialogMode(
-      handoverRecipientsWereSent ? "resend" : "first-send"
-    )
-    setHandoverSendDialogOpen(true)
   }
 
   async function handleSendHandoverRecipientInfo(force = false) {
@@ -1403,8 +1639,6 @@ export function ExitChecklistForm({
     }
 
     try {
-      setSendingHandoverInfo(true)
-
       const res = await fetch(
         `/api/odchody/${resolvedOffboardingId}/exit-checklist/handover-recipients/send`,
         {
@@ -1419,6 +1653,8 @@ export function ExitChecklistForm({
               option2: handoverOption2,
               option2Target: cleanHandoverOption2Target,
               option2TargetPositionNum: handoverOption2TargetPositionNum,
+              option2TargetDepartment: handoverOption2TargetDepartment,
+              option2TargetUnitName: handoverOption2TargetUnitName,
               option3: handoverOption3,
               option3Reason: handoverOption3Reason,
               responsibleParty: null,
@@ -1436,9 +1672,7 @@ export function ExitChecklistForm({
 
       const json = await res.json().catch(() => null)
 
-      if (res.status === 409 && json?.code === "ALREADY_SENT") {
-        setHandoverSendDialogMode("resend")
-        setHandoverSendDialogOpen(true)
+      if (res.status === 409 && json?.code === "ALREADY_SENT" && !force) {
         return
       }
 
@@ -1523,7 +1757,6 @@ export function ExitChecklistForm({
       setHandoverRecipientsSentByEmail(sentByEmail)
       setHandoverRecipientsSentHash(sentHash)
       setHandoverRecipientsSentCount(sentCount)
-      setHandoverSendDialogOpen(false)
 
       showFeedback(
         "success",
@@ -1531,15 +1764,49 @@ export function ExitChecklistForm({
         `Informace o předávané agendě byly odeslány pro ${validHandoverRecipients.length} osobu/osob.`
       )
     } catch (err) {
-      showFeedback(
-        "error",
-        "Chyba při odesílání",
-        err instanceof Error
-          ? err.message
-          : "Došlo k neočekávané chybě při odesílání."
+      console.warn(
+        "[EXIT-CHECKLIST] Informace o předávané agendě se nepodařilo odeslat:",
+        err
       )
-    } finally {
-      setSendingHandoverInfo(false)
+    }
+  }
+
+  async function handleSendHandoverKitt6Info(force = false) {
+    if (!resolvedOffboardingId) return
+
+    try {
+      const res = await fetch(
+        `/api/odchody/${resolvedOffboardingId}/exit-checklist/handover-kitt6-notify`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ force }),
+        }
+      )
+
+      const json = await res.json().catch(() => null)
+
+      if (res.status === 409 && json?.code === "ALREADY_SENT" && !force) {
+        return
+      }
+
+      if (!res.ok) {
+        throw new Error(
+          json?.message ?? json?.error ?? "Nepodařilo se odeslat informaci."
+        )
+      }
+
+      showFeedback(
+        "success",
+        "Informace byla odeslána",
+        `Informace o předání agendy byla odeslána na ${json?.sentTo ?? "KITT6"}.`
+      )
+    } catch (err) {
+      console.warn(
+        "[EXIT-CHECKLIST] Informace pro KITT6 se nepodařilo odeslat:",
+        err
+      )
     }
   }
 
@@ -1563,10 +1830,15 @@ export function ExitChecklistForm({
           conflictOfInterest,
           managerEmail: managerEmail || null,
           managerName: managerName || null,
+          managerPosition: managerPosition || null,
+          managerDepartment: managerDepartment || null,
           handoverManagerSignature,
+          assetsEditedByHR,
+          handoverEditedByHR,
           items: items.map((i) => ({
             key: i.key,
             resolved: i.resolved,
+            note: i.note,
             signedByName: i.signedByName,
             signedByEmail: i.signedByEmail,
             signedAt: i.signedAt,
@@ -1576,12 +1848,16 @@ export function ExitChecklistForm({
             subject: a.subject,
             inventoryNumber: a.inventoryNumber,
           })),
+          noAssets,
           handover: {
             includeHandoverAgenda,
             option1: handoverOption1,
+            option1Note: handoverOption1Note,
             option2: handoverOption2,
             option2Target: cleanHandoverOption2Target,
             option2TargetPositionNum: handoverOption2TargetPositionNum,
+            option2TargetDepartment: handoverOption2TargetDepartment,
+            option2TargetUnitName: handoverOption2TargetUnitName,
             option3: handoverOption3,
             option3Reason: handoverOption3Reason,
             responsibleParty: null,
@@ -1616,8 +1892,9 @@ export function ExitChecklistForm({
       if (payload.data) {
         setItems(mergeItemsWithConfig(payload.data.items ?? []))
         setAssets(payload.data.assets ?? [])
+        setNoAssets(payload.data.noAssets ?? false)
         setLockedAt(payload.data.lockedAt ?? null)
-        setConflictOfInterest(payload.data.conflictOfInterest ?? false)
+        setConflictOfInterest(payload.data.conflictOfInterest ?? null)
         setSignatures({
           employee: payload.data.signatures?.employee ?? emptySignature(),
           manager: payload.data.signatures?.manager ?? emptySignature(),
@@ -1627,10 +1904,10 @@ export function ExitChecklistForm({
         setHandoverManagerSignature(
           payload.data.handoverManagerSignature ?? emptySignature()
         )
-        setIncludeHandoverAgenda(
-          payload.data.handover?.includeHandoverAgenda ?? false
-        )
+        setAssetsEditedByHR(payload.data.assetsEditedByHR ?? null)
+        setHandoverEditedByHR(payload.data.handoverEditedByHR ?? null)
         setHandoverOption1(payload.data.handover?.option1 ?? false)
+        setHandoverOption1Note(payload.data.handover?.option1Note ?? "")
         setHandoverOption2(payload.data.handover?.option2 ?? false)
         setHandoverOption2Target(
           cleanPositionName(
@@ -1640,6 +1917,12 @@ export function ExitChecklistForm({
         )
         setHandoverOption2TargetPositionNum(
           payload.data.handover?.option2TargetPositionNum ?? ""
+        )
+        setHandoverOption2TargetDepartment(
+          payload.data.handover?.option2TargetDepartment ?? ""
+        )
+        setHandoverOption2TargetUnitName(
+          payload.data.handover?.option2TargetUnitName ?? ""
         )
         setHandoverOption3(payload.data.handover?.option3 ?? false)
         setHandoverOption3Reason(payload.data.handover?.option3Reason ?? "")
@@ -1670,6 +1953,8 @@ export function ExitChecklistForm({
         )
         setManagerName(payload.data.managerName ?? "")
         setManagerEmail(payload.data.managerEmail ?? "")
+        setManagerPosition(payload.data.managerPosition ?? "")
+        setManagerDepartment(payload.data.managerDepartment ?? "")
         markClean()
 
         showFeedback(
@@ -1681,6 +1966,24 @@ export function ExitChecklistForm({
             ? "Formulář je uložený a uzamčený k dalším úpravám."
             : "Všechny změny a podpisy byly úspěšně zaznamenány."
         )
+
+        if (Boolean(payload.data.handoverManagerSignature?.signedAt)) {
+          if (
+            payload.data.handover?.option3 &&
+            (payload.data.handover?.handoverRecipients?.length ?? 0) > 0
+          ) {
+            void handleSendHandoverRecipientInfo()
+          } else if (
+            payload.data.handover?.option2 &&
+            Boolean(
+              payload.data.handover?.option2Target ||
+                payload.data.handover?.option2TargetPositionNum
+            ) &&
+            !payload.data.handover?.handoverNotifiedAt
+          ) {
+            void handleSendHandoverKitt6Info()
+          }
+        }
 
         onSaved?.(payload.data, options?.requestClose)
         return true
@@ -1713,14 +2016,28 @@ export function ExitChecklistForm({
     )
   }
 
-  async function requestGeneratePdf() {
+  function requestGeneratePdf() {
     if (dirtyRef.current && !isLocked) {
-      const saved = await handleSave(false)
-
-      if (!saved) return
+      setPendingDirtyAction({ type: "generate" })
+      return
     }
 
     openPdf()
+  }
+
+  async function confirmDirtySaveAndProceed() {
+    const action = pendingDirtyAction
+    setPendingDirtyAction(null)
+    if (!action) return
+
+    const saved = await handleSave(false)
+    if (!saved) return
+
+    if (action.type === "generate") {
+      openPdf()
+    } else if (action.type === "send") {
+      await sendPdfNow()
+    }
   }
 
   async function handleUnlock() {
@@ -1779,7 +2096,7 @@ export function ExitChecklistForm({
     }
   }
 
-  async function handleSendPdf() {
+  function handleSendPdf() {
     if (!resolvedOffboardingId || !canSendPdf) return
 
     const email = pdfRecipientEmail.trim().toLowerCase()
@@ -1789,14 +2106,21 @@ export function ExitChecklistForm({
       return
     }
 
+    if (dirtyRef.current && !isLocked) {
+      setPendingDirtyAction({ type: "send" })
+      return
+    }
+
+    void sendPdfNow()
+  }
+
+  async function sendPdfNow() {
+    if (!resolvedOffboardingId || !canSendPdf) return
+
+    const email = pdfRecipientEmail.trim().toLowerCase()
+
     try {
       setSendingPdf(true)
-
-      if (dirtyRef.current && !isLocked) {
-        const saved = await handleSave(false)
-
-        if (!saved) return
-      }
 
       const res = await fetch(
         `/api/odchody/${resolvedOffboardingId}/exit-checklist/send-pdf`,
@@ -1844,12 +2168,197 @@ export function ExitChecklistForm({
   const pdfButtonLabel =
     dirty && !isLocked ? "Uložit a vygenerovat PDF" : "Vygenerovat PDF"
 
+  const ownRowKeys = useMemo(() => {
+    const keys = new Set<string>()
+    if (isInternalMode || !currentUserEmailNormalized) return keys
+
+    EXIT_CHECKLIST_SIGNATORIES.forEach((signatory) => {
+      if (
+        signatory.emails.some(
+          (email) => normalizeEmail(email) === currentUserEmailNormalized
+        )
+      ) {
+        signatory.rowKeys.forEach((key) => keys.add(key))
+      }
+    })
+
+    if (
+      LAW_SIGNATORY.emails.some(
+        (email) => normalizeEmail(email) === currentUserEmailNormalized
+      )
+    ) {
+      LAW_SIGNATORY.rowKeys.forEach((key) => keys.add(key))
+    }
+
+    signatureRecipients.forEach((recipient) => {
+      if (
+        !recipient.revokedAt &&
+        normalizeEmail(recipient.email) === currentUserEmailNormalized
+      ) {
+        ;(recipient.rowKeys ?? []).forEach((key) => keys.add(key))
+      }
+    })
+
+    return keys
+  }, [isInternalMode, currentUserEmailNormalized, signatureRecipients])
+
+  const remainingOwnRowsCount = items.filter(
+    (item) =>
+      ownRowKeys.has(item.key) &&
+      !item.signedAt &&
+      !signingDisabledKeys.includes(item.key)
+  ).length
+
+  function buildSaveSummary(): { sendLines: string[]; missingLines: string[] } {
+    const sendLines: string[] = []
+
+    if (Boolean(handoverManagerSignature.signedAt)) {
+      const nextOption2Target = handoverOption2
+        ? cleanHandoverOption2Target || handoverOption2TargetPositionNum
+        : ""
+      const previousNotifiedTo = initialData.handover?.handoverNotifiedTo
+      const previousNotifiedTarget =
+        initialData.handover?.handoverNotifiedTarget ?? null
+
+      if (
+        previousNotifiedTo &&
+        (!handoverOption2 || nextOption2Target !== previousNotifiedTarget)
+      ) {
+        sendLines.push(
+          `Kontaktu KITT6 (${previousNotifiedTo}) bude oznámeno, že dříve zvolené předání agendy je zrušené.`
+        )
+      }
+
+      if (
+        handoverOption2 &&
+        Boolean(nextOption2Target) &&
+        (!previousNotifiedTo || nextOption2Target !== previousNotifiedTarget)
+      ) {
+        sendLines.push(
+          `Informace o předání agendy na jiné funkční místo bude odeslána na kontakt KITT6.`
+        )
+      }
+
+      const previousSentEmails = (
+        initialData.handover?.handoverSendHistory ?? []
+      ).filter((entry) => (entry.sentCount ?? 0) > 0 && !entry.cancelledAt)
+      const nextRecipientEmails = new Set(
+        handoverOption3
+          ? validHandoverRecipients.map((r) => normalizeEmail(r.email))
+          : []
+      )
+      const droppedRecipients = previousSentEmails.filter(
+        (entry) => !nextRecipientEmails.has(normalizeEmail(entry.email))
+      )
+
+      if (droppedRecipients.length > 0) {
+        sendLines.push(
+          `Osobám, které už dříve dostaly informaci o odpovědnosti za dokumenty, ale v nové volbě už nejsou (${droppedRecipients.map((r) => r.name || r.email).join(", ")}), bude oznámeno zrušení.`
+        )
+      }
+
+      if (handoverOption3 && validHandoverRecipients.length > 0) {
+        const previousSentEmailSet = new Set(
+          previousSentEmails.map((entry) => normalizeEmail(entry.email))
+        )
+        const newlyAdded = validHandoverRecipients.filter(
+          (r) => !previousSentEmailSet.has(normalizeEmail(r.email))
+        )
+
+        if (newlyAdded.length > 0) {
+          sendLines.push(
+            `Informace o odpovědnosti za dokumenty bude odeslána: ${newlyAdded.map((r) => r.name || r.email).join(", ")}.`
+          )
+        }
+      }
+    }
+
+    const missingLines: string[] = []
+
+    if (!isInternalMode && remainingOwnRowsCount > 0) {
+      missingLines.push(
+        `Ještě máte ${remainingOwnRowsCount} ${remainingOwnRowsCount === 1 ? "nepodepsanou položku" : "nepodepsané položky"} ve výstupním listu – dokud je nepodepíšete, budou vám dál chodit automatické připomínky.`
+      )
+    }
+
+    return { sendLines, missingLines }
+  }
+
+  function requestSave(action: () => void) {
+    setPendingSaveAction(() => action)
+  }
+
+  function requestSignRow(key: ExitChecklistItem["key"], behalf: boolean) {
+    if (!isInternalMode && ownRowKeys.size > 0 && !ownRowKeys.has(key)) {
+      setForeignSignTarget({ key, behalf })
+      return
+    }
+    if (behalf) signRowOnBehalf(key)
+    else signRow(key)
+  }
+
+  function confirmForeignSign() {
+    if (!foreignSignTarget) return
+    const { key, behalf } = foreignSignTarget
+    setForeignSignTarget(null)
+    if (behalf) signRowOnBehalf(key)
+    else signRow(key)
+  }
+
+  const completion = getExitChecklistCompletionState({
+    ...initialData,
+    items,
+    assets,
+    noAssets,
+    conflictOfInterest,
+    handover: {
+      ...initialData.handover,
+      includeHandoverAgenda,
+      option1: handoverOption1,
+      option2: handoverOption2,
+      option2Target: cleanHandoverOption2Target,
+      option2TargetPositionNum: handoverOption2TargetPositionNum,
+      option2TargetDepartment: handoverOption2TargetDepartment,
+      option2TargetUnitName: handoverOption2TargetUnitName,
+      option3: handoverOption3,
+      option3Reason: handoverOption3Reason,
+    },
+    handoverManagerSignature,
+    signatures,
+  })
+
+  const signedEmails = useMemo(() => {
+    const emails = new Set<string>()
+    items.forEach((item) => {
+      if (item.signedByEmail) emails.add(normalizeEmail(item.signedByEmail))
+    })
+    ;[signatures.employee, signatures.manager, signatures.issuer].forEach(
+      (value) => {
+        if (value.signedByEmail) emails.add(normalizeEmail(value.signedByEmail))
+      }
+    )
+    if (handoverManagerSignature.signedByEmail) {
+      emails.add(normalizeEmail(handoverManagerSignature.signedByEmail))
+    }
+    return Array.from(emails)
+  }, [items, signatures, handoverManagerSignature])
+
   const isLockedBadge = isLocked ? (
-    <Badge variant="outline" className="flex items-center gap-1">
+    <Badge
+      variant="outline"
+      className="flex items-center gap-1 border-emerald-200 bg-emerald-50 text-emerald-800"
+    >
       <Lock className="size-3" /> Uzamčeno k úpravám
     </Badge>
   ) : (
-    <Badge variant="secondary">
+    <Badge
+      variant="outline"
+      className={
+        isInternalMode
+          ? "border-amber-200 bg-amber-50 text-amber-800"
+          : "border-sky-200 bg-sky-50 text-sky-800"
+      }
+    >
       {isInternalMode ? "Rozpracováno" : "Podpisový režim"}
     </Badge>
   )
@@ -1897,15 +2406,349 @@ export function ExitChecklistForm({
         </DialogContent>
       </Dialog>
 
-      <Card>
+      {isInternalMode && (
+        <div className="overflow-hidden rounded-2xl border bg-background shadow-sm">
+          <div className="border-b bg-background p-5">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-lg font-semibold tracking-tight">
+                Správa výstupního listu
+              </h3>
+
+              {isLockedBadge}
+
+              <Badge
+                variant="outline"
+                className={
+                  completion.percent === 100
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                    : "border-amber-200 bg-amber-50 text-amber-800"
+                }
+              >
+                {completion.percent} % dokončeno
+              </Badge>
+
+              <Badge
+                variant="outline"
+                className={
+                  conflictOfInterest === true
+                    ? "border-amber-200 bg-amber-50 text-amber-800"
+                    : conflictOfInterest === false
+                      ? "text-muted-foreground"
+                      : "border-red-200 bg-red-50 text-red-700"
+                }
+              >
+                {conflictOfInterest === true
+                  ? "Střet zájmů: Ano – Právní odbor podepisuje"
+                  : conflictOfInterest === false
+                    ? "Střet zájmů: Ne"
+                    : "Střet zájmů: nerozhodnuto"}
+              </Badge>
+
+              <Badge
+                variant="outline"
+                className={
+                  initialData.signatureRecipientsSentAt
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                    : "border-amber-200 bg-amber-50 text-amber-800"
+                }
+              >
+                {initialData.signatureRecipientsSentAt
+                  ? "Odesláno k podpisu"
+                  : "Čeká na odeslání k podpisu"}
+              </Badge>
+
+              {!isInternalMode && ownRowKeys.size > 0 && (
+                <Badge
+                  variant="outline"
+                  className={
+                    remainingOwnRowsCount === 0
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                      : "border-amber-200 bg-amber-50 text-amber-800"
+                  }
+                >
+                  {remainingOwnRowsCount === 0
+                    ? "0 – vše podepsáno"
+                    : `Zbývá ${remainingOwnRowsCount} ${
+                        remainingOwnRowsCount === 1 ? "řádek" : "řádků"
+                      } k podpisu`}
+                </Badge>
+              )}
+            </div>
+
+            <p className="mt-2 text-sm text-muted-foreground">
+              Odeslání k podpisu, přehled osob k podpisu, PDF a historie.
+            </p>
+          </div>
+
+          <div className="space-y-4 p-5">
+            {canInvite && !initialData.signatureRecipientsSentAt && (
+              <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                <span>
+                  Seznam osob k podpisu ještě nebyl potvrzen a odeslán. Otevřete
+                  „Seznam a správa osob k podpisu“ níže a odešlete pozvánky
+                  vybraným osobám.
+                </span>
+              </div>
+            )}
+
+            {completion.missingSections.length > 0 && (
+              <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                <span>
+                  Nedokončeno: {completion.missingSections.join(", ")}.
+                </span>
+              </div>
+            )}
+
+            <div className="text-xs text-muted-foreground">
+              {isLocked
+                ? "Výstupní list je uzamčený. Lze vygenerovat PDF, odeslat PDF nebo jej odemknout pro úpravy."
+                : isInternalMode
+                  ? "Po uzamčení formuláře již nepůjde běžným uživatelům měnit."
+                  : "Výstupní list můžete doplnit, podepsat a uložit pod svým přihlášeným účtem."}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 border-t pt-4">
+              {canInvite && resolvedOffboardingId && (
+                <SignatureRecipientsDialog
+                  offboardingId={resolvedOffboardingId}
+                  employeeName={header.employeeName ?? ""}
+                  employeeEmail={header.employeeEmail ?? null}
+                  publicToken={initialData.publicToken ?? null}
+                  conflictOfInterest={conflictOfInterest}
+                  managerEmail={managerEmail || null}
+                  managerName={managerName || null}
+                  managerPosition={managerPosition || null}
+                  managerDepartment={managerDepartment || null}
+                  signedEmails={signedEmails}
+                  isLocked={isLocked}
+                  sectionBResponsible={sectionBResponsible}
+                  kitt6OptionContact={kitt6OptionContact}
+                  onManagerChange={(value) => {
+                    setManagerName(value.name)
+                    setManagerEmail(value.email)
+                    setManagerPosition(value.position ?? "")
+                    setManagerDepartment(value.department ?? "")
+                  }}
+                  onSectionBResponsibleChange={setSectionBResponsible}
+                  onKitt6ContactChange={setKitt6OptionContact}
+                  onConflictOfInterestChange={setConflictOfInterest}
+                />
+              )}
+
+              {canGeneratePdf && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={requestGeneratePdf}
+                  className="gap-1"
+                  disabled={saving || sendingPdf}
+                >
+                  <Printer className="size-4" /> {pdfButtonLabel}
+                </Button>
+              )}
+
+              {canSendPdf && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSendPdfDialogOpen(true)}
+                  className="gap-1"
+                  disabled={saving || sendingPdf}
+                >
+                  <Send className="size-4" /> Odeslat PDF
+                </Button>
+              )}
+
+              {canUnlock && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleUnlock()}
+                  disabled={saving}
+                  className="gap-1"
+                >
+                  <Undo2 className="size-4" />
+                  Odemknout pro úpravy
+                </Button>
+              )}
+
+              {!isLocked && (
+                <>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="bg-[#00847C] text-white hover:bg-[#0B6D73]"
+                    onClick={() =>
+                      requestSave(
+                        () => void handleSave(false, { requestClose: true })
+                      )
+                    }
+                    disabled={saving}
+                  >
+                    {saving ? "Ukládám…" : "Uložit"}
+                  </Button>
+
+                  {canLock && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-1 bg-background"
+                      onClick={() =>
+                        requestSave(
+                          () => void handleSave(true, { requestClose: true })
+                        )
+                      }
+                      disabled={saving || completion.percent < 100}
+                      title={
+                        completion.percent < 100
+                          ? "Nejdřív dokončete všechny sekce (viz Nedokončeno výše)"
+                          : undefined
+                      }
+                    >
+                      <Lock className="size-4" />
+                      Dokončit a uzamknout
+                    </Button>
+                  )}
+                </>
+              )}
+
+              {((isInternalMode && isAdmin) || isEmployeeVisitor) &&
+                resolvedOffboardingId && (
+                  <DocumentHistoryDialog
+                    title="Historie výstupního listu"
+                    fetchUrl={`/api/odchody/${resolvedOffboardingId}/exit-checklist/history`}
+                    actionLabel={exitChecklistEventActionLabel}
+                    trigger={
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1"
+                      >
+                        <HistoryIcon className="size-4" />
+                        Historie
+                      </Button>
+                    }
+                  />
+                )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <Card className="border-blue-200 bg-blue-50">
         <CardHeader>
-          <CardTitle className="flex items-center justify-between gap-2">
-            <span>Výstupní list</span>
-            {isLockedBadge}
+          <CardTitle className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xl font-semibold">Výstupní list</span>
+            <div className="flex flex-wrap items-center gap-2">
+              {isLockedBadge}
+              {!isInternalMode && (
+                <>
+                  <Badge
+                    variant="outline"
+                    className={
+                      completion.percent === 100
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                        : "border-amber-200 bg-amber-50 text-amber-800"
+                    }
+                  >
+                    {completion.percent} % dokončeno
+                  </Badge>
+                  <Badge
+                    variant="outline"
+                    className={
+                      conflictOfInterest === true
+                        ? "border-amber-200 bg-amber-50 text-amber-800"
+                        : conflictOfInterest === false
+                          ? "text-muted-foreground"
+                          : "border-red-200 bg-red-50 text-red-700"
+                    }
+                  >
+                    {conflictOfInterest === true
+                      ? "Střet zájmů: Ano"
+                      : conflictOfInterest === false
+                        ? "Střet zájmů: Ne"
+                        : "Střet zájmů: nerozhodnuto"}
+                  </Badge>
+                  {!isLocked && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="gap-1 bg-background"
+                      onClick={requestGeneratePdf}
+                    >
+                      <Printer className="size-4" />
+                      Stáhnout PDF
+                    </Button>
+                  )}
+                  {!isLocked && onRequestSave && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="gap-1 bg-[#00847C] text-white hover:bg-[#0B6D73]"
+                      onClick={onRequestSave}
+                      disabled={!dirty}
+                    >
+                      <Save className="size-4" />
+                      Uložit
+                    </Button>
+                  )}
+                </>
+              )}
+            </div>
           </CardTitle>
         </CardHeader>
 
         <CardContent className="space-y-6 text-sm">
+          {!isInternalMode && isEmployeeVisitor && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+              <span>
+                Než bude moct být vyrovnání závazků elektronicky podepsáno,
+                musíte fyzicky vrátit zapůjčený majetek, předat agendu a
+                vyrovnat případné závazky. Podepsat můžete pouze svoje pole
+                (Podpis zaměstnance) – ostatní pole a sekce vyplňují a
+                podepisují ostatní zúčastnění.
+              </span>
+            </div>
+          )}
+
+          {!isInternalMode && isManagerVisitor && (
+            <div className="flex items-start gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+              <Info className="mt-0.5 size-4 shrink-0" />
+              <span>
+                Jste vedoucí odboru u tohoto výstupního listu (případně jeho
+                zástupce). Zkontrolujte prosím všechny sekce
+                {!includeHandoverAgenda
+                  ? ", v sekci C vyberte způsob předání agendy"
+                  : ""}{" "}
+                a podepište ji – bez vyplnění a podpisu zůstane výstupní list
+                nekompletní.
+              </span>
+            </div>
+          )}
+
+          {!isInternalMode &&
+            isSectionBResponsibleVisitor &&
+            !assetsComplete && (
+              <div className="flex items-start gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+                <Info className="mt-0.5 size-4 shrink-0" />
+                <span>
+                  Jste odpovědná osoba za sekci B (vyrovnání majetku), nebo ji
+                  zastupujete. Prosím zkontrolujte a podepište vyrovnání
+                  majetku, dokud nebude vyplněné, bude výstupní list zůstávat
+                  nekompletní.
+                </span>
+              </div>
+            )}
+
           {!isInternalMode && !isCurrentUserAuthorizedSigner && (
             <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
@@ -1919,92 +2762,65 @@ export function ExitChecklistForm({
             </div>
           )}
 
-          <div className="grid gap-2 md:grid-cols-[1.5fr,1fr]">
-            <div>
-              <span className="font-medium text-muted-foreground">
-                Zaměstnanec:
-              </span>{" "}
-              {header.employeeName}
+          <div className="rounded-xl border bg-background px-4 py-3">
+            <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Zaměstnanec
             </div>
-            <div>
-              <span className="font-medium text-muted-foreground">
-                Osobní číslo:
-              </span>{" "}
-              {header.personalNumber ?? "–"}
+            <div className="text-lg font-semibold leading-snug">
+              {header.employeeName || "–"}
             </div>
           </div>
 
-          <div className="grid gap-2 md:grid-cols-[1.5fr,1fr]">
-            <div>
-              <span className="font-medium text-muted-foreground">
-                Odbor / oddělení:
-              </span>{" "}
-              {header.department} – {header.unitName}
-            </div>
-            <div>
-              <span className="font-medium text-muted-foreground">
-                Datum skončení:
-              </span>{" "}
-              {formattedDate || "–"}
-            </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <HeaderDetailTile
+              label="Osobní číslo"
+              value={header.personalNumber}
+            />
+            <HeaderDetailTile label="Datum skončení" value={formattedDate} />
+            <HeaderDetailTile label="Odbor" value={header.department} />
+            <HeaderDetailTile label="Oddělení" value={header.unitName} />
+            <HeaderDetailTile label="Pozice" value={header.positionName} />
+            <HeaderDetailTile label="Číslo funkce" value={header.positionNum} />
           </div>
 
-          <div className="grid gap-2 md:grid-cols-[1.5fr,1fr]">
-            <div>
-              <span className="font-medium text-muted-foreground">Pozice:</span>{" "}
-              {header.positionName || "–"}
-            </div>
-            <div>
-              <span className="font-medium text-muted-foreground">
-                Číslo funkce:
-              </span>{" "}
-              {header.positionNum || "–"}
-            </div>
-          </div>
-
-          {isInternalMode && !isLocked && (
-            <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
-              <Checkbox
-                id="conflictOfInterest"
-                checked={conflictOfInterest}
-                onCheckedChange={(checked) => {
-                  setConflictOfInterest(Boolean(checked))
-                  markDirty()
-                }}
-              />
-              <Label
-                htmlFor="conflictOfInterest"
-                className="cursor-pointer text-sm"
-              >
-                Obsahuje střet zájmů{" "}
+          {isInternalMode && (
+            <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <span>
+                Střet zájmů:{" "}
+                {conflictOfInterest === true
+                  ? "Ano – zahrnut řádek Právního odboru"
+                  : conflictOfInterest === false
+                    ? "Ne"
+                    : "nerozhodnuto"}
+              </span>
+              {!isLocked && (
                 <span className="text-xs font-normal text-muted-foreground">
-                  (aktivuje řádek Právního odboru k podpisu)
+                  Rozhodnutí proveďte v okně „Seznam a správa osob k podpisu“.
                 </span>
-              </Label>
-            </div>
-          )}
-
-          {isInternalMode && isLocked && conflictOfInterest && (
-            <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              Střet zájmů: zahrnut řádek Právního odboru
+              )}
             </div>
           )}
 
           <div className="grid items-stretch gap-4 border-t pt-4 md:grid-cols-2">
             <HeaderSignatureBlock
               label="Podpis zaměstnance"
+              identityName={initialData.employeeName}
+              identityEmail={initialData.employeeEmail}
               value={signatures.employee}
               isLocked={isLocked}
-              isAdmin={isAdmin}
+              isAdmin={canOverrideOthersSignature}
               currentUserName={currentUserName}
               currentUserEmail={currentUserEmail}
+              interactive={isInternalMode || isEmployeeVisitor}
               onSign={() => signHeaderSignature("employee")}
               onSignBehalf={() => signHeaderSignatureBehalf("employee")}
               onRevoke={() => revokeHeaderSignature("employee")}
             />
 
             <div
-              className="flex flex-col rounded-md border p-3"
+              className={`flex flex-col rounded-md border bg-background p-3 ${
+                isEmployeeVisitor ? "opacity-60" : ""
+              }`}
               style={{ minHeight: "130px" }}
             >
               <Label className="mb-2 text-sm font-medium">
@@ -2049,6 +2865,8 @@ export function ExitChecklistForm({
                     onSelect={(employee) => {
                       setManagerName(buildPersonFullName(employee))
                       setManagerEmail(employee.email ?? "")
+                      setManagerPosition(employee.positionName ?? "")
+                      setManagerDepartment(employee.department ?? "")
                       setManagerLoadError(null)
                       markDirty()
                     }}
@@ -2096,7 +2914,9 @@ export function ExitChecklistForm({
 
               {(isLocked || !isInternalMode) && managerName && (
                 <div className="mb-2 rounded-md bg-muted/50 px-3 py-2 text-xs">
-                  <div className="font-medium">{managerName}</div>
+                  <div className="font-semibold text-foreground">
+                    {managerName}
+                  </div>
                   {managerEmail && (
                     <div className="text-muted-foreground">{managerEmail}</div>
                   )}
@@ -2106,8 +2926,11 @@ export function ExitChecklistForm({
               <div style={{ minHeight: "52px" }} className="flex-1">
                 {signatures.manager.signedAt ? (
                   <div className="rounded-md bg-muted/50 px-3 py-2 text-sm">
-                    <div className="font-medium">
+                    <div className="font-semibold text-foreground">
                       {signatures.manager.signedByName ?? "Podepsáno"}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Elektronicky podepsáno
                     </div>
                     <div className="text-xs text-muted-foreground">
                       {format(
@@ -2128,6 +2951,8 @@ export function ExitChecklistForm({
                 style={{ minHeight: "70px" }}
               >
                 {!isLocked &&
+                  (isInternalMode || isManagerVisitor) &&
+                  !isEmployeeVisitor &&
                   !signatures.manager.signedAt &&
                   Boolean(currentUserName || currentUserEmail) && (
                     <>
@@ -2155,8 +2980,10 @@ export function ExitChecklistForm({
                   )}
 
                 {!isLocked &&
+                  (isInternalMode || isManagerVisitor) &&
+                  !isEmployeeVisitor &&
                   signatures.manager.signedAt &&
-                  (isAdmin ||
+                  (canOverrideOthersSignature ||
                     normalizeEmail(signatures.manager.signedByEmail) ===
                       currentUserEmailNormalized) && (
                     <Button
@@ -2175,59 +3002,77 @@ export function ExitChecklistForm({
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="bg-green-50">
         <CardHeader>
           <CardTitle className="text-base">
             A. Vyrovnání závazků zaměstnance k zaměstnavateli
           </CardTitle>
         </CardHeader>
 
-        <CardContent className="p-0 sm:p-6">
+        <CardContent className="bg-background p-0 sm:p-6">
           <div className="divide-y lg:hidden">
             {items.map((item) => {
               const isSigned = Boolean(item.signedAt)
               const signedAtDate = item.signedAt
                 ? format(new Date(item.signedAt), "d.M.yyyy HH:mm")
                 : ""
+              const isSigningDisabled = signingDisabledKeys.includes(item.key)
+              const isLawInfoGreyed = item.key === "lawInfo" && lawInfoGreyed
+              const isOwnRow = ownRowKeys.has(item.key)
               const currentUserIsSigner =
                 normalizeEmail(item.signedByEmail) ===
                 currentUserEmailNormalized
-              const isSigningDisabled = signingDisabledKeys.includes(item.key)
-              const isLawInfoGreyed = item.key === "lawInfo" && lawInfoGreyed
               const showSignButton =
-                !isLocked && !isSigned && !isSigningDisabled
+                !isLocked &&
+                !isSigned &&
+                !isSigningDisabled &&
+                !isEmployeeVisitor
               const showRevokeButton =
                 !isLocked &&
                 isSigned &&
                 !isSigningDisabled &&
                 !isLawInfoGreyed &&
-                (isAdmin || currentUserIsSigner)
+                !isEmployeeVisitor &&
+                (canOverrideOthersSignature || currentUserIsSigner)
+              const resolutionEditable =
+                !isLocked &&
+                !isSigningDisabled &&
+                !isSigned &&
+                !isEmployeeVisitor
 
               return (
                 <div
                   key={item.key}
                   className={`space-y-2 px-4 py-3 ${
                     isLawInfoGreyed ? "opacity-50" : ""
-                  }`}
+                  } ${isOwnRow ? "bg-emerald-50/40" : ""}`}
                 >
-                  <div className="text-xs">
+                  <div className="flex items-center gap-2 text-xs">
                     {renderOrganization(
                       item.organization,
                       item.key === "handoverProtocol" ? managerName : null
+                    )}
+                    {isOwnRow && (
+                      <Badge
+                        variant="outline"
+                        className="border-emerald-200 bg-emerald-50 text-[10px] text-emerald-800"
+                      >
+                        Vaše agenda
+                      </Badge>
                     )}
                   </div>
 
                   <div className="text-sm">{item.obligation}</div>
 
                   <div className="flex flex-col gap-2 pt-1 min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between">
-                    {!isLocked && !isSigningDisabled ? (
-                      <div className="inline-flex w-fit items-center gap-1 rounded-md bg-muted px-1 py-0.5 text-xs">
+                    {resolutionEditable ? (
+                      <div className="inline-flex w-fit items-center gap-2 rounded-md bg-muted px-1 py-0.5 text-[11px]">
                         <button
                           type="button"
                           className={`rounded px-2 py-0.5 ${
                             item.resolved === "YES"
                               ? "bg-green-600 text-white"
-                              : "hover:bg-green-100"
+                              : "bg-background hover:bg-green-100"
                           }`}
                           onClick={() => updateResolved(item.key, "YES")}
                         >
@@ -2238,7 +3083,7 @@ export function ExitChecklistForm({
                           className={`rounded px-2 py-0.5 ${
                             item.resolved === "NO"
                               ? "bg-red-600 text-white"
-                              : "hover:bg-red-100"
+                              : "bg-background hover:bg-red-100"
                           }`}
                           onClick={() => updateResolved(item.key, "NO")}
                         >
@@ -2265,7 +3110,7 @@ export function ExitChecklistForm({
                             size="sm"
                             variant="outline"
                             className="h-7 gap-1 whitespace-nowrap px-2 text-xs"
-                            onClick={() => signRow(item.key)}
+                            onClick={() => requestSignRow(item.key, false)}
                           >
                             <Check className="size-3 shrink-0" /> Podepsat
                           </Button>
@@ -2274,8 +3119,12 @@ export function ExitChecklistForm({
                             type="button"
                             size="sm"
                             variant="outline"
-                            className="h-7 gap-1 whitespace-nowrap px-2 text-xs text-muted-foreground"
-                            onClick={() => signRowOnBehalf(item.key)}
+                            className={`h-7 gap-1 whitespace-nowrap px-2 text-xs ${
+                              isOwnRow
+                                ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                                : "text-muted-foreground"
+                            }`}
+                            onClick={() => requestSignRow(item.key, true)}
                           >
                             <Check className="size-3 shrink-0" /> Podepsat
                             v&nbsp;zastoupení
@@ -2297,9 +3146,30 @@ export function ExitChecklistForm({
                     </div>
                   </div>
 
+                  {resolutionEditable && item.resolved !== null && (
+                    <Input
+                      value={item.note ?? ""}
+                      onChange={(e) => updateItemNote(item.key, e.target.value)}
+                      placeholder="poznámka"
+                      className="h-7 bg-background py-1 text-[11px] leading-4"
+                    />
+                  )}
+
+                  {!resolutionEditable && item.note && (
+                    <p className="text-[11px] text-muted-foreground">
+                      {item.note}
+                    </p>
+                  )}
+
                   {isSigned && !isLawInfoGreyed && (
-                    <div className="text-xs text-muted-foreground">
-                      {item.signedByName} · {signedAtDate}
+                    <div className="text-xs">
+                      <span className="font-medium text-foreground">
+                        {item.signedByName}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · Elektronicky podepsáno · {signedAtDate}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -2307,17 +3177,17 @@ export function ExitChecklistForm({
             })}
           </div>
 
-          <div className="hidden lg:block">
-            <Table className="w-full table-fixed">
+          <div className="hidden overflow-x-auto lg:block">
+            <Table className="w-full min-w-[780px] table-fixed">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-1/5">Odbor / organizace</TableHead>
-                  <TableHead className="w-[24%]">Závazek</TableHead>
-                  <TableHead className="w-[8%] text-center">Vyrovnán</TableHead>
-                  <TableHead className="w-[30%] pl-10">
-                    Datum a podpis
+                  <TableHead className="w-[24%]">Odbor / organizace</TableHead>
+                  <TableHead className="w-[18%]">Závazek</TableHead>
+                  <TableHead className="w-[16%] text-center">
+                    Vyrovnán
                   </TableHead>
-                  <TableHead className="w-[22%] pl-3 text-left">Akce</TableHead>
+                  <TableHead className="w-1/5 pl-2">Datum a podpis</TableHead>
+                  <TableHead className="w-[22%] pl-2 text-left">Akce</TableHead>
                 </TableRow>
               </TableHeader>
 
@@ -2327,47 +3197,69 @@ export function ExitChecklistForm({
                   const signedAtDate = item.signedAt
                     ? format(new Date(item.signedAt), "d.M.yyyy HH:mm")
                     : ""
-                  const currentUserIsSigner =
-                    normalizeEmail(item.signedByEmail) ===
-                    currentUserEmailNormalized
                   const isSigningDisabled = signingDisabledKeys.includes(
                     item.key
                   )
                   const isLawInfoGreyed =
                     item.key === "lawInfo" && lawInfoGreyed
+                  const isOwnRow = ownRowKeys.has(item.key)
+                  const currentUserIsSigner =
+                    normalizeEmail(item.signedByEmail) ===
+                    currentUserEmailNormalized
                   const showSignButton =
-                    !isLocked && !isSigned && !isSigningDisabled
+                    !isLocked &&
+                    !isSigned &&
+                    !isSigningDisabled &&
+                    !isEmployeeVisitor
                   const showRevokeButton =
                     !isLocked &&
                     isSigned &&
                     !isSigningDisabled &&
                     !isLawInfoGreyed &&
-                    (isAdmin || currentUserIsSigner)
+                    !isEmployeeVisitor &&
+                    (canOverrideOthersSignature || currentUserIsSigner)
+                  const resolutionEditable =
+                    !isLocked &&
+                    !isSigningDisabled &&
+                    !isSigned &&
+                    !isEmployeeVisitor
 
                   return (
                     <TableRow
                       key={item.key}
-                      className={isLawInfoGreyed ? "opacity-50" : ""}
+                      className={`${isLawInfoGreyed ? "opacity-50" : ""} ${
+                        isOwnRow ? "bg-emerald-50/40" : ""
+                      }`}
                       style={{ height: "92px" }}
                     >
-                      <TableCell className="w-[18%] align-middle text-sm">
-                        {renderOrganization(
-                          item.organization,
-                          item.key === "handoverProtocol" ? managerName : null
-                        )}
+                      <TableCell className="w-[24%] align-middle text-sm">
+                        <div className="flex items-center gap-1.5">
+                          {renderOrganization(
+                            item.organization,
+                            item.key === "handoverProtocol" ? managerName : null
+                          )}
+                          {isOwnRow && (
+                            <Badge
+                              variant="outline"
+                              className="shrink-0 border-emerald-200 bg-emerald-50 text-[10px] text-emerald-800"
+                            >
+                              Vaše agenda
+                            </Badge>
+                          )}
+                        </div>
                       </TableCell>
-                      <TableCell className="w-[22%] whitespace-normal break-words align-middle text-sm leading-snug">
+                      <TableCell className="w-[18%] whitespace-normal break-words align-middle text-sm leading-snug">
                         {item.obligation}
                       </TableCell>
-                      <TableCell className="text-center align-middle">
-                        {!isLocked && !isSigningDisabled ? (
-                          <div className="inline-flex items-center gap-1 rounded-md bg-muted px-1 py-0.5 text-xs">
+                      <TableCell className="w-[16%] text-center align-middle">
+                        {resolutionEditable ? (
+                          <div className="inline-flex w-fit items-center gap-2 rounded-md bg-muted px-1 py-0.5 text-[11px]">
                             <button
                               type="button"
                               className={`rounded px-2 py-0.5 ${
                                 item.resolved === "YES"
                                   ? "bg-green-600 text-white"
-                                  : "hover:bg-green-100"
+                                  : "bg-background hover:bg-green-100"
                               }`}
                               onClick={() => updateResolved(item.key, "YES")}
                             >
@@ -2378,7 +3270,7 @@ export function ExitChecklistForm({
                               className={`rounded px-2 py-0.5 ${
                                 item.resolved === "NO"
                                   ? "bg-red-600 text-white"
-                                  : "hover:bg-red-100"
+                                  : "bg-background hover:bg-red-100"
                               }`}
                               onClick={() => updateResolved(item.key, "NO")}
                             >
@@ -2396,8 +3288,25 @@ export function ExitChecklistForm({
                                   : "–"}
                           </span>
                         )}
+
+                        {resolutionEditable && item.resolved !== null && (
+                          <Input
+                            value={item.note ?? ""}
+                            onChange={(e) =>
+                              updateItemNote(item.key, e.target.value)
+                            }
+                            placeholder="poznámka"
+                            className="mt-2 h-6 bg-background px-2 py-0.5 text-[10px] leading-4"
+                          />
+                        )}
+
+                        {!resolutionEditable && item.note && (
+                          <p className="mt-2 text-[10px] text-muted-foreground">
+                            {item.note}
+                          </p>
+                        )}
                       </TableCell>
-                      <TableCell className="w-[30%] pl-10 align-middle">
+                      <TableCell className="w-1/5 pl-2 align-middle">
                         <TableSignatureCell
                           isSigned={isSigned}
                           isMuted={isLawInfoGreyed}
@@ -2405,12 +3314,13 @@ export function ExitChecklistForm({
                           signedAt={signedAtDate}
                         />
                       </TableCell>
-                      <TableCell className="w-[22%] pl-3 align-middle">
+                      <TableCell className="w-[22%] pl-2 align-middle">
                         <TableActionCell
                           showSignButton={showSignButton}
                           showRevokeButton={showRevokeButton}
-                          onSign={() => signRow(item.key)}
-                          onSignBehalf={() => signRowOnBehalf(item.key)}
+                          isOwnRow={isOwnRow}
+                          onSign={() => requestSignRow(item.key, false)}
+                          onSignBehalf={() => requestSignRow(item.key, true)}
                           onRevoke={() => revokeSignature(item.key)}
                         />
                       </TableCell>
@@ -2423,7 +3333,7 @@ export function ExitChecklistForm({
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="bg-amber-50">
         <CardHeader>
           <CardTitle className="text-base">
             B. Výpis z osobní karty zaměstnance o zapůjčení movitého majetku
@@ -2435,6 +3345,50 @@ export function ExitChecklistForm({
             (mobilní telefon, fotopřístroje) evidovaného Odborem služeb k datu
             vystavení:
           </p>
+
+          {assetsSignedByOther && !canOverrideOthersSignature && (
+            <div className="flex items-start gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+              <Lock className="mt-0.5 size-3.5 shrink-0" />
+              <span>
+                Tuto sekci už potvrdil(a) {signatures.issuer.signedByName} a
+                nelze ji dál upravovat. V případě potřeby kontaktujte Personální
+                oddělení.
+              </span>
+            </div>
+          )}
+
+          {!assetsFieldsLocked && (
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="noAssets"
+                className="bg-background"
+                checked={noAssets}
+                onCheckedChange={(checked) => {
+                  const next = Boolean(checked)
+                  if (next && assets.length > 0) {
+                    setConfirmClearAssetsOpen(true)
+                    return
+                  }
+                  setNoAssets(next)
+                  markAssetsHrEdit()
+                  markDirty()
+                }}
+              />
+              <Label htmlFor="noAssets" className="cursor-pointer text-sm">
+                Zaměstnanec nemá žádný zapůjčený majetek
+              </Label>
+            </div>
+          )}
+
+          {!noAssets && assets.length === 0 && (
+            <div className="flex items-start gap-2 rounded-md border border-purple-200 bg-purple-50 px-3 py-2 text-sm text-purple-800">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+              <span>
+                Není vyplněný žádný majetek. Zaškrtněte, že žádný nemá, nebo
+                přidejte položky.
+              </span>
+            </div>
+          )}
 
           <div className="space-y-3 sm:hidden">
             {assets.length === 0 && (
@@ -2449,7 +3403,7 @@ export function ExitChecklistForm({
                   <p className="text-xs font-medium text-muted-foreground">
                     Položka {index + 1}
                   </p>
-                  {!isLocked && (
+                  {!assetsFieldsLocked && (
                     <Button
                       type="button"
                       size="icon"
@@ -2468,13 +3422,14 @@ export function ExitChecklistForm({
                     <Label className="text-xs text-muted-foreground">
                       Předmět
                     </Label>
-                    {!isLocked ? (
+                    {!assetsFieldsLocked ? (
                       <Input
                         value={asset.subject}
                         onChange={(e) =>
                           updateAsset(asset.id, "subject", e.target.value)
                         }
                         placeholder="např. mobilní telefon"
+                        className="bg-background"
                       />
                     ) : (
                       <p className="rounded-md bg-muted/50 px-3 py-2 text-sm">
@@ -2487,7 +3442,7 @@ export function ExitChecklistForm({
                     <Label className="text-xs text-muted-foreground">
                       Inventární číslo
                     </Label>
-                    {!isLocked ? (
+                    {!assetsFieldsLocked ? (
                       <Input
                         value={asset.inventoryNumber}
                         onChange={(e) =>
@@ -2498,6 +3453,7 @@ export function ExitChecklistForm({
                           )
                         }
                         placeholder="např. 123456"
+                        className="bg-background"
                       />
                     ) : (
                       <p className="rounded-md bg-muted/50 px-3 py-2 text-sm">
@@ -2534,20 +3490,21 @@ export function ExitChecklistForm({
                 {assets.map((asset) => (
                   <TableRow key={asset.id}>
                     <TableCell>
-                      {!isLocked ? (
+                      {!assetsFieldsLocked ? (
                         <Input
                           value={asset.subject}
                           onChange={(e) =>
                             updateAsset(asset.id, "subject", e.target.value)
                           }
                           placeholder="např. mobilní telefon"
+                          className="bg-background"
                         />
                       ) : (
                         <span>{asset.subject}</span>
                       )}
                     </TableCell>
                     <TableCell>
-                      {!isLocked ? (
+                      {!assetsFieldsLocked ? (
                         <Input
                           value={asset.inventoryNumber}
                           onChange={(e) =>
@@ -2558,13 +3515,14 @@ export function ExitChecklistForm({
                             )
                           }
                           placeholder="např. 123456"
+                          className="bg-background"
                         />
                       ) : (
                         <span>{asset.inventoryNumber}</span>
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      {!isLocked && (
+                      {!assetsFieldsLocked && (
                         <Button
                           type="button"
                           size="icon"
@@ -2582,15 +3540,30 @@ export function ExitChecklistForm({
             </Table>
           </div>
 
-          {!isLocked && (
+          {!assetsFieldsLocked && (
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={addAssetRow}
+              className="gap-1 border-2 border-dashed border-[#00847C] text-[#00847C] hover:bg-[#00847C]/10"
             >
+              <Plus className="size-4" />
               Přidat položku
             </Button>
+          )}
+
+          {assetsEditedByHR && (
+            <div className="flex justify-end">
+              <Badge
+                variant="outline"
+                className="border-emerald-200 bg-emerald-50 text-emerald-800"
+              >
+                Upraveno {hrEditRoleLabel(assetsEditedByHR)}
+                {" · "}
+                {format(new Date(assetsEditedByHR.at), "d.M.yyyy HH:mm")}
+              </Badge>
+            </div>
           )}
 
           <div className="border-t pt-4">
@@ -2598,7 +3571,13 @@ export function ExitChecklistForm({
               label="Za Odbor služeb potvrzuje správnost Výpisu"
               value={signatures.issuer}
               isLocked={isLocked}
-              isAdmin={isAdmin}
+              isAdmin={canOverrideOthersSignature}
+              interactive={isInternalMode || !isEmployeeVisitor}
+              signDisabledReason={
+                !assetsComplete
+                  ? "Nejdřív v sekci B vyplňte zapůjčený majetek, nebo zaškrtněte, že zaměstnanec žádný nemá."
+                  : undefined
+              }
               currentUserName={currentUserName}
               currentUserEmail={currentUserEmail}
               onSign={() => signHeaderSignature("issuer")}
@@ -2609,868 +3588,633 @@ export function ExitChecklistForm({
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="bg-purple-50">
         <CardHeader>
           <CardTitle className="flex items-center justify-between text-base">
             <span>C. Předávaná agenda</span>
 
-            {!isLocked && (
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="includeHandover"
-                  checked={includeHandoverAgenda}
-                  onCheckedChange={(checked) => {
-                    const next = Boolean(checked)
-                    setIncludeHandoverAgenda(next)
-
-                    if (!next) {
-                      setHandoverOption1(false)
-                      setHandoverOption2(false)
-                      setHandoverOption2Target("")
-                      setHandoverOption2TargetPositionNum("")
-                      setHandoverOption3(false)
-                      setHandoverOption3Reason("")
-                      setResponsibleParty(null)
-                      setHandoverRecipients([])
-                    }
-
-                    markDirty()
-                  }}
-                />
-                <Label
-                  htmlFor="includeHandover"
-                  className="cursor-pointer text-sm font-normal text-muted-foreground"
-                >
-                  Zahrnout předávanou agendu
-                </Label>
-              </div>
-            )}
-
-            {isLocked && includeHandoverAgenda && (
-              <Badge variant="secondary">Zahrnuto</Badge>
+            {includeHandoverAgenda && (
+              <Badge
+                variant="outline"
+                className="border-emerald-200 bg-emerald-50 text-emerald-800"
+              >
+                Vybráno
+              </Badge>
             )}
           </CardTitle>
         </CardHeader>
 
-        {includeHandoverAgenda && (
-          <CardContent className="space-y-4">
-            <p className="text-sm font-medium">
-              Elektronické dokumenty v e-spisu — elektronické předání dokumentů
-              proběhne/proběhlo následujícím způsobem:
-            </p>
+        <CardContent className="space-y-4">
+          <p className="text-sm font-medium">
+            Elektronické dokumenty v e-spisu — elektronické předání dokumentů
+            proběhne/proběhlo následujícím způsobem (vyberte jeden ze tří
+            způsobů):
+          </p>
 
-            <div className="space-y-4">
-              <div className="flex items-start gap-3">
-                <Checkbox
-                  id="handover1"
-                  checked={handoverOption1}
-                  onCheckedChange={(checked) => {
-                    setHandoverOption1(Boolean(checked))
-                    markDirty()
-                  }}
-                  disabled={isLocked}
-                />
-                <Label
-                  htmlFor="handover1"
-                  className={`text-sm ${
-                    isLocked ? "cursor-default" : "cursor-pointer"
-                  }`}
-                >
-                  Předáno zaměstnancem do spisovny v e-spise nebo předáno na
-                  jiné funkční místo
-                </Label>
-              </div>
+          {!includeHandoverAgenda && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+              <span>
+                Je potřeba vybrat jeden ze způsobů předání agendy, jinak nebude
+                výstupní list považován za dokončený.
+              </span>
+            </div>
+          )}
 
-              <div className="space-y-2">
-                <div className="flex items-start gap-3">
-                  <Checkbox
-                    id="handover2"
-                    checked={handoverOption2}
-                    onCheckedChange={(checked) => {
-                      const next = Boolean(checked)
-                      setHandoverOption2(next)
+          {handoverSignedByOther && !canOverrideOthersSignature && (
+            <div className="flex items-start gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+              <Lock className="mt-0.5 size-4 shrink-0" />
+              <span>
+                Tuto sekci už potvrdil(a){" "}
+                {handoverManagerSignature.signedByName} a nelze ji dál
+                upravovat. V případě potřeby kontaktujte Personální oddělení.
+              </span>
+            </div>
+          )}
 
-                      if (!next) {
-                        setHandoverOption2Target("")
-                        setHandoverOption2TargetPositionNum("")
-                      }
+          <div className="space-y-4">
+            <div className="flex items-start gap-3">
+              <Checkbox
+                id="handover1"
+                className="bg-background"
+                checked={handoverOption1}
+                onCheckedChange={(checked) => {
+                  const next = Boolean(checked)
+                  setHandoverOption1(next)
 
-                      markDirty()
-                    }}
-                    disabled={isLocked}
-                  />
-                  <Label
-                    htmlFor="handover2"
-                    className={`text-sm ${
-                      isLocked ? "cursor-default" : "cursor-pointer"
-                    }`}
-                  >
-                    OI-KITT6 předá na jiné funkční místo
-                  </Label>
-                </div>
+                  if (next) {
+                    setHandoverOption2(false)
+                    setHandoverOption2Target("")
+                    setHandoverOption2TargetPositionNum("")
+                    setHandoverOption2TargetDepartment("")
+                    setHandoverOption2TargetUnitName("")
+                    setHandoverOption3(false)
+                    setHandoverOption3Reason("")
+                    setResponsibleParty(null)
+                    setHandoverRecipients([])
+                  } else {
+                    setHandoverOption1Note("")
+                  }
 
-                {handoverOption2 && (
-                  <div className="ml-7 space-y-2">
-                    <PositionCombobox<PositionSearchItem>
-                      positions={[]}
-                      showOccupantInfo={false}
-                      disabled={isLocked}
-                      popoverClassName="w-[420px] p-0"
-                      onSelect={(position) => {
-                        setHandoverOption2TargetPositionNum(position.num)
-                        setHandoverOption2Target(position.name)
-                        markDirty()
-                      }}
-                      trigger={() => (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="w-full justify-between"
-                          disabled={isLocked}
-                        >
-                          <span className="truncate">
-                            {selectedHandoverOption2PositionLabel ||
-                              "Vyberte funkční místo ze systemizace"}
-                          </span>
-                          <ChevronDown className="ml-2 size-4 opacity-60" />
-                        </Button>
-                      )}
-                    />
-
-                    {selectedHandoverOption2PositionLabel && (
-                      <p className="text-xs text-muted-foreground">
-                        Vybrané funkční místo:{" "}
-                        <span className="font-medium">
-                          {selectedHandoverOption2PositionLabel}
-                        </span>
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-start gap-3">
-                  <Checkbox
-                    id="handover3"
-                    checked={handoverOption3}
-                    onCheckedChange={(checked) => {
-                      const next = Boolean(checked)
-                      setHandoverOption3(next)
-
-                      if (!next) {
-                        setHandoverOption3Reason("")
-                        setResponsibleParty(null)
-                        setHandoverRecipients([])
-                        setNewRecipientName("")
-                        setNewRecipientEmail("")
-                        setNewRecipientPersonalNumber("")
-                        setNewRecipientDepartment("")
-                        setNewRecipientError(null)
-                      }
-
-                      markDirty()
-                    }}
-                    disabled={isLocked}
-                  />
-                  <Label
-                    htmlFor="handover3"
-                    className={`text-sm ${
-                      isLocked ? "cursor-default" : "cursor-pointer"
-                    }`}
-                  >
-                    Zůstává zatím na neobsazeném funkčním místě z důvodu:
-                  </Label>
-                </div>
-
-                {handoverOption3 && (
-                  <div className="ml-7 space-y-3">
-                    <Input
-                      value={handoverOption3Reason}
-                      onChange={(e) => {
-                        setHandoverOption3Reason(e.target.value)
-                        markDirty()
-                      }}
-                      placeholder="např. do doby nástupu nového zaměstnance"
-                      disabled={isLocked}
-                    />
-
-                    <div className="space-y-3 rounded-md border p-3">
-                      <div>
-                        <Label className="text-sm font-medium">
-                          Za dokumenty odpovídá
-                        </Label>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          Vyberte odpovědnou osobu z EOS nebo ji doplňte ručně.
-                          Pokud osoba není v EOS, vyplňte celé jméno a e-mail.
-                          Uložení výstupního listu e-maily neposílá; informaci
-                          odešlete ručně tlačítkem níže.
-                        </p>
-                      </div>
-
-                      {!isLocked && (
-                        <>
-                          <PersonLookupCombobox
-                            variant="button"
-                            placeholder="Vyhledat odpovědnou osobu v eOSu…"
-                            onSelect={(employee) => {
-                              const id = employee.id
-                              const email = normalizeEmail(employee.email)
-
-                              if (
-                                handoverRecipients.some(
-                                  (recipient) =>
-                                    recipient.id === id ||
-                                    normalizeEmail(recipient.email) === email
-                                )
-                              ) {
-                                return
-                              }
-
-                              setHandoverRecipients((prev) => [
-                                ...prev,
-                                {
-                                  id,
-                                  name: buildPersonFullName(employee),
-                                  email: employee.email ?? "",
-                                  personalNumber: employee.personalNumber,
-                                  department: employee.department,
-                                },
-                              ])
-
-                              markDirty()
-                            }}
-                          />
-
-                          <div className="space-y-2 rounded-md border bg-muted/20 p-3">
-                            <Label className="text-xs font-medium">
-                              Přidat osobu ručně
-                            </Label>
-
-                            <div className="grid gap-2 sm:grid-cols-2">
-                              <Input
-                                placeholder="Celé jméno a příjmení *"
-                                value={newRecipientName}
-                                onChange={(e) => {
-                                  setNewRecipientName(e.target.value)
-                                  setNewRecipientError(null)
-                                }}
-                                className="h-8 text-sm"
-                              />
-
-                              <Input
-                                placeholder="email@praha6.cz *"
-                                value={newRecipientEmail}
-                                onChange={(e) => {
-                                  setNewRecipientEmail(e.target.value)
-                                  setNewRecipientError(null)
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") {
-                                    e.preventDefault()
-                                    addRecipientManually()
-                                  }
-                                }}
-                                className="h-8 text-sm"
-                              />
-
-                              <Input
-                                placeholder="Osobní číslo"
-                                value={newRecipientPersonalNumber}
-                                onChange={(e) => {
-                                  setNewRecipientPersonalNumber(e.target.value)
-                                  setNewRecipientError(null)
-                                }}
-                                className="h-8 text-sm"
-                              />
-
-                              <Input
-                                placeholder="Odbor / oddělení"
-                                value={newRecipientDepartment}
-                                onChange={(e) => {
-                                  setNewRecipientDepartment(e.target.value)
-                                  setNewRecipientError(null)
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") {
-                                    e.preventDefault()
-                                    addRecipientManually()
-                                  }
-                                }}
-                                className="h-8 text-sm"
-                              />
-                            </div>
-
-                            <div className="flex justify-end">
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="h-8 shrink-0"
-                                onClick={addRecipientManually}
-                              >
-                                Přidat
-                              </Button>
-                            </div>
-
-                            {newRecipientError && (
-                              <p className="text-xs text-red-600">
-                                {newRecipientError}
-                              </p>
-                            )}
-                          </div>
-                        </>
-                      )}
-
-                      {handoverRecipients.length > 0 ? (
-                        <div className="space-y-1">
-                          {handoverRecipients.map((recipient) => (
-                            <div
-                              key={recipient.id}
-                              className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-2 text-xs"
-                            >
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-medium">
-                                    {recipient.name}
-                                  </span>
-                                  {recipient.personalNumber && (
-                                    <span className="font-mono text-muted-foreground">
-                                      {recipient.personalNumber}
-                                    </span>
-                                  )}
-                                </div>
-
-                                <div className="flex gap-3 text-muted-foreground">
-                                  {recipient.department && (
-                                    <span>{recipient.department}</span>
-                                  )}
-                                  {recipient.email && (
-                                    <span>{recipient.email}</span>
-                                  )}
-                                </div>
-                              </div>
-
-                              {!isLocked && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setHandoverRecipients((prev) =>
-                                      prev.filter((x) => x.id !== recipient.id)
-                                    )
-                                    markDirty()
-                                  }}
-                                  className="ml-2 shrink-0 text-muted-foreground hover:text-foreground"
-                                  aria-label="Odebrat příjemce"
-                                >
-                                  <X className="size-3" />
-                                </button>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">
-                          Zatím není uvedena žádná odpovědná osoba.
-                        </p>
-                      )}
-
-                      {Boolean(currentUserEmail) &&
-                        Boolean(resolvedOffboardingId) && (
-                          <div className="rounded-md border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900">
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                              <div className="space-y-0.5">
-                                <p className="font-medium">
-                                  Informace se neodesílají automaticky při
-                                  uložení.
-                                </p>
-                                <p>
-                                  Osobu uvedenou v poli „Za dokumenty odpovídá“
-                                  informujte co nejdříve.
-                                </p>
-                              </div>
-
-                              <Button
-                                type="button"
-                                size="sm"
-                                className="
-                                  h-auto
-                                  min-h-9
-                                  w-full
-                                  max-w-full
-                                  justify-center
-                                  gap-2
-                                  whitespace-normal
-                                  rounded-md
-                                  bg-[#00847C]
-                                  px-3
-                                  py-2
-                                  text-center
-                                  text-sm
-                                  font-medium
-                                  leading-snug
-                                  text-white
-                                  hover:bg-[#0B6D73]
-                                  disabled:bg-[#00847C]/50
-                                  disabled:text-white/80
-                                  sm:w-auto
-                                  sm:whitespace-nowrap
-                                "
-                                onClick={openHandoverSendDialog}
-                                disabled={
-                                  sendingHandoverInfo || !canSendHandoverInfo
-                                }
-                              >
-                                {sendingHandoverInfo ? (
-                                  <>
-                                    <Loader2 className="size-4 shrink-0 animate-spin" />
-                                    <span className="min-w-0">Odesílám…</span>
-                                  </>
-                                ) : handoverRecipientsWereSent ? (
-                                  <>
-                                    <Send className="size-4 shrink-0" />
-                                    <span className="min-w-0">
-                                      Odeslat znovu
-                                    </span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Send className="size-4 shrink-0" />
-                                    <span className="min-w-0">
-                                      Odeslat informace odpovědným osobám
-                                    </span>
-                                  </>
-                                )}
-                              </Button>
-                            </div>
-
-                            {displayedHandoverSendHistory.length > 0 ? (
-                              <div className="mt-3 rounded-md border border-blue-200 bg-white/70 p-3">
-                                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-blue-900">
-                                  Historie odeslání informací
-                                </p>
-
-                                <div className="space-y-2">
-                                  {displayedHandoverSendHistory.map((entry) => (
-                                    <div
-                                      key={`${entry.id}-${entry.email}`}
-                                      className="rounded-md bg-blue-50 px-3 py-2 text-[11px] text-blue-800"
-                                    >
-                                      <div className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-                                        <div className="min-w-0">
-                                          <span className="font-medium">
-                                            {entry.name}
-                                          </span>
-                                          {entry.email && (
-                                            <span className="text-blue-700">
-                                              {" "}
-                                              · {entry.email}
-                                            </span>
-                                          )}
-                                        </div>
-
-                                        <div className="shrink-0 text-blue-700">
-                                          odesláno {entry.sentCount || 1}×
-                                        </div>
-                                      </div>
-
-                                      <div className="mt-1 text-blue-700">
-                                        Naposledy{" "}
-                                        <span className="font-medium">
-                                          {formatDateTime(entry.lastSentAt)}
-                                        </span>
-                                        {entry.lastSentByName ||
-                                        entry.lastSentByEmail ? (
-                                          <>
-                                            {" "}
-                                            uživatelem{" "}
-                                            <span className="font-medium">
-                                              {entry.lastSentByName ??
-                                                entry.lastSentByEmail}
-                                            </span>
-                                          </>
-                                        ) : null}
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            ) : handoverRecipientsSentAt ? (
-                              <p className="mt-2 text-[11px] text-blue-700">
-                                Zasláno{" "}
-                                {formatDateTime(handoverRecipientsSentAt)}{" "}
-                                uživatelem{" "}
-                                <span className="font-medium">
-                                  {handoverRecipientsSentByName ??
-                                    handoverRecipientsSentByEmail ??
-                                    "neznámý uživatel"}
-                                </span>
-                                {handoverRecipientsSentCount &&
-                                handoverRecipientsSentCount > 1
-                                  ? ` · odesláno ${handoverRecipientsSentCount}×`
-                                  : ""}
-                              </p>
-                            ) : null}
-
-                            {!canSendHandoverInfo &&
-                              validHandoverRecipients.length === 0 && (
-                                <p className="mt-2 text-[11px] text-blue-700">
-                                  Tlačítko se aktivuje po přidání alespoň jedné
-                                  odpovědné osoby s platným e-mailem.
-                                </p>
-                              )}
-                          </div>
-                        )}
-                    </div>
-                  </div>
-                )}
-              </div>
+                  markHandoverHrEdit()
+                  markDirty()
+                }}
+                disabled={handoverFieldsLocked}
+              />
+              <Label
+                htmlFor="handover1"
+                className={`text-sm ${
+                  handoverFieldsLocked ? "cursor-default" : "cursor-pointer"
+                }`}
+              >
+                Předáno zaměstnancem do spisovny v e-spise nebo předáno na jiné
+                funkční místo
+              </Label>
             </div>
 
-            <div className="border-t pt-4">
-              <div
-                className="flex flex-col rounded-md border p-3"
-                style={{ minHeight: "110px" }}
-              >
-                <Label className="mb-2 text-sm font-medium">
-                  Způsob předání agendy potvrzuje — Vedoucí odboru
-                  {managerName && (
-                    <span className="ml-2 text-xs font-normal text-muted-foreground">
-                      ({managerName})
-                    </span>
-                  )}
-                </Label>
+            {handoverOption1 && (
+              <div className="ml-7">
+                <Input
+                  value={handoverOption1Note}
+                  onChange={(e) => {
+                    setHandoverOption1Note(e.target.value)
+                    markHandoverHrEdit()
+                    markDirty()
+                  }}
+                  placeholder="Poznámka (nepovinné)"
+                  disabled={handoverFieldsLocked}
+                  className="h-8 bg-background py-1 text-xs"
+                />
+              </div>
+            )}
 
-                <div style={{ minHeight: "52px" }} className="flex-1">
-                  {handoverManagerSignature.signedAt ? (
-                    <div className="rounded-md bg-muted/50 px-3 py-2 text-sm">
-                      <div className="font-medium">
-                        {handoverManagerSignature.signedByName ?? "Podepsáno"}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {format(
-                          new Date(handoverManagerSignature.signedAt),
-                          "d.M.yyyy HH:mm"
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
-                      Nepodepsáno
-                    </div>
+            <div className="space-y-2">
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  id="handover2"
+                  className="bg-background"
+                  checked={handoverOption2}
+                  onCheckedChange={(checked) => {
+                    const next = Boolean(checked)
+                    setHandoverOption2(next)
+
+                    if (next) {
+                      setHandoverOption1(false)
+                      setHandoverOption1Note("")
+                      setHandoverOption3(false)
+                      setHandoverOption3Reason("")
+                      setResponsibleParty(null)
+                      setHandoverRecipients([])
+                    } else {
+                      setHandoverOption2Target("")
+                      setHandoverOption2TargetPositionNum("")
+                      setHandoverOption2TargetDepartment("")
+                      setHandoverOption2TargetUnitName("")
+                    }
+
+                    markHandoverHrEdit()
+                    markDirty()
+                  }}
+                  disabled={handoverFieldsLocked}
+                />
+                <Label
+                  htmlFor="handover2"
+                  className={`text-sm ${
+                    handoverFieldsLocked ? "cursor-default" : "cursor-pointer"
+                  }`}
+                >
+                  KITT6 předá na jiné funkční místo
+                </Label>
+              </div>
+
+              {handoverOption2 && (
+                <div className="ml-7 space-y-2">
+                  <PositionCombobox<PositionSearchItem>
+                    positions={[]}
+                    showOccupantInfo={false}
+                    disabled={handoverFieldsLocked}
+                    popoverClassName="w-[420px] p-0"
+                    onSelect={(position) => {
+                      setHandoverOption2TargetPositionNum(position.num)
+                      setHandoverOption2Target(position.name)
+                      setHandoverOption2TargetDepartment(
+                        position.dept_name ?? ""
+                      )
+                      setHandoverOption2TargetUnitName(position.unit_name ?? "")
+                      markHandoverHrEdit()
+                      markDirty()
+                    }}
+                    trigger={() => (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full justify-between bg-background"
+                        disabled={handoverFieldsLocked}
+                      >
+                        <span className="truncate">
+                          {selectedHandoverOption2PositionLabel ||
+                            "Vyberte funkční místo ze systemizace"}
+                        </span>
+                        <ChevronDown className="ml-2 size-4 opacity-60" />
+                      </Button>
+                    )}
+                  />
+
+                  {selectedHandoverOption2PositionLabel && (
+                    <p className="text-xs text-muted-foreground">
+                      Vybrané funkční místo:{" "}
+                      <span className="font-medium">
+                        {selectedHandoverOption2PositionLabel}
+                      </span>
+                    </p>
                   )}
                 </div>
+              )}
+            </div>
 
-                {!isLocked && (
-                  <div
-                    className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-[168px_168px]"
-                    style={{ minHeight: "70px" }}
-                  >
-                    {!handoverManagerSignature.signedAt &&
-                      Boolean(currentUserName || currentUserEmail) && (
-                        <>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs"
-                            onClick={() => signHandoverManagerSignature(false)}
-                          >
-                            <Check className="size-3 shrink-0" /> Podepsat
-                          </Button>
+            <div className="space-y-2">
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  id="handover3"
+                  className="bg-background"
+                  checked={handoverOption3}
+                  onCheckedChange={(checked) => {
+                    const next = Boolean(checked)
+                    setHandoverOption3(next)
 
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs text-muted-foreground"
-                            onClick={() => signHandoverManagerSignature(true)}
+                    if (next) {
+                      setHandoverOption1(false)
+                      setHandoverOption1Note("")
+                      setHandoverOption2(false)
+                      setHandoverOption2Target("")
+                      setHandoverOption2TargetPositionNum("")
+                      setHandoverOption2TargetDepartment("")
+                      setHandoverOption2TargetUnitName("")
+                    } else {
+                      setHandoverOption3Reason("")
+                      setResponsibleParty(null)
+                      setHandoverRecipients([])
+                      setNewRecipientName("")
+                      setNewRecipientEmail("")
+                      setNewRecipientPersonalNumber("")
+                      setNewRecipientDepartment("")
+                      setNewRecipientError(null)
+                    }
+
+                    markHandoverHrEdit()
+                    markDirty()
+                  }}
+                  disabled={handoverFieldsLocked}
+                />
+                <Label
+                  htmlFor="handover3"
+                  className={`text-sm ${
+                    handoverFieldsLocked ? "cursor-default" : "cursor-pointer"
+                  }`}
+                >
+                  Zůstává zatím na neobsazeném funkčním místě z důvodu:
+                </Label>
+              </div>
+
+              {handoverOption3 && (
+                <div className="ml-7 space-y-3">
+                  <Input
+                    value={handoverOption3Reason}
+                    onChange={(e) => {
+                      setHandoverOption3Reason(e.target.value)
+                      markHandoverHrEdit()
+                      markDirty()
+                    }}
+                    placeholder="Důvod (povinné) – např. do doby nástupu nového zaměstnance"
+                    disabled={handoverFieldsLocked}
+                    className="bg-background"
+                  />
+
+                  <div className="space-y-3 rounded-md border bg-background p-3">
+                    <div>
+                      <Label className="text-sm font-medium">
+                        Za dokumenty odpovídá (povinné)
+                      </Label>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        Vyberte odpovědnou osobu z EOS nebo ji doplňte ručně.
+                        Pokud osoba není v EOS, vyplňte celé jméno a e-mail.
+                        Informace se odešle automaticky po vyplnění, podpisu a
+                        uložení sekce C.
+                      </p>
+                    </div>
+
+                    {!handoverFieldsLocked && (
+                      <>
+                        <PersonLookupCombobox
+                          variant="button"
+                          placeholder="Vyhledat odpovědnou osobu v eOSu…"
+                          onSelect={(employee) => {
+                            const id = employee.id
+                            const email = normalizeEmail(employee.email)
+
+                            if (
+                              handoverRecipients.some(
+                                (recipient) =>
+                                  recipient.id === id ||
+                                  normalizeEmail(recipient.email) === email
+                              )
+                            ) {
+                              return
+                            }
+
+                            setHandoverRecipients((prev) => [
+                              ...prev,
+                              {
+                                id,
+                                name: buildPersonFullName(employee),
+                                email: employee.email ?? "",
+                                personalNumber: employee.personalNumber,
+                                department: employee.department,
+                              },
+                            ])
+
+                            markHandoverHrEdit()
+                            markDirty()
+                          }}
+                        />
+
+                        <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+                          <Label className="text-xs font-medium">
+                            Přidat osobu ručně
+                          </Label>
+
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <Input
+                              placeholder="Celé jméno a příjmení *"
+                              value={newRecipientName}
+                              onChange={(e) => {
+                                setNewRecipientName(e.target.value)
+                                setNewRecipientError(null)
+                              }}
+                              className="h-8 bg-background text-sm"
+                            />
+
+                            <Input
+                              placeholder="email@praha6.cz *"
+                              value={newRecipientEmail}
+                              onChange={(e) => {
+                                setNewRecipientEmail(e.target.value)
+                                setNewRecipientError(null)
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault()
+                                  addRecipientManually()
+                                }
+                              }}
+                              className="h-8 bg-background text-sm"
+                            />
+
+                            <Input
+                              placeholder="Osobní číslo"
+                              value={newRecipientPersonalNumber}
+                              onChange={(e) => {
+                                setNewRecipientPersonalNumber(e.target.value)
+                                setNewRecipientError(null)
+                              }}
+                              className="h-8 bg-background text-sm"
+                            />
+
+                            <Input
+                              placeholder="Odbor / oddělení"
+                              value={newRecipientDepartment}
+                              onChange={(e) => {
+                                setNewRecipientDepartment(e.target.value)
+                                setNewRecipientError(null)
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault()
+                                  addRecipientManually()
+                                }
+                              }}
+                              className="h-8 bg-background text-sm"
+                            />
+                          </div>
+
+                          <div className="flex justify-end">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-8 shrink-0 bg-background"
+                              onClick={addRecipientManually}
+                            >
+                              Přidat
+                            </Button>
+                          </div>
+
+                          {newRecipientError && (
+                            <p className="text-xs text-red-600">
+                              {newRecipientError}
+                            </p>
+                          )}
+                        </div>
+                      </>
+                    )}
+
+                    {handoverRecipients.length > 0 ? (
+                      <div className="space-y-1">
+                        {handoverRecipients.map((recipient) => (
+                          <div
+                            key={recipient.id}
+                            className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-2 text-xs"
                           >
-                            <Check className="size-3 shrink-0" /> Podepsat v
-                            zastoupení
-                          </Button>
-                        </>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">
+                                  {recipient.name}
+                                </span>
+                                {recipient.personalNumber && (
+                                  <span className="font-mono text-muted-foreground">
+                                    {recipient.personalNumber}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="flex gap-3 text-muted-foreground">
+                                {recipient.department && (
+                                  <span>{recipient.department}</span>
+                                )}
+                                {recipient.email && (
+                                  <span>{recipient.email}</span>
+                                )}
+                              </div>
+                            </div>
+
+                            {!handoverFieldsLocked && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setHandoverRecipients((prev) =>
+                                    prev.filter((x) => x.id !== recipient.id)
+                                  )
+                                  markHandoverHrEdit()
+                                  markDirty()
+                                }}
+                                className="ml-2 shrink-0 text-muted-foreground hover:text-foreground"
+                                aria-label="Odebrat příjemce"
+                              >
+                                <X className="size-3" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Zatím není uvedena žádná odpovědná osoba.
+                      </p>
+                    )}
+
+                    {Boolean(currentUserEmail) &&
+                      Boolean(resolvedOffboardingId) && (
+                        <div className="rounded-md border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900">
+                          <p className="font-medium">
+                            Informace se odešlou automaticky osobám uvedeným v
+                            poli „Za dokumenty odpovídá“, jakmile vedoucí odboru
+                            sekci C vyplní, podepíše a uloží.
+                          </p>
+
+                          {displayedHandoverSendHistory.length > 0 ? (
+                            <div className="mt-3 rounded-md border border-blue-200 bg-white/70 p-3">
+                              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-blue-900">
+                                Historie odeslání informací
+                              </p>
+
+                              <div className="space-y-2">
+                                {displayedHandoverSendHistory.map((entry) => (
+                                  <div
+                                    key={`${entry.id}-${entry.email}`}
+                                    className="rounded-md bg-blue-50 px-3 py-2 text-[11px] text-blue-800"
+                                  >
+                                    <div className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                                      <div className="min-w-0">
+                                        <span className="font-semibold text-foreground">
+                                          {entry.name}
+                                        </span>
+                                        {entry.email && (
+                                          <span className="text-blue-700">
+                                            {" "}
+                                            · {entry.email}
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      <div className="shrink-0 text-blue-700">
+                                        odesláno {entry.sentCount || 1}×
+                                      </div>
+                                    </div>
+
+                                    <div className="mt-1 text-blue-700">
+                                      Naposledy{" "}
+                                      <span className="font-medium">
+                                        {formatDateTime(entry.lastSentAt)}
+                                      </span>
+                                      {entry.lastSentByName ||
+                                      entry.lastSentByEmail ? (
+                                        <>
+                                          {" "}
+                                          uživatelem{" "}
+                                          <span className="font-medium">
+                                            {entry.lastSentByName ??
+                                              entry.lastSentByEmail}
+                                          </span>
+                                        </>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : handoverRecipientsSentAt ? (
+                            <p className="mt-2 text-[11px] text-blue-700">
+                              Zasláno {formatDateTime(handoverRecipientsSentAt)}{" "}
+                              uživatelem{" "}
+                              <span className="font-medium">
+                                {handoverRecipientsSentByName ??
+                                  handoverRecipientsSentByEmail ??
+                                  "neznámý uživatel"}
+                              </span>
+                              {handoverRecipientsSentCount &&
+                              handoverRecipientsSentCount > 1
+                                ? ` · odesláno ${handoverRecipientsSentCount}×`
+                                : ""}
+                            </p>
+                          ) : null}
+
+                          {validHandoverRecipients.length === 0 && (
+                            <p className="mt-2 text-[11px] text-blue-700">
+                              Informace se odešlou po přidání alespoň jedné
+                              odpovědné osoby s platným e-mailem.
+                            </p>
+                          )}
+                        </div>
                       )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
 
-                    {handoverManagerSignature.signedAt &&
-                      (isAdmin ||
-                        normalizeEmail(
-                          handoverManagerSignature.signedByEmail
-                        ) === currentUserEmailNormalized) && (
+          {handoverEditedByHR && (
+            <div className="flex justify-end">
+              <Badge
+                variant="outline"
+                className="border-emerald-200 bg-emerald-50 text-emerald-800"
+              >
+                Upraveno {hrEditRoleLabel(handoverEditedByHR)}
+                {" · "}
+                {format(new Date(handoverEditedByHR.at), "d.M.yyyy HH:mm")}
+              </Badge>
+            </div>
+          )}
+
+          <div className="border-t pt-4">
+            <div
+              className="flex flex-col rounded-md border bg-background p-3"
+              style={{ minHeight: "110px" }}
+            >
+              <Label className="mb-2 text-sm font-medium">
+                Způsob předání agendy potvrzuje — Vedoucí odboru
+                {managerName && (
+                  <span className="ml-2 font-semibold text-foreground">
+                    {managerName}
+                  </span>
+                )}
+              </Label>
+
+              <div style={{ minHeight: "52px" }} className="flex-1">
+                {handoverManagerSignature.signedAt ? (
+                  <div className="rounded-md bg-muted/50 px-3 py-2 text-sm">
+                    <div className="font-semibold text-foreground">
+                      {handoverManagerSignature.signedByName ?? "Podepsáno"}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Elektronicky podepsáno
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {format(
+                        new Date(handoverManagerSignature.signedAt),
+                        "d.M.yyyy HH:mm"
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
+                    Nepodepsáno
+                  </div>
+                )}
+              </div>
+
+              {!isLocked && (isInternalMode || isManagerVisitor) && (
+                <div
+                  className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-[168px_168px]"
+                  style={{ minHeight: "70px" }}
+                >
+                  {!handoverManagerSignature.signedAt &&
+                    Boolean(currentUserName || currentUserEmail) && (
+                      <>
                         <Button
                           type="button"
                           size="sm"
-                          variant="ghost"
-                          className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs text-muted-foreground"
-                          onClick={revokeHandoverManagerSignature}
+                          variant="outline"
+                          className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs"
+                          onClick={() => signHandoverManagerSignature(false)}
+                          disabled={!handoverSignReady}
+                          title={
+                            !handoverSignReady
+                              ? handoverSignBlockedReason
+                              : undefined
+                          }
                         >
-                          <Undo2 className="size-3" /> Zrušit podpis
+                          <Check className="size-3 shrink-0" /> Podepsat
                         </Button>
-                      )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        )}
-      </Card>
 
-      <Card>
-        <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-xs text-muted-foreground">
-            {isLocked
-              ? "Výstupní list je uzamčený. Lze vygenerovat PDF, odeslat PDF nebo jej odemknout pro úpravy."
-              : isInternalMode
-                ? "Po uzamčení formuláře již nepůjde běžným uživatelům měnit."
-                : "Výstupní list můžete doplnit, podepsat a uložit pod svým přihlášeným účtem."}
-          </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs text-muted-foreground"
+                          onClick={() => signHandoverManagerSignature(true)}
+                          disabled={!handoverSignReady}
+                          title={
+                            !handoverSignReady
+                              ? handoverSignBlockedReason
+                              : undefined
+                          }
+                        >
+                          <Check className="size-3 shrink-0" /> Podepsat v
+                          zastoupení
+                        </Button>
+                      </>
+                    )}
 
-          <div className="flex flex-col items-end gap-2">
-            {canInvite && (
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                {initialData.publicToken && (
-                  <SendAllDialog
-                    offboardingId={resolvedOffboardingId}
-                    employeeName={header.employeeName ?? ""}
-                    employeeEmail={header.employeeEmail ?? null}
-                    publicToken={initialData.publicToken}
-                    conflictOfInterest={conflictOfInterest}
-                    managerEmail={managerEmail || null}
-                    managerName={managerName || null}
-                  />
-                )}
-                <SendInviteDialog
-                  offboardingId={resolvedOffboardingId}
-                  employeeName={header.employeeName ?? ""}
-                />
-                <SendInviteBehalfDialog
-                  offboardingId={resolvedOffboardingId}
-                  employeeName={header.employeeName ?? ""}
-                  managerName={managerName || null}
-                />
-              </div>
-            )}
-
-            {(canInvite || canGeneratePdf || canSendPdf) && (
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                {canInvite && resolvedOffboardingId && (
-                  <SignatureRecipientsDialog
-                    offboardingId={resolvedOffboardingId}
-                    employeeName={header.employeeName ?? ""}
-                    managerName={managerName || null}
-                  />
-                )}
-
-                {canGeneratePdf && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={requestGeneratePdf}
-                    className="gap-1"
-                    disabled={saving || sendingPdf}
-                  >
-                    <Printer className="size-4" /> {pdfButtonLabel}
-                  </Button>
-                )}
-
-                {canSendPdf && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setSendPdfDialogOpen(true)}
-                    className="gap-1"
-                    disabled={saving || sendingPdf}
-                  >
-                    <Send className="size-4" /> Odeslat PDF
-                  </Button>
-                )}
-              </div>
-            )}
-
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              {canUnlock && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void handleUnlock()}
-                  disabled={saving}
-                  className="gap-1"
-                >
-                  <Undo2 className="size-4" />
-                  Odemknout pro úpravy
-                </Button>
-              )}
-
-              {!isLocked && (
-                <>
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="bg-[#00847C] text-white hover:bg-[#0B6D73]"
-                    onClick={() =>
-                      void handleSave(false, { requestClose: true })
-                    }
-                    disabled={saving}
-                  >
-                    {saving ? "Ukládám…" : "Uložit"}
-                  </Button>
-
-                  {canLock && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void handleSave(true)}
-                      disabled={saving}
-                    >
-                      Uzamknout
-                    </Button>
-                  )}
-                </>
-              )}
-
-              {isInternalMode && isAdmin && resolvedOffboardingId && (
-                <DocumentHistoryDialog
-                  title="Historie výstupního listu"
-                  fetchUrl={`/api/odchody/${resolvedOffboardingId}/exit-checklist/history`}
-                  actionLabel={exitChecklistEventActionLabel}
-                  trigger={
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="gap-1"
-                    >
-                      <HistoryIcon className="size-4" />
-                      Historie
-                    </Button>
-                  }
-                />
+                  {handoverManagerSignature.signedAt &&
+                    (canOverrideOthersSignature ||
+                      normalizeEmail(handoverManagerSignature.signedByEmail) ===
+                        currentUserEmailNormalized) && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs text-muted-foreground"
+                        onClick={revokeHandoverManagerSignature}
+                      >
+                        <Undo2 className="size-3" /> Zrušit podpis
+                      </Button>
+                    )}
+                </div>
               )}
             </div>
           </div>
         </CardContent>
       </Card>
-
-      <AlertDialog
-        open={handoverSendDialogOpen}
-        onOpenChange={(open) => {
-          if (!sendingHandoverInfo) {
-            setHandoverSendDialogOpen(open)
-          }
-        }}
-      >
-        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-lg overflow-hidden p-0">
-          <div className="p-6 sm:px-8 sm:py-7">
-            <AlertDialogHeader className="space-y-3 text-left">
-              <AlertDialogTitle className="text-xl font-semibold">
-                {handoverSendDialogMode === "resend"
-                  ? "Odeslat informace znovu?"
-                  : "Odeslat informace odpovědným osobám?"}
-              </AlertDialogTitle>
-
-              <AlertDialogDescription asChild>
-                <div className="space-y-4 text-sm leading-6 text-muted-foreground">
-                  {handoverSendDialogMode === "resend" ? (
-                    <p>
-                      Informace pro osoby uvedené v poli „Za dokumenty odpovídá“
-                      už byly odeslány. Pokud je odešlete znovu, příjemci
-                      dostanou nový e-mail.
-                    </p>
-                  ) : (
-                    <p>
-                      Osobám uvedeným v poli „Za dokumenty odpovídá“ bude
-                      odeslán e-mail s informací, že u nich byla uvedena
-                      odpovědnost za dokumenty/agendu uvedeného zaměstnance,
-                      který ukončuje pracovní poměr. Tato akce se uloží hned,
-                      nezávisle na uložení celého formuláře.
-                    </p>
-                  )}
-
-                  {handoverRecipientsSentAt && (
-                    <div className="rounded-md border bg-muted/40 p-3 text-xs">
-                      <p className="font-medium text-foreground">
-                        Poslední odeslání
-                      </p>
-                      <p className="mt-1">
-                        {format(
-                          new Date(handoverRecipientsSentAt),
-                          "d.M.yyyy HH:mm"
-                        )}
-                        {" · "}
-                        {handoverRecipientsSentByName ??
-                          handoverRecipientsSentByEmail ??
-                          "neznámý uživatel"}
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="rounded-md border bg-background p-3 text-xs">
-                    <p className="mb-2 font-medium text-foreground">
-                      Osoby uvedené v poli „Za dokumenty odpovídá“
-                    </p>
-                    <ul className="max-h-48 space-y-2 overflow-y-auto pr-1">
-                      {validHandoverRecipients.map((recipient) => (
-                        <li key={recipient.id} className="flex flex-col">
-                          <span className="font-medium text-foreground">
-                            {recipient.name}
-                          </span>
-                          <span>{recipient.email}</span>
-                          {recipient.department && (
-                            <span className="text-muted-foreground/80">
-                              {recipient.department}
-                            </span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-
-            <AlertDialogFooter className="mt-6 gap-2 sm:gap-2">
-              <AlertDialogCancel
-                disabled={sendingHandoverInfo}
-                className="h-10 min-w-[120px]"
-              >
-                Zrušit
-              </AlertDialogCancel>
-
-              <Button
-                type="button"
-                className="h-10 min-w-[150px] bg-[#00847C] text-white hover:bg-[#0B6D73]"
-                onClick={() =>
-                  void handleSendHandoverRecipientInfo(
-                    handoverSendDialogMode === "resend"
-                  )
-                }
-                disabled={sendingHandoverInfo}
-              >
-                {sendingHandoverInfo ? (
-                  <>
-                    <Loader2 className="mr-2 size-4 animate-spin" />
-                    Odesílám…
-                  </>
-                ) : handoverSendDialogMode === "resend" ? (
-                  <>
-                    <Send className="mr-2 size-4" />
-                    Odeslat znovu
-                  </>
-                ) : (
-                  <>
-                    <Send className="mr-2 size-4" />
-                    Odeslat
-                  </>
-                )}
-              </Button>
-            </AlertDialogFooter>
-          </div>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <AlertDialog
         open={sendPdfDialogOpen}
@@ -3573,6 +4317,202 @@ export function ExitChecklistForm({
               </Button>
             </AlertDialogFooter>
           </div>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={foreignSignTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setForeignSignTarget(null)
+        }}
+      >
+        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-lg overflow-hidden p-0">
+          <div className="p-6 sm:px-8 sm:py-7">
+            <AlertDialogHeader className="space-y-3 text-left">
+              <AlertDialogTitle className="text-xl font-semibold">
+                Toto není vaše agenda
+              </AlertDialogTitle>
+
+              <AlertDialogDescription className="text-sm leading-6">
+                Tento řádek obvykle podepisuje jiná osoba. Opravdu ho chcete
+                podepsat i přesto?
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+
+            <AlertDialogFooter className="mt-6 gap-2 sm:gap-2">
+              <AlertDialogCancel
+                onClick={() => setForeignSignTarget(null)}
+                className="h-10 min-w-[120px]"
+              >
+                Zpět
+              </AlertDialogCancel>
+
+              <Button
+                type="button"
+                className="h-10 min-w-[150px] bg-[#00847C] text-white hover:bg-[#0B6D73]"
+                onClick={confirmForeignSign}
+              >
+                Přesto podepsat
+              </Button>
+            </AlertDialogFooter>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={pendingSaveAction !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingSaveAction(null)
+        }}
+      >
+        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-lg overflow-hidden p-0">
+          <div className="p-6 sm:px-8 sm:py-7">
+            <AlertDialogHeader className="space-y-3 text-left">
+              <AlertDialogTitle className="text-xl font-semibold">
+                Uložit výstupní list?
+              </AlertDialogTitle>
+
+              <AlertDialogDescription asChild>
+                <div className="space-y-3 text-sm leading-6">
+                  {(() => {
+                    const { sendLines, missingLines } = buildSaveSummary()
+
+                    if (sendLines.length === 0 && missingLines.length === 0) {
+                      return (
+                        <p>
+                          Změny se uloží. Tímto uložením se nikomu nic odesílat
+                          nebude.
+                        </p>
+                      )
+                    }
+
+                    return (
+                      <>
+                        {sendLines.length > 0 && (
+                          <div>
+                            <p className="font-medium text-foreground">
+                              Po uložení se odešle:
+                            </p>
+                            <ul className="mt-1 list-disc space-y-1 pl-5">
+                              {sendLines.map((line, index) => (
+                                <li key={index}>{line}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {missingLines.length > 0 && (
+                          <div>
+                            <p className="font-medium text-amber-800">
+                              Upozornění:
+                            </p>
+                            <ul className="mt-1 list-disc space-y-1 pl-5 text-amber-800">
+                              {missingLines.map((line, index) => (
+                                <li key={index}>{line}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </>
+                    )
+                  })()}
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+
+            <AlertDialogFooter className="mt-6 gap-2 sm:gap-2">
+              <AlertDialogCancel
+                onClick={() => setPendingSaveAction(null)}
+                className="h-10 min-w-[120px]"
+              >
+                Zpět k úpravě
+              </AlertDialogCancel>
+
+              <Button
+                type="button"
+                className="h-10 min-w-[150px] bg-[#00847C] text-white hover:bg-[#0B6D73]"
+                onClick={() => {
+                  const action = pendingSaveAction
+                  setPendingSaveAction(null)
+                  action?.()
+                }}
+              >
+                Uložit a odeslat
+              </Button>
+            </AlertDialogFooter>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={confirmClearAssetsOpen}
+        onOpenChange={setConfirmClearAssetsOpen}
+      >
+        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-lg overflow-hidden p-0">
+          <div className="p-6 sm:px-8 sm:py-7">
+            <AlertDialogHeader className="space-y-3 text-left">
+              <AlertDialogTitle className="text-xl font-semibold">
+                Vymazat vypsaný majetek?
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-sm leading-6">
+                Je vypsáno {assets.length}{" "}
+                {assets.length === 1 ? "položka" : "položek"} majetku.
+                Zaškrtnutím &bdquo;Zaměstnanec nemá žádný zapůjčený
+                majetek&ldquo; se tyto položky vymažou.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+
+            <AlertDialogFooter className="mt-6 gap-2 sm:gap-2">
+              <AlertDialogCancel className="h-10 min-w-[120px]">
+                Zrušit
+              </AlertDialogCancel>
+
+              <Button
+                type="button"
+                className="h-10 min-w-[150px] bg-[#00847C] text-white hover:bg-[#0B6D73]"
+                onClick={() => {
+                  setAssets([])
+                  setNoAssets(true)
+                  markAssetsHrEdit()
+                  markDirty()
+                  setConfirmClearAssetsOpen(false)
+                }}
+              >
+                Vymazat a zaškrtnout
+              </Button>
+            </AlertDialogFooter>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={pendingDirtyAction !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDirtyAction(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Neuložené změny</AlertDialogTitle>
+            <AlertDialogDescription>
+              Výstupní list má neuložené změny. Aby{" "}
+              {pendingDirtyAction?.type === "send"
+                ? "odeslané PDF odpovídalo"
+                : "vygenerované PDF odpovídalo"}{" "}
+              aktuálnímu stavu, je potřeba je nejdřív uložit.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingDirtyAction(null)}>
+              Zrušit
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-[#00847C] text-white hover:bg-[#0B6D73]"
+              onClick={() => void confirmDirtySaveAndProceed()}
+            >
+              Uložit a pokračovat
+            </AlertDialogAction>
+          </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </div>

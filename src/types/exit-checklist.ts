@@ -26,6 +26,7 @@ export interface ExitChecklistRowDefinition {
 
 export interface ExitChecklistItem extends ExitChecklistRowDefinition {
   resolved: ExitResolvedValue
+  note: string | null
   signedByName: string | null
   signedByEmail: string | null
   signedAt: string | null
@@ -49,6 +50,7 @@ export interface HandoverSendHistoryEntry {
   lastSentByName: string | null
   lastSentByEmail: string | null
   sentCount: number
+  cancelledAt?: string | null
 }
 
 export interface HandoverResponsiblePerson {
@@ -70,9 +72,12 @@ export interface HandoverAgendaData {
   includeHandoverAgenda?: boolean
 
   option1?: boolean
+  option1Note?: string
   option2?: boolean
   option2Target?: string
   option2TargetPositionNum?: string
+  option2TargetDepartment?: string
+  option2TargetUnitName?: string
 
   option3?: boolean
   option3Reason?: string
@@ -86,6 +91,17 @@ export interface HandoverAgendaData {
   handoverRecipientsSentByEmail?: string | null
   handoverRecipientsSentHash?: string | null
   handoverRecipientsSentCount?: number | null
+
+  handoverNotifiedAt?: string | null
+  handoverNotifiedTo?: string | null
+  handoverNotifiedTarget?: string | null
+}
+
+export interface ExitChecklistResponsiblePerson {
+  name: string
+  position?: string
+  department?: string
+  email: string
 }
 
 export interface ExitChecklistSignatureValue {
@@ -102,11 +118,18 @@ export interface ExitChecklistSignatures {
   managerEmail?: string | null
 }
 
+export interface ExitChecklistHrEditMarker {
+  name: string
+  email: string
+  role?: string
+  at: string
+}
+
 export interface ExitChecklistData {
   id?: number
   offboardingId: number
   publicToken?: string | null
-  conflictOfInterest?: boolean
+  conflictOfInterest?: boolean | null
   employeeName: string
   personalNumber: string | null
   department: string
@@ -118,7 +141,11 @@ export interface ExitChecklistData {
   employeeEmail?: string | null
   managerEmail?: string | null
   managerName?: string | null
+  managerPosition?: string | null
+  managerDepartment?: string | null
   handoverManagerSignature?: ExitChecklistSignatureValue | null
+  assetsEditedByHR?: ExitChecklistHrEditMarker | null
+  handoverEditedByHR?: ExitChecklistHrEditMarker | null
 
   completedAt?: string | null
   completedNotificationSentAt?: string | null
@@ -128,6 +155,7 @@ export interface ExitChecklistData {
 
   items: ExitChecklistItem[]
   assets: ExitAssetItem[]
+  noAssets?: boolean
   handover?: HandoverAgendaData
   signatures?: ExitChecklistSignatures
 
@@ -135,6 +163,9 @@ export interface ExitChecklistData {
   signatureRecipientsSentAt?: string | null
   signatureRecipientsSentByName?: string | null
   signatureRecipientsSentByEmail?: string | null
+
+  sectionBResponsible?: ExitChecklistResponsiblePerson | null
+  kitt6OptionContact?: ExitChecklistResponsiblePerson | null
 }
 
 export interface ExitChecklistSignatureRecipient {
@@ -144,4 +175,7 @@ export interface ExitChecklistSignatureRecipient {
   behalfLabel?: string
   invitedAt?: string
   revokedAt?: string
+  substituteForKey?: string
+  position?: string
+  department?: string
 }

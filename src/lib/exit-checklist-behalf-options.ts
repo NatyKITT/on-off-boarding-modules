@@ -21,14 +21,14 @@ function normalizeKey(value: string): string {
     .replace(new RegExp("[\\u0300-\\u036f]", "g"), "")
 }
 
-function stripOfficeInfo(value: string): string {
+export function stripOfficeInfo(value: string): string {
   return cleanText(value)
     .replace(/\s*[-–—]\s*č\.\s*dv\..*$/i, "")
     .replace(/\s*č\.\s*dv\..*$/i, "")
     .trim()
 }
 
-function looksLikePersonName(value: string): boolean {
+export function looksLikePersonName(value: string): boolean {
   const cleaned = stripOfficeInfo(value)
   if (!cleaned) return false
 

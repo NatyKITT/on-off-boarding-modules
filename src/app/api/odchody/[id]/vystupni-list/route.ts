@@ -13,8 +13,21 @@ import type {
 } from "@/types/exit-checklist"
 
 import { prisma } from "@/lib/db"
+import {
+  getOrCreateChecklist,
+  isPraha6OrKitt6,
+  mapToExitChecklistData,
+} from "@/lib/exit-checklist"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
-import { canAccessInternalApp, canReadExitChecklist } from "@/lib/rbac"
+import {
+  canAccessInternalApp,
+  canAdminExitChecklist,
+  canReadExitChecklist,
+} from "@/lib/rbac"
+
+function normalizeEmail(value?: string | null): string {
+  return (value ?? "").trim().toLowerCase()
+}
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -82,24 +95,11 @@ type FontSet = {
   bold: PDFFont
 }
 
-async function getChecklistById(
-  id: number,
-  cookie: string | null
-): Promise<ExitChecklistData> {
-  const base = process.env.AUTH_URL || process.env.NEXT_PUBLIC_APP_URL
-  if (!base) throw new Error("Chybí AUTH_URL nebo NEXT_PUBLIC_APP_URL.")
+async function getChecklistById(id: number): Promise<ExitChecklistData> {
+  const result = await getOrCreateChecklist(id)
+  if (!result) throw new Error("Odchod nenalezen.")
 
-  const res = await fetch(`${base}/api/odchody/${id}/exit-checklist`, {
-    cache: "no-store",
-    headers: cookie ? { cookie } : undefined,
-  })
-
-  if (!res.ok) throw new Error(`Nelze načíst výstupní list (${res.status}).`)
-
-  const json = await res.json()
-  if (!json.data) throw new Error("Chybí data výstupního listu.")
-
-  return json.data as ExitChecklistData
+  return mapToExitChecklistData(result.off, result.checklist)
 }
 
 async function readFirstExistingFile(
@@ -1067,23 +1067,65 @@ export async function GET(
     }
 
     const role = user.role ?? "USER"
-
-    if (!canAccessInternalApp(role) || !canReadExitChecklist(role)) {
-      return new Response(
-        JSON.stringify({
-          error: "Nemáte oprávnění zobrazit PDF výstupního listu.",
-        }),
-        {
-          status: 403,
-          headers: { "Content-Type": "application/json" },
-        }
-      )
-    }
-
     const id = Number(params.id)
     if (Number.isNaN(id)) throw new Error("Neplatné ID odchodu.")
 
-    const cookie = req.headers.get("cookie") ?? null
+    const isInternalReader =
+      canAccessInternalApp(role) && canReadExitChecklist(role)
+
+    const checklist = await getChecklistById(id)
+
+    if (!isInternalReader) {
+      if (!user.email || !isPraha6OrKitt6(user.email)) {
+        return new Response(
+          JSON.stringify({
+            error: "Nemáte oprávnění zobrazit PDF výstupního listu.",
+          }),
+          { status: 403, headers: { "Content-Type": "application/json" } }
+        )
+      }
+
+      if (!canReadExitChecklist(role)) {
+        return new Response(
+          JSON.stringify({
+            error: "Nemáte oprávnění zobrazit PDF výstupního listu.",
+          }),
+          { status: 403, headers: { "Content-Type": "application/json" } }
+        )
+      }
+
+      if (checklist.lockedAt) {
+        return new Response(
+          JSON.stringify({
+            error:
+              "Výstupní list je uzamčený – PDF si stáhněte přes interní aplikaci.",
+          }),
+          { status: 403, headers: { "Content-Type": "application/json" } }
+        )
+      }
+
+      if (!canAdminExitChecklist(role)) {
+        const currentUserEmail = normalizeEmail(user.email)
+        const matches = (checklist.signatureRecipients ?? []).filter(
+          (recipient) => normalizeEmail(recipient.email) === currentUserEmail
+        )
+        const hasActiveInvitedMatch = matches.some(
+          (recipient) => !recipient.revokedAt && Boolean(recipient.invitedAt)
+        )
+
+        if (!hasActiveInvitedMatch) {
+          const wasRemoved = matches.some((recipient) => recipient.revokedAt)
+          return new Response(
+            JSON.stringify({
+              error: wasRemoved
+                ? "Byli jste odebráni ze seznamu osob k podpisu – nemáte už přístup k tomuto výstupnímu listu."
+                : "Nemáte přístup k PDF tohoto výstupního listu – nebyla vám zaslána pozvánka k podpisu.",
+            }),
+            { status: 403, headers: { "Content-Type": "application/json" } }
+          )
+        }
+      }
+    }
 
     const tplPath = path.join(
       process.cwd(),
@@ -1093,13 +1135,11 @@ export async function GET(
       "vystupni-list.pdf"
     )
 
-    const [tplBytes, regularFontBytes, boldFontBytes, checklist] =
-      await Promise.all([
-        fs.readFile(tplPath),
-        readRequiredFont(ARIAL_REGULAR_FONT_CANDIDATES, "Arial"),
-        readRequiredFont(ARIAL_BOLD_FONT_CANDIDATES, "Arial Bold"),
-        getChecklistById(id, cookie),
-      ])
+    const [tplBytes, regularFontBytes, boldFontBytes] = await Promise.all([
+      fs.readFile(tplPath),
+      readRequiredFont(ARIAL_REGULAR_FONT_CANDIDATES, "Arial"),
+      readRequiredFont(ARIAL_BOLD_FONT_CANDIDATES, "Arial Bold"),
+    ])
 
     const pdf = await PDFDocument.load(tplBytes)
     pdf.registerFontkit(fontkit)

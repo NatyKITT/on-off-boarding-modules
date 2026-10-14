@@ -6,11 +6,10 @@ import type {
 
 import { prisma } from "@/lib/db"
 import {
-  sendBehalfSignatureEmail,
-  sendEmployeeExitChecklistInviteEmail,
   sendExitChecklistDueSoonReminderEmail,
+  sendExitChecklistSignatureReminderEmail,
+  sendOffboardingDepartureConfirmationEmail,
   sendQueuedProbationEmail,
-  sendSignatureInviteEmail,
   type ProbationMailQueuePayload,
 } from "@/lib/email"
 import { addProbationEvent } from "@/lib/probation-evaluation-request"
@@ -26,6 +25,7 @@ const PROBATION_MAIL_JOB_TYPES: MailJobType[] = [
   "PROBATION_EVALUATION_UNLOCK_REMINDER",
   "NOTICE_WARNING",
   "EXIT_SIGNATURE_INVITE",
+  "OFFBOARDING_DEPARTURE_CONFIRMATION",
 ]
 
 function asPayload(value: unknown): QueuePayload {
@@ -135,6 +135,19 @@ function toExitChecklistReminderPayload(payload: QueuePayload) {
   }
 }
 
+function toOffboardingDepartureConfirmationPayload(payload: QueuePayload) {
+  return {
+    to: getRecipients(payload),
+    employeeName: asStr(payload.employeeName) ?? "",
+    employeePersonalNumber: asStr(payload.employeePersonalNumber),
+    employeePosition: asStr(payload.employeePosition),
+    employeeDepartment: asStr(payload.employeeDepartment),
+    employeeUnitName: asStr(payload.employeeUnitName),
+    plannedEnd: asStr(payload.plannedEnd),
+    odchodyLink: asStr(payload.odchodyLink),
+  }
+}
+
 function toExitSignatureReminderPayload(payload: QueuePayload) {
   return {
     to: asStr(payload.to) ?? "",
@@ -142,7 +155,10 @@ function toExitSignatureReminderPayload(payload: QueuePayload) {
     employeePosition: asStr(payload.employeePosition) ?? "",
     employeeDepartment: asStr(payload.employeeDepartment) ?? "",
     employmentEndDate: asStr(payload.employmentEndDate) ?? "",
+    daysBeforeEnd: asNumber(payload.daysBeforeEnd) ?? 0,
     signUrl: asStr(payload.signUrl) ?? "",
+    roleNote: asStr(payload.roleNote),
+    behalfLabel: asStr(payload.behalfLabel),
   }
 }
 
@@ -350,27 +366,17 @@ async function processJob(job: MailQueue) {
     return
   }
 
+  if (job.type === "OFFBOARDING_DEPARTURE_CONFIRMATION") {
+    await sendOffboardingDepartureConfirmationEmail(
+      toOffboardingDepartureConfirmationPayload(payload)
+    )
+    return
+  }
+
   if (job.type === "EXIT_SIGNATURE_INVITE") {
-    const behalfLabel = asStr(payload.behalfLabel)
-
-    if (payload.isBehalf === true && behalfLabel) {
-      await sendBehalfSignatureEmail({
-        ...toExitSignatureReminderPayload(payload),
-        behalfOfName: behalfLabel,
-        behalfOfRole: "",
-        behalfOfDisplayLabel: behalfLabel,
-      })
-      return
-    }
-
-    if (payload.isEmployee === true) {
-      await sendEmployeeExitChecklistInviteEmail(
-        toExitSignatureReminderPayload(payload)
-      )
-      return
-    }
-
-    await sendSignatureInviteEmail(toExitSignatureReminderPayload(payload))
+    await sendExitChecklistSignatureReminderEmail(
+      toExitSignatureReminderPayload(payload)
+    )
     return
   }
 

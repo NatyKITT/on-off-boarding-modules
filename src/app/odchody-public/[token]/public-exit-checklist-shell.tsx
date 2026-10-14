@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { CheckCircle, Loader2, XCircle } from "lucide-react"
+import { CheckCircle, Loader2, Lock, XCircle } from "lucide-react"
 
 import type { ExitChecklistData } from "@/types/exit-checklist"
 
@@ -21,7 +21,11 @@ export function PublicExitChecklistShell({ token }: Props) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
+  const [dirty, setDirty] = useState(false)
+  const [saveTrigger, setSaveTrigger] = useState(0)
   const [showLoginSuccess, setShowLoginSuccess] = useState(loginSuccess)
+
+  const isLockedForPublic = Boolean(data?.lockedAt)
 
   useEffect(() => {
     let cancelled = false
@@ -72,6 +76,17 @@ export function PublicExitChecklistShell({ token }: Props) {
   }, [token])
 
   useEffect(() => {
+    if (!dirty) return
+
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      e.preventDefault()
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload)
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload)
+  }, [dirty])
+
+  useEffect(() => {
     if (!showLoginSuccess) return
 
     const timeout = window.setTimeout(() => {
@@ -83,11 +98,7 @@ export function PublicExitChecklistShell({ token }: Props) {
 
   return (
     <div className="min-h-screen bg-neutral-50 px-4 py-6">
-      <div className="mx-auto max-w-4xl space-y-4">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-bold">Výstupní list</h1>
-        </div>
-
+      <div className="mx-auto max-w-5xl space-y-4">
         {showLoginSuccess && !loading && !error && (
           <div className="flex items-start gap-3 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
             <CheckCircle className="mt-0.5 size-5 shrink-0 text-emerald-600" />
@@ -127,14 +138,32 @@ export function PublicExitChecklistShell({ token }: Props) {
           </div>
         )}
 
-        {data && !loading && (
+        {data && !loading && isLockedForPublic && (
+          <div className="flex flex-col items-center gap-3 rounded-md border border-neutral-200 bg-white px-6 py-12 text-center">
+            <Lock className="size-10 text-neutral-400" />
+            <p className="text-base font-medium text-neutral-800">
+              Výstupní list byl uzamčen pro úpravy.
+            </p>
+            <p className="max-w-md text-sm text-muted-foreground">
+              Zobrazení, stažení PDF, odeslání nebo odemknutí už je dostupné
+              pouze v interní aplikaci pro Personální oddělení (HR/PO), IT a
+              administrátory. V případě potřeby je kontaktujte.
+            </p>
+          </div>
+        )}
+
+        {data && !loading && !isLockedForPublic && (
           <ExitChecklistForm
             mode="public"
             publicToken={token}
             initialData={data}
+            onDirtyChange={setDirty}
+            externalSaveTrigger={saveTrigger}
+            onRequestSave={() => setSaveTrigger((t) => t + 1)}
             onSaved={(newData) => {
               setData(newData)
               setSaved(true)
+              setDirty(false)
             }}
           />
         )}

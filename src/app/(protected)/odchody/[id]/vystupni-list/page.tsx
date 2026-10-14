@@ -25,26 +25,12 @@ export default async function VystupniListPage({ params }: Props) {
     where: { id: offboardingId },
     select: {
       id: true,
-      name: true,
-      surname: true,
-      titleBefore: true,
-      titleAfter: true,
       plannedEnd: true,
       actualEnd: true,
     },
   })
 
   if (!offboarding) notFound()
-
-  const employeeName = [
-    offboarding.titleBefore,
-    offboarding.name,
-    offboarding.surname,
-    offboarding.titleAfter,
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .trim()
 
   const employmentEndDate = offboarding.actualEnd
     ? offboarding.actualEnd.toISOString()
@@ -53,7 +39,6 @@ export default async function VystupniListPage({ params }: Props) {
   return (
     <ExitChecklistPageClient
       offboardingId={offboardingId}
-      employeeName={employeeName}
       employmentEndDate={employmentEndDate}
     />
   )

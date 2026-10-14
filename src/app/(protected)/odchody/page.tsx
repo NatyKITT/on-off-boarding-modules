@@ -51,6 +51,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Collapsible,
   CollapsibleContent,
@@ -78,7 +79,6 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { ActiveFilterChips } from "@/components/common/active-filter-chips"
-import { ExitChecklistDialog } from "@/components/common/exit-checklist-dialog"
 import { LinkedRecordInfoButton } from "@/components/common/linked-record-info-button"
 import { ListPageSkeleton } from "@/components/common/list-page-skeleton"
 import { MonthFilter } from "@/components/common/month-filter"
@@ -262,8 +262,6 @@ function formatOptionalDate(value?: string | null) {
   return Number.isNaN(date.getTime()) ? "–" : format(date, "d.M.yyyy")
 }
 
-// Výpovědní doba nemá v appce vlastní datum začátku - dopočítá se zpětně
-// od data odchodu podle délky výpovědní doby (noticeMonths).
 function computeNoticeStart(
   targetDate?: string | null,
   noticeMonths?: number | null
@@ -317,9 +315,6 @@ function departureProgressTags(departure: Departure): string[] {
   const bucket = getDateProgressBucket(departureTargetDate(departure))
   if (!bucket) return []
 
-  // "Po termínu" má smysl jen u dosud nepotvrzených plánovaných odchodů –
-  // skutečný odchod má datum v minulosti vždy a "po termínu" by tam
-  // zavádějícím způsobem naznačovalo, že něco nestíhá.
   if (bucket === "OVERDUE") {
     return departureStatus(departure) === "planned" ? ["OVERDUE"] : []
   }
@@ -1073,6 +1068,20 @@ export default function OffboardingPage() {
   )
   const [loading, setLoading] = useState(true)
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
+
+  const overdueUnconfirmed = useMemo(
+    () =>
+      planned.filter(
+        (d) =>
+          !d.actualEnd &&
+          !d.cancelledAt &&
+          departureProgressTags(d).includes("OVERDUE")
+      ),
+    [planned]
+  )
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false)
+  const [bulkConfirmSelected, setBulkConfirmSelected] = useState<number[]>([])
+  const [bulkConfirmLoading, setBulkConfirmLoading] = useState(false)
   const [openNewPlanned, setOpenNewPlanned] = useState(false)
   const [openNewActual, setOpenNewActual] = useState(false)
   const [openActual, setOpenActual] = useState(false)
@@ -1138,10 +1147,6 @@ export default function OffboardingPage() {
     title: "",
     message: "",
   })
-
-  const [openExitChecklistId, setOpenExitChecklistId] = useState<number | null>(
-    null
-  )
 
   const qpMode = sp.get("new") as "create-planned" | "create-actual" | null
   const qpDate = sp.get("date") || undefined
@@ -1259,17 +1264,6 @@ export default function OffboardingPage() {
   }, [qpMode, canManageOffboarding])
 
   useEffect(() => {
-    const handler = () => {
-      setOpenExitChecklistId(null)
-    }
-
-    window.addEventListener("exit-checklist:close", handler)
-    return () => {
-      window.removeEventListener("exit-checklist:close", handler)
-    }
-  }, [])
-
-  useEffect(() => {
     const handler = () => void reload()
     window.addEventListener("offboarding:deleted", handler)
     window.addEventListener("offboarding:updated", handler)
@@ -1315,8 +1309,6 @@ export default function OffboardingPage() {
     const hasProgressFilter =
       departurePresets.length > 0 || isDayRangeActive(departureDayRange)
 
-    // Při aktivním hledání jménem se měsíční filtr ignoruje - vyhledávání
-    // musí najít člověka bez ohledu na to, jaký měsíc/rok je zrovna vybraný.
     if ((!departureDateFilter || isSearching) && !hasProgressFilter) {
       return allDepartures
     }
@@ -1425,9 +1417,6 @@ export default function OffboardingPage() {
   const isAnyFilterActive =
     isAnyNonStatusFilterActive || facetFilters.status.length > 0
 
-  // With no explicit status chosen, an active filter still narrows which
-  // tab(s) actually contain matches — so the page can jump straight there
-  // (or show them combined) instead of silently sitting on an empty tab.
   const displayStatuses = useMemo(() => {
     if (facetFilters.status.length > 0) {
       if (facetFilters.status.includes("all")) {
@@ -1637,9 +1626,6 @@ export default function OffboardingPage() {
 
     if (!previous || qpHighlightId) return
 
-    // Zmizení "?highlight=" z URL může způsobit i naše vlastní
-    // router.replace() hned po úspěšném zvýraznění záznamu (viz níže) -
-    // v tom případě se zvýraznění nemá rušit, jen se spotřebuje příznak.
     if (selfClearedHighlightRef.current) {
       selfClearedHighlightRef.current = false
       return
@@ -1990,6 +1976,86 @@ export default function OffboardingPage() {
       )
       setCancelDialog((prev) => ({ ...prev, loading: false }))
     }
+  }
+
+  async function handleBulkConfirmDepartures(rows: Departure[]) {
+    if (!canManageOffboarding || rows.length === 0) return
+
+    setBulkConfirmLoading(true)
+    const failed: string[] = []
+
+    for (const row of rows) {
+      try {
+        const actualDate = new Date(row.plannedEnd)
+        const noticePeriodEnd = new Date(actualDate)
+        noticePeriodEnd.setMonth(noticePeriodEnd.getMonth() + 2)
+
+        const res = await fetch(`/api/odchody/${row.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            actualEnd: row.plannedEnd.slice(0, 10),
+            noticePeriodEnd: format(noticePeriodEnd, "yyyy-MM-dd"),
+            status: "COMPLETED",
+          }),
+        })
+
+        if (!res.ok) throw new Error()
+      } catch {
+        failed.push(`${row.name} ${row.surname}`)
+      }
+    }
+
+    setBulkConfirmLoading(false)
+    setBulkConfirmSelected([])
+
+    if (failed.length === 0) {
+      setBulkConfirmOpen(false)
+      showSuccess(
+        "Odchody potvrzeny",
+        `Potvrzeno jako skutečný odchod: ${rows.length}.`
+      )
+    } else {
+      showError("Některé odchody se nepodařilo potvrdit", failed.join(", "))
+    }
+
+    await reload()
+  }
+
+  async function handleBulkCancelDepartures(rows: Departure[]) {
+    if (!canManageOffboarding || rows.length === 0) return
+
+    setBulkConfirmLoading(true)
+    const failed: string[] = []
+
+    for (const row of rows) {
+      try {
+        const res = await fetch(`/api/odchody/${row.id}/cancel`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason: "" }),
+        })
+
+        if (!res.ok) throw new Error()
+      } catch {
+        failed.push(`${row.name} ${row.surname}`)
+      }
+    }
+
+    setBulkConfirmLoading(false)
+    setBulkConfirmSelected([])
+
+    if (failed.length === 0) {
+      setBulkConfirmOpen(false)
+      showSuccess(
+        "Odchody označeny jako neuskutečněné",
+        `Označeno: ${rows.length}.`
+      )
+    } else {
+      showError("Některé odchody se nepodařilo označit", failed.join(", "))
+    }
+
+    await reload()
   }
 
   async function handleRestoreCancelled() {
@@ -2376,7 +2442,9 @@ export default function OffboardingPage() {
                                                 void handleDelete(e)
                                               }
                                               onOpenExitChecklist={() =>
-                                                setOpenExitChecklistId(e.id)
+                                                router.push(
+                                                  `/odchody/${e.id}/vystupni-list`
+                                                )
                                               }
                                               relatedChanges={
                                                 e.personalNumber?.trim()
@@ -2651,7 +2719,9 @@ export default function OffboardingPage() {
                                                 void handleDelete(e)
                                               }
                                               onOpenExitChecklist={() =>
-                                                setOpenExitChecklistId(e.id)
+                                                router.push(
+                                                  `/odchody/${e.id}/vystupni-list`
+                                                )
                                               }
                                               relatedChanges={
                                                 e.personalNumber?.trim()
@@ -2900,6 +2970,74 @@ export default function OffboardingPage() {
           Správa plánovaných a skutečných odchodů zaměstnanců
         </p>
       </div>
+
+      {hasLoadedOnce && overdueUnconfirmed.length > 0 && (
+        <div className="flex flex-col gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            <div>
+              <p className="font-medium">
+                {overdueUnconfirmed.length === 1
+                  ? "Plánovaný odchod je po termínu a nebyl potvrzen"
+                  : `${overdueUnconfirmed.length} plánovaných odchodů je po termínu a nebyly potvrzeny`}
+              </p>
+              <p className="mt-0.5 text-xs">
+                Potvrďte prosím, jestli k odchodu skutečně došlo, nebo ho
+                označte jako neuskutečněný.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {overdueUnconfirmed.slice(0, 3).map((d) => (
+              <div
+                key={d.id}
+                className="flex items-center gap-2 rounded-md border border-red-200 bg-white px-2 py-1"
+              >
+                <span className="font-medium">
+                  {d.name} {d.surname}
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1 px-2 text-xs"
+                  onClick={() => openActualDialogFromPlanned(d)}
+                >
+                  <Check className="size-3" /> Odešel
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1 px-2 text-xs"
+                  onClick={() =>
+                    setCancelDialog({
+                      open: true,
+                      departure: d,
+                      loading: false,
+                      reason: "",
+                    })
+                  }
+                >
+                  <XCircle className="size-3" /> Neuskutečnil se
+                </Button>
+              </div>
+            ))}
+
+            {overdueUnconfirmed.length > 1 && (
+              <Button
+                type="button"
+                size="sm"
+                className="h-7 bg-red-600 px-3 text-xs text-white hover:bg-red-700"
+                onClick={() => setBulkConfirmOpen(true)}
+              >
+                Hromadně vyřešit ({overdueUnconfirmed.length})
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
 
       {!hasLoadedOnce ? (
         <ListPageSkeleton />
@@ -3472,6 +3610,104 @@ export default function OffboardingPage() {
       </Dialog>
 
       <Dialog
+        open={bulkConfirmOpen}
+        onOpenChange={(open) => {
+          setBulkConfirmOpen(open)
+          if (!open) setBulkConfirmSelected([])
+        }}
+      >
+        <DialogContent
+          className="max-w-lg"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle>Hromadné vyřešení prošlých odchodů</DialogTitle>
+            <DialogDescription>
+              Vyberte, kterých zaměstnanců se potvrzení týká, a zvolte hromadnou
+              akci.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-[50vh] space-y-2 overflow-y-auto py-2">
+            {overdueUnconfirmed.map((d) => (
+              <label
+                key={d.id}
+                className="flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm"
+              >
+                <Checkbox
+                  checked={bulkConfirmSelected.includes(d.id)}
+                  onCheckedChange={(checked) => {
+                    setBulkConfirmSelected((prev) =>
+                      checked === true
+                        ? [...prev, d.id]
+                        : prev.filter((id) => id !== d.id)
+                    )
+                  }}
+                />
+                <span className="flex-1">
+                  <span className="font-medium">
+                    {d.name} {d.surname}
+                  </span>
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    plán. odchod {d.plannedEnd.slice(0, 10)}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={bulkConfirmLoading}
+              onClick={() =>
+                setBulkConfirmSelected(
+                  bulkConfirmSelected.length === overdueUnconfirmed.length
+                    ? []
+                    : overdueUnconfirmed.map((d) => d.id)
+                )
+              }
+            >
+              {bulkConfirmSelected.length === overdueUnconfirmed.length
+                ? "Zrušit výběr"
+                : "Vybrat vše"}
+            </Button>
+            <Button
+              variant="outline"
+              disabled={bulkConfirmLoading || bulkConfirmSelected.length === 0}
+              className="gap-1"
+              onClick={() =>
+                void handleBulkCancelDepartures(
+                  overdueUnconfirmed.filter((d) =>
+                    bulkConfirmSelected.includes(d.id)
+                  )
+                )
+              }
+            >
+              <XCircle className="size-3.5" /> Označit jako neuskutečněné
+            </Button>
+            <Button
+              disabled={bulkConfirmLoading || bulkConfirmSelected.length === 0}
+              className="gap-1 bg-[#00847C] text-white hover:bg-[#0B6D73]"
+              onClick={() =>
+                void handleBulkConfirmDepartures(
+                  overdueUnconfirmed.filter((d) =>
+                    bulkConfirmSelected.includes(d.id)
+                  )
+                )
+              }
+            >
+              {bulkConfirmLoading && (
+                <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              )}
+              <Check className="size-3.5" /> Potvrdit jako odešlé
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
         open={restoreCancelledDialog.open}
         onOpenChange={(open) =>
           setRestoreCancelledDialog((prev) => ({ ...prev, open }))
@@ -3718,14 +3954,6 @@ export default function OffboardingPage() {
           </div>
         </DialogContent>
       </Dialog>
-
-      {openExitChecklistId != null && (
-        <ExitChecklistDialog
-          key={openExitChecklistId}
-          offboardingId={openExitChecklistId}
-          open={true}
-        />
-      )}
 
       <SuccessModal
         open={successModal.open}

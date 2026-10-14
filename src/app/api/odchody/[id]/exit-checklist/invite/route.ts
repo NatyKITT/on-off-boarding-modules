@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server"
 import { auth } from "@/auth"
 import { Prisma } from "@prisma/client"
 
+import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
+
 import { prisma } from "@/lib/db"
 import {
   logEmailHistory,
@@ -14,9 +16,19 @@ import {
   mergeSignatureRecipients,
 } from "@/lib/exit-checklist"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
+import {
+  EXIT_CHECKLIST_MANAGER_ROLE_NOTE,
+  EXIT_CHECKLIST_SECTION_B_ROLE_NOTE,
+} from "@/lib/exit-checklist-role-notes"
 import { canAdminExitChecklist } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
+
+function getHeaderObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
+}
 
 function cleanText(value: unknown): string {
   return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : ""
@@ -77,6 +89,13 @@ export async function POST(
   const behalfOfDisplayLabel = cleanText(
     (body as Record<string, unknown>).behalfOfDisplayLabel
   )
+  const behalfOfPosition =
+    cleanText((body as Record<string, unknown>).behalfOfPosition) || null
+  const behalfOfDepartment =
+    cleanText((body as Record<string, unknown>).behalfOfDepartment) || null
+  const behalfOfEmail =
+    cleanText((body as Record<string, unknown>).behalfOfEmail).toLowerCase() ||
+    null
   const behalfOfRowKeysRaw = (body as Record<string, unknown>).behalfOfRowKeys
   const behalfOfRowKeys = Array.isArray(behalfOfRowKeysRaw)
     ? behalfOfRowKeysRaw.filter(
@@ -177,18 +196,38 @@ export async function POST(
     Boolean(offboarding.userEmail) &&
     inviteeEmail === offboarding.userEmail?.trim().toLowerCase()
 
+  const header = getHeaderObject(checklist.header)
+  const managerEmail = cleanText(header.managerEmail).toLowerCase()
+  const sectionBResponsibleHeader = getHeaderObject(header.sectionBResponsible)
+  const sectionBEmail = cleanText(sectionBResponsibleHeader.email).toLowerCase()
+
+  function resolveRoleNote(email: string | null): string | null {
+    if (!email) return null
+    if (email === managerEmail) return EXIT_CHECKLIST_MANAGER_ROLE_NOTE
+    if (email === sectionBEmail) return EXIT_CHECKLIST_SECTION_B_ROLE_NOTE
+    return null
+  }
+
   try {
     if (isBehalf) {
+      const behalfObligations = EXIT_CHECKLIST_ROWS.filter((row) =>
+        behalfOfRowKeys.includes(row.key)
+      ).map((row) => row.obligation)
+
       await sendBehalfSignatureEmail({
         to: inviteeEmail,
         behalfOfName: behalfOfName || behalfOf || "zodpovědnou osobu",
         behalfOfRole,
         behalfOfDisplayLabel: behalfOfDisplayLabel || behalfOf || undefined,
+        behalfOfPosition,
+        behalfOfDepartment,
+        roleNote: resolveRoleNote(behalfOfEmail),
         employeeName,
         employeePosition: offboarding.positionName ?? "",
         employeeDepartment: offboarding.department ?? "",
         employmentEndDate,
         signUrl,
+        obligations: behalfObligations,
       })
     } else if (isEmployeeInvite) {
       await sendEmployeeExitChecklistInviteEmail({
@@ -207,6 +246,7 @@ export async function POST(
         employeeDepartment: offboarding.department ?? "",
         employmentEndDate,
         signUrl,
+        roleNote: resolveRoleNote(inviteeEmail),
       })
     }
 

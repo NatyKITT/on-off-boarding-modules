@@ -2,6 +2,68 @@
 
 Historie významných změn v aplikaci On-Off-Boarding Modul. Nejnovější verze nahoře.
 
+## 0.15.0 – 2026-10-01
+
+### Nové funkce
+
+- **Správa výstupního listu se nově otevírá na vlastní stránce** (`/odchody/[id]/vystupni-list`) místo modálního okna z přehledu Odchodů – stabilnější chování při podepisování více lidmi najednou, zpět vede vždy na přehled Odchodů. Stránka samotná existovala už dřív (používala se z detailu nástupu), teď se na ni odkazuje i z přehledu.
+- **Jasné oddělení "co je potřeba nastavit a odeslat" od "samotného výstupního listu"** – na stránce výstupního listu je teď nejdřív karta "Nastavení a odeslání k podpisu" (střet zájmů, výpis majetku, předávaná agenda, odeslání k podpisu) a až pod tím samotné body výstupního listu k podpisu.
+- **Střet zájmů musí být vědomě rozhodnutý před odesláním k podpisu** – dřív pole vždy mělo hodnotu ano/ne (výchozí ne), takže nešlo poznat, jestli to někdo vůbec vyplnil. Nově je to skutečná volba Ano/Ne bez výchozí hodnoty; dokud není vybraná, nejde výstupní list odeslat k podpisu (s vysvětlující hláškou).
+- **Automatické hlídání prošlých plánovaných odchodů bez potvrzení** – pokud uplyne plánované datum odchodu a nikdo v appce nepotvrdil, jestli k odchodu skutečně došlo, objeví se nahoře v přehledu Odchodů červený banner s možností rovnou potvrdit ("Odešel") nebo označit jako neuskutečněný u každého jména; při více takových záznamech jde hromadně vybrat a vyřešit najednou. Personální oddělení navíc dostane den po plánovaném konci jednorázový e-mail s připomínkou a odkazem do přehledu.
+- **Veřejná verze výstupního listu nyní skutečně rozlišuje role podle seznamu osob k podpisu** – odcházející zaměstnanec smí podepsat jen svůj vlastní řádek v hlavičce (nikdy ne za vedoucího ani jinou sekci), ale vidí celý výstupní list, historii změn a kdo co podepsal. Vedoucí odboru smí podepsat svůj podpis v hlavičce i řádek „předávací protokol" a má přístup do sekcí A a B, ale nesmí podepsat za zaměstnance. Ostatní podepisující nesmí na hlavičkové podpisy ani na sekci C (tu smí vyplnit a podepsat jen vedoucí nebo jeho zástup), mají přístup jen do sekce A a B. Konkrétní funkční signatáři (a jejich zástupci) smí podepsat i cizí řádek v sekci A, appka na to ale upozorní („Toto není vaše agenda"); důležité je, že se na ně dál spoléhají automatické připomínky – dokud nemají podepsané úplně všechny své přiřazené řádky, počítají se jako nepodepsaní.
+- **Jednou podepsaný řádek v sekci A je uzamčený** – hodnotu Ano/Ne i poznámku u něj nejde dál měnit ani zrušit nikým jiným než tím, kdo podepsal (ten musí nejdřív zrušit svůj podpis). Prázdná poznámka se u uzamčeného řádku už nezobrazuje.
+- **Redesign okna „Seznam a správa osob k podpisu výstupního listu"** – rozhodnutí o střetu zájmů je nahoře a odešle se/uloží až společně s ostatními změnami hlavním tlačítkem Uložit (s potvrzovacím oknem, co se komu odešle); odpovědné osoby za sekci B, sekci C (vedoucí odboru) a kontakt KITT6 jsou dole jako editovatelné „vizitky" propojené se zbytkem záznamu odchodu. Zavírací dialog při neuložených změnách nabízí Zůstat / Uložit / Zavřít bez uložení.
+- **Oprava a zpřesnění zastupování** – zaškrtávátko přejmenováno na „Přidat jako zastupujícího za"; když se vybere zastoupení za osobu, která ještě není v seznamu, přidá se tam automaticky i ona a dostane dvojí info (vlastní pozvánka + info o zastoupení). Jednotný formát zobrazení u všech příjemců (jméno / e-mail / pozice - odbor, barevně odlišené poznámky kdo zastupuje koho) bez ohledu na to, jakým způsobem byli do seznamu přidáni.
+- **Nový cron krok – kontrola před odesláním pozvánek** – dokud HR poprvé neodeslala žádnou pozvánku k podpisu, cron (od 1 měsíce před plánovaným koncem, u krátké výpovědní doby hned) upozorní, pokud chybí vedoucí odboru nebo není rozhodnutý střet zájmů.
+- **Rozšířený rozvrh cílených připomínek** – z 14/7/3/2/1 na 14/7/5/3/2/1/0 dní před koncem; e-mail navíc obsahuje poznámku podle role (zaměstnanec / vedoucí / odpovědná osoba za sekci B), i při přímém (nikoli jen zastupujícím) odeslání pozvánky. Nový souhrnný report pro HR na stejné dny nahrazuje starší samostatnou 30/14/7/3/2/1denní upomínku.
+- **E-mail zaměstnanci o dokončení** nově obsahuje i výzvu HR, ať si se zaměstnancem domluví předání zápočtového listu a poté výstupní list označí jako hotový a zamkne.
+- **Přepracovaná pozvánka pro odcházejícího zaměstnance** – nově obsahuje očíslované kroky (1. fyzické vrácení majetku s přehledem odpovědných osob a kanceláří, 2. elektronický podpis se zvýrazněným tlačítkem a odkazem, 3. dokončení a vyzvednutí zápočtového listu) a kontaktní kartu Personálního oddělení v patičce.
+- **Stažení PDF výstupního listu uvolněno i pro nedokončený list** – kdokoli s potvrzenou pozvánkou k podpisu (přihlášený přes praha6/kitt6 e-mail) smí stáhnout PDF, dokud list není uzamčený, bez ohledu na to, jestli je 100 % podepsaný.
+- **Historie výstupního listu** je nově viditelná i odcházejícímu zaměstnanci ve veřejné verzi (dřív jen interní ADMIN/HR/IT).
+- **Odpovědná osoba za sekci B** se při změně na jinou osobu automaticky propíše do seznamu příjemců k podpisu, aby jí šla odeslat pozvánka.
+- **Odkaz „Přidat do kalendáře" odstraněn ze skutečných nástupů/odchodů a z personálních změn v měsíčních reportech** (u plánovaných nástupů/odchodů zůstává).
+- **Redesign e-mailu pozvánky odcházejícímu zaměstnanci** – kroky 1–3 jsou nově tři samostatné, barevně odlišené karty s číslovaným odznakem, aby byly v e-mailu dobře vizuálně oddělené a výrazné.
+- Tlačítko „Podepsat přesto" (u podpisu cizího řádku v sekci A) přejmenováno na „Přesto podepsat".
+- Potvrzovací okno při ukládání seznamu osob k podpisu nově přesně rozlišuje, jestli se při uložení skutečně odešle nějaký e-mail – pokud ne (např. odebrání nikdy nepozvaného Právního odboru), nabídne jen „Uložit", ne „Uložit a odeslat".
+- **E-maily o zastoupení a odebrání přepracovány na stejnou strukturu jako ostatní e-maily** – informace o zaměstnanci/odchodu je v samostatné tabulce, oddělené od informace o zástupci; e-mail zastupovanému nově obsahuje celé jméno, pozici a odbor zástupce a kontakt na Personální oddělení při nejasnostech. Při zrušení zastoupení dostává informaci (se stejnou strukturou, jen o zrušení) i původní zastupovaná osoba – dřív ji nedostala žádnou.
+- Odebrání příjemce, kterému už byla dříve odeslána pozvánka k podpisu, po uložení pořád správně odesílá informační e-mail o odebrání (ověřeno, beze změny v mechanismu) – jen přepracovaný do přehlednější podoby se stejnou tabulkou jako ostatní e-maily.
+- **E-mail o odebrání ze seznamu osob k podpisu přepracován na stejnou strukturu jako ostatní e-maily** – dřív jedna hutná věta se jménem, pozicí, odborem i datem odchodu zaměstnance, nově samostatná informační tabulka stejná jako u ostatních e-mailů k výstupnímu listu, oddělená od úvodní a závěrečné věty.
+- **Sekce C (předání agendy) – oba informační e-maily nově uvádějí jméno a pozici/odbor vedoucího odboru** – e-mail na KITT6 kontakt i e-mail každé vybrané odpovědné osobě nově obsahuje celé jméno a pozici/odbor konkrétního vedoucího odboru, který danou volbu předání zvolil, místo obecné věty „Vedoucí odboru v rámci výstupního listu zvolil(a), že…".
+- **Sekce C – změna již potvrzené volby po podpisu a uložení nově zruší předchozí informaci** – pokud vedoucí odboru po dřívějším podepsaném a uloženém předání agendy (KITT6 kontakt, nebo konkrétní odpovědné osoby) volbu znovu otevře, změní (jiný způsob předání, jiné cílové funkční místo u KITT6, jiný seznam odpovědných osob) a znovu podepíše a uloží, appka už dřív upozorněným osobám/kontaktu automaticky pošle e-mail se stejnou tabulkou, že tato dřívější varianta byla zrušena a byl potvrzen jiný způsob předání – žádné další kroky z jejich strany už nejsou potřeba. Platí jen pro skutečně odeslané informace (ne pro nikdy nenotifikované), e-mail se posílá jen při znovu podepsaném a uloženém výstupním listu (ve shodě s pravidlem, že platná je jen podepsaná volba), a to v interní appce i přes veřejný odkaz.
+- **Nové potvrzovací okno „Uložit výstupní list?" před každým uložením** – shrnuje, co se po uložení skutečně odešle (nové pozvánky/info k sekci C, oznámení o zrušení dřívější volby KITT6 nebo odpovědným osobám, které v nové volbě už nejsou), a pokud přihlášený ve veřejné verzi ještě nemá podepsané všechny své řádky, upozorní, že mu budou dál chodit automatické připomínky. Tlačítka „Uložit a odeslat" / „Zpět k úpravě" (needitovalo se nic). Platí jednotně pro všechna místa uložení – tlačítko v samotném výstupním listu, tlačítka na stránce kolem něj i „Uložit a odejít" v okně o neuložených změnách.
+- **Sekce C (předání agendy) nyní nezávisí na stavu sekce B (majetek)** – dřív šlo sekci C podepsat až po vyplnění majetku v sekci B, i když obě sekce řeší různé osoby a věci. Podpis sekce C teď blokují jen vlastní pole volby C.
+
+### Opravy
+
+- Oprava chyby, kdy přepnutí „Obsahuje výstupní list střet zájmů?" u ještě neodeslaného seznamu přepsalo celý rozpracovaný návrh zpět na výchozí – teď se vždy jen přidá/odebere Právní odbor.
+- Oprava zobrazení jména u statických signatářů a Právního odboru – pozice a odbor se nově správně rozdělí do samostatných polí místo aby zůstaly slité v poli jméno.
+- Oprava chybějící kontroly podpisu sekce C u vedoucího odboru v cronu (dřív stačil jen podpis v hlavičce).
+- **Oprava mezery v oddělení rolí od admin oprávnění** – role nastavená v administraci appky (ADMIN/HR/IT/READONLY) se dřív i ve veřejné verzi počítala jako automatické oprávnění podepisovat, bez ohledu na to, jestli je dotyčný v seznamu osob k podpisu daného výstupního listu. Teď se ve veřejné verzi vždy řídí výhradně příslušností k tomuto seznamu.
+- Oprava: odcházející zaměstnanec mohl ve veřejné verzi stále měnit Ano/Ne a poznámku v sekci A a podepsat sekci B (pole „Vydávající") – obě místa teď respektují, že zaměstnanec smí jen sledovat, ne upravovat ani podepisovat.
+- Oprava chybějící pozice/odboru u příjemců – dohledávání v EOS adresáři omylem vylučovalo právě odcházejícího zaměstnance (má aktivní záznam odchodu), takže se jemu samotnému nikdy nedohledala pozice/odbor; opraveno i párování podle jména pro případy jiného pořadí nebo formátování.
+- Oprava chybějící pozice/odboru u vedoucího odboru v seznamu příjemců – doplňuje se přímo z autoritativních dat karty vedoucího, ne jen nejistým dohledáním podle jména v adresáři.
+- Odstraněn zbytečně duplicitní nadpis „Výstupní list – [jméno]" na interní stránce výstupního listu (stejné jméno už zobrazuje karta pod ním).
+- Oprava zobrazení příjemců se shodným e-mailem jako jiný řádek v seznamu (typicky nový zástupce se shodou e-mailu) – jméno, e-mail i pozice/odbor se dřív u druhého výskytu skrylo a zelená poznámka „Zastupuje za" tak vizuálně splynula se špatným, nesouvisejícím řádkem. Teď se u každého řádku vždy zobrazí jeho vlastní identita, se stejnými rozestupy a dělicí čárkou mezi všemi záznamy.
+- Popisek „zastupuje za" sjednocen na velké počáteční písmeno, stejně jako „Zastupuje:".
+- **Oprava mezery v public verzi – odebraný příjemce byl i tak vidět, pokud měl roli ADMIN/HR/IT** – kontrola na zrušený přístup (`revokedAt`) ve veřejném API (`/api/odchody/public/[token]`, čtení i ukládání) se dřív přeskakovala pro interní role. Teď platí pro všechny stejně – odebraná osoba uvidí jen hlášku „Nemáte přístup k podpisu tohoto výstupního listu. Pokud je něco v nepořádku, kontaktujte Personální oddělení.", žádná data výstupního listu, dokud ji HR nevrátí zpět do seznamu.
+- Podpis „Za Odbor služeb potvrzuje správnost Výpisu" (sekce B) je nově přímo needitovatelné (disabled) tlačítko s vysvětlujícím tooltipem, dokud není vyplněn majetek nebo zaškrtnuto „žádný majetek" – dřív šlo kliknout a teprve pak se zobrazila chybová hláška.
+- **Zpřísnění ochrany proti opakovanému odeslání e-mailu o předání agendy na KITT6** – dřív se spoléhalo jen na kontrolu na straně prohlížeče; teď i server (`/handover-kitt6-notify`) sám odmítne znovu odeslat stejnou volbu (stejné cílové funkční místo), dokud se skutečně nezmění.
+
+Vyžaduje databázovou migraci (nová hodnota `OFFBOARDING_DEPARTURE_CONFIRMATION` v enumu `MailJobType` pro frontu e-mailů, nové pole `note` u `ExitChecklistItem`) – bez dalších změn dat.
+
+---
+
+## Deployment checklist k verzi 0.15.0
+
+- [ ] Nasadit migrace `add_offboarding_departure_confirmation_mail_type` a `add_exit_checklist_item_note`.
+- [ ] V přehledu Odchodů kliknout na "Výstupní list" u řádku a ověřit, že se otevře stránka (ne modál) a tlačítko zpět vede na Odchody.
+- [ ] U výstupního listu bez nastaveného střetu zájmů ověřit, že odeslání k podpisu je zablokované, a po výběru Ano/Ne se odemkne.
+- [ ] Testovacímu odchodu nastavit `plannedEnd` pár dní do minulosti (bez `actualEnd`, bez `cancelledAt`) a ověřit banner v Odchodech i hromadné okno při více záznamech.
+- [ ] Zavolat `/api/cron/offboarding-notifications?force=true` pro odchod s `plannedEnd` přesně včera a ověřit, že vznikne právě jeden e-mail v `MailQueue` (a při opakovaném volání znovu ne).
+- [ ] Ve veřejné verzi výstupního listu vyzkoušet přihlášení jako odcházející zaměstnanec, jako vedoucí odboru a jako běžný podepisující a ověřit, že každý vidí/smí jen to, co má.
+
+---
+
 ## 0.14.0 – 2026-09-29
 
 ### Nové funkce

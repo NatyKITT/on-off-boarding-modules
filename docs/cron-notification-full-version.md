@@ -104,37 +104,37 @@ zkušební doba řeší až po potvrzení skutečného nástupu).
 Řeší dva samostatné typy připomínek, vždy nejvýš jednou za dané okno a
 daný odchod:
 
-**A) Souhrnná připomínka pro HR** (typ úlohy `NOTICE_WARNING`,
-funkce `queueExitChecklistReminders`) – v okamžicích **30, 14, 7, 3, 2
-a 1 den** před plánovaným koncem:
+**A) Kontrola před odesláním pozvánek k podpisu** (typ úlohy
+`NOTICE_WARNING`, funkce `queueExitChecklistSetupReminders`) – hlídá,
+jestli má HR před prvním odeslání pozvánek vyplněné dvě povinné věci:
+vedoucího odboru a rozhodnutý střet zájmů (rozhoduje se výhradně
+v okně "Osoby k podpisu výstupního listu", viz kapitola 11.6):
 
-- dohledá plánované odchody (bez `actualEnd`), kterým se blíží
-  plánovaný konec pracovního poměru,
-- u každého ověří, jestli je výstupní list (exit checklist) už
-  kompletně podepsaný – pokud ano, upomínka se nevytváří,
-- zjistí, jestli HR už vůbec jednou kliknula "Odeslat všem k podpisu"
-  (viz níže) – podle toho zvolí text:
-  - ještě neodeslala → HR se vyzve, ať pozvánky odešle
-    ("Nutno odeslat pozvánku k podpisu výstupního listu…"),
-  - už odeslala, ale list není hotový → HR se jen informuje,
-    že list stále čeká na podpis, a e-mail navíc obsahuje seznam
-    „Ještě nepodepsali" – jména a e-maily konkrétních lidí ze
-    signatureRecipients roster, kteří ještě nepodepsali (počítá se
-    stejnou logikou jako u cílených připomínek v bodě B),
+- dohledá plánované odchody (bez `actualEnd`, bez `cancelledAt`),
+  kterým ještě nikdy nebyla odeslána žádná pozvánka k podpisu
+  (`signatureRecipientsSentAt` je prázdné) – jakmile HR poprvé odešle
+  pozvánky, tato kontrola se pro daný odchod už nikdy znovu nespustí,
+- u krátké výpovědní doby (`noticeMonths < 2` nebo vlastní zadaná
+  data, `hasCustomDates`) běží kontrola každý den cronu bez ohledu na
+  datum; jinak teprve od okamžiku, kdy do plánovaného konce zbývá
+  **1 měsíc** nebo méně,
+- pokud chybí vedoucí odboru a/nebo není rozhodnutý střet zájmů,
+  zařadí HR jeden souhrnný e-mail s výčtem, co konkrétně chybí
+  doplnit – nejvýš jednou za den a daný odchod,
 - příjemci jsou `HR_EMAILS`,
 - zápis události `DEADLINE_REMINDER_SENT` do historie výstupního
-  listu, včetně `meta.pendingSigners` se stejným seznamem.
+  listu, včetně `meta.missing` s výčtem chybějících věcí.
 
-**B) Cílená připomínka konkrétním lidem** (typ úlohy
-`EXIT_SIGNATURE_INVITE`, funkce `queueExitChecklistSignatureReminders`)
-– v okamžicích **14, 7, 3, 2 a 1 den** před plánovaným koncem (bez
-30denního okna, na rozdíl od souhrnné připomínky pro HR výše):
+**B) Cílená připomínka konkrétním lidem + souhrnný report pro HR**
+(typ úlohy `EXIT_SIGNATURE_INVITE` pro podepisující, `NOTICE_WARNING`
+pro HR report, funkce `queueExitChecklistSignatureReminders`) –
+v okamžicích **14, 7, 5, 3, 2, 1 a 0 dní** před plánovaným koncem:
 
 - pro každý nedokončený odchod se podívá na **uloženou skupinu
   příjemců** (`ExitChecklist.header.signatureRecipients`) – tedy
   přesně ten seznam lidí, kterým bylo kdy odesláno k podpisu. Skupina
-  se nepřepisuje jen přes dialog "Odeslat všem k podpisu" (viz
-  kapitola 11.6, tam se dá i explicitně odebrat/zrušit), ale
+  se nepřepisuje jen přes dialog "Osoby k podpisu výstupního listu"
+  (viz kapitola 11.6, tam se dá i explicitně odebrat/zrušit), ale
   **doplňuje se automaticky** i každým jednotlivým odesláním tlačítkem
   "Odeslat k podpisu", "Odeslat k podpisu v zastoupení" nebo přidáním
   v okně "Osoby k podpisu" – žádná z těchto akcí zbytek skupiny
@@ -147,19 +147,47 @@ a 1 den** před plánovaným koncem:
   (přímo za sebe a k tomu v zastoupení za jinou osobu/odbor) – cron je
   vyhodnocuje **odděleně** (podle dvojice e-mail + role v zastoupení),
   takže vyřízení jedné role stejného člověka neovlivní tu druhou,
-- u každého člověka ze skupiny zjistí, jestli má ještě co podepsat:
-  pokud byl přidán "v zastoupení", počítá se podle konkrétních řádků
-  výstupního listu, za které podepisuje (uložené u něj jako
-  `rowKeys`); jinak zaměstnanec/vedoucí podle hlavičkového podpisu,
+- u každého člověka ze skupiny zjistí, jestli má ještě co podepsat a
+  jakou roli u toho zastává (`resolveSignatureRecipientStatus`):
+  zastoupení za vedoucího se posuzuje úplně stejně jako vedoucí sám
+  (musí podepsat hlavičku i sekci C), zaměstnanec podle svého
+  hlavičkového podpisu, vedoucí podle hlavičky **a** podpisu sekce C
+  zároveň (`managerHasSigned` – dřív se kontrolovala jen hlavička),
+  odpovědná osoba za sekci B podle podpisu vydávajícího v sekci B,
   funkční signatáři (SNEO, spisová služba, mzdová účtárna...) podle
-  svých konkrétních řádků výstupního listu, ostatní obecně podle
-  celkové kompletnosti,
+  svých konkrétních řádků výstupního listu (uložené u nich jako
+  `rowKeys`) – pokud má někdo přiřazeno víc řádků, musí mít podepsané
+  úplně všechny, jinak se dál počítá jako nepodepsaný a připomínka mu
+  chodí dál, ostatní obecně podle celkové kompletnosti,
 - e-mail vede na stejný veřejný odkaz (`/odchody-public/[token]`),
-  jaký dostali v původní pozvánce; odcházející zaměstnanec dostává
-  jinou verzi textu než ostatní signatáři (viz kapitola 11.6) a stejně
-  tak lidé přidaní "v zastoupení" (text s "v zastoupení za…"),
+  jaký dostali v původní pozvánce; podle role (zaměstnanec, vedoucí,
+  odpovědná osoba za sekci B) obsahuje navíc zvýrazněnou poznámku, co
+  konkrétně má dotyčný ještě vyřídit, a lidé přidaní "v zastoupení"
+  mají v e-mailu i text "v zastoupení za…",
 - zápis události `SIGNATURE_INVITE_SENT` do historie výstupního
-  listu, s metadaty o tom, komu a kolik dní před koncem se poslalo.
+  listu, s metadaty o tom, komu a kolik dní před koncem se poslalo,
+- pokud na daný den zbyl alespoň jeden nepodepsaný příjemce, zařadí se
+  navíc (nejvýš jednou za tento den a odchod) **jeden souhrnný report
+  pro HR** se jmény a e-maily těch, co ještě nepodepsali – tento
+  report **nahrazuje** dřívější samostatnou 30/14/7/3/2/1denní
+  souhrnnou upomínku pro HR, žádné duplicitní e-maily se tedy
+  neposílají.
+
+**C) Potvrzení, že plánovaný odchod skutečně proběhl** (typ úlohy
+`OFFBOARDING_DEPARTURE_CONFIRMATION`, funkce
+`queueOffboardingDepartureConfirmations`) – přesně **1 den po**
+plánovaném konci (`plannedEnd` padlo do včerejška), jednorázově:
+
+- dohledá plánované odchody (bez `actualEnd`, bez `cancelledAt`),
+  kterým právě včera uplynul plánovaný konec a nikdo v appce
+  nepotvrdil, jestli k odchodu skutečně došlo,
+- pošle HR (`HR_EMAILS`) jeden e-mail na zaměstnance s odkazem do
+  přehledu Odchodů, kde je stejná situace zároveň vidět jako červený
+  banner (s možností rovnou potvrdit nebo označit jako neuskutečněný,
+  u více záznamů i hromadně),
+- jde o jednorázovou připomínku vázanou na přesné okno "včera" – žádné
+  další sledovací pole u odchodu pro to není potřeba, okno se samo
+  druhý den uzavře.
 
 Řádek podpisu zaměstnance na veřejném odkaze (`/odchody-public/[token]`)
 navíc smí podepsat jen účet přihlášený přes Google se stejným e-mailem,
@@ -167,8 +195,8 @@ jaký má u odchodu uvedený odcházející zaměstnanec – ne kterýkoli
 přihlášený uživatel z povolené domény jako dřív.
 
 Endpoint stejně jako `probation-notifications` e-maily přímo
-neposílá, pouze vytváří úlohy do `MailQueue` (`NOTICE_WARNING` a
-`EXIT_SIGNATURE_INVITE`).
+neposílá, pouze vytváří úlohy do `MailQueue` (`NOTICE_WARNING`,
+`EXIT_SIGNATURE_INVITE` a `OFFBOARDING_DEPARTURE_CONFIRMATION`).
 
 Na stránce výstupního listu (`/odchody/[id]/vystupni-list`) se navíc
 nezávisle na cronu zobrazuje barevný banner (žlutý do 7 dnů, červený
@@ -874,12 +902,15 @@ zastoupení za jinou osobu/odbor (`behalfLabel`). Přidání, odebrání,
 vrácení i cílené připomínky rozlišují každou roli zvlášť podle dvojice
 e-mail + `behalfLabel`, takže zásah do jedné role neovlivní tu druhou.
 
-**Přístup k podpisu je vázaný na tuto skupinu.** Kdo je v ní aktivně
-(bez `revokedAt`), smí ve výstupním listu podepisovat; kdo byl
-odebraný, výstupní list přes svůj odkaz stále vidí, ale nesmí nic
-podepsat a uvidí informaci, že má požádat o opětovné přidání.
-Uživatelé s vyšším oprávněním než USER (HR, IT, READONLY, ADMIN) smí
-podepisovat vždy, bez ohledu na členství ve skupině.
+**Přístup k podpisu (a ve veřejné verzi i k samotnému zobrazení) je
+vázaný na tuto skupinu.** Kdo je v ní aktivně (bez `revokedAt`), smí ve
+výstupním listu podepisovat; kdo byl odebraný, přes veřejný odkaz už
+výstupní list vůbec neuvidí, jen hlášku, že nemá přístup k podpisu a má
+se v případě nejasností obrátit na Personální oddělení (`GET` i `PUT`
+na `/api/odchody/public/[token]` to hlídají shodně). Toto se řídí
+výhradně příslušností ke skupině, ne rolí nastavenou v administraci
+appky. V interní aplikaci naproti tomu smí podepisovat vždy uživatelé
+s rolí HR, IT, READONLY nebo ADMIN, bez ohledu na členství ve skupině.
 
 Ať už se skupina upraví kterýmkoli z těchto tří míst, příští běh cronu
 vždy reaguje na aktuální uložený stav, ne na historii dřívějších
@@ -1092,7 +1123,7 @@ Doporučené dokumentovat:
 
 Cron `probation-notifications` automaticky hlídá vypršení odkazů k vyplnění nástupních dokumentů a posílá upozornění zaměstnanci (3 dny předem), HR (v den vypršení) i HR na dokumenty, které ještě vůbec nebyly odeslány (3 dny před plánovaným nástupem). Automatika k zkušební době je v něm od verze 0.14.0 dočasně vypnutá – bude řešena přes jinou aplikaci.
 
-Cron pro blížící se konec pracovního poměru automaticky hlídá plánované odchody (dosud bez potvrzeného skutečného konce) s nedokončeným výstupním listem a připravuje upomínky pro HR (30/14/7/3 dny předem) i cílené připomínky konkrétním příjemcům ze skupiny „Odeslat všem k podpisu" (14/7/3/2/1 den předem), kteří ještě nepodepsali.
+Cron pro blížící se konec pracovního poměru automaticky hlídá plánované odchody (dosud bez potvrzeného skutečného konce). Dřív než se vůbec odešlou první pozvánky k podpisu zkontroluje, že HR má vyplněného vedoucího odboru a rozhodnutý střet zájmů (od 1 měsíce před koncem, u krátké výpovědní doby hned). Po odeslání pozvánek pak na škále 14/7/5/3/2/1/0 dní předem posílá cílené připomínky konkrétním nepodepsaným příjemcům (s poznámkou podle jejich role) a na stejné dny i souhrnný report pro HR, kdo ještě nepodepsal.
 
 Mail worker následně bere připravené zprávy z e-mailové fronty a fyzicky je odesílá přes Resend.
 

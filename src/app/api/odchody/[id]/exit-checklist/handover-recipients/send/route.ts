@@ -4,8 +4,9 @@ import { z, ZodError } from "zod"
 
 import { prisma } from "@/lib/db"
 import { sendHandoverRecipientEmail } from "@/lib/email"
+import { isPraha6OrKitt6 } from "@/lib/exit-checklist"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
-import { canAdminExitChecklist } from "@/lib/rbac"
+import { canAccessInternalApp, canAdminExitChecklist } from "@/lib/rbac"
 import { getSession } from "@/lib/session"
 
 export const runtime = "nodejs"
@@ -219,6 +220,7 @@ function mergeHandoverSendHistory({
       lastSentByName: sanitizeNullableText(item.lastSentByName),
       lastSentByEmail: sanitizeNullableText(item.lastSentByEmail),
       sentCount: sanitizeNumber(item.sentCount),
+      cancelledAt: sanitizeNullableText(item.cancelledAt),
     })
   }
 
@@ -241,6 +243,7 @@ function mergeHandoverSendHistory({
       lastSentByName: sanitizeNullableText(item.handoverInfoLastSentByName),
       lastSentByEmail: sanitizeNullableText(item.handoverInfoLastSentByEmail),
       sentCount,
+      cancelledAt: null,
     })
   }
 
@@ -264,6 +267,7 @@ function mergeHandoverSendHistory({
       lastSentByName: sentByName,
       lastSentByEmail: sentByEmail,
       sentCount: previousCount + 1,
+      cancelledAt: null,
     })
   }
 
@@ -400,17 +404,8 @@ export async function POST(
   }
 
   const role = user.role ?? "USER"
-
-  if (!canAdminExitChecklist(role)) {
-    return NextResponse.json(
-      {
-        status: "error",
-        message:
-          "Nemáte oprávnění odesílat informace příjemcům předávané agendy.",
-      },
-      { status: 403 }
-    )
-  }
+  const isInternalAdmin =
+    canAccessInternalApp(role) && canAdminExitChecklist(role)
 
   const offboardingId = Number(params.id)
 
@@ -504,6 +499,27 @@ export async function POST(
     const header = getHeaderObject(offboarding.exitChecklist.header)
     const existingHandover = getHandoverObject(offboarding.exitChecklist.header)
 
+    const managerEmail = sanitizeText(header.managerEmail)
+    const managerName = sanitizeText(header.managerName) || null
+    const managerPosition = sanitizeText(header.managerPosition) || null
+    const managerDepartment = sanitizeText(header.managerDepartment) || null
+    const isManagerVisitor =
+      Boolean(user.email) &&
+      Boolean(managerEmail) &&
+      normalizeEmail(user.email) === normalizeEmail(managerEmail) &&
+      isPraha6OrKitt6(user.email)
+
+    if (!isInternalAdmin && !isManagerVisitor) {
+      return NextResponse.json(
+        {
+          status: "error",
+          message:
+            "Nemáte oprávnění odesílat informace příjemcům předávané agendy.",
+        },
+        { status: 403 }
+      )
+    }
+
     const alreadySentSameRecipients =
       Boolean(existingHandover.handoverRecipientsSentAt) &&
       sanitizeText(existingHandover.handoverRecipientsSentHash) ===
@@ -550,6 +566,9 @@ export async function POST(
             sanitizeText(handover?.option3Reason) ||
             sanitizeText(existingHandover.option3Reason) ||
             null,
+          managerName,
+          managerPosition,
+          managerDepartment,
         })
       )
     )

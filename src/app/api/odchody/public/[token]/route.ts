@@ -15,10 +15,14 @@ import {
   getHrRecipientsFromEnv,
   sendExitChecklistCompletedEmail,
   sendExitChecklistCompletedToEmployeeEmail,
+  sendExitChecklistUnresolvedItemsEmail,
+  sendHandoverKitt6Email,
+  sendHandoverRecipientEmail,
 } from "@/lib/email"
 import {
   assetLabel,
   buildHeaderFromOff,
+  computeHandoverSupersededNotifications,
   getChecklistByPublicToken,
   handoverSummaryLabel,
   isPraha6OrKitt6,
@@ -27,10 +31,12 @@ import {
   resolutionLabel,
   sanitizeExitChecklistFilename,
   sanitizeHandoverForJson,
+  sanitizeHrEditMarker,
   sanitizeIsoDate,
   sanitizeSignaturesForJson,
   sanitizeSignatureValueForJson,
   sanitizeText,
+  toTriStateBoolean,
   trackSignatureChange,
   tryFetchExitChecklistPdfBuffer,
 } from "@/lib/exit-checklist"
@@ -271,6 +277,25 @@ export async function GET(
 
   const data = mapToExitChecklistData(checklist.offboarding, checklist)
 
+  {
+    const currentUserEmail = normalizeEmail(user.email)
+    const matches = (data.signatureRecipients ?? []).filter(
+      (recipient) => normalizeEmail(recipient.email) === currentUserEmail
+    )
+    const hasActiveMatch = matches.some((recipient) => !recipient.revokedAt)
+
+    if (matches.length > 0 && !hasActiveMatch) {
+      return NextResponse.json(
+        {
+          status: "error",
+          message:
+            "Nemáte přístup k podpisu tohoto výstupního listu. Pokud je něco v nepořádku, kontaktujte Personální oddělení.",
+        },
+        { status: 403 }
+      )
+    }
+  }
+
   return NextResponse.json({
     status: "success",
     data,
@@ -327,6 +352,36 @@ export async function PUT(
     )
   }
 
+  {
+    const headerForAccess = getJsonRecord(checklist.header)
+    const currentUserEmailForAccess = normalizeEmail(user.email)
+    const matches = (
+      Array.isArray(headerForAccess.signatureRecipients)
+        ? headerForAccess.signatureRecipients
+        : []
+    ).filter(
+      (recipient) =>
+        recipient &&
+        typeof recipient === "object" &&
+        normalizeEmail((recipient as { email?: string }).email) ===
+          currentUserEmailForAccess
+    )
+    const hasActiveMatch = matches.some(
+      (recipient) => !(recipient as { revokedAt?: string }).revokedAt
+    )
+
+    if (matches.length > 0 && !hasActiveMatch) {
+      return NextResponse.json(
+        {
+          status: "error",
+          message:
+            "Nemáte přístup k podpisu tohoto výstupního listu. Pokud je něco v nepořádku, kontaktujte Personální oddělení.",
+        },
+        { status: 403 }
+      )
+    }
+  }
+
   const body = await req.json().catch(() => null)
 
   if (!body || typeof body !== "object") {
@@ -349,6 +404,19 @@ export async function PUT(
   const currentHeader = getJsonRecord(checklist.header)
   const currentHandover = currentHeader.handover
   const currentSignatures = getCurrentSignatures(currentHeader)
+
+  const normalizedCurrentUserEmail = normalizeEmail(user.email)
+
+  const assetsLockedForUser =
+    !canAdmin &&
+    Boolean(currentSignatures.issuer.signedAt) &&
+    normalizeEmail(currentSignatures.issuer.signedByEmail) !==
+      normalizedCurrentUserEmail
+
+  const noAssets =
+    canEditContent && !assetsLockedForUser
+      ? Boolean(bodyRecord.noAssets)
+      : Boolean(currentHeader.noAssets)
 
   const incomingSignatures = getJsonRecord(
     bodyRecord.signatures
@@ -374,6 +442,12 @@ export async function PUT(
   const currentHandoverManagerSignature = normalizeCurrentSignatureValue(
     currentHeader.handoverManagerSignature
   )
+
+  const handoverLockedForUser =
+    !canAdmin &&
+    Boolean(currentHandoverManagerSignature.signedAt) &&
+    normalizeEmail(currentHandoverManagerSignature.signedByEmail) !==
+      normalizedCurrentUserEmail
 
   trackSignatureChange(
     "Podpis zaměstnance",
@@ -404,30 +478,59 @@ export async function PUT(
     clearedLabels
   )
 
-  const existingConflictOfInterest = Boolean(currentHeader.conflictOfInterest)
+  const existingConflictOfInterest = toTriStateBoolean(
+    currentHeader.conflictOfInterest
+  )
 
   const conflictOfInterest = canAdmin
-    ? Boolean(bodyRecord.conflictOfInterest)
+    ? toTriStateBoolean(bodyRecord.conflictOfInterest)
     : existingConflictOfInterest
 
   const conflictOfInterestChanged =
     existingConflictOfInterest !== conflictOfInterest
 
-  const incomingHandover = canEditContent
-    ? (sanitizeHandoverForJson(bodyRecord.handover) ??
-      sanitizeHandoverForJson(currentHandover))
-    : sanitizeHandoverForJson(currentHandover)
+  const incomingHandover =
+    canEditContent && !handoverLockedForUser
+      ? (sanitizeHandoverForJson(bodyRecord.handover) ??
+        sanitizeHandoverForJson(currentHandover))
+      : sanitizeHandoverForJson(currentHandover)
 
   const handover = preserveHandoverSendMetadata(
     incomingHandover,
     currentHandover
   )
 
+  let finalHandover = handover
+  let handoverKitt6Cancellation: {
+    email: string
+    target: string | null
+  } | null = null
+  let handoverRecipientCancellations: {
+    email: string
+    name: string
+  }[] = []
+
+  if (handover && Boolean(nextHandoverManagerSignature?.signedAt)) {
+    const superseded = computeHandoverSupersededNotifications(
+      currentHandover,
+      handover
+    )
+    finalHandover = superseded.handover
+    handoverKitt6Cancellation = superseded.kitt6
+    handoverRecipientCancellations = superseded.recipients
+  }
+
   const previousHandoverSummary = handoverSummaryLabel(currentHandover)
   const nextHandoverSummary = handoverSummaryLabel(handover)
   const handoverChanged = previousHandoverSummary !== nextHandoverSummary
 
   const resolutionChanges: string[] = []
+  const unresolvedItems: {
+    label: string
+    organization: string
+    note: string | null
+  }[] = []
+  let unresolvedChanged = false
 
   try {
     for (let index = 0; index < EXIT_CHECKLIST_ROWS.length; index++) {
@@ -472,6 +575,12 @@ export async function PUT(
             : null
           : (existing?.signedAt ?? null)
 
+      const note = isInactiveLawInfo
+        ? null
+        : incoming && canTouchRow
+          ? sanitizeText(incoming.note) || null
+          : (existing?.note ?? null)
+
       if (
         existing &&
         existing.resolution !== resolution &&
@@ -480,6 +589,21 @@ export async function PUT(
         resolutionChanges.push(
           `${rowDef.obligation}: ${resolutionLabel(resolution)}`
         )
+      }
+
+      if (resolution === ChecklistResolution.NO) {
+        unresolvedItems.push({
+          label: rowDef.obligation,
+          organization: rowDef.organization,
+          note,
+        })
+
+        if (
+          existing?.resolution !== ChecklistResolution.NO ||
+          (existing?.note ?? null) !== note
+        ) {
+          unresolvedChanged = true
+        }
       }
 
       trackSignatureChange(
@@ -507,6 +631,7 @@ export async function PUT(
           label: rowDef.obligation,
           order: index,
           resolution,
+          note,
           signedByName,
           signedByEmail,
           signedAt,
@@ -518,6 +643,7 @@ export async function PUT(
           label: rowDef.obligation,
           order: index,
           resolution,
+          note,
           signedByName,
           signedByEmail,
           signedAt,
@@ -529,7 +655,7 @@ export async function PUT(
     const assetsUpdatedLabels: string[] = []
     const assetsRemovedLabels: string[] = []
 
-    if (canEditContent) {
+    if (canEditContent && !assetsLockedForUser) {
       const currentUserId = user.id ?? null
 
       const existingAssets = await prisma.exitChecklistAsset.findMany({
@@ -634,6 +760,26 @@ export async function PUT(
         null
       : sanitizeText(currentHeader.managerName) || null
 
+    const managerPosition = canAdmin
+      ? sanitizeText(bodyRecord.managerPosition) ||
+        sanitizeText(currentHeader.managerPosition) ||
+        null
+      : sanitizeText(currentHeader.managerPosition) || null
+
+    const managerDepartment = canAdmin
+      ? sanitizeText(bodyRecord.managerDepartment) ||
+        sanitizeText(currentHeader.managerDepartment) ||
+        null
+      : sanitizeText(currentHeader.managerDepartment) || null
+
+    const assetsEditedByHR = canAdmin
+      ? sanitizeHrEditMarker(bodyRecord.assetsEditedByHR)
+      : sanitizeHrEditMarker(currentHeader.assetsEditedByHR)
+
+    const handoverEditedByHR = canAdmin
+      ? sanitizeHrEditMarker(bodyRecord.handoverEditedByHR)
+      : sanitizeHrEditMarker(currentHeader.handoverEditedByHR)
+
     const updatedHeader: Prisma.InputJsonObject = {
       employeeName: header.employeeName,
       personalNumber: header.personalNumber,
@@ -642,14 +788,21 @@ export async function PUT(
       employmentEndDate: header.employmentEndDate,
       managerEmail,
       managerName,
+      managerPosition,
+      managerDepartment,
       conflictOfInterest,
+      noAssets,
       handoverManagerSignature: sanitizeSignatureValueForJson(
         nextHandoverManagerSignature
       ),
-      handover,
+      assetsEditedByHR,
+      handoverEditedByHR,
+      handover: finalHandover,
       signatures: sanitizeSignaturesForJson(nextSignatures),
       ...existingCompletionMetadata,
       ...getExistingSignatureRecipientsMetadata(currentHeader),
+      sectionBResponsible: currentHeader.sectionBResponsible ?? null,
+      kitt6OptionContact: currentHeader.kitt6OptionContact ?? null,
     }
 
     const updatedChecklist = await prisma.exitChecklist.update({
@@ -666,6 +819,65 @@ export async function PUT(
       },
     })
 
+    if (
+      handoverKitt6Cancellation ||
+      handoverRecipientCancellations.length > 0
+    ) {
+      const handoverEmployeeDepartment = [header.department, header.unitName]
+        .filter(Boolean)
+        .join(" – ")
+      const handoverEmploymentEndDate = header.employmentEndDate
+        ? new Date(header.employmentEndDate).toLocaleDateString("cs-CZ")
+        : ""
+      const previousOption3Reason = sanitizeText(
+        getJsonRecord(currentHandover).option3Reason
+      )
+
+      if (handoverKitt6Cancellation) {
+        try {
+          await sendHandoverKitt6Email({
+            to: handoverKitt6Cancellation.email,
+            employeeName: header.employeeName,
+            employeePosition: header.positionName ?? "",
+            employeeDepartment: handoverEmployeeDepartment,
+            employmentEndDate: handoverEmploymentEndDate,
+            targetPosition: handoverKitt6Cancellation.target || "neuvedeno",
+            managerName,
+            managerPosition,
+            managerDepartment,
+            cancelled: true,
+          })
+        } catch (error) {
+          console.error(
+            "[EXIT-CHECKLIST PUBLIC PUT] Zrušení předání na KITT6 se nepodařilo oznámit:",
+            error
+          )
+        }
+      }
+
+      for (const recipient of handoverRecipientCancellations) {
+        try {
+          await sendHandoverRecipientEmail({
+            to: recipient.email,
+            employeeName: header.employeeName,
+            employeePosition: header.positionName ?? "",
+            employeeDepartment: handoverEmployeeDepartment,
+            employmentEndDate: handoverEmploymentEndDate,
+            option3Reason: previousOption3Reason || null,
+            managerName,
+            managerPosition,
+            managerDepartment,
+            cancelled: true,
+          })
+        } catch (error) {
+          console.error(
+            "[EXIT-CHECKLIST PUBLIC PUT] Zrušení odpovědnosti za agendu se nepodařilo oznámit:",
+            error
+          )
+        }
+      }
+    }
+
     const actorInfo = {
       by: user.id ?? null,
       byName: user.name ?? user.email ?? null,
@@ -675,7 +887,15 @@ export async function PUT(
     const headerChanges: string[] = []
 
     if (conflictOfInterestChanged) {
-      headerChanges.push(`Střet zájmů: ${conflictOfInterest ? "ano" : "ne"}`)
+      headerChanges.push(
+        `Střet zájmů: ${
+          conflictOfInterest === true
+            ? "ano"
+            : conflictOfInterest === false
+              ? "ne"
+              : "nerozhodnuto"
+        }`
+      )
     }
 
     if (handoverChanged) {
@@ -841,6 +1061,39 @@ export async function PUT(
         } catch (emailError) {
           console.warn(
             "[EXIT-CHECKLIST PUBLIC PUT] Výstupní list je dokončený, ale HR e-mail se nepodařilo odeslat:",
+            emailError
+          )
+        }
+      }
+    }
+
+    if (unresolvedChanged && unresolvedItems.length > 0) {
+      const unresolvedRecipients = getHrRecipientsFromEnv()
+      const baseUrl = getAppBaseUrl()
+
+      if (unresolvedRecipients.length > 0) {
+        try {
+          const unresolvedEndDate =
+            updatedChecklist.offboarding.actualEnd ??
+            updatedChecklist.offboarding.plannedEnd
+          await sendExitChecklistUnresolvedItemsEmail({
+            to: unresolvedRecipients,
+            employeeName: data.employeeName,
+            employeePosition: updatedChecklist.offboarding.positionName ?? "",
+            employeeDepartment: [data.department, data.unitName]
+              .filter(Boolean)
+              .join(" – "),
+            employmentEndDate: unresolvedEndDate
+              ? new Date(unresolvedEndDate).toLocaleDateString("cs-CZ")
+              : sanitizeText(data.employmentEndDate),
+            items: unresolvedItems,
+            checklistUrl: baseUrl
+              ? `${baseUrl}/odchody/${checklist.offboardingId}/vystupni-list`
+              : null,
+          })
+        } catch (emailError) {
+          console.warn(
+            "[EXIT-CHECKLIST PUBLIC PUT] Souhrn nevyrovnaných položek se nepodařilo odeslat:",
             emailError
           )
         }

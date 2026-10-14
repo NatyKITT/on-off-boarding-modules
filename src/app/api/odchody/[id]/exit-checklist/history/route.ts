@@ -8,6 +8,10 @@ export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
 export const revalidate = 0
 
+function normalizeEmail(value?: string | null): string {
+  return (value ?? "").trim().toLowerCase()
+}
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string } }
@@ -21,16 +25,6 @@ export async function GET(
     )
   }
 
-  if (!canEditInternalApp(session.user.role)) {
-    return NextResponse.json(
-      {
-        status: "error",
-        message: "Nemáte oprávnění zobrazit historii výstupního listu.",
-      },
-      { status: 403 }
-    )
-  }
-
   const offboardingId = Number(params.id)
 
   if (!Number.isFinite(offboardingId)) {
@@ -38,6 +32,27 @@ export async function GET(
       { status: "error", message: "Neplatné ID odchodu." },
       { status: 400 }
     )
+  }
+
+  if (!canEditInternalApp(session.user.role)) {
+    const offboarding = await prisma.employeeOffboarding.findUnique({
+      where: { id: offboardingId },
+      select: { userEmail: true },
+    })
+    const isDepartingEmployee =
+      Boolean(offboarding?.userEmail) &&
+      normalizeEmail(offboarding?.userEmail) ===
+        normalizeEmail(session.user.email)
+
+    if (!isDepartingEmployee) {
+      return NextResponse.json(
+        {
+          status: "error",
+          message: "Nemáte oprávnění zobrazit historii výstupního listu.",
+        },
+        { status: 403 }
+      )
+    }
   }
 
   const checklist = await prisma.exitChecklist.findUnique({

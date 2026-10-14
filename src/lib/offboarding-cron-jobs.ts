@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server"
 import type { MailJobStatus } from "@prisma/client"
-import { addDays, startOfDay } from "date-fns"
+import { addDays, addMonths, startOfDay } from "date-fns"
 
 import type { ExitChecklistData } from "@/types/exit-checklist"
 import {
@@ -15,22 +15,21 @@ import {
 } from "@/lib/exit-checklist"
 import { getExitChecklistCompletionState } from "@/lib/exit-checklist-completion"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
+import { recipientIdentityKey } from "@/lib/exit-checklist-recipient-key"
+import {
+  EXIT_CHECKLIST_EMPLOYEE_ROLE_NOTE,
+  EXIT_CHECKLIST_MANAGER_ROLE_NOTE,
+  EXIT_CHECKLIST_SECTION_B_ROLE_NOTE,
+} from "@/lib/exit-checklist-role-notes"
 import {
   buildFullName,
   getAppBaseUrlFromRequest,
   getHrRecipientsFromEnv,
 } from "@/lib/probation-evaluation-request"
 
-type ReminderDay = 30 | 14 | 7 | 3 | 2 | 1
-type SignatureReminderDay = 14 | 7 | 3 | 2 | 1
+type SignatureReminderDay = 14 | 7 | 5 | 3 | 2 | 1 | 0
 
-type DeadlineReminderKind =
-  | "30_DAYS_BEFORE_END"
-  | "14_DAYS_BEFORE_END"
-  | "7_DAYS_BEFORE_END"
-  | "3_DAYS_BEFORE_END"
-  | "2_DAYS_BEFORE_END"
-  | "1_DAY_BEFORE_END"
+const SIGNATURE_REMINDER_DAYS: SignatureReminderDay[] = [14, 7, 5, 3, 2, 1, 0]
 
 const ACTIVE_MAIL_STATUSES: MailJobStatus[] = ["QUEUED", "PROCESSING", "SENT"]
 
@@ -63,81 +62,12 @@ function asString(value: unknown): string | null {
   return trimmed.length ? trimmed : null
 }
 
-function deadlineReminderKind(
-  daysBeforeEnd: ReminderDay
-): DeadlineReminderKind {
-  switch (daysBeforeEnd) {
-    case 30:
-      return "30_DAYS_BEFORE_END"
-    case 14:
-      return "14_DAYS_BEFORE_END"
-    case 7:
-      return "7_DAYS_BEFORE_END"
-    case 3:
-      return "3_DAYS_BEFORE_END"
-    case 2:
-      return "2_DAYS_BEFORE_END"
-    case 1:
-      return "1_DAY_BEFORE_END"
-  }
-}
+function dayCountLabelCs(days: number): string {
+  if (days <= 0) return "dnes"
+  if (days === 1) return "1 den"
+  if (days >= 2 && days <= 4) return `${days} dny`
 
-function daysBeforeEndLabel(daysBeforeEnd: ReminderDay) {
-  switch (daysBeforeEnd) {
-    case 30:
-      return "za měsíc"
-    case 14:
-      return "za 14 dní"
-    case 7:
-      return "za 7 dní"
-    case 3:
-      return "za 3 dny"
-    case 2:
-      return "za 2 dny"
-    case 1:
-      return "za 1 den"
-  }
-}
-
-function daysBeforeEndRemainingLabel(daysBeforeEnd: ReminderDay) {
-  switch (daysBeforeEnd) {
-    case 30:
-      return "zhruba měsíc"
-    case 14:
-      return "14 dní"
-    case 7:
-      return "7 dní"
-    case 3:
-      return "3 dny"
-    case 2:
-      return "2 dny"
-    case 1:
-      return "1 den"
-  }
-}
-
-function reminderSubject(args: {
-  employeeName: string
-  daysBeforeEnd: ReminderDay
-  hasInvite: boolean
-}) {
-  const dayLabel = daysBeforeEndLabel(args.daysBeforeEnd)
-
-  return args.hasInvite
-    ? `Blíží se konec pracovního poměru (${dayLabel}) – ${args.employeeName}`
-    : `Nutno odeslat pozvánku k podpisu výstupního listu (${dayLabel}) – ${args.employeeName}`
-}
-
-function reminderIntro(args: {
-  daysBeforeEnd: ReminderDay
-  hasInvite: boolean
-}) {
-  const remaining = daysBeforeEndRemainingLabel(args.daysBeforeEnd)
-  const urgently = args.daysBeforeEnd <= 3 ? " co nejdříve" : ""
-
-  return args.hasInvite
-    ? `Do konce pracovního poměru zbývá ${remaining} a výstupní list zatím není kompletně podepsaný. Prosíme o zajištění podpisu${urgently}.`
-    : `Do konce pracovního poměru zbývá ${remaining} a pozvánka k podpisu výstupního listu zatím nebyla nikomu odeslána. Prosíme o odeslání pozvánky${urgently}.`
+  return `${days} dní`
 }
 
 function isSameOffboardingPayload(args: {
@@ -149,7 +79,8 @@ function isSameOffboardingPayload(args: {
 
 async function existsOffboardingReminderJob(args: {
   offboardingId: number
-  reminderKind: DeadlineReminderKind
+  reminderKind: string
+  reminderDate?: string
 }) {
   const jobs = await prisma.mailQueue.findMany({
     where: {
@@ -165,6 +96,13 @@ async function existsOffboardingReminderJob(args: {
 
     if (asString(payload.reminderKind) !== args.reminderKind) return false
 
+    if (
+      args.reminderDate !== undefined &&
+      asString(payload.reminderDate) !== args.reminderDate
+    ) {
+      return false
+    }
+
     return isSameOffboardingPayload({
       payload,
       offboardingId: args.offboardingId,
@@ -172,18 +110,34 @@ async function existsOffboardingReminderJob(args: {
   })
 }
 
-async function queueExitChecklistReminders(args: {
-  daysBeforeEnd: ReminderDay
-  effectiveEndFilter: { lte: Date; gt?: Date; gte?: Date }
-  now: Date
+async function existsOffboardingDepartureConfirmationJob(
+  offboardingId: number
+) {
+  const jobs = await prisma.mailQueue.findMany({
+    where: {
+      type: "OFFBOARDING_DEPARTURE_CONFIRMATION",
+      status: { in: ACTIVE_MAIL_STATUSES },
+    },
+    select: { payload: true },
+    take: 1000,
+  })
+
+  return jobs.some((job) =>
+    isSameOffboardingPayload({
+      payload: getPayloadRecord(job.payload),
+      offboardingId,
+    })
+  )
+}
+
+async function queueOffboardingDepartureConfirmations(args: {
+  yesterdayFilter: { gte: Date; lt: Date }
   baseUrl: string
   hrRecipients: string[]
   notifications: string[]
 }) {
-  const reminderKind = deadlineReminderKind(args.daysBeforeEnd)
-
   if (args.hrRecipients.length === 0) {
-    args.notifications.push(`${reminderKind.toLowerCase()}_skipped_no_hr`)
+    args.notifications.push("departure_confirmation_skipped_no_hr")
     return 0
   }
 
@@ -191,60 +145,137 @@ async function queueExitChecklistReminders(args: {
     where: {
       deletedAt: null,
       actualEnd: null,
-      plannedEnd: args.effectiveEndFilter,
+      cancelledAt: null,
+      plannedEnd: args.yesterdayFilter,
     },
-    select: { id: true },
+  })
+
+  let queued = 0
+
+  for (const off of candidates) {
+    const alreadyQueued = await existsOffboardingDepartureConfirmationJob(
+      off.id
+    )
+
+    if (alreadyQueued) {
+      args.notifications.push(`departure_confirmation_already_active:${off.id}`)
+      continue
+    }
+
+    const employeeName = buildFullName(off)
+    const odchodyLink = `${args.baseUrl}/odchody`
+
+    const job = await prisma.mailQueue.create({
+      data: {
+        type: "OFFBOARDING_DEPARTURE_CONFIRMATION",
+        payload: {
+          recipients: args.hrRecipients,
+          offboardingId: off.id,
+          employeeName,
+          employeePersonalNumber: off.personalNumber,
+          employeePosition: off.positionName,
+          employeeDepartment: off.department,
+          employeeUnitName: off.unitName,
+          plannedEnd: off.plannedEnd?.toISOString() ?? null,
+          odchodyLink,
+          createdBy: "system-cron",
+          createdByName: "Systémový cron",
+        },
+        status: "QUEUED",
+        priority: 2,
+        createdBy: "system-cron",
+      },
+    })
+
+    queued += 1
+    args.notifications.push(`departure_confirmation_queued:${off.id}:${job.id}`)
+  }
+
+  return queued
+}
+
+function isShortNoticeOffboarding(off: {
+  noticeMonths: number | null
+  hasCustomDates: boolean
+}) {
+  return (
+    (off.noticeMonths !== null && off.noticeMonths < 2) ||
+    off.hasCustomDates === true
+  )
+}
+
+async function queueExitChecklistSetupReminders(args: {
+  today: Date
+  hrRecipients: string[]
+  notifications: string[]
+}) {
+  const reminderKind = "SETUP_MISSING"
+  const reminderDate = args.today.toISOString().slice(0, 10)
+
+  if (args.hrRecipients.length === 0) {
+    args.notifications.push("setup_missing_skipped_no_hr")
+    return 0
+  }
+
+  const candidates = await prisma.employeeOffboarding.findMany({
+    where: {
+      deletedAt: null,
+      actualEnd: null,
+      cancelledAt: null,
+    },
+    select: {
+      id: true,
+      plannedEnd: true,
+      noticeMonths: true,
+      hasCustomDates: true,
+    },
   })
 
   let queued = 0
 
   for (const candidate of candidates) {
-    const result = await getOrCreateChecklist(candidate.id)
+    if (!candidate.plannedEnd) continue
 
-    if (!result) {
-      args.notifications.push(
-        `${reminderKind.toLowerCase()}_skipped_not_found:${candidate.id}`
-      )
-      continue
-    }
+    const shortNotice = isShortNoticeOffboarding(candidate)
+    const windowStart = addMonths(candidate.plannedEnd, -1)
+
+    if (!shortNotice && args.today < windowStart) continue
+
+    const result = await getOrCreateChecklist(candidate.id)
+    if (!result) continue
 
     const { off, checklist } = result
     const data: ExitChecklistData = mapToExitChecklistData(off, checklist)
 
-    if (getExitChecklistCompletionState(data).isComplete) {
-      args.notifications.push(
-        `${reminderKind.toLowerCase()}_skipped_complete:${candidate.id}`
-      )
-      continue
+    if (Boolean(data.signatureRecipientsSentAt)) continue
+
+    const missing: string[] = []
+    if (!data.managerEmail) missing.push("Vedoucí odboru nebyl zadán.")
+    if (data.conflictOfInterest === null) {
+      missing.push("Stav střetu zájmů nebyl rozhodnut.")
     }
+
+    if (missing.length === 0) continue
 
     const alreadyQueued = await existsOffboardingReminderJob({
       offboardingId: off.id,
       reminderKind,
+      reminderDate,
     })
 
     if (alreadyQueued) {
-      args.notifications.push(
-        `${reminderKind.toLowerCase()}_already_active:${candidate.id}`
-      )
+      args.notifications.push(`setup_missing_already_active:${off.id}`)
       continue
     }
 
     const employeeName = buildFullName(off)
     const effectiveEnd = off.actualEnd ?? off.plannedEnd
-    const checklistLink = `${args.baseUrl}/odchody/${off.id}/vystupni-list`
-    const hasInvite = Boolean(data.signatureRecipientsSentAt)
-
-    const pendingSigners = hasInvite
-      ? (data.signatureRecipients ?? [])
-          .filter(
-            (recipient) =>
-              !recipient.revokedAt &&
-              !resolveSignatureRecipientStatus(data, off.userEmail, recipient)
-                .hasSigned
-          )
-          .map((recipient) => `${recipient.name} (${recipient.email})`)
-      : []
+    const daysBeforeEnd = Math.max(
+      0,
+      Math.round(
+        (candidate.plannedEnd.getTime() - args.today.getTime()) / 86_400_000
+      )
+    )
 
     const job = await prisma.mailQueue.create({
       data: {
@@ -258,19 +289,11 @@ async function queueExitChecklistReminders(args: {
           employeeDepartment: off.department,
           employeeUnitName: off.unitName,
           employmentEndDate: effectiveEnd?.toISOString() ?? null,
-          checklistLink,
-          subject: reminderSubject({
-            employeeName,
-            daysBeforeEnd: args.daysBeforeEnd,
-            hasInvite,
-          }),
-          intro: reminderIntro({
-            daysBeforeEnd: args.daysBeforeEnd,
-            hasInvite,
-          }),
-          pendingSigners,
+          daysBeforeEnd,
+          subject: `Chybí nastavení před odesláním pozvánek k podpisu – ${employeeName}`,
+          intro: `Než bude možné odeslat pozvánky k podpisu výstupního listu, je potřeba doplnit: ${missing.join(" ")}`,
           reminderKind,
-          daysBeforeEnd: args.daysBeforeEnd,
+          reminderDate,
           createdBy: "system-cron",
           createdByName: "Systémový cron",
         },
@@ -280,38 +303,22 @@ async function queueExitChecklistReminders(args: {
       },
     })
 
-    await prisma.employeeOffboarding.update({
-      where: { id: off.id },
-      data: {
-        lastNoticeReminder: args.now,
-        noticeRemindersSent: { increment: 1 },
-      },
-    })
-
     await logExitChecklistEvent({
       checklistId: checklist.id,
       action: "DEADLINE_REMINDER_SENT",
       by: "system-cron",
       byName: "Systémový cron",
-      message: reminderSubject({
-        employeeName,
-        daysBeforeEnd: args.daysBeforeEnd,
-        hasInvite,
-      }),
+      message: `Chybí nastavení před odesláním pozvánek: ${missing.join(" ")}`,
       meta: {
         reminderKind,
-        daysBeforeEnd: args.daysBeforeEnd,
-        hasInvite,
         mailQueueId: job.id,
         recipients: args.hrRecipients,
-        pendingSigners,
+        missing,
       },
     })
 
     queued += 1
-    args.notifications.push(
-      `${reminderKind.toLowerCase()}_queued:${off.id}:${job.id}`
-    )
+    args.notifications.push(`setup_missing_queued:${off.id}:${job.id}`)
   }
 
   return queued
@@ -350,12 +357,38 @@ async function existsOffboardingSignatureReminderJob(args: {
   })
 }
 
+function managerHasSigned(data: ExitChecklistData): boolean {
+  return (
+    Boolean(data.signatures?.manager?.signedAt) &&
+    Boolean(data.handoverManagerSignature?.signedAt)
+  )
+}
+
 function resolveSignatureRecipientStatus(
   data: ExitChecklistData,
   employeeEmail: string | null,
-  recipient: { name: string; email: string; rowKeys?: string[] }
-): { hasSigned: boolean; label: string } {
+  recipient: {
+    name: string
+    email: string
+    rowKeys?: string[]
+    substituteForKey?: string
+  }
+): { hasSigned: boolean; label: string; roleNote: string | null } {
   const email = recipient.email.trim().toLowerCase()
+
+  if (recipient.substituteForKey && data.managerEmail) {
+    const managerKey = recipientIdentityKey({
+      email: data.managerEmail,
+      behalfLabel: undefined,
+    })
+    if (recipient.substituteForKey === managerKey) {
+      return {
+        hasSigned: managerHasSigned(data),
+        label: "vedoucí (zastoupení)",
+        roleNote: EXIT_CHECKLIST_MANAGER_ROLE_NOTE,
+      }
+    }
+  }
 
   if (recipient.rowKeys?.length) {
     return {
@@ -363,6 +396,7 @@ function resolveSignatureRecipientStatus(
         Boolean(data.items.find((item) => item.key === key)?.signedAt)
       ),
       label: recipient.name,
+      roleNote: null,
     }
   }
 
@@ -370,13 +404,26 @@ function resolveSignatureRecipientStatus(
     return {
       hasSigned: Boolean(data.signatures?.employee?.signedAt),
       label: "zaměstnanec",
+      roleNote: EXIT_CHECKLIST_EMPLOYEE_ROLE_NOTE,
     }
   }
 
   if (data.managerEmail && email === data.managerEmail.trim().toLowerCase()) {
     return {
-      hasSigned: Boolean(data.signatures?.manager?.signedAt),
+      hasSigned: managerHasSigned(data),
       label: "vedoucí",
+      roleNote: EXIT_CHECKLIST_MANAGER_ROLE_NOTE,
+    }
+  }
+
+  if (
+    data.sectionBResponsible?.email &&
+    email === data.sectionBResponsible.email.trim().toLowerCase()
+  ) {
+    return {
+      hasSigned: Boolean(data.signatures?.issuer?.signedAt),
+      label: "odpovědná osoba za sekci B",
+      roleNote: EXIT_CHECKLIST_SECTION_B_ROLE_NOTE,
     }
   }
 
@@ -402,21 +449,18 @@ function resolveSignatureRecipientStatus(
         Boolean(data.items.find((item) => item.key === key)?.signedAt)
       ),
       label: knownSignatory.name,
+      roleNote: null,
     }
   }
 
-  return { hasSigned: false, label: recipient.name }
+  return { hasSigned: false, label: recipient.name, roleNote: null }
 }
 
-// Cílené připomínky - na rozdíl od výše (queueExitChecklistReminders, jde
-// vždy jen na HR souhrnně) se posílají přímo těm, kdo ještě konkrétně
-// nepodepsali (přesně skupina, kterou HR naposledy odeslala přes "Odeslat
-// všem k podpisu" - uložená v data.signatureRecipients), na stejný
-// veřejný odkaz, jaký dostali při pozvánce.
 async function queueExitChecklistSignatureReminders(args: {
   daysBeforeEnd: SignatureReminderDay
   effectiveEndFilter: { lte: Date; gt?: Date; gte?: Date }
   baseUrl: string
+  hrRecipients: string[]
   notifications: string[]
 }) {
   const candidates = await prisma.employeeOffboarding.findMany({
@@ -447,19 +491,22 @@ async function queueExitChecklistSignatureReminders(args: {
     const employeeName = buildFullName(off)
     const effectiveEnd = off.actualEnd ?? off.plannedEnd
     const signUrl = `${args.baseUrl}/odchody-public/${checklist.publicToken}`
+    const pendingSigners: string[] = []
 
     for (const recipient of data.signatureRecipients) {
       const email = recipient.email.trim().toLowerCase()
 
       if (!email || recipient.revokedAt) continue
 
-      const { hasSigned, label } = resolveSignatureRecipientStatus(
+      const { hasSigned, label, roleNote } = resolveSignatureRecipientStatus(
         data,
         off.userEmail,
         recipient
       )
 
       if (hasSigned) continue
+
+      pendingSigners.push(`${recipient.name} (${recipient.email})`)
 
       const alreadyQueued = await existsOffboardingSignatureReminderJob({
         offboardingId: off.id,
@@ -487,6 +534,7 @@ async function queueExitChecklistSignatureReminders(args: {
             employmentEndDate: effectiveEnd?.toISOString() ?? null,
             signUrl,
             reminderRole: label,
+            roleNote,
             isBehalf: Boolean(recipient.behalfLabel),
             behalfLabel: recipient.behalfLabel ?? null,
             isEmployee:
@@ -507,7 +555,7 @@ async function queueExitChecklistSignatureReminders(args: {
         action: "SIGNATURE_INVITE_SENT",
         by: "system-cron",
         byName: "Systémový cron",
-        message: `Automatická připomínka podpisu (${label}) – zbývá ${args.daysBeforeEnd} ${args.daysBeforeEnd === 1 ? "den" : "dny"} do konce pracovního poměru.`,
+        message: `Automatická připomínka podpisu (${label}) – zbývá ${dayCountLabelCs(args.daysBeforeEnd)} do konce pracovního poměru.`,
         meta: {
           reminderRole: label,
           daysBeforeEnd: args.daysBeforeEnd,
@@ -520,6 +568,53 @@ async function queueExitChecklistSignatureReminders(args: {
       args.notifications.push(
         `sig_reminder_${args.daysBeforeEnd}d_queued:${off.id}:${job.id}`
       )
+    }
+
+    if (pendingSigners.length > 0 && args.hrRecipients.length > 0) {
+      const reportKind = `SIG_REPORT_${args.daysBeforeEnd}D`
+
+      const alreadyReported = await existsOffboardingReminderJob({
+        offboardingId: off.id,
+        reminderKind: reportKind,
+      })
+
+      if (!alreadyReported) {
+        const reportJob = await prisma.mailQueue.create({
+          data: {
+            type: "NOTICE_WARNING",
+            payload: {
+              recipients: args.hrRecipients,
+              offboardingId: off.id,
+              employeeName,
+              employeePersonalNumber: off.personalNumber,
+              employeePosition: off.positionName,
+              employeeDepartment: off.department,
+              employeeUnitName: off.unitName,
+              employmentEndDate: effectiveEnd?.toISOString() ?? null,
+              checklistLink: `${args.baseUrl}/odchody/${off.id}/vystupni-list`,
+              subject: `Kdo ještě nepodepsal výstupní list (${dayCountLabelCs(args.daysBeforeEnd)}) – ${employeeName}`,
+              intro: `Do konce pracovního poměru zbývá ${dayCountLabelCs(args.daysBeforeEnd)} a výstupní list zatím není kompletně podepsaný.`,
+              pendingSigners,
+              reminderKind: reportKind,
+              daysBeforeEnd: args.daysBeforeEnd,
+              createdBy: "system-cron",
+              createdByName: "Systémový cron",
+            },
+            status: "QUEUED",
+            priority: 2,
+            createdBy: "system-cron",
+          },
+        })
+
+        queued += 1
+        args.notifications.push(
+          `sig_report_${args.daysBeforeEnd}d_queued:${off.id}:${reportJob.id}`
+        )
+      } else {
+        args.notifications.push(
+          `sig_report_${args.daysBeforeEnd}d_already_active:${off.id}`
+        )
+      }
     }
   }
 
@@ -534,133 +629,62 @@ export async function ensureOffboardingCronJobs(req: NextRequest) {
 
   const notifications: string[] = []
 
-  const in30Days = addDays(today, 30)
-  const in14Days = addDays(today, 14)
-  const in7Days = addDays(today, 7)
-  const in3Days = addDays(today, 3)
-  const in2Days = addDays(today, 2)
-  const in1Day = addDays(today, 1)
+  const yesterday = addDays(today, -1)
+  const dayOffsets = new Map<number, Date>(
+    SIGNATURE_REMINDER_DAYS.map((day) => [day, addDays(today, day)])
+  )
 
-  const at30Days = await queueExitChecklistReminders({
-    daysBeforeEnd: 30,
-    effectiveEndFilter: { lte: in30Days, gt: in14Days },
-    now,
+  const departureConfirmations = await queueOffboardingDepartureConfirmations({
+    yesterdayFilter: { gte: yesterday, lt: today },
     baseUrl,
     hrRecipients,
     notifications,
   })
 
-  const at14Days = await queueExitChecklistReminders({
-    daysBeforeEnd: 14,
-    effectiveEndFilter: { lte: in14Days, gt: in7Days },
-    now,
-    baseUrl,
+  const setupReminders = await queueExitChecklistSetupReminders({
+    today,
     hrRecipients,
     notifications,
   })
 
-  const at7Days = await queueExitChecklistReminders({
-    daysBeforeEnd: 7,
-    effectiveEndFilter: { lte: in7Days, gt: in3Days },
-    now,
-    baseUrl,
-    hrRecipients,
-    notifications,
-  })
+  const sigStats: Record<string, number> = {}
+  let signatureReminders = 0
 
-  const at3Days = await queueExitChecklistReminders({
-    daysBeforeEnd: 3,
-    effectiveEndFilter: { lte: in3Days, gt: in2Days },
-    now,
-    baseUrl,
-    hrRecipients,
-    notifications,
-  })
+  for (let i = 0; i < SIGNATURE_REMINDER_DAYS.length; i++) {
+    const day = SIGNATURE_REMINDER_DAYS[i]
+    const nextDay = SIGNATURE_REMINDER_DAYS[i + 1]
+    const upper = dayOffsets.get(day) as Date
+    const lower =
+      nextDay !== undefined ? (dayOffsets.get(nextDay) as Date) : null
 
-  const at2Days = await queueExitChecklistReminders({
-    daysBeforeEnd: 2,
-    effectiveEndFilter: { lte: in2Days, gt: in1Day },
-    now,
-    baseUrl,
-    hrRecipients,
-    notifications,
-  })
+    const effectiveEndFilter = lower
+      ? { lte: upper, gt: lower }
+      : { lte: upper, gte: today }
 
-  const at1Day = await queueExitChecklistReminders({
-    daysBeforeEnd: 1,
-    effectiveEndFilter: { lte: in1Day, gte: today },
-    now,
-    baseUrl,
-    hrRecipients,
-    notifications,
-  })
+    const count = await queueExitChecklistSignatureReminders({
+      daysBeforeEnd: day,
+      effectiveEndFilter,
+      baseUrl,
+      hrRecipients,
+      notifications,
+    })
 
-  const sig14Days = await queueExitChecklistSignatureReminders({
-    daysBeforeEnd: 14,
-    effectiveEndFilter: { lte: in14Days, gt: in7Days },
-    baseUrl,
-    notifications,
-  })
-
-  const sig7Days = await queueExitChecklistSignatureReminders({
-    daysBeforeEnd: 7,
-    effectiveEndFilter: { lte: in7Days, gt: in3Days },
-    baseUrl,
-    notifications,
-  })
-
-  const sig3Days = await queueExitChecklistSignatureReminders({
-    daysBeforeEnd: 3,
-    effectiveEndFilter: { lte: in3Days, gt: in2Days },
-    baseUrl,
-    notifications,
-  })
-
-  const sig2Days = await queueExitChecklistSignatureReminders({
-    daysBeforeEnd: 2,
-    effectiveEndFilter: { lte: in2Days, gt: in1Day },
-    baseUrl,
-    notifications,
-  })
-
-  const sig1Day = await queueExitChecklistSignatureReminders({
-    daysBeforeEnd: 1,
-    effectiveEndFilter: { lte: in1Day, gte: today },
-    baseUrl,
-    notifications,
-  })
+    sigStats[`sig${day}Days`] = count
+    signatureReminders += count
+  }
 
   const queued = notifications.filter((item) => item.includes("_queued")).length
 
   return {
     status: "success" as const,
     notifications,
-    processed:
-      at30Days +
-      at14Days +
-      at7Days +
-      at3Days +
-      at2Days +
-      at1Day +
-      sig14Days +
-      sig7Days +
-      sig3Days +
-      sig2Days +
-      sig1Day,
+    processed: setupReminders + signatureReminders + departureConfirmations,
     queued,
     failed: 0,
     stats: {
-      at30Days,
-      at14Days,
-      at7Days,
-      at3Days,
-      at2Days,
-      at1Day,
-      sig14Days,
-      sig7Days,
-      sig3Days,
-      sig2Days,
-      sig1Day,
+      setupReminders,
+      ...sigStats,
+      departureConfirmations,
       queued,
     },
   }

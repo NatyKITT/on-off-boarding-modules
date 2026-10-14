@@ -50,6 +50,7 @@ enum MailJobType {
 
   NOTICE_WARNING
   NOTICE_ENDING
+  OFFBOARDING_DEPARTURE_CONFIRMATION
 
   SIGNATURE_INVITE
   EXIT_CHECKLIST_SIGNATURE_INVITE
@@ -877,6 +878,7 @@ model ExitChecklistItem {
   order      Int
 
   resolution ChecklistResolution @default(NOT_APPLICABLE)
+  note       String?
 
   signedById    String?
   signedByName  String?

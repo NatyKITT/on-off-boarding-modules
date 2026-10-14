@@ -8,6 +8,8 @@ import {
   ArrowLeft,
   CheckCircle,
   Loader2,
+  Save,
+  X,
   XCircle,
 } from "lucide-react"
 import { useSession } from "next-auth/react"
@@ -27,11 +29,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { ExitChecklistForm } from "@/components/forms/exit-checklist-form"
 
 type Props = {
   offboardingId: number
-  employeeName: string
   employmentEndDate?: string | null
 }
 
@@ -64,7 +66,6 @@ function DeadlineBanner({ daysToEnd }: { daysToEnd: number }) {
 
 export function ExitChecklistPageClient({
   offboardingId,
-  employeeName,
   employmentEndDate,
 }: Props) {
   const { data: session } = useSession()
@@ -80,7 +81,9 @@ export function ExitChecklistPageClient({
   const [dirty, setDirty] = useState(false)
   const [saved, setSaved] = useState(false)
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false)
+  const [saveTrigger, setSaveTrigger] = useState(0)
   const pendingNavRef = useRef<string | null>(null)
+  const saveAndLeaveRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -135,12 +138,23 @@ export function ExitChecklistPageClient({
     return () => window.removeEventListener("beforeunload", handleBeforeUnload)
   }, [dirty])
 
-  const handleSaved = useCallback((newData: ExitChecklistData) => {
-    setData(newData)
-    setDirty(false)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 4000)
-  }, [])
+  const handleSaved = useCallback(
+    (newData: ExitChecklistData) => {
+      setData(newData)
+      setDirty(false)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 4000)
+
+      if (saveAndLeaveRef.current) {
+        saveAndLeaveRef.current = false
+        if (pendingNavRef.current) {
+          router.push(pendingNavRef.current)
+          pendingNavRef.current = null
+        }
+      }
+    },
+    [router]
+  )
 
   function handleBackClick(e: React.MouseEvent, href: string) {
     if (dirty) {
@@ -159,7 +173,13 @@ export function ExitChecklistPageClient({
     }
   }
 
-  const backHref = `/odchody/${offboardingId}`
+  function saveAndLeave() {
+    setShowUnsavedDialog(false)
+    saveAndLeaveRef.current = true
+    setSaveTrigger((t) => t + 1)
+  }
+
+  const backHref = "/odchody"
 
   const daysToEnd = getDaysRemaining(employmentEndDate)
   const isComplete = data
@@ -170,21 +190,52 @@ export function ExitChecklistPageClient({
 
   return (
     <div className="min-h-screen bg-neutral-50 px-4 py-6">
-      <div className="mx-auto max-w-4xl space-y-4">
-        <div className="flex items-center gap-3">
-          {canAccessApp && (
+      <div className="mx-auto max-w-5xl space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {canAccessApp ? (
             <Link
               href={backHref}
               onClick={(e) => handleBackClick(e, backHref)}
-              className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+              className={buttonVariants({
+                size: "sm",
+                className: "gap-1 bg-[#029B83] text-white hover:bg-[#02735F]",
+              })}
             >
               <ArrowLeft className="size-4" />
               Zpět na odchod
             </Link>
+          ) : (
+            <span />
           )}
-          <span className="text-sm text-muted-foreground">
-            Výstupní list – {employeeName}
-          </span>
+
+          {canAccessApp && (
+            <div className="flex items-center gap-2">
+              {dirty && (
+                <span className="text-xs font-medium text-amber-700">
+                  Máte neuložené změny
+                </span>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                className="gap-1 bg-[#00847C] text-white hover:bg-[#0B6D73]"
+                onClick={() => setSaveTrigger((t) => t + 1)}
+                disabled={!dirty}
+              >
+                <Save className="size-4" />
+                Uložit
+              </Button>
+              <button
+                type="button"
+                aria-label="Zavřít výstupní list"
+                title="Zavřít a vrátit se na seznam odchodů"
+                onClick={(e) => handleBackClick(e, backHref)}
+                className="rounded-md border p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+          )}
         </div>
 
         {showDeadlineBanner && !loading && (
@@ -218,13 +269,36 @@ export function ExitChecklistPageClient({
         )}
 
         {data && !loading && (
-          <ExitChecklistForm
-            offboardingId={offboardingId}
-            mode="internal"
-            initialData={data}
-            onDirtyChange={setDirty}
-            onSaved={handleSaved}
-          />
+          <>
+            <ExitChecklistForm
+              offboardingId={offboardingId}
+              mode="internal"
+              initialData={data}
+              onDirtyChange={setDirty}
+              onSaved={handleSaved}
+              externalSaveTrigger={saveTrigger}
+            />
+
+            {canAccessApp && (
+              <div className="flex items-center justify-end gap-2">
+                {dirty && (
+                  <span className="text-xs font-medium text-amber-700">
+                    Máte neuložené změny
+                  </span>
+                )}
+                <Button
+                  type="button"
+                  size="sm"
+                  className="gap-1 bg-[#00847C] text-white hover:bg-[#0B6D73]"
+                  onClick={() => setSaveTrigger((t) => t + 1)}
+                  disabled={!dirty}
+                >
+                  <Save className="size-4" />
+                  Uložit
+                </Button>
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -244,6 +318,12 @@ export function ExitChecklistPageClient({
               onClick={confirmLeave}
             >
               Odejít bez uložení
+            </AlertDialogAction>
+            <AlertDialogAction
+              className="bg-[#00847C] text-white hover:bg-[#0B6D73]"
+              onClick={saveAndLeave}
+            >
+              Uložit a odejít
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

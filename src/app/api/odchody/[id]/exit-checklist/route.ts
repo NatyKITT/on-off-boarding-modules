@@ -18,10 +18,14 @@ import {
   getHrRecipientsFromEnv,
   sendExitChecklistCompletedEmail,
   sendExitChecklistCompletedToEmployeeEmail,
+  sendExitChecklistUnresolvedItemsEmail,
+  sendHandoverKitt6Email,
+  sendHandoverRecipientEmail,
 } from "@/lib/email"
 import {
   assetLabel,
   buildHeaderFromOff,
+  computeHandoverSupersededNotifications,
   getOrCreateChecklist,
   handoverSummaryLabel,
   mapToExitChecklistData,
@@ -29,10 +33,12 @@ import {
   resolutionLabel,
   sanitizeExitChecklistFilename,
   sanitizeHandoverForJson,
+  sanitizeHrEditMarker,
   sanitizeIsoDate,
   sanitizeSignaturesForJson,
   sanitizeSignatureValueForJson,
   sanitizeText,
+  toTriStateBoolean,
   trackSignatureChange,
   tryFetchExitChecklistPdfBuffer,
 } from "@/lib/exit-checklist"
@@ -541,14 +547,40 @@ export async function PUT(
       currentHandover
     )
 
-    const existingConflictOfInterest = Boolean(currentHeader.conflictOfInterest)
+    let finalHandover = handover
+    let handoverKitt6Cancellation: {
+      email: string
+      target: string | null
+    } | null = null
+    let handoverRecipientCancellations: {
+      email: string
+      name: string
+    }[] = []
+
+    if (handover && Boolean(handoverManagerSignature?.signedAt)) {
+      const superseded = computeHandoverSupersededNotifications(
+        currentHandover,
+        handover
+      )
+      finalHandover = superseded.handover
+      handoverKitt6Cancellation = superseded.kitt6
+      handoverRecipientCancellations = superseded.recipients
+    }
+
+    const existingConflictOfInterest = toTriStateBoolean(
+      currentHeader.conflictOfInterest
+    )
 
     const conflictOfInterest = canEditContent
-      ? Boolean(bodyRecord.conflictOfInterest)
+      ? toTriStateBoolean(bodyRecord.conflictOfInterest)
       : existingConflictOfInterest
 
     const conflictOfInterestChanged =
       existingConflictOfInterest !== conflictOfInterest
+
+    const noAssets = canEditContent
+      ? Boolean(bodyRecord.noAssets)
+      : Boolean(currentHeader.noAssets)
 
     const previousHandoverSummary = handoverSummaryLabel(currentHandover)
     const nextHandoverSummary = handoverSummaryLabel(handover)
@@ -566,6 +598,26 @@ export async function PUT(
         null
       : sanitizeText(currentHeader.managerName) || null
 
+    const managerPosition = canEditContent
+      ? sanitizeText(bodyRecord.managerPosition) ||
+        sanitizeText(currentHeader.managerPosition) ||
+        null
+      : sanitizeText(currentHeader.managerPosition) || null
+
+    const managerDepartment = canEditContent
+      ? sanitizeText(bodyRecord.managerDepartment) ||
+        sanitizeText(currentHeader.managerDepartment) ||
+        null
+      : sanitizeText(currentHeader.managerDepartment) || null
+
+    const assetsEditedByHR = canEditContent
+      ? sanitizeHrEditMarker(bodyRecord.assetsEditedByHR)
+      : sanitizeHrEditMarker(currentHeader.assetsEditedByHR)
+
+    const handoverEditedByHR = canEditContent
+      ? sanitizeHrEditMarker(bodyRecord.handoverEditedByHR)
+      : sanitizeHrEditMarker(currentHeader.handoverEditedByHR)
+
     const header = buildHeaderFromOff(off)
     const existingCompletionMetadata =
       getExistingCompletionMetadata(currentHeader)
@@ -578,17 +630,30 @@ export async function PUT(
       employmentEndDate: header.employmentEndDate,
       managerEmail,
       managerName,
+      managerPosition,
+      managerDepartment,
       conflictOfInterest,
+      noAssets,
       handoverManagerSignature: sanitizeSignatureValueForJson(
         handoverManagerSignature
       ),
-      handover,
+      assetsEditedByHR,
+      handoverEditedByHR,
+      handover: finalHandover,
       signatures: sanitizeSignaturesForJson(signatures),
       ...existingCompletionMetadata,
       ...getExistingSignatureRecipientsMetadata(currentHeader),
+      sectionBResponsible: currentHeader.sectionBResponsible ?? null,
+      kitt6OptionContact: currentHeader.kitt6OptionContact ?? null,
     }
 
     const resolutionChanges: string[] = []
+    const unresolvedItems: {
+      label: string
+      organization: string
+      note: string | null
+    }[] = []
+    let unresolvedChanged = false
 
     for (let index = 0; index < EXIT_CHECKLIST_ROWS.length; index++) {
       const rowDef = EXIT_CHECKLIST_ROWS[index]
@@ -632,6 +697,12 @@ export async function PUT(
             : null
           : (existing?.signedAt ?? null)
 
+      const note = isInactiveLawInfo
+        ? null
+        : incoming && canTouchRow
+          ? sanitizeText(incoming.note) || null
+          : (existing?.note ?? null)
+
       if (
         existing &&
         existing.resolution !== resolution &&
@@ -640,6 +711,21 @@ export async function PUT(
         resolutionChanges.push(
           `${rowDef.obligation}: ${resolutionLabel(resolution)}`
         )
+      }
+
+      if (resolution === ChecklistResolution.NO) {
+        unresolvedItems.push({
+          label: rowDef.obligation,
+          organization: rowDef.organization,
+          note,
+        })
+
+        if (
+          existing?.resolution !== ChecklistResolution.NO ||
+          (existing?.note ?? null) !== note
+        ) {
+          unresolvedChanged = true
+        }
       }
 
       trackSignatureChange(
@@ -667,6 +753,7 @@ export async function PUT(
           label: rowDef.obligation,
           order: index,
           resolution,
+          note,
           signedByName,
           signedByEmail,
           signedAt,
@@ -678,6 +765,7 @@ export async function PUT(
           label: rowDef.obligation,
           order: index,
           resolution,
+          note,
           signedByName,
           signedByEmail,
           signedAt,
@@ -793,6 +881,65 @@ export async function PUT(
       },
     })
 
+    if (
+      handoverKitt6Cancellation ||
+      handoverRecipientCancellations.length > 0
+    ) {
+      const handoverEmployeeDepartment = [header.department, header.unitName]
+        .filter(Boolean)
+        .join(" – ")
+      const handoverEmploymentEndDate = header.employmentEndDate
+        ? new Date(header.employmentEndDate).toLocaleDateString("cs-CZ")
+        : ""
+      const previousOption3Reason = sanitizeText(
+        getJsonRecord(currentHandover).option3Reason
+      )
+
+      if (handoverKitt6Cancellation) {
+        try {
+          await sendHandoverKitt6Email({
+            to: handoverKitt6Cancellation.email,
+            employeeName: header.employeeName,
+            employeePosition: header.positionName ?? "",
+            employeeDepartment: handoverEmployeeDepartment,
+            employmentEndDate: handoverEmploymentEndDate,
+            targetPosition: handoverKitt6Cancellation.target || "neuvedeno",
+            managerName,
+            managerPosition,
+            managerDepartment,
+            cancelled: true,
+          })
+        } catch (error) {
+          console.error(
+            "[EXIT-CHECKLIST PUT] Zrušení předání na KITT6 se nepodařilo oznámit:",
+            error
+          )
+        }
+      }
+
+      for (const recipient of handoverRecipientCancellations) {
+        try {
+          await sendHandoverRecipientEmail({
+            to: recipient.email,
+            employeeName: header.employeeName,
+            employeePosition: header.positionName ?? "",
+            employeeDepartment: handoverEmployeeDepartment,
+            employmentEndDate: handoverEmploymentEndDate,
+            option3Reason: previousOption3Reason || null,
+            managerName,
+            managerPosition,
+            managerDepartment,
+            cancelled: true,
+          })
+        } catch (error) {
+          console.error(
+            "[EXIT-CHECKLIST PUT] Zrušení odpovědnosti za agendu se nepodařilo oznámit:",
+            error
+          )
+        }
+      }
+    }
+
     const actorInfo = {
       by: userId,
       byName: user.name ?? user.email ?? null,
@@ -810,7 +957,15 @@ export async function PUT(
       const headerChanges: string[] = []
 
       if (conflictOfInterestChanged) {
-        headerChanges.push(`Střet zájmů: ${conflictOfInterest ? "ano" : "ne"}`)
+        headerChanges.push(
+          `Střet zájmů: ${
+            conflictOfInterest === true
+              ? "ano"
+              : conflictOfInterest === false
+                ? "ne"
+                : "nerozhodnuto"
+          }`
+        )
       }
 
       if (handoverChanged) {
@@ -964,6 +1119,37 @@ export async function PUT(
         } catch (emailError) {
           console.warn(
             "[EXIT-CHECKLIST PUT] Výstupní list je dokončený, ale HR e-mail se nepodařilo odeslat:",
+            emailError
+          )
+        }
+      }
+    }
+
+    if (unresolvedChanged && unresolvedItems.length > 0) {
+      const unresolvedRecipients = getHrRecipientsFromEnv()
+      const baseUrl = getAppBaseUrl()
+
+      if (unresolvedRecipients.length > 0) {
+        try {
+          const unresolvedEndDate = off.actualEnd ?? off.plannedEnd
+          await sendExitChecklistUnresolvedItemsEmail({
+            to: unresolvedRecipients,
+            employeeName: data.employeeName,
+            employeePosition: off.positionName ?? "",
+            employeeDepartment: [data.department, data.unitName]
+              .filter(Boolean)
+              .join(" – "),
+            employmentEndDate: unresolvedEndDate
+              ? new Date(unresolvedEndDate).toLocaleDateString("cs-CZ")
+              : sanitizeText(data.employmentEndDate),
+            items: unresolvedItems,
+            checklistUrl: baseUrl
+              ? `${baseUrl}/odchody/${offboardingId}/vystupni-list`
+              : null,
+          })
+        } catch (emailError) {
+          console.warn(
+            "[EXIT-CHECKLIST PUT] Souhrn nevyrovnaných položek se nepodařilo odeslat:",
             emailError
           )
         }

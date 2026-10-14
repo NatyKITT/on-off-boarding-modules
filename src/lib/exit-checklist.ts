@@ -9,7 +9,9 @@ import {
 import type {
   ExitAssetItem,
   ExitChecklistData,
+  ExitChecklistHrEditMarker,
   ExitChecklistItem,
+  ExitChecklistResponsiblePerson,
   ExitChecklistSignatureRecipient,
   ExitChecklistSignatures,
   ExitChecklistSignatureValue,
@@ -63,6 +65,54 @@ export function sanitizeText(value: unknown): string {
   return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : ""
 }
 
+export function sanitizeHrEditMarker(
+  value: unknown
+): Prisma.InputJsonValue | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
+
+  const raw = value as Record<string, unknown>
+  const name = sanitizeText(raw.name)
+  const email = sanitizeText(raw.email)
+  const role = sanitizeText(raw.role)
+  const at = sanitizeText(raw.at)
+
+  if (!name && !email) return null
+
+  return {
+    name,
+    email,
+    ...(role ? { role } : {}),
+    at: at || new Date().toISOString(),
+  }
+}
+
+export function sanitizeHrEditMarkerForResponse(
+  value: unknown
+): ExitChecklistHrEditMarker | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
+
+  const raw = value as Record<string, unknown>
+  const name = sanitizeText(raw.name)
+  const email = sanitizeText(raw.email)
+  const role = sanitizeText(raw.role)
+  const at = sanitizeText(raw.at)
+
+  if (!name && !email) return null
+
+  return {
+    name,
+    email,
+    ...(role ? { role } : {}),
+    at: at || new Date().toISOString(),
+  }
+}
+
+export function toTriStateBoolean(value: unknown): boolean | null {
+  if (value === true) return true
+  if (value === false) return false
+  return null
+}
+
 export function sanitizeResponsibleParty(
   value: unknown
 ): "KITT6" | "OSS_KT" | null {
@@ -89,6 +139,16 @@ export function resolutionLabel(value: ChecklistResolution): string {
   if (value === ChecklistResolution.YES) return "Ano"
   if (value === ChecklistResolution.NO) return "Ne"
   return "Nepodává se"
+}
+
+export function resolveHandoverOption2Target(value: unknown): string {
+  const h = getRecord(value)
+
+  return (
+    sanitizeText(h.option2TargetUnitName) ||
+    sanitizeText(h.option2Target) ||
+    sanitizeText(h.option2TargetPositionNum)
+  )
 }
 
 export function handoverSummaryLabel(value: unknown): string {
@@ -274,6 +334,7 @@ function normalizeHistoryEntry(
     lastSentByName: sanitizeNullableText(item.lastSentByName),
     lastSentByEmail: sanitizeNullableText(item.lastSentByEmail),
     sentCount: sanitizeNullableNumber(item.sentCount) ?? 0,
+    cancelledAt: sanitizeNullableText(item.cancelledAt),
   }
 }
 
@@ -317,6 +378,9 @@ function upsertHistoryEntry(
       ? next.lastSentByEmail
       : existing.lastSentByEmail,
     sentCount: Math.max(existing.sentCount ?? 0, next.sentCount ?? 0),
+    cancelledAt: useNextAsMain
+      ? (next.cancelledAt ?? null)
+      : (existing.cancelledAt ?? null),
   })
 }
 
@@ -383,6 +447,7 @@ function sanitizeHandoverSendHistoryForJson(
       lastSentByName: entry.lastSentByName,
       lastSentByEmail: entry.lastSentByEmail,
       sentCount: entry.sentCount,
+      cancelledAt: entry.cancelledAt ?? null,
     })
   )
 }
@@ -394,6 +459,9 @@ function getHandoverSendMetadataForJson(raw: Record<string, unknown>): {
   handoverRecipientsSentHash: string | null
   handoverRecipientsSentCount: number | null
   handoverSendHistory: Prisma.InputJsonArray
+  handoverNotifiedAt: string | null
+  handoverNotifiedTo: string | null
+  handoverNotifiedTarget: string | null
 } {
   return {
     handoverRecipientsSentAt: sanitizeNullableText(
@@ -412,6 +480,9 @@ function getHandoverSendMetadataForJson(raw: Record<string, unknown>): {
       raw.handoverRecipientsSentCount
     ),
     handoverSendHistory: sanitizeHandoverSendHistoryForJson(raw),
+    handoverNotifiedAt: sanitizeNullableText(raw.handoverNotifiedAt),
+    handoverNotifiedTo: sanitizeNullableText(raw.handoverNotifiedTo),
+    handoverNotifiedTarget: sanitizeNullableText(raw.handoverNotifiedTarget),
   }
 }
 
@@ -425,6 +496,9 @@ function getHandoverSendMetadataForResponse(
   | "handoverRecipientsSentHash"
   | "handoverRecipientsSentCount"
   | "handoverSendHistory"
+  | "handoverNotifiedAt"
+  | "handoverNotifiedTo"
+  | "handoverNotifiedTarget"
 > {
   return {
     handoverRecipientsSentAt: sanitizeNullableText(
@@ -443,6 +517,9 @@ function getHandoverSendMetadataForResponse(
       raw.handoverRecipientsSentCount
     ),
     handoverSendHistory: sanitizeHandoverSendHistoryForResponse(raw),
+    handoverNotifiedAt: sanitizeNullableText(raw.handoverNotifiedAt),
+    handoverNotifiedTo: sanitizeNullableText(raw.handoverNotifiedTo),
+    handoverNotifiedTarget: sanitizeNullableText(raw.handoverNotifiedTarget),
   }
 }
 
@@ -501,9 +578,12 @@ export function sanitizeHandoverForJson(
     return {
       includeHandoverAgenda: false,
       option1: false,
+      option1Note: "",
       option2: false,
       option2Target: "",
       option2TargetPositionNum: "",
+      option2TargetDepartment: "",
+      option2TargetUnitName: "",
       option3: false,
       option3Reason: "",
       responsibleParty: null,
@@ -516,9 +596,17 @@ export function sanitizeHandoverForJson(
   const option2 = Boolean(raw.option2)
   const option3 = Boolean(raw.option3)
 
+  const option1Note = option1 ? sanitizeText(raw.option1Note) : ""
+
   const option2Target = option2 ? sanitizeText(raw.option2Target) : ""
   const option2TargetPositionNum = option2
     ? sanitizeText(raw.option2TargetPositionNum)
+    : ""
+  const option2TargetDepartment = option2
+    ? sanitizeText(raw.option2TargetDepartment)
+    : ""
+  const option2TargetUnitName = option2
+    ? sanitizeText(raw.option2TargetUnitName)
     : ""
 
   const option3Reason = option3 ? sanitizeText(raw.option3Reason) : ""
@@ -533,9 +621,12 @@ export function sanitizeHandoverForJson(
   return {
     includeHandoverAgenda: true,
     option1,
+    option1Note,
     option2,
     option2Target,
     option2TargetPositionNum,
+    option2TargetDepartment,
+    option2TargetUnitName,
     option3,
     option3Reason,
     responsibleParty,
@@ -560,9 +651,12 @@ export function sanitizeHandoverForResponse(
     return {
       includeHandoverAgenda: false,
       option1: false,
+      option1Note: "",
       option2: false,
       option2Target: "",
       option2TargetPositionNum: "",
+      option2TargetDepartment: "",
+      option2TargetUnitName: "",
       option3: false,
       option3Reason: "",
       responsibleParty: null,
@@ -582,10 +676,17 @@ export function sanitizeHandoverForResponse(
   return {
     includeHandoverAgenda: true,
     option1,
+    option1Note: option1 ? sanitizeText(raw.option1Note) : "",
     option2,
     option2Target: option2 ? sanitizeText(raw.option2Target) : "",
     option2TargetPositionNum: option2
       ? sanitizeText(raw.option2TargetPositionNum)
+      : "",
+    option2TargetDepartment: option2
+      ? sanitizeText(raw.option2TargetDepartment)
+      : "",
+    option2TargetUnitName: option2
+      ? sanitizeText(raw.option2TargetUnitName)
       : "",
     option3,
     option3Reason: option3 ? sanitizeText(raw.option3Reason) : "",
@@ -641,8 +742,94 @@ export function preserveHandoverSendMetadata(
       previousMetadata.handoverRecipientsSentCount ??
       null,
 
+    handoverNotifiedAt:
+      nextMetadata.handoverNotifiedAt ??
+      previousMetadata.handoverNotifiedAt ??
+      null,
+
+    handoverNotifiedTo:
+      nextMetadata.handoverNotifiedTo ??
+      previousMetadata.handoverNotifiedTo ??
+      null,
+
+    handoverNotifiedTarget:
+      nextMetadata.handoverNotifiedTarget ??
+      previousMetadata.handoverNotifiedTarget ??
+      null,
+
     handoverSendHistory: mergedHistory,
   }
+}
+
+export interface HandoverSupersededKitt6Notice {
+  email: string
+  target: string | null
+}
+
+export interface HandoverSupersededResult {
+  handover: Prisma.InputJsonObject
+  kitt6: HandoverSupersededKitt6Notice | null
+  recipients: HandoverSendHistoryEntry[]
+}
+
+export function computeHandoverSupersededNotifications(
+  previousHandover: unknown,
+  nextHandover: Prisma.InputJsonObject
+): HandoverSupersededResult {
+  const next = { ...nextHandover } as Record<string, unknown>
+  const previous = getRecord(previousHandover)
+
+  const previousNotifiedTo = sanitizeNullableText(previous.handoverNotifiedTo)
+  const previousNotifiedTarget = sanitizeNullableText(
+    previous.handoverNotifiedTarget
+  )
+  const nextOption2 = Boolean(next.option2)
+  const nextTarget = nextOption2 ? resolveHandoverOption2Target(next) : ""
+
+  let kitt6: HandoverSupersededKitt6Notice | null = null
+
+  if (
+    previousNotifiedTo &&
+    (!nextOption2 || nextTarget !== previousNotifiedTarget)
+  ) {
+    kitt6 = { email: previousNotifiedTo, target: previousNotifiedTarget }
+    next.handoverNotifiedAt = null
+    next.handoverNotifiedTo = null
+    next.handoverNotifiedTarget = null
+  }
+
+  const nextOption3 = Boolean(next.option3)
+  const nextRecipientEmails = new Set(
+    (Array.isArray(next.handoverRecipients) ? next.handoverRecipients : [])
+      .filter(
+        (item): item is Record<string, unknown> =>
+          Boolean(item) && typeof item === "object"
+      )
+      .map((item) => normalizeEmail(item.email))
+      .filter(Boolean)
+  )
+
+  const history = sanitizeHandoverSendHistoryForResponse(next)
+  const recipients: HandoverSendHistoryEntry[] = []
+
+  const nextHistory = history.map((entry) => {
+    const stillActive = nextOption3 && nextRecipientEmails.has(entry.email)
+
+    if (entry.sentCount > 0 && !entry.cancelledAt && !stillActive) {
+      recipients.push(entry)
+      return { ...entry, cancelledAt: new Date().toISOString() }
+    }
+
+    return entry
+  })
+
+  if (recipients.length > 0) {
+    next.handoverSendHistory = sanitizeHandoverSendHistoryForJson({
+      handoverSendHistory: nextHistory,
+    })
+  }
+
+  return { handover: next as Prisma.InputJsonObject, kitt6, recipients }
 }
 
 export function sanitizeSignaturesForJson(
@@ -698,6 +885,9 @@ export function sanitizeSignatureRecipientsForResponse(
       const behalfLabel = sanitizeNullableText(item.behalfLabel)
       const invitedAt = sanitizeNullableText(item.invitedAt)
       const revokedAt = sanitizeNullableText(item.revokedAt)
+      const substituteForKey = sanitizeNullableText(item.substituteForKey)
+      const position = sanitizeNullableText(item.position)
+      const department = sanitizeNullableText(item.department)
 
       return {
         name: sanitizeText(item.name),
@@ -706,9 +896,69 @@ export function sanitizeSignatureRecipientsForResponse(
         ...(behalfLabel ? { behalfLabel } : {}),
         ...(invitedAt ? { invitedAt } : {}),
         ...(revokedAt ? { revokedAt } : {}),
+        ...(substituteForKey ? { substituteForKey } : {}),
+        ...(position ? { position } : {}),
+        ...(department ? { department } : {}),
       }
     })
     .filter((item) => item.name && item.email)
+}
+
+const DEFAULT_SECTION_B_RESPONSIBLE: ExitChecklistResponsiblePerson = {
+  name: "Ing. Martina Krýzová",
+  position: "vedoucí Oddělení vnitřní správy",
+  department: "Odbor služeb",
+  email: "mkryzova@praha6.cz",
+}
+
+const DEFAULT_KITT6_OPTION_CONTACT: ExitChecklistResponsiblePerson = {
+  name: "Vladimír Šuvarina",
+  position: "ředitel KITT6",
+  department: "KITT6",
+  email: "vsuvarina@praha6.cz",
+}
+
+export function sanitizeResponsiblePersonForResponse(
+  value: unknown,
+  fallback: ExitChecklistResponsiblePerson
+): ExitChecklistResponsiblePerson {
+  const raw = getRecord(value)
+  const email = sanitizeText(raw.email)
+  if (!email) return fallback
+
+  return {
+    name: sanitizeText(raw.name) || fallback.name,
+    position: sanitizeText(raw.position) || fallback.position,
+    department: sanitizeText(raw.department) || fallback.department,
+    email: normalizeEmail(email),
+  }
+}
+
+export function sanitizeResponsiblePersonForJson(
+  value: unknown,
+  fallback: ExitChecklistResponsiblePerson
+): Prisma.InputJsonObject {
+  return sanitizeResponsiblePersonForResponse(
+    value,
+    fallback
+  ) as unknown as Prisma.InputJsonObject
+}
+
+export function sanitizeKitt6ContactForResponse(
+  value: unknown
+): ExitChecklistResponsiblePerson {
+  return sanitizeResponsiblePersonForResponse(
+    value,
+    DEFAULT_KITT6_OPTION_CONTACT
+  )
+}
+
+export function sanitizeKitt6ContactForJson(
+  value: unknown
+): Prisma.InputJsonObject {
+  return sanitizeKitt6ContactForResponse(
+    value
+  ) as unknown as Prisma.InputJsonObject
 }
 
 export function mergeSignatureRecipients(
@@ -751,6 +1001,7 @@ export function mapToExitChecklistData(
     return {
       ...row,
       resolved,
+      note: dbItem?.note ?? null,
       signedByName: dbItem?.signedByName ?? null,
       signedByEmail: dbItem?.signedByEmail ?? null,
       signedAt: dbItem?.signedAt
@@ -781,7 +1032,10 @@ export function mapToExitChecklistData(
     id: checklist.id,
     offboardingId: off.id,
     publicToken: checklist.publicToken,
-    conflictOfInterest: Boolean(headerData.conflictOfInterest),
+    conflictOfInterest:
+      typeof headerData.conflictOfInterest === "boolean"
+        ? headerData.conflictOfInterest
+        : null,
     positionNum: off.positionNum ?? null,
     positionName: header.positionName,
 
@@ -794,9 +1048,17 @@ export function mapToExitChecklistData(
 
     managerEmail: sanitizeText(headerData.managerEmail) || null,
     managerName: sanitizeText(headerData.managerName) || null,
+    managerPosition: sanitizeText(headerData.managerPosition) || null,
+    managerDepartment: sanitizeText(headerData.managerDepartment) || null,
     handoverManagerSignature:
       sanitizeSignatureValueForResponse(headerData.handoverManagerSignature) ??
       null,
+    assetsEditedByHR: sanitizeHrEditMarkerForResponse(
+      headerData.assetsEditedByHR
+    ),
+    handoverEditedByHR: sanitizeHrEditMarkerForResponse(
+      headerData.handoverEditedByHR
+    ),
 
     lockedAt: checklist.lockedAt
       ? new Date(checklist.lockedAt).toISOString()
@@ -806,6 +1068,7 @@ export function mapToExitChecklistData(
 
     items,
     assets,
+    noAssets: Boolean(headerData.noAssets),
     handover,
     signatures,
 
@@ -818,6 +1081,14 @@ export function mapToExitChecklistData(
     ),
     signatureRecipientsSentByEmail: sanitizeNullableText(
       headerData.signatureRecipientsSentByEmail
+    ),
+
+    sectionBResponsible: sanitizeResponsiblePersonForResponse(
+      headerData.sectionBResponsible,
+      DEFAULT_SECTION_B_RESPONSIBLE
+    ),
+    kitt6OptionContact: sanitizeKitt6ContactForResponse(
+      headerData.kitt6OptionContact
     ),
   }
 }
@@ -885,8 +1156,6 @@ export async function getOrCreateChecklist(offboardingId: number) {
 
       return { off, checklist: created }
     } catch (error) {
-      // Souběžný požadavek mezitím checklist už založil (unique constraint
-      // na offboardingId) - dohledáme ten, co vytvořil jako první.
       const isUniqueConstraintError =
         error &&
         typeof error === "object" &&
@@ -941,11 +1210,6 @@ export function sanitizeExitChecklistFilename(value: string) {
     .replace(/^-|-$/g, "")
 }
 
-// Zkusí vygenerovat PDF výstupního listu přeposláním cookie aktuálního
-// požadavku na interní PDF endpoint - ten vyžaduje interní roli
-// (ADMIN/HR/IT/READONLY). Pokud dokončení přišlo od zaměstnance přes veřejný
-// odkaz (role USER), PDF endpoint vrátí 403 a přiložení se přeskočí - odkaz
-// na výstupní list v e-mailu zůstává vždy funkční fallback.
 export async function tryFetchExitChecklistPdfBuffer(args: {
   cookie: string
   baseUrl: string
