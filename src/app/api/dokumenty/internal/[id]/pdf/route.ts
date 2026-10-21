@@ -15,7 +15,7 @@ export async function GET(
   const session = await auth()
 
   if (!session?.user) {
-    return new Response(JSON.stringify({ message: "Nejste přihlášen(a)." }), {
+    return new Response(JSON.stringify({ message: "Nejste přihlášeni." }), {
       status: 401,
       headers: { "Content-Type": "application/json" },
     })

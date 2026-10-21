@@ -30,6 +30,7 @@ type ExperienceFormBaseProps = {
   initialData?: unknown
   readOnly?: boolean
   employeeMeta?: EmployeeMeta
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 type ExperienceFormPublicProps = ExperienceFormBaseProps & {
@@ -82,7 +83,7 @@ export function ExperienceForm(props: ExperienceFormProps) {
     control,
     register,
     handleSubmit,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = form
 
   const { fields, append, remove } = useFieldArray<
@@ -92,6 +93,12 @@ export function ExperienceForm(props: ExperienceFormProps) {
     control,
     name: "experience",
   })
+
+  const onDirtyChange = props.onDirtyChange
+
+  React.useEffect(() => {
+    onDirtyChange?.(status === "filling" && isDirty)
+  }, [isDirty, status, onDirtyChange])
 
   const isCompleted = status === "completed"
   const isDisabled =
@@ -199,7 +206,7 @@ export function ExperienceForm(props: ExperienceFormProps) {
             department={props.employeeMeta?.department}
             position={props.employeeMeta?.position}
           />
-          <p>Vážená paní, vážený pane,</p>
+          <p>Dobrý den,</p>
           <p>
             dovolujeme si Vás požádat o vyplnění následujících údajů pro účely
             zpracování personální a mzdové agendy. Vaše údaje budou k dispozici

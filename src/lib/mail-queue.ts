@@ -8,6 +8,9 @@ import { prisma } from "@/lib/db"
 import {
   sendExitChecklistDueSoonReminderEmail,
   sendExitChecklistSignatureReminderEmail,
+  sendNewRecordManagerNoticeEmail,
+  sendNewRecordManagerUpdateEmail,
+  sendNewRecordMissingManagerEmail,
   sendOffboardingDepartureConfirmationEmail,
   sendQueuedProbationEmail,
   type ProbationMailQueuePayload,
@@ -26,6 +29,7 @@ const PROBATION_MAIL_JOB_TYPES: MailJobType[] = [
   "NOTICE_WARNING",
   "EXIT_SIGNATURE_INVITE",
   "OFFBOARDING_DEPARTURE_CONFIRMATION",
+  "NEW_RECORD_MANAGER_NOTICE",
 ]
 
 function asPayload(value: unknown): QueuePayload {
@@ -148,6 +152,72 @@ function toOffboardingDepartureConfirmationPayload(payload: QueuePayload) {
   }
 }
 
+function toNewRecordKind(value: unknown): "ONBOARDING" | "OFFBOARDING" {
+  return value === "OFFBOARDING" ? "OFFBOARDING" : "ONBOARDING"
+}
+
+function toNewRecordMissingManagerPayload(payload: QueuePayload) {
+  return {
+    to: getRecipients(payload),
+    kind: toNewRecordKind(payload.kind),
+    employeeName: asStr(payload.employeeName) ?? "",
+    employeePersonalNumber: asStr(payload.employeePersonalNumber),
+    employeePosition: asStr(payload.employeePosition),
+    employeeDepartment: asStr(payload.employeeDepartment),
+    employeeUnitName: asStr(payload.employeeUnitName),
+    plannedDate: asStr(payload.plannedDate),
+    recordLink: asStr(payload.recordLink),
+  }
+}
+
+function toNewRecordManagerNoticePayload(payload: QueuePayload) {
+  return {
+    to: getRecipients(payload),
+    kind: toNewRecordKind(payload.kind),
+    employeeName: asStr(payload.employeeName) ?? "",
+    employeePersonalNumber: asStr(payload.employeePersonalNumber),
+    employeePosition: asStr(payload.employeePosition),
+    employeeDepartment: asStr(payload.employeeDepartment),
+    employeeUnitName: asStr(payload.employeeUnitName),
+    plannedDate: asStr(payload.plannedDate),
+    recordLink: asStr(payload.recordLink) ?? "",
+  }
+}
+
+function toNewRecordManagerUpdateReason(
+  value: unknown
+):
+  | "FIELDS_CHANGED"
+  | "MANAGER_REMOVED"
+  | "RECORD_CANCELLED"
+  | "RECORD_DELETED" {
+  if (
+    value === "MANAGER_REMOVED" ||
+    value === "RECORD_CANCELLED" ||
+    value === "RECORD_DELETED"
+  ) {
+    return value
+  }
+
+  return "FIELDS_CHANGED"
+}
+
+function toNewRecordManagerUpdatePayload(payload: QueuePayload) {
+  return {
+    to: getRecipients(payload),
+    kind: toNewRecordKind(payload.kind),
+    reason: toNewRecordManagerUpdateReason(payload.reason),
+    changeSummary: asDisplayStrArr(payload.changeSummary),
+    employeeName: asStr(payload.employeeName) ?? "",
+    employeePersonalNumber: asStr(payload.employeePersonalNumber),
+    employeePosition: asStr(payload.employeePosition),
+    employeeDepartment: asStr(payload.employeeDepartment),
+    employeeUnitName: asStr(payload.employeeUnitName),
+    plannedDate: asStr(payload.plannedDate),
+    recordLink: asStr(payload.recordLink),
+  }
+}
+
 function toExitSignatureReminderPayload(payload: QueuePayload) {
   return {
     to: asStr(payload.to) ?? "",
@@ -159,6 +229,7 @@ function toExitSignatureReminderPayload(payload: QueuePayload) {
     signUrl: asStr(payload.signUrl) ?? "",
     roleNote: asStr(payload.roleNote),
     behalfLabel: asStr(payload.behalfLabel),
+    headerSubtitle: asStr(payload.headerSubtitle),
   }
 }
 
@@ -360,8 +431,29 @@ async function processJob(job: MailQueue) {
   const payload = asPayload(job.payload)
 
   if (job.type === "NOTICE_WARNING") {
+    if (asStr(payload.noticeKind) === "NEW_RECORD_MISSING_MANAGER") {
+      await sendNewRecordMissingManagerEmail(
+        toNewRecordMissingManagerPayload(payload)
+      )
+      return
+    }
+
     await sendExitChecklistDueSoonReminderEmail(
       toExitChecklistReminderPayload(payload)
+    )
+    return
+  }
+
+  if (job.type === "NEW_RECORD_MANAGER_NOTICE") {
+    if (asStr(payload.reason)) {
+      await sendNewRecordManagerUpdateEmail(
+        toNewRecordManagerUpdatePayload(payload)
+      )
+      return
+    }
+
+    await sendNewRecordManagerNoticeEmail(
+      toNewRecordManagerNoticePayload(payload)
     )
     return
   }

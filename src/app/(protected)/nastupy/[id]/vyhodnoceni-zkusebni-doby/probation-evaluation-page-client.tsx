@@ -1,21 +1,14 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowLeft, CheckCircle, Loader2, XCircle } from "lucide-react"
 import { useSession } from "next-auth/react"
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
+
+import { UnsavedChangesDialog } from "@/components/common/unsaved-changes-dialog"
 import {
   ProbationEvaluationForm,
   type ProbationEvaluationFormValues,
@@ -197,9 +190,8 @@ export function ProbationEvaluationPageClient({
   const [error, setError] = useState<string | null>(null)
   const [savedMessage, setSavedMessage] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
-  const [showUnsavedDialog, setShowUnsavedDialog] = useState(false)
-
-  const pendingNavRef = useRef<string | null>(null)
+  const { isDialogOpen, guardAction, closeDialog, proceed } =
+    useUnsavedChangesGuard(dirty)
 
   const apiUrl = `/api/nastupy/${onboardingId}/probation-evaluation`
 
@@ -270,19 +262,6 @@ export function ProbationEvaluationPageClient({
     void loadData()
   }, [loadData])
 
-  useEffect(() => {
-    if (!dirty) return
-
-    function handleBeforeUnload(event: BeforeUnloadEvent) {
-      event.preventDefault()
-      event.returnValue = ""
-    }
-
-    window.addEventListener("beforeunload", handleBeforeUnload)
-
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload)
-  }, [dirty])
-
   async function handleSave(values: ProbationEvaluationFormValues) {
     if (saving || !canManage || locked || unavailable) return
     if (completed && !revisionOpen) return
@@ -336,21 +315,13 @@ export function ProbationEvaluationPageClient({
   }
 
   function handleBackClick(event: React.MouseEvent, href: string) {
-    if (!dirty) return
-
     event.preventDefault()
-    pendingNavRef.current = href
-    setShowUnsavedDialog(true)
+    guardAction(() => router.push(href))
   }
 
   function confirmLeave() {
-    setShowUnsavedDialog(false)
     setDirty(false)
-
-    if (pendingNavRef.current) {
-      router.push(pendingNavRef.current)
-      pendingNavRef.current = null
-    }
+    proceed()
   }
 
   const backHref = "/nastupy"
@@ -469,27 +440,12 @@ export function ProbationEvaluationPageClient({
         )}
       </div>
 
-      <AlertDialog open={showUnsavedDialog} onOpenChange={setShowUnsavedDialog}>
-        <AlertDialogContent className="max-w-md">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Neuložené změny</AlertDialogTitle>
-            <AlertDialogDescription>
-              Ve vyhodnocení zkušební doby jsou neuložené změny. Pokud odejdete,
-              přijdete o ně.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-
-          <AlertDialogFooter>
-            <AlertDialogCancel>Zůstat</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={confirmLeave}
-            >
-              Odejít bez uložení
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <UnsavedChangesDialog
+        open={isDialogOpen}
+        onStay={closeDialog}
+        onDiscard={confirmLeave}
+        description="Ve vyhodnocení zkušební doby jsou neuložené změny. Nejdříve je můžete uložit tlačítkem ve formuláři, nebo odejít bez uložení."
+      />
     </div>
   )
 }

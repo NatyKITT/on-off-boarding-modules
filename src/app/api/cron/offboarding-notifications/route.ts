@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 
 import { requireCronAuthorization } from "@/lib/cron-auth"
 import { isLocalHourNow } from "@/lib/cron-schedule"
+import { ensureOffboardingManagerWatchJobs } from "@/lib/new-record-manager-watch"
 import { ensureOffboardingCronJobs } from "@/lib/offboarding-cron-jobs"
 
 export const runtime = "nodejs"
@@ -27,8 +28,9 @@ export async function GET(req: NextRequest) {
 
   try {
     const result = await ensureOffboardingCronJobs(req)
+    const newRecordManagerWatch = await ensureOffboardingManagerWatchJobs(req)
 
-    return NextResponse.json(result)
+    return NextResponse.json({ ...result, newRecordManagerWatch })
   } catch (error) {
     console.error("[CRON_OFFBOARDING_NOTIFICATIONS_ERROR]", error)
 

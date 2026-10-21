@@ -8,9 +8,15 @@ import { type Position } from "@/types/position"
 
 import { useIsReadonly } from "@/hooks/use-current-role"
 import { useToast } from "@/hooks/use-toast"
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import {
+  ManagerNotifyDialog,
+  type ManagerNotifyPrompt,
+} from "@/components/common/manager-notify-dialog"
+import { UnsavedChangesDialog } from "@/components/common/unsaved-changes-dialog"
 import {
   OnboardingFormUnified,
   type ProbationExtension,
@@ -123,6 +129,11 @@ export default function OnboardingEditPage({ params }: PageProps) {
   const [loadingPositions, setLoadingPositions] = React.useState(false)
   const [positions, setPositions] = React.useState<Position[]>([])
   const [row, setRow] = React.useState<OnbRow | null>(null)
+  const [dirty, setDirty] = React.useState(false)
+  const [managerNotifyPrompt, setManagerNotifyPrompt] =
+    React.useState<ManagerNotifyPrompt>(null)
+  const { isDialogOpen, guardAction, closeDialog, proceed } =
+    useUnsavedChangesGuard(dirty)
 
   const editContext: "planned" | "actual" = row?.actualStart
     ? "actual"
@@ -207,7 +218,10 @@ export default function OnboardingEditPage({ params }: PageProps) {
     <div className="mx-auto w-full max-w-5xl p-4">
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-bold">Upravit nástup</h1>
-        <Button variant="outline" onClick={() => router.push("/nastupy")}>
+        <Button
+          variant="outline"
+          onClick={() => guardAction(() => router.push("/nastupy"))}
+        >
           Zpět na přehled
         </Button>
       </div>
@@ -272,12 +286,17 @@ export default function OnboardingEditPage({ params }: PageProps) {
                 }}
                 mode="edit"
                 editContext={editContext}
-                onSuccess={() => {
+                onDirtyChange={setDirty}
+                onSuccess={(_id, prompt) => {
                   toast({
                     title: "Uloženo",
                     description: "Změny byly úspěšně uloženy.",
                   })
-                  router.push("/nastupy")
+                  if (prompt) {
+                    setManagerNotifyPrompt(prompt)
+                  } else {
+                    router.push("/nastupy")
+                  }
                 }}
               />
             </>
@@ -299,6 +318,23 @@ export default function OnboardingEditPage({ params }: PageProps) {
             : null}
         </p>
       )}
+
+      <UnsavedChangesDialog
+        open={isDialogOpen}
+        onStay={closeDialog}
+        onDiscard={() => {
+          setDirty(false)
+          proceed()
+        }}
+      />
+
+      <ManagerNotifyDialog
+        prompt={managerNotifyPrompt}
+        onClose={() => {
+          setManagerNotifyPrompt(null)
+          router.push("/nastupy")
+        }}
+      />
     </div>
   )
 }

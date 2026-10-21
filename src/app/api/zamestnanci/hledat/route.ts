@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
 
   if (!session?.user) {
     return NextResponse.json(
-      { status: "error", message: "Nejste přihlášen(a)." },
+      { status: "error", message: "Nejste přihlášeni." },
       { status: 401 }
     )
   }
@@ -34,10 +34,12 @@ export async function GET(req: NextRequest) {
   try {
     const q = (req.nextUrl.searchParams.get("q") || "").trim()
     const listAll = req.nextUrl.searchParams.get("listAll") === "true"
-    const limit = Math.min(
-      Math.max(Number(req.nextUrl.searchParams.get("limit") || 200), 1),
-      1000
-    )
+    const limit = listAll
+      ? Number.MAX_SAFE_INTEGER
+      : Math.min(
+          Math.max(Number(req.nextUrl.searchParams.get("limit") || 200), 1),
+          1000
+        )
 
     const excludeParam = req.nextUrl.searchParams.get("exclude") || ""
     const manualExclude = excludeParam

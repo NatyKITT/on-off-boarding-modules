@@ -2,8 +2,9 @@
 
 Interní HR aplikace Úřadu městské části Praha 6 (a příspěvkové
 organizace KITT6) pro evidenci nástupů, odchodů a zaměstnaneckých
-změn, správu souvisejících dokumentů, vyhodnocení zkušební doby a
-pravidelné reportování.
+změn, správu souvisejících dokumentů, žádosti o pracovnělékařskou
+prohlídku a pravidelné reportování. (Vyhodnocení zkušební doby je od
+verze 0.15.0 vypnuté – agendu přebírá Systemizace.)
 
 Tato příručka je psaná tak, aby se dala použít i jako **podklad pro
 školení nových kolegů z HR** – vysvětluje krok za krokem, jak se která
@@ -37,9 +38,10 @@ rychle pochopit, kde co je:
    správa dokumentů zaměstnanců), **Statistiky** a (jen pro
    administrátora) **Nastavení**.
 4. Naprostá většina práce s konkrétním zaměstnancem probíhá tak, že si
-   HR otevře jeho nástup/odchod a odsud dál řídí dokumenty,
-   vyhodnocení zkušební doby nebo výstupní list – nejde o samostatné,
-   nesouvisející moduly, ale o „podstránky“ konkrétního nástupu/odchodu.
+   HR otevře jeho nástup/odchod a odsud dál řídí dokumenty, žádost
+   o pracovnělékařskou prohlídku nebo výstupní list – nejde o
+   samostatné, nesouvisející moduly, ale o „podstránky“ konkrétního
+   nástupu/odchodu.
 5. Cokoliv, co má vyplnit **sám zaměstnanec nebo jeho nadřízený** (bez
    přístupu do vnitřní aplikace), se řeší přes **veřejný odkaz zaslaný
    e-mailem** – viz kapitola 6.
@@ -94,20 +96,20 @@ Roli přiděluje **administrátor** v sekci _Administrace_
 „Č“ = čtení/prohlížení, „Č + Z“ = čtení i zápis (vytváření, úpravy,
 odesílání e-mailů), „–“ = žádný přístup.
 
-| Modul                                                    | ADMIN | HR    | IT    | READONLY | USER    |
-| -------------------------------------------------------- | ----- | ----- | ----- | -------- | ------- |
-| Přehled (kalendář)                                       | Č + Z | Č + Z | Č + Z | Č        | –       |
-| Nástupy / Odchody                                        | Č + Z | Č + Z | Č + Z | Č        | –       |
-| Zaměstnanecké změny                                      | Č + Z | Č + Z | Č + Z | Č        | –       |
-| Interní dokumenty – prohlížení a odeslání PDF            | Č + Z | Č + Z | Č + Z | –        | –       |
-| Interní dokumenty – přiřazení, zámek, znovu-vygenerování | Č + Z | Č + Z | –     | –        | –       |
-| Vyhodnocení zkušební doby (interní správa)               | Č + Z | Č + Z | Č + Z | –        | –       |
-| Výstupní list (interní správa a podpis)                  | Č + Z | Č + Z | Č + Z | Podpis¹  | Podpis¹ |
-| Měsíční e-mailové reporty (Nástupy/Odchody/Změny)        | Č + Z | Č + Z | Č + Z | Č        | –       |
-| Statistiky – prohlížení, export a odeslání PDF           | Č + Z | Č + Z | Č + Z | Č + Z    | –       |
-| Statistiky – uložení/smazání vlastního pohledu           | Č + Z | Č + Z | Č + Z | –        | –       |
-| Administrace (uživatelé a role)                          | Č + Z | –     | –     | –        | –       |
-| Nastavení                                                | Č + Z | –     | –     | –        | –       |
+| Modul                                                              | ADMIN | HR    | IT    | READONLY | USER    |
+| ------------------------------------------------------------------ | ----- | ----- | ----- | -------- | ------- |
+| Přehled (kalendář)                                                 | Č + Z | Č + Z | Č + Z | Č        | –       |
+| Nástupy / Odchody                                                  | Č + Z | Č + Z | Č + Z | Č        | –       |
+| Zaměstnanecké změny                                                | Č + Z | Č + Z | Č + Z | Č        | –       |
+| Interní dokumenty – prohlížení a odeslání PDF                      | Č + Z | Č + Z | Č + Z | –        | –       |
+| Interní dokumenty – přiřazení, zámek, znovu-vygenerování           | Č + Z | Č + Z | –     | –        | –       |
+| Vyhodnocení zkušební doby (interní správa) – **vypnuto od 0.15.0** | –     | –     | –     | –        | –       |
+| Výstupní list (interní správa a podpis)                            | Č + Z | Č + Z | Č + Z | Podpis¹  | Podpis¹ |
+| Měsíční e-mailové reporty (Nástupy/Odchody/Změny)                  | Č + Z | Č + Z | Č + Z | Č        | –       |
+| Statistiky – prohlížení, export a odeslání PDF                     | Č + Z | Č + Z | Č + Z | Č + Z    | –       |
+| Statistiky – uložení/smazání vlastního pohledu                     | Č + Z | Č + Z | Č + Z | –        | –       |
+| Administrace (uživatelé a role)                                    | Č + Z | –     | –     | –        | –       |
+| Nastavení                                                          | Č + Z | –     | –     | –        | –       |
 
 ¹ Zaměstnanec/nadřízený bez role v aplikaci má k exit checklistu
 přístup pouze přes veřejný odkaz zaslaný e-mailem, ne přes vnitřní
@@ -122,10 +124,10 @@ k podpisu).
   uživatelů a rolí) a do Nastavení; jinak má stejná práva jako HR.
 - **HR** – plný rozsah běžné agendy: zakládá a upravuje nástupy,
   odchody a změny, spravuje interní dokumenty (včetně přiřazení,
-  zámku a znovu-vygenerování), spravuje vyhodnocení zkušební doby a
+  zámku a znovu-vygenerování), žádost o pracovnělékařskou prohlídku a
   exit checklist, odesílá měsíční i statistické reporty.
-- **IT** – má prakticky stejná práva jako HR u nástupů, odchodů, změn,
-  vyhodnocení zkušební doby a exit checklistu. **Jeden rozdíl:** u
+- **IT** – má prakticky stejná práva jako HR u nástupů, odchodů, změn
+  a exit checklistu. **Jeden rozdíl:** u
   interních dokumentů může dokumenty prohlížet a poslat hotové PDF,
   ale nemůže je přiřazovat, zamykat ani znovu generovat – to zůstává
   jen na HR a ADMIN.
@@ -150,21 +152,21 @@ k podpisu).
 
 ### Hlavní agenda
 
-| Adresa                                    | Popis                                                               | Přístup                 |
-| ----------------------------------------- | ------------------------------------------------------------------- | ----------------------- |
-| `/prehled`                                | Kalendářní přehled nástupů a odchodů, výchozí stránka po přihlášení | ADMIN, HR, IT, READONLY |
-| `/nastupy`                                | Seznam nástupů (plánované i skutečné)                               | ADMIN, HR, IT, READONLY |
-| `/nastupy/[id]`                           | Detail konkrétního nástupu                                          | ADMIN, HR, IT, READONLY |
-| `/nastupy/[id]/editovat`                  | Úprava nástupu                                                      | ADMIN, HR, IT           |
-| `/nastupy/[id]/vyhodnoceni-zkusebni-doby` | Interní správa vyhodnocení zkušební doby k danému nástupu           | ADMIN, HR, IT           |
-| `/odchody`                                | Seznam odchodů (plánované i skutečné)                               | ADMIN, HR, IT, READONLY |
-| `/odchody/[id]`                           | Detail konkrétního odchodu, včetně exit checklistu                  | ADMIN, HR, IT, READONLY |
-| `/odchody/[id]/editovat`                  | Úprava odchodu                                                      | ADMIN, HR, IT           |
-| `/odchody/[id]/vystupni-list`             | Výstupní list k odchodu                                             | ADMIN, HR, IT, READONLY |
-| `/zmeny`                                  | Seznam zaměstnaneckých změn                                         | ADMIN, HR, IT, READONLY |
-| `/zmeny/[id]`                             | Detail konkrétní změny                                              | ADMIN, HR, IT, READONLY |
-| `/zmeny/[id]/editovat`                    | Úprava změny                                                        | ADMIN, HR, IT           |
-| `/dokumenty/internal/[id]`                | Interní správa dokumentu (generování, zámek, odeslání)              | ADMIN, HR, IT¹          |
+| Adresa                                    | Popis                                                                                     | Přístup                 |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------- | ----------------------- |
+| `/prehled`                                | Kalendářní přehled nástupů a odchodů, výchozí stránka po přihlášení                       | ADMIN, HR, IT, READONLY |
+| `/nastupy`                                | Seznam nástupů (plánované i skutečné)                                                     | ADMIN, HR, IT, READONLY |
+| `/nastupy/[id]`                           | Detail konkrétního nástupu                                                                | ADMIN, HR, IT, READONLY |
+| `/nastupy/[id]/editovat`                  | Úprava nástupu                                                                            | ADMIN, HR, IT           |
+| `/nastupy/[id]/vyhodnoceni-zkusebni-doby` | Vyhodnocení zkušební doby – **vypnuto od 0.15.0** (přesměruje na informaci o Systemizaci) | –                       |
+| `/odchody`                                | Seznam odchodů (plánované i skutečné)                                                     | ADMIN, HR, IT, READONLY |
+| `/odchody/[id]`                           | Detail konkrétního odchodu, včetně exit checklistu                                        | ADMIN, HR, IT, READONLY |
+| `/odchody/[id]/editovat`                  | Úprava odchodu                                                                            | ADMIN, HR, IT           |
+| `/odchody/[id]/vystupni-list`             | Výstupní list k odchodu                                                                   | ADMIN, HR, IT, READONLY |
+| `/zmeny`                                  | Seznam zaměstnaneckých změn                                                               | ADMIN, HR, IT, READONLY |
+| `/zmeny/[id]`                             | Detail konkrétní změny                                                                    | ADMIN, HR, IT, READONLY |
+| `/zmeny/[id]/editovat`                    | Úprava změny                                                                              | ADMIN, HR, IT           |
+| `/dokumenty/internal/[id]`                | Interní správa dokumentu (generování, zámek, odeslání)                                    | ADMIN, HR, IT¹          |
 
 ¹ IT vidí a odešle hotové PDF, ale tlačítka pro přiřazení, zámek a
 znovu-vygenerování jsou pro roli IT skrytá/needitovatelná.
@@ -183,11 +185,11 @@ společně s Dokumenty:
 
 ### Veřejné odkazy (bez přihlášení do vnitřní aplikace)
 
-| Adresa                               | Popis                                         | Přístup                             |
-| ------------------------------------ | --------------------------------------------- | ----------------------------------- |
-| `/dokumenty/[hash]`                  | Vyplnění osobních dokumentů zaměstnancem      | Odkaz z e-mailu                     |
-| `/odchody-public/[token]`            | Vyplnění a podpis exit checklistu             | Odkaz z e-mailu                     |
-| `/vyhodnoceni-zkusebni-doby/[token]` | Vyplnění vyhodnocení zkušební doby nadřízeným | Odkaz z e-mailu + Google přihlášení |
+| Adresa                               | Popis                                                                                 | Přístup         |
+| ------------------------------------ | ------------------------------------------------------------------------------------- | --------------- |
+| `/dokumenty/[hash]`                  | Vyplnění osobních dokumentů zaměstnancem                                              | Odkaz z e-mailu |
+| `/odchody-public/[token]`            | Vyplnění a podpis exit checklistu                                                     | Odkaz z e-mailu |
+| `/vyhodnoceni-zkusebni-doby/[token]` | **Vypnuto od 0.15.0** – zobrazí jen informaci, že se formulář přesunul do Systemizace | –               |
 
 Adresy ve tvaru `[id]`, `[hash]` a `[token]` jsou vždy vázané na
 konkrétní záznam – nejde o pevné, zapamatovatelné odkazy, ale o adresy
@@ -262,10 +264,19 @@ Z detailu nástupu se dále řídí:
 
   Appka sama upozorní na tři situace: zaměstnance 3 dny před
   vypršením odkazu, Personální oddělení v den vypršení (pokud
-  dokument pořád není vyplněný), a nově i Personální oddělení 3 dny
-  před plánovaným nástupem (případně zpětně i po jeho termínu), pokud
-  dokument ještě vůbec nebyl zaměstnanci odeslán. První dvě připomínky
-  se počítají jen od chvíle, kdy byl odkaz opravdu odeslán.
+  dokument pořád není vyplněný), a Personální oddělení 7 dní po
+  založení záznamu nástupu (ne podle plánovaného data nástupu), pokud
+  dokument ještě vůbec nebyl zaměstnanci odeslán – pokud se do dalších
+  3 dnů nevyřeší, tahle třetí připomínka se opakuje každé 3 dny. První
+  dvě připomínky se počítají jen od chvíle, kdy byl odkaz opravdu
+  odeslán.
+
+  Appka dále hlídá, jestli po plánovaném dni nástupu někdo v appce
+  potvrdil, že zaměstnanec skutečně nastoupil – pokud ne, Personální
+  oddělení dostane e-mail s výzvou ke kontrole (víc takových nástupů
+  ve stejný den se sejde v jednom společném e-mailu), opakovaně každé
+  3 dny, dokud se skutečný nástup nepotvrdí nebo se záznam
+  nezruší/nesmaže.
 
   Pokud se osobní dotazník i dotazník pro mzdovou agendu vyplňují
   odděleně, appka při otevření druhého z nich nabídne převzetí
@@ -277,61 +288,90 @@ Z detailu nástupu se dále řídí:
   na to Personální oddělení v e-mailu o vyplnění i v historii
   dokumentu.
 
-- **Vyhodnocení zkušební doby** – formulář vyplňovaný nadřízeným
-  zaměstnance na konci zkušební doby, prostřednictvím veřejného
-  odkazu (kapitola 6). HR/IT v aplikaci sledují stav, odesílají
-  pozvánku i upomínky a po vyplnění mohou formulář znovu odemknout
-  k opravě.
+- **Vyhodnocení zkušební doby je od verze 0.15.0 úplně vypnuté** –
+  agendu od 30. 10. 2026 přebírá Systemizace, která si sama rozesílá
+  pozvánky i upomínky. V appce zmizelo tlačítko i karta v okně
+  Dokumenty a veřejný odkaz zaměstnancům/nadřízeným zobrazí jen
+  informaci, že formulář byl přesunutý jinam. Historie dříve
+  vyplněných vyhodnocení (dřív, než se agenda přesunula) zůstává
+  v appce dál vidět, nic se nemazalo.
 
-  Automatické zakládání pozvánek a připomínek podle blížícího se
-  konce zkušební doby je **dočasně vypnuté** (bude řešeno přes jinou
-  aplikaci) – pozvánku i případné opakované odeslání je teď potřeba
-  poslat ručně z detailu nástupu. Zbytek procesu (vyplnění, tajemník,
-  finální PDF) funguje beze změny.
+- **Žádost o pracovnělékařskou prohlídku** – appka pro vstupní
+  lékařskou prohlídku nového zaměstnance umí vygenerovat žádost přesně
+  ve vzhledu skutečného formuláře úřadu (logo a hlavička Prahy 6),
+  kterou HR vytiskne, nechá podepsat a orazítkovat a naskenovanou
+  podepsanou verzi nahraje zpátky do appky. V okně Dokumenty, záložka
+  **„Lékařská prohlídka"**, HR postupně vyplní:
+  - **pracovní zařazení** – appka ho předvyplní podle pozice u
+    nástupu, HR jen potvrdí nebo upraví,
+  - **druh práce** (stručný popis pracovní činnosti) a **režim
+    práce**,
+  - **rizikové faktory pracovních podmínek** – Ano/Ne, při Ano i popis,
+  - **kategorii práce** (1 / 2 / 2R / 3 / 4) a **profesní riziko** –
+    Ano/Ne, při Ano i popis,
+  - **druh prohlídky** (vstupní / periodická / mimořádná / výstupní /
+    následná po skončení rizikové práce) – u všech kromě vstupní je
+    navíc povinné vyplnit důvod k jejímu provedení,
+  - **variantu vstupní prohlídky** – buď ÚLZ (partnerský ústav), nebo
+    vlastní praktický lékař zaměstnance. U ÚLZ appka navíc nabídne na
+    výběr: zadat konkrétní termín a hodinu, nebo zvolit „Domluví se
+    zaměstnanec sám" – v tom případě appka datum/hodinu nevyžaduje
+    a v e-mailu zaměstnanci napíše, ať si termín domluví sám přímo
+    s ústavem (místo konkrétního času nebo obecného „termín vám sdělí
+    personální oddělení").
 
-  **Kdo dostane e-mail a kdy** (přehled pro HR):
-  1. HR odešle nadřízenému **pozvánku** k vyplnění ručně z detailu
-     nástupu.
-  2. Jakmile nadřízený formulář **finálně odešle**, HR ihned dostane
-     e-mail s vygenerovaným **PDF v příloze**.
-     - Pokud nadřízený **není** zároveň tajemník úřadu, dostane ve
-       stejnou chvíli e-mail i **tajemník** – PDF v příloze a odkaz
-       „Otevřít k vyjádření“ (stejný odkaz, jaký měl nadřízený). HR
-       e-mail v tomto případě navíc uvádí, že šlo i tajemníkovi.
-     - Pokud je nadřízený sám tajemníkem (nebo jde o nástup přímo na
-       pozici tajemníka), druhý krok odpadá – HR dostane jen tento
-       jeden e-mail a je hotovo.
-  3. Tajemník na svém odkaze vidí kompletní kontext (koho se
-     vyhodnocení týká) i vyplněné hodnocení nadřízeného, a odděleně
-     doplní souhlas nebo nesouhlas s doporučením, případný komentář a
-     podpis. Při volbě „Nesouhlasím" je komentář povinný. Po odeslání:
-     - HR dostane **nový** e-mail s aktualizovaným PDF, ve kterém je
-       vidět **obojí stanovisko najednou** – doporučení nadřízeného
-       (ano/ne) i vyjádření tajemníka (souhlasí/nesouhlasí),
-     - **nadřízený**, který formulář původně vyplnil, dostane
-       samostatný e-mail s informací, že se tajemník vyjádřil a jak,
-       včetně finálního PDF v příloze – aby věděl, že proces je
-       u konce.
-  4. Pokud HR formulář znovu odemkne k opravě a někdo uloží revizi,
-     dostane HR znovu e-mail s aktuálním PDF; tajemníkovi ani
-     nadřízenému se v tomto kroku nic automaticky neposílá.
+  Appka vždy zobrazuje i pole **datum narození** a **adresa trvalého
+  pobytu** – jakmile zaměstnanec vyplní osobní dotazník, doplní se
+  automaticky jeho údaji a pole se needitovatelně zamknou (dotazník
+  má vždy přednost). Dokud dotazník vyplněný není, HR je může vyplnit
+  ručně přímo tady – díky tomu lze žádost připravit a odeslat hned na
+  začátku, společně s odkazy na nástupní dokumenty, ne až po vyplnění
+  dotazníku. Tlačítkem **„Vygenerovat žádost"** HR dostane PDF
+  k vytištění; po podpisu a orazítkování ho naskenuje a tlačítkem
+  **„Nahrát podepsanou žádost"** nahraje zpět – appka žádnou část
+  podpisu/razítka sama nedokresluje.
 
-  Pokud se tajemníkovi žádost o vyjádření z nějakého důvodu nedoručila
-  (chybný e-mail, výpadek) nebo je potřeba mu ji jen znovu připomenout,
-  jde na detailu tlačítkem **„Poslat tajemníkovi"** žádost kdykoli
-  ručně odeslat/zopakovat, dokud tajemník své vyjádření sám neodešle.
+  Odeslání zaměstnanci jde udělat na dvou místech, podle toho, co je
+  zrovna hlavní cíl:
+  - v záložce **„Nástupní dokumenty"** je primární odeslání odkazů na
+    nástupní dokumenty, žádost o prohlídku je tam jen volitelná
+    příloha (zaškrtnutím **„Přiložit i žádost o pracovnělékařskou
+    prohlídku"**),
+  - v záložce **„Lékařská prohlídka"** je to naopak – primární je
+    samostatné tlačítko **„Odeslat žádost"**, a pokud ještě existují
+    nástupní dokumenty, které zaměstnanec nevyplnil, nabídne se
+    volitelné přiložení jejich odkazů k témuž e-mailu (u dokumentů,
+    které už zaměstnanec vyplnil, se znovuodeslání odkazu nenabízí –
+    nemělo by smysl).
 
-  Všechny tyto e-maily (pozvánka, připomínky i navazující zprávy)
-  obsahují u konce zkušební doby i odkaz/tlačítko **„Přidat do
-  kalendáře"** (Google kalendář).
+  Obě možnosti vyžadují vyplněné povinné údaje a nahranou podepsanou
+  žádost. Jakmile je žádost jednou odeslaná, appka to na obou místech
+  zobrazí a nenabízí odeslání znovu, aby nešlo omylem poslat podruhé.
 
-  Tajemníka lze pro testovací nebo přechodné účely ručně přepsat
-  (jméno a e-mail) přímo v detailu vyhodnocení zkušební doby, vedle
-  údajů o nadřízeném – nastavení je globální a platí okamžitě pro
-  všechny nástupy, dokud se nevrátí zpět na automatické dohledání. HR
-  může po odemknutí vyplněného formuláře upravit i stanovisko
-  tajemníka; podpis a čas podpisu přitom zůstávají zachované a změna
-  se zapíše do historie.
+  Nahoře v okně Dokumenty, nad oběma záložkami, appka navíc zobrazuje
+  malou informační hlavičku s pozicí, odborem a oddělením zaměstnance
+  – stejně viditelnou bez ohledu na to, která záložka je otevřená.
+
+  Appka navíc 7 dní po založení záznamu nástupu (a dál opakovaně
+  každé 3 dny, dokud se nevyřeší) připomene Personálnímu oddělení,
+  pokud u nástupu s vyplněným osobním dotazníkem ještě nebyla žádost
+  o prohlídku odeslána – společně s případnou stejnou připomínkou na
+  nezaslané nástupní dokumenty v jednom e-mailu.
+
+  **Stav připravenosti a uzamčení nástupních dokumentů** – jakmile
+  jsou u nástupu kompletně hotové (vyplněné/podepsané) všechny tři
+  nástupní dokumenty a zároveň odeslaná žádost o lékařskou prohlídku,
+  appka to sama pozná a v okně Dokumenty nahoře nabídne tlačítko
+  **„Označit jako hotové a zamknout"** – zároveň o tom opakovaně (každé
+  3 dny, i po přechodu nástupu na skutečný) připomíná Personálnímu
+  oddělení e-mailem, dokud to někdo neoznačí. Toto jednoznačné pole
+  (appka ho uvnitř eviduje jako „rozpracováno / připraveno /
+  uzamčeno") slouží jako budoucí podklad pro Systemizaci nebo jiné
+  napojené systémy, aby poznaly, že data k nástupu jsou kompletní
+  a připravená k přečtení. Jakmile je záznam takto uzamčený, nejde
+  dál upravovat ani nástupní dokumenty, ani žádost o lékařskou
+  prohlídku – odemknout ho zpátky k úpravám může jen HR nebo
+  administrátor appky tlačítkem „Odemknout" na stejném místě.
 
 Pokud se k danému osobnímu číslu později objeví i odpovídající
 odchod, aplikace záznamy **automaticky propojí** – u nástupu se pak
@@ -479,10 +519,11 @@ podle role v appce):
   přihlášený uživatel z povolené domény. Žádnou jinou sekci nesmí
   upravovat ani podepisovat, ale historii změn (tlačítko „Historie") a
   informaci, kdo co podepsal, vidí stejně jako interní uživatelé.
-- **Vedoucí odboru** – smí podepsat svůj podpis v hlavičce i řádek
-  „předávací protokol" (propojené, viz níže) a má přístup do sekce A
-  i B jako kterýkoli jiný podepisující, ale nesmí podepsat ani upravit
-  řádek zaměstnance v hlavičce.
+- **Vedoucí odboru** – smí podepsat svůj podpis v hlavičce, řádek
+  „předávací protokol" v sekci A a vyplnit/podepsat sekci C (jsou to tři
+  samostatné podpisy, viz níže) a má přístup do sekce A i B jako kterýkoli
+  jiný podepisující, ale nesmí podepsat ani upravit řádek zaměstnance
+  v hlavičce.
 - **Ostatní podepisující** (bez role vedoucí/zaměstnanec) – nesmí na
   hlavičkové podpisy zaměstnance ani vedoucího, ani na sekci C (tu smí
   vyplnit a podepsat jen vedoucí); mají přístup jen do sekce A, případně
@@ -509,11 +550,13 @@ Automatické připomínky k podpisu sledují u každého člověka všechny
 podepsané úplně všechny, ne jen jeden z nich; totéž platí pro
 zastupujícího, pokud zastupuje za takovou osobu.
 
-Vedoucí odboru podepisuje ve dvou místech: nahoře v hlavičce
-(„Podpis vedoucího odboru") a u řádku „předávací protokol" v části A.
-Tato dvě políčka jsou **propojená** – stačí podepsat (i v zastoupení)
-kterékoli z nich a to druhé se automaticky označí jako podepsané stejnou
-osobou; zrušení podpisu na jednom zruší i to druhé.
+Vedoucí odboru podepisuje na **třech samostatných místech**: nahoře
+v hlavičce („Podpis vedoucího odboru"), u řádku „předávací protokol"
+v části A a v sekci C (způsob předání agendy) – každé se podepisuje
+i zrušuje zvlášť, nic se mezi nimi automaticky nekopíruje. Appka ale
+hlídá, že osoba nastavená jako vedoucí odboru daného odchodu má hotové
+všechny tři: při kliknutí na „Uložit" ve veřejné verzi potvrzovací okno
+(„Uložit výstupní list?") vypíše, co jí ještě chybí.
 
 **Předání agendy (sekce C) – kdo a kdy dostane e-mail:** vedoucí odboru
 v sekci C vybere jeden ze tří způsobů předání agendy a svůj výběr
@@ -627,8 +670,9 @@ skutečně došlo (ani skutečný odchod, ani neuskutečněný), objeví se
 nahoře v přehledu Odchodů červený banner se jmény a tlačítky „Odešel"
 a „Neuskutečnil se" u každého z nich; při více takových záznamech jde
 otevřít hromadné okno, zaškrtnout vybrané a vyřídit je najednou.
-Personální oddělení navíc den po plánovaném konci dostane jednorázový
-e-mail s připomínkou a odkazem do přehledu.
+Personální oddělení navíc od plánovaného konce dostane e-mail
+s připomínkou a odkazem do přehledu – a dokud skutečný konec nikdo
+nepotvrdí (nebo odchod nezruší), e-mail se opakuje každé 3 dny.
 
 **Neuskutečněný odchod** – pokud se plánovaný nebo i skutečně potvrzený
 odchod nakonec nestane (zaměstnanec zůstal, přešel na jiné oddělení
@@ -651,6 +695,40 @@ Plánované, Skutečné, Neuskutečněné a Vše.
 Neuskutečněné odchody jde stejně jako u nástupů nově zahrnout i do
 okna "Generovat PDF report" a mají v sekci Statistiky (kapitola 5.5)
 vlastní KPI kartu.
+
+**Hromadné akce** – nad seznamem každé ze tří sekcí (Plánované,
+Skutečné, Neuskutečněné), u Nástupů i Odchodů, je vedle tlačítka
+„Smazané záznamy" tlačítko **„Hromadné akce"** (barevně odlišené
+stejně jako tlačítko „Zaslat měsíční report" dané sekce; zobrazí se,
+jen když sekce obsahuje víc než jeden záznam). Otevře okno se
+zaškrtávacím seznamem všech záznamů dané sekce podle právě
+nastaveného filtru, seskupených po měsících – zaškrtnutím měsíce se
+vyberou najednou všechny záznamy v něm, tlačítkem „Vybrat vše" úplně
+všechny. Nabízené akce v okně se liší podle sekce, ve které jste
+tlačítko otevřeli, a dělají přesně totéž, co odpovídající tlačítko
+u jednotlivého záznamu, jen najednou pro všechny vybrané; popisek
+tlačítka se podle počtu vybraných záznamů přepíná mezi jednotným
+a množným číslem (např. „Nastoupil" u jednoho záznamu, „Nastoupili"
+u víc):
+
+- **Plánované** → „Odešel(i)"/„Nastoupil(i)" (ke dni plánovaného
+  nástupu/konce u každého záznamu zvlášť, výpovědní lhůta nebo
+  zkušební doba se dopočítá automaticky stejně jako u jednotlivého
+  potvrzení) nebo „Neuskutečnil(i) se"/„Nenastoupil(i)" (u nástupů je
+  potřeba vyplnit společný důvod zrušení, u odchodů je nepovinný),
+- **Skutečné** → „Vrátit do plánovaných" (zruší se u vybraných
+  zaznamenané skutečné datum) nebo stejně jako u Plánovaných
+  „Neuskutečnil(i) se"/„Nenastoupil(i)" (přímé zrušení i ze stavu
+  „skutečné"),
+- **Neuskutečněné** → „Obnovit" (každý vybraný záznam se vrátí tam,
+  kde byl před zrušením – do plánovaných, nebo do skutečných, pokud
+  už měl vyplněné skutečné datum).
+
+Jde o doplňkovou možnost vedle už existujících tlačítek u
+jednotlivého záznamu – nic se tím neruší ani nemění, jen to jde dělat
+pro víc záznamů najednou. U Odchodů tím není dotčený ani nijak
+nahrazený červený banner pro prošlé plánované termíny bez potvrzení
+(ten řeší jen tuto jednu konkrétní situaci a zůstává beze změny).
 
 ### 5.4 Zaměstnanecké změny
 
@@ -796,17 +874,9 @@ záznam, na kterém nepotřebuje mít v aplikaci účet ani roli:
 - **Výstupní list** (`/odchody-public/[token]`) – odcházející
   zaměstnanec nebo jeho nadřízený zde potvrdí vrácení majetku,
   předání agendy a podepíše výstup.
-- **Vyhodnocení zkušební doby**
-  (`/vyhodnoceni-zkusebni-doby/[token]`) – nadřízený zde po
-  přihlášení přes Google (ověřeném proti konkrétnímu zaměstnanci)
-  vyplní vyhodnocení zkušební doby. Je-li potřeba i vyjádření
-  tajemníka, otevře se mu po odeslání stejný odkaz s hlavičkou
-  (koho se vyhodnocení týká), vyplněným hodnocením nadřízeného a
-  odděleným rámečkem pro jeho vlastní vyjádření (souhlas/nesouhlas,
-  komentář, podpis); ostatním (včetně původního nadřízeného) se po
-  odeslání zobrazí jen potvrzení, ne obsah vyhodnocení. Jakmile
-  tajemník své vyjádření odešle, dostane původní nadřízený e-mailem
-  informaci, že se tajemník vyjádřil.
+- **Vyhodnocení zkušební doby** (`/vyhodnoceni-zkusebni-doby/[token]`)
+  – od verze 0.15.0 vypnuto, odkaz zobrazí jen informaci, že se
+  formulář přesunul do Systemizace (agendu od 30. 10. 2026 přebírá).
 
 Podpis se v aplikaci vždy zapisuje s **celým jménem včetně titulů**
 (pokud je má přihlášený uživatel v aplikaci vyplněné) – u jména za
@@ -875,16 +945,17 @@ včetně jména, e-mailu a času.
 
 ## 9. Slovníček pojmů
 
-| Pojem                         | Význam                                                                                                                                                                                                                                                            |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Plánovaný** nástup/odchod   | Termín, který se má stát podle plánu, dosud nepotvrzen                                                                                                                                                                                                            |
-| **Skutečný** nástup/odchod    | Termín potvrzený jako reálně proběhlý                                                                                                                                                                                                                             |
-| **Výstupní list**             | Modální okno u odchodu se všemi akcemi k výstupnímu procesu (odeslání k podpisu, osoby k podpisu, PDF, zámek, historie)                                                                                                                                           |
-| **Dokument výstupní list**    | Hlavní součást okna Výstupní list – strukturovaný dokument se sekcemi majetek, agenda, střet zájmů, podpis (v kódu appky označovaný jako „exit-checklist")                                                                                                        |
-| **Osoby k podpisu**           | Skupina lidí (zaměstnanec, vedoucí, případně další signatáři, i v zastoupení), kterým HR naposledy poslala výstupní list k podpisu; podle ní se řídí cílené připomínky i to, kdo smí podepisovat – kdo z ní byl odebraný, nesmí podepsat, dokud není vrácen zpět  |
-| **Vyhodnocení zkušební doby** | Formulář hodnocení zaměstnance nadřízeným na konci zkušební doby                                                                                                                                                                                                  |
-| **Vyjádření tajemníka**       | Druhá fáze vyhodnocení zkušební doby – tajemník úřadu se souhlasem/nesouhlasem, komentářem a podpisem vyjádří k doporučení nadřízeného, pokud jím není sám                                                                                                        |
-| **Zaměstnanecká změna**       | Informační záznam o změně jména a/nebo pozice u stávajícího zaměstnance                                                                                                                                                                                           |
-| **Osobní číslo**              | Identifikátor zaměstnance, podle kterého se automaticky propojují nástup a odchod                                                                                                                                                                                 |
-| **Upomínka na konec PP**      | Automatická e-mailová upomínka pro osoby k podpisu a souhrnný report pro HR, 14/7/5/3/2/1/0 den před **plánovaným** koncem pracovního poměru, pokud výstupní list ještě není hotový (plus kontrola vedoucího a střetu zájmů ještě před prvním odesláním pozvánek) |
-| **Smazané záznamy**           | Přehled smazaných nástupů/odchodů/změn s možností obnovení                                                                                                                                                                                                        |
+| Pojem                                    | Význam                                                                                                                                                                                                                                                            |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Plánovaný** nástup/odchod              | Termín, který se má stát podle plánu, dosud nepotvrzen                                                                                                                                                                                                            |
+| **Skutečný** nástup/odchod               | Termín potvrzený jako reálně proběhlý                                                                                                                                                                                                                             |
+| **Výstupní list**                        | Modální okno u odchodu se všemi akcemi k výstupnímu procesu (odeslání k podpisu, osoby k podpisu, PDF, zámek, historie)                                                                                                                                           |
+| **Dokument výstupní list**               | Hlavní součást okna Výstupní list – strukturovaný dokument se sekcemi majetek, agenda, střet zájmů, podpis (v kódu appky označovaný jako „exit-checklist")                                                                                                        |
+| **Osoby k podpisu**                      | Skupina lidí (zaměstnanec, vedoucí, případně další signatáři, i v zastoupení), kterým HR naposledy poslala výstupní list k podpisu; podle ní se řídí cílené připomínky i to, kdo smí podepisovat – kdo z ní byl odebraný, nesmí podepsat, dokud není vrácen zpět  |
+| **Vyhodnocení zkušební doby**            | Formulář hodnocení zaměstnance nadřízeným na konci zkušební doby. **Od verze 0.15.0 v appce vypnuté** – agendu přebírá Systemizace.                                                                                                                               |
+| **Vyjádření tajemníka**                  | Druhá fáze vyhodnocení zkušební doby (viz výše) – tajemník úřadu se souhlasem/nesouhlasem, komentářem a podpisem vyjádří k doporučení nadřízeného, pokud jím není sám                                                                                             |
+| **Žádost o pracovnělékařskou prohlídku** | Formulář pro vstupní lékařskou prohlídku nového zaměstnance, generovaný appkou ve vzhledu skutečného formuláře úřadu; HR ho vytiskne, nechá podepsat/orazítkovat a podepsanou naskenovanou verzi nahraje zpět k přiložení do e-mailu zaměstnanci.                 |
+| **Zaměstnanecká změna**                  | Informační záznam o změně jména a/nebo pozice u stávajícího zaměstnance                                                                                                                                                                                           |
+| **Osobní číslo**                         | Identifikátor zaměstnance, podle kterého se automaticky propojují nástup a odchod                                                                                                                                                                                 |
+| **Upomínka na konec PP**                 | Automatická e-mailová upomínka pro osoby k podpisu a souhrnný report pro HR, 14/7/5/3/2/1/0 den před **plánovaným** koncem pracovního poměru, pokud výstupní list ještě není hotový (plus kontrola vedoucího a střetu zájmů ještě před prvním odesláním pozvánek) |
+| **Smazané záznamy**                      | Přehled smazaných nástupů/odchodů/změn s možností obnovení                                                                                                                                                                                                        |

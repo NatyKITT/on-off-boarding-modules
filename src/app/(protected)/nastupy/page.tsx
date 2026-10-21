@@ -88,9 +88,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { ActiveFilterChips } from "@/components/common/active-filter-chips"
 import { AssignCompanyDataDialog } from "@/components/common/assign-company-data-dialog"
+import {
+  BulkSelectableRecordList,
+  type BulkSelectableRecord,
+} from "@/components/common/bulk-selectable-record-list"
 import { EmployeeDocumentsDialog } from "@/components/common/employee-documents-dialog"
 import { LinkedRecordInfoButton } from "@/components/common/linked-record-info-button"
 import { ListPageSkeleton } from "@/components/common/list-page-skeleton"
+import {
+  ManagerNotifyDialog,
+  type ManagerNotifyPrompt,
+} from "@/components/common/manager-notify-dialog"
 import { MonthFilter } from "@/components/common/month-filter"
 import {
   MultiSelectFilter,
@@ -823,6 +831,28 @@ const groupByYearAndMonth = (
   return grouped
 }
 
+function toBulkSelectableRecords(
+  data: Arrival[],
+  dateField: "plannedStart" | "actualStart",
+  dateLabelPrefix: string
+): BulkSelectableRecord[] {
+  return data
+    .map((item) => {
+      const dateStr = item[dateField] || item.plannedStart
+      if (!dateStr) return null
+
+      const date = new Date(dateStr)
+      return {
+        id: item.id,
+        label: `${item.name} ${item.surname}`,
+        dateLabel: `${dateLabelPrefix} ${format(date, "d.M.yyyy")}`,
+        monthKey: format(date, "yyyy-MM"),
+        monthLabel: format(date, "LLLL yyyy", { locale: cs }),
+      }
+    })
+    .filter((record): record is BulkSelectableRecord => record !== null)
+}
+
 function getLatestYearAndMonth(
   data: Arrival[],
   dateField: "plannedStart" | "actualStart"
@@ -928,6 +958,25 @@ export default function OnboardingPage() {
     loading: boolean
     targetType: "planned" | "actual" | null
   }>({ open: false, arrival: null, loading: false, targetType: null })
+
+  const [bulkPlannedOpen, setBulkPlannedOpen] = useState(false)
+  const [bulkPlannedSelected, setBulkPlannedSelected] = useState<number[]>([])
+  const [bulkPlannedReason, setBulkPlannedReason] = useState("")
+  const [bulkPlannedLoading, setBulkPlannedLoading] = useState(false)
+
+  const [bulkActualOpen, setBulkActualOpen] = useState(false)
+  const [bulkActualSelected, setBulkActualSelected] = useState<number[]>([])
+  const [bulkActualReason, setBulkActualReason] = useState("")
+  const [bulkActualLoading, setBulkActualLoading] = useState(false)
+
+  const [bulkCancelledOpen, setBulkCancelledOpen] = useState(false)
+  const [bulkCancelledSelected, setBulkCancelledSelected] = useState<number[]>(
+    []
+  )
+  const [bulkCancelledLoading, setBulkCancelledLoading] = useState(false)
+
+  const [managerNotifyPrompt, setManagerNotifyPrompt] =
+    useState<ManagerNotifyPrompt>(null)
 
   const [successModal, setSuccessModal] = useState({
     open: false,
@@ -1874,9 +1923,10 @@ export default function OnboardingPage() {
         body: JSON.stringify({ reason }),
       })
 
+      const responseJson = await response.json().catch(() => null)
+
       if (!response.ok) {
-        const errorData = await response.json().catch(() => null)
-        throw new Error(errorData?.message ?? "Zrušení se nezdařilo")
+        throw new Error(responseJson?.message ?? "Zrušení se nezdařilo")
       }
 
       setCancelDialog({
@@ -1889,6 +1939,9 @@ export default function OnboardingPage() {
         "Nástup zrušen",
         `Záznam "${arrival.name} ${arrival.surname}" byl přesunut do neuskutečněných.`
       )
+      if (responseJson?.managerNotifyPrompt) {
+        setManagerNotifyPrompt(responseJson.managerNotifyPrompt)
+      }
       await reload()
     } catch (error) {
       console.error("Error cancelling arrival:", error)
@@ -1943,6 +1996,214 @@ export default function OnboardingPage() {
     }
   }
 
+  async function handleBulkStartArrivals(rows: Arrival[]) {
+    if (isReadonly || rows.length === 0) return
+
+    setBulkPlannedLoading(true)
+    const failed: string[] = []
+
+    for (const row of rows) {
+      try {
+        const start = row.plannedStart.slice(0, 10)
+        const extensions = row.probationExtensions ?? []
+        const hasExtensionCalculation = extensions.length > 0
+        const nextProbationEnd = computeProbationEndForStart(row, start)
+
+        const payload: {
+          actualStart: string
+          status: "COMPLETED"
+          probationEnd?: string
+          hasCustomDates: boolean
+          probationExtensions: ProbationExtension[]
+          probationExtensionSummary?: string | null
+        } = {
+          actualStart: start,
+          status: "COMPLETED",
+          hasCustomDates: Boolean(
+            row.hasCustomDates || hasExtensionCalculation
+          ),
+          probationExtensions: extensions,
+          probationExtensionSummary: hasExtensionCalculation
+            ? (row.probationExtensionSummary ?? null)
+            : null,
+        }
+        if (nextProbationEnd) payload.probationEnd = nextProbationEnd
+
+        const res = await fetch(`/api/nastupy/${row.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+
+        if (!res.ok) throw new Error()
+      } catch {
+        failed.push(`${row.name} ${row.surname}`)
+      }
+    }
+
+    setBulkPlannedLoading(false)
+    setBulkPlannedSelected([])
+
+    if (failed.length === 0) {
+      setBulkPlannedOpen(false)
+      showSuccess(
+        "Nástupy potvrzeny",
+        `Potvrzeno jako skutečný nástup ke dni plánovaného nástupu: ${rows.length}.`
+      )
+    } else {
+      showError("Některé nástupy se nepodařilo potvrdit", failed.join(", "))
+    }
+
+    await reload()
+  }
+
+  async function handleBulkCancelArrivals(rows: Arrival[], reason: string) {
+    if (isReadonly || rows.length === 0) return
+    if (!reason.trim()) {
+      showError("Chybějící údaj", "Vyplňte prosím důvod zrušení.")
+      return
+    }
+
+    setBulkPlannedLoading(true)
+    const failed: string[] = []
+
+    for (const row of rows) {
+      try {
+        const res = await fetch(`/api/nastupy/${row.id}/cancel`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason: reason.trim() }),
+        })
+
+        if (!res.ok) throw new Error()
+      } catch {
+        failed.push(`${row.name} ${row.surname}`)
+      }
+    }
+
+    setBulkPlannedLoading(false)
+    setBulkPlannedSelected([])
+
+    if (failed.length === 0) {
+      setBulkPlannedOpen(false)
+      setBulkPlannedReason("")
+      showSuccess(
+        "Nástupy označeny jako neuskutečněné",
+        `Označeno: ${rows.length}.`
+      )
+    } else {
+      showError("Některé nástupy se nepodařilo označit", failed.join(", "))
+    }
+
+    await reload()
+  }
+
+  async function handleBulkRevertArrivals(rows: Arrival[]) {
+    if (isReadonly || rows.length === 0) return
+
+    setBulkActualLoading(true)
+    const failed: string[] = []
+
+    for (const row of rows) {
+      try {
+        const res = await fetch(`/api/nastupy/${row.id}/revert`, {
+          method: "POST",
+        })
+
+        if (!res.ok) throw new Error()
+      } catch {
+        failed.push(`${row.name} ${row.surname}`)
+      }
+    }
+
+    setBulkActualLoading(false)
+    setBulkActualSelected([])
+
+    if (failed.length === 0) {
+      setBulkActualOpen(false)
+      showSuccess("Nástupy vráceny", `Vráceno do plánovaných: ${rows.length}.`)
+    } else {
+      showError("Některé nástupy se nepodařilo vrátit", failed.join(", "))
+    }
+
+    await reload()
+  }
+
+  async function handleBulkCancelActualArrivals(
+    rows: Arrival[],
+    reason: string
+  ) {
+    if (isReadonly || rows.length === 0) return
+    if (!reason.trim()) {
+      showError("Chybějící údaj", "Vyplňte prosím důvod zrušení.")
+      return
+    }
+
+    setBulkActualLoading(true)
+    const failed: string[] = []
+
+    for (const row of rows) {
+      try {
+        const res = await fetch(`/api/nastupy/${row.id}/cancel`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason: reason.trim() }),
+        })
+
+        if (!res.ok) throw new Error()
+      } catch {
+        failed.push(`${row.name} ${row.surname}`)
+      }
+    }
+
+    setBulkActualLoading(false)
+    setBulkActualSelected([])
+
+    if (failed.length === 0) {
+      setBulkActualOpen(false)
+      setBulkActualReason("")
+      showSuccess(
+        "Nástupy označeny jako neuskutečněné",
+        `Označeno: ${rows.length}.`
+      )
+    } else {
+      showError("Některé nástupy se nepodařilo označit", failed.join(", "))
+    }
+
+    await reload()
+  }
+
+  async function handleBulkRestoreArrivals(rows: Arrival[]) {
+    if (isReadonly || rows.length === 0) return
+
+    setBulkCancelledLoading(true)
+    const failed: string[] = []
+
+    for (const row of rows) {
+      try {
+        const res = await fetch(`/api/nastupy/${row.id}/restore-cancelled`, {
+          method: "POST",
+        })
+
+        if (!res.ok) throw new Error()
+      } catch {
+        failed.push(`${row.name} ${row.surname}`)
+      }
+    }
+
+    setBulkCancelledLoading(false)
+    setBulkCancelledSelected([])
+
+    if (failed.length === 0) {
+      setBulkCancelledOpen(false)
+      showSuccess("Nástupy obnoveny", `Obnoveno: ${rows.length}.`)
+    } else {
+      showError("Některé nástupy se nepodařilo obnovit", failed.join(", "))
+    }
+
+    await reload()
+  }
+
   async function handleEdit(arrival: Arrival, context: "planned" | "actual") {
     try {
       const response = await fetch(`/api/nastupy/${arrival.id}`, {
@@ -1977,9 +2238,10 @@ export default function OnboardingPage() {
         method: "DELETE",
       })
 
+      const responseJson = await response.json().catch(() => null)
+
       if (!response.ok) {
-        const errorData = await response.json().catch(() => null)
-        throw new Error(errorData?.message ?? "Smazání se nezdařilo")
+        throw new Error(responseJson?.message ?? "Smazání se nezdařilo")
       }
 
       setDeleteDialog({
@@ -1992,6 +2254,9 @@ export default function OnboardingPage() {
         "Záznam smazán",
         `Záznam "${arrival.name} ${arrival.surname}" byl úspěšně smazán`
       )
+      if (responseJson?.managerNotifyPrompt) {
+        setManagerNotifyPrompt(responseJson.managerNotifyPrompt)
+      }
 
       window.dispatchEvent(new CustomEvent("onboarding:deleted"))
       await reload()
@@ -2454,6 +2719,9 @@ export default function OnboardingPage() {
                 onboardingId={arrival.id}
                 email={arrival.email}
                 employeeName={fullName}
+                positionName={arrival.positionName}
+                department={arrival.department}
+                unitName={arrival.unitName}
                 supervisorName={arrival.supervisorName}
                 supervisorEmail={arrival.supervisorEmail}
                 probationEvaluationSentAt={
@@ -2533,71 +2801,86 @@ export default function OnboardingPage() {
   const plannedSectionContent = (
     <>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        {!isReadonly && (
-          <Dialog
-            open={openNewPlanned}
-            onOpenChange={(open) => {
-              setOpenNewPlanned(open)
-              if (open && positions.length === 0) {
-                void loadPositions()
-              }
-            }}
-          >
-            <DialogTrigger asChild>
-              <Button className="inline-flex w-full items-center justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] sm:w-auto">
-                Přidat plánovaný nástup
-              </Button>
-            </DialogTrigger>
-
-            <DialogContent
-              className="flex max-h-[90vh] max-w-5xl flex-col gap-0 overflow-hidden p-0"
-              onInteractOutside={(event) => event.preventDefault()}
+        <div className="flex flex-wrap items-center gap-2">
+          {!isReadonly && (
+            <Dialog
+              open={openNewPlanned}
+              onOpenChange={(open) => {
+                setOpenNewPlanned(open)
+                if (open && positions.length === 0) {
+                  void loadPositions()
+                }
+              }}
             >
-              <DialogTitle className="shrink-0 border-b px-6 py-4">
-                Nový plánovaný nástup
-              </DialogTitle>
-              <div
-                className="min-h-0 flex-1 overflow-y-auto p-6"
-                data-lenis-prevent=""
-                onWheelCapture={(event) => event.stopPropagation()}
-              >
-                {loadingPositions ? (
-                  <div className="flex items-center justify-center py-8">
-                    <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
-                    <span className="ml-2 text-muted-foreground">
-                      Načítám pozice...
-                    </span>
-                  </div>
-                ) : (
-                  <OnboardingFormClient
-                    positions={positions}
-                    mode="create-planned"
-                    prefillDate={qpDate}
-                    personalNumberMeta={personalMeta}
-                    onSuccess={async () => {
-                      setOpenNewPlanned(false)
-                      showSuccess(
-                        "Záznam vytvořen",
-                        "Plánovaný nástup byl úspěšně přidán."
-                      )
-                      await reload()
-                    }}
-                  />
-                )}
-              </div>
-            </DialogContent>
-          </Dialog>
-        )}
+              <DialogTrigger asChild>
+                <Button className="inline-flex w-full items-center justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] sm:w-auto">
+                  Přidat plánovaný nástup
+                </Button>
+              </DialogTrigger>
 
-        {!isReadonly && (
-          <DeletedRecordsDialog
-            kind="onboarding"
-            title="Smazané nástupy"
-            triggerLabel="Smazané záznamy"
-            successEvent="onboarding:deleted"
-            onRestore={() => void reload()}
-          />
-        )}
+              <DialogContent
+                className="flex max-h-[90vh] max-w-5xl flex-col gap-0 overflow-hidden p-0"
+                onInteractOutside={(event) => event.preventDefault()}
+              >
+                <DialogTitle className="shrink-0 border-b px-6 py-4">
+                  Nový plánovaný nástup
+                </DialogTitle>
+                <div
+                  className="min-h-0 flex-1 overflow-y-auto p-6"
+                  data-lenis-prevent=""
+                  onWheelCapture={(event) => event.stopPropagation()}
+                >
+                  {loadingPositions ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
+                      <span className="ml-2 text-muted-foreground">
+                        Načítám pozice...
+                      </span>
+                    </div>
+                  ) : (
+                    <OnboardingFormClient
+                      positions={positions}
+                      mode="create-planned"
+                      prefillDate={qpDate}
+                      personalNumberMeta={personalMeta}
+                      onSuccess={async () => {
+                        setOpenNewPlanned(false)
+                        showSuccess(
+                          "Záznam vytvořen",
+                          "Plánovaný nástup byl úspěšně přidán."
+                        )
+                        await reload()
+                      }}
+                    />
+                  )}
+                </div>
+              </DialogContent>
+            </Dialog>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {!isReadonly && filteredPlanned.length > 1 && (
+            <Button
+              className="gap-2 bg-blue-600 text-white hover:bg-blue-700"
+              onClick={() => setBulkPlannedOpen(true)}
+              title="Vybrat víc nástupů najednou a hromadně je potvrdit jako nastoupené nebo označit jako neuskutečněné"
+            >
+              <Users className="size-4" />
+              Hromadné akce
+            </Button>
+          )}
+
+          {!isReadonly && (
+            <DeletedRecordsDialog
+              kind="onboarding"
+              title="Smazané nástupy"
+              triggerLabel="Smazané záznamy"
+              successEvent="onboarding:deleted"
+              onRestore={() => void reload()}
+            />
+          )}
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
@@ -2793,71 +3076,86 @@ export default function OnboardingPage() {
   const actualSectionContent = (
     <>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        {!isReadonly && (
-          <Dialog
-            open={openNewActual}
-            onOpenChange={(open) => {
-              setOpenNewActual(open)
-              if (open && positions.length === 0) {
-                void loadPositions()
-              }
-            }}
-          >
-            <DialogTrigger asChild>
-              <Button className="inline-flex w-full items-center justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] sm:w-auto">
-                Přidat skutečný nástup
-              </Button>
-            </DialogTrigger>
-
-            <DialogContent
-              className="flex max-h-[90vh] max-w-5xl flex-col gap-0 overflow-hidden p-0"
-              onInteractOutside={(event) => event.preventDefault()}
+        <div className="flex flex-wrap items-center gap-2">
+          {!isReadonly && (
+            <Dialog
+              open={openNewActual}
+              onOpenChange={(open) => {
+                setOpenNewActual(open)
+                if (open && positions.length === 0) {
+                  void loadPositions()
+                }
+              }}
             >
-              <DialogTitle className="shrink-0 border-b px-6 py-4">
-                Skutečný nástup
-              </DialogTitle>
-              <div
-                className="min-h-0 flex-1 overflow-y-auto p-6"
-                data-lenis-prevent=""
-                onWheelCapture={(event) => event.stopPropagation()}
-              >
-                {loadingPositions ? (
-                  <div className="flex items-center justify-center py-8">
-                    <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
-                    <span className="ml-2 text-muted-foreground">
-                      Načítám pozice...
-                    </span>
-                  </div>
-                ) : (
-                  <OnboardingFormClient
-                    positions={positions}
-                    mode="create-actual"
-                    prefillDate={qpDate}
-                    personalNumberMeta={personalMeta}
-                    onSuccess={async () => {
-                      setOpenNewActual(false)
-                      showSuccess(
-                        "Záznam vytvořen",
-                        "Skutečný nástup byl úspěšně přidán."
-                      )
-                      await reload()
-                    }}
-                  />
-                )}
-              </div>
-            </DialogContent>
-          </Dialog>
-        )}
+              <DialogTrigger asChild>
+                <Button className="inline-flex w-full items-center justify-center gap-2 bg-[#00847C] text-white hover:bg-[#0B6D73] sm:w-auto">
+                  Přidat skutečný nástup
+                </Button>
+              </DialogTrigger>
 
-        {!isReadonly && (
-          <DeletedRecordsDialog
-            kind="onboarding"
-            title="Smazané nástupy"
-            triggerLabel="Smazané záznamy"
-            successEvent="onboarding:deleted"
-            onRestore={() => void reload()}
-          />
-        )}
+              <DialogContent
+                className="flex max-h-[90vh] max-w-5xl flex-col gap-0 overflow-hidden p-0"
+                onInteractOutside={(event) => event.preventDefault()}
+              >
+                <DialogTitle className="shrink-0 border-b px-6 py-4">
+                  Skutečný nástup
+                </DialogTitle>
+                <div
+                  className="min-h-0 flex-1 overflow-y-auto p-6"
+                  data-lenis-prevent=""
+                  onWheelCapture={(event) => event.stopPropagation()}
+                >
+                  {loadingPositions ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="size-8 animate-spin rounded-full border-b-2 border-current" />
+                      <span className="ml-2 text-muted-foreground">
+                        Načítám pozice...
+                      </span>
+                    </div>
+                  ) : (
+                    <OnboardingFormClient
+                      positions={positions}
+                      mode="create-actual"
+                      prefillDate={qpDate}
+                      personalNumberMeta={personalMeta}
+                      onSuccess={async () => {
+                        setOpenNewActual(false)
+                        showSuccess(
+                          "Záznam vytvořen",
+                          "Skutečný nástup byl úspěšně přidán."
+                        )
+                        await reload()
+                      }}
+                    />
+                  )}
+                </div>
+              </DialogContent>
+            </Dialog>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {!isReadonly && filteredActual.length > 1 && (
+            <Button
+              className="gap-2 bg-green-600 text-white hover:bg-green-700"
+              onClick={() => setBulkActualOpen(true)}
+              title="Vybrat víc nástupů najednou a hromadně je vrátit zpět do plánovaných"
+            >
+              <Users className="size-4" />
+              Hromadné akce
+            </Button>
+          )}
+
+          {!isReadonly && (
+            <DeletedRecordsDialog
+              kind="onboarding"
+              title="Smazané nástupy"
+              triggerLabel="Smazané záznamy"
+              successEvent="onboarding:deleted"
+              onRestore={() => void reload()}
+            />
+          )}
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
@@ -3052,6 +3350,20 @@ export default function OnboardingPage() {
 
   const cancelledSectionContent = (
     <>
+      {!isReadonly && filteredCancelled.length > 1 && (
+        <div className="flex justify-end">
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={() => setBulkCancelledOpen(true)}
+            title="Vybrat víc neuskutečněných nástupů najednou a hromadně je obnovit"
+          >
+            <Users className="size-4" />
+            Hromadné akce
+          </Button>
+        </div>
+      )}
+
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         {loading && !hasLoadedOnce ? (
           <div className="flex items-center justify-center py-8">
@@ -4008,6 +4320,310 @@ export default function OnboardingPage() {
       </Dialog>
 
       <Dialog
+        open={bulkPlannedOpen}
+        onOpenChange={(open) => {
+          setBulkPlannedOpen(open)
+          if (!open) {
+            setBulkPlannedSelected([])
+            setBulkPlannedReason("")
+          }
+        }}
+      >
+        <DialogContent
+          className="max-w-lg"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle>Hromadné akce – plánované nástupy</DialogTitle>
+            <DialogDescription>
+              Vyberte záznamy (třeba podle měsíce) a označte je najednou jako
+              skutečně nastoupené ke dni jejich plánovaného nástupu, nebo jako
+              neuskutečněné.
+            </DialogDescription>
+          </DialogHeader>
+
+          <BulkSelectableRecordList
+            records={toBulkSelectableRecords(
+              filteredPlanned,
+              "plannedStart",
+              "plán. nástup"
+            )}
+            selected={bulkPlannedSelected}
+            onToggle={(id) =>
+              setBulkPlannedSelected((prev) =>
+                prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]
+              )
+            }
+            onToggleMany={(ids, checked) =>
+              setBulkPlannedSelected((prev) =>
+                checked
+                  ? Array.from(new Set([...prev, ...ids]))
+                  : prev.filter((id) => !ids.includes(id))
+              )
+            }
+          />
+
+          {bulkPlannedSelected.length > 0 && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">
+                Důvod zrušení (jen pro „Nenastoupili“)
+              </label>
+              <Textarea
+                value={bulkPlannedReason}
+                onChange={(e) => setBulkPlannedReason(e.target.value)}
+                rows={2}
+                placeholder="např. nástup zrušen dohodou"
+              />
+            </div>
+          )}
+
+          <DialogFooter className="flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={bulkPlannedLoading}
+              onClick={() =>
+                setBulkPlannedSelected(
+                  bulkPlannedSelected.length === filteredPlanned.length
+                    ? []
+                    : filteredPlanned.map((a) => a.id)
+                )
+              }
+            >
+              {bulkPlannedSelected.length === filteredPlanned.length
+                ? "Zrušit výběr"
+                : "Vybrat vše"}
+            </Button>
+            <Button
+              variant="outline"
+              disabled={bulkPlannedLoading || bulkPlannedSelected.length === 0}
+              className="gap-1"
+              onClick={() =>
+                void handleBulkCancelArrivals(
+                  filteredPlanned.filter((a) =>
+                    bulkPlannedSelected.includes(a.id)
+                  ),
+                  bulkPlannedReason
+                )
+              }
+            >
+              <XCircle className="size-3.5" />{" "}
+              {bulkPlannedSelected.length === 1
+                ? "Nenastoupil"
+                : "Nenastoupili"}
+            </Button>
+            <Button
+              disabled={bulkPlannedLoading || bulkPlannedSelected.length === 0}
+              className="gap-1 bg-green-600 text-white hover:bg-green-700"
+              onClick={() =>
+                void handleBulkStartArrivals(
+                  filteredPlanned.filter((a) =>
+                    bulkPlannedSelected.includes(a.id)
+                  )
+                )
+              }
+            >
+              {bulkPlannedLoading && (
+                <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              )}
+              <Check className="size-3.5" />{" "}
+              {bulkPlannedSelected.length === 1 ? "Nastoupil" : "Nastoupili"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={bulkActualOpen}
+        onOpenChange={(open) => {
+          setBulkActualOpen(open)
+          if (!open) {
+            setBulkActualSelected([])
+            setBulkActualReason("")
+          }
+        }}
+      >
+        <DialogContent
+          className="max-w-lg"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle>Hromadné akce – skutečné nástupy</DialogTitle>
+            <DialogDescription>
+              Vyberte záznamy a vraťte je najednou zpět mezi plánované nástupy,
+              nebo je označte jako neuskutečněné.
+            </DialogDescription>
+          </DialogHeader>
+
+          <BulkSelectableRecordList
+            records={toBulkSelectableRecords(
+              filteredActual,
+              "actualStart",
+              "skut. nástup"
+            )}
+            selected={bulkActualSelected}
+            onToggle={(id) =>
+              setBulkActualSelected((prev) =>
+                prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]
+              )
+            }
+            onToggleMany={(ids, checked) =>
+              setBulkActualSelected((prev) =>
+                checked
+                  ? Array.from(new Set([...prev, ...ids]))
+                  : prev.filter((id) => !ids.includes(id))
+              )
+            }
+          />
+
+          {bulkActualSelected.length > 0 && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">
+                Důvod zrušení (jen pro „Nenastoupili“)
+              </label>
+              <Textarea
+                value={bulkActualReason}
+                onChange={(e) => setBulkActualReason(e.target.value)}
+                rows={2}
+                placeholder="např. nástup dodatečně zrušen"
+              />
+            </div>
+          )}
+
+          <DialogFooter className="flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={bulkActualLoading}
+              onClick={() =>
+                setBulkActualSelected(
+                  bulkActualSelected.length === filteredActual.length
+                    ? []
+                    : filteredActual.map((a) => a.id)
+                )
+              }
+            >
+              {bulkActualSelected.length === filteredActual.length
+                ? "Zrušit výběr"
+                : "Vybrat vše"}
+            </Button>
+            <Button
+              variant="outline"
+              disabled={bulkActualLoading || bulkActualSelected.length === 0}
+              className="gap-1"
+              onClick={() =>
+                void handleBulkCancelActualArrivals(
+                  filteredActual.filter((a) =>
+                    bulkActualSelected.includes(a.id)
+                  ),
+                  bulkActualReason
+                )
+              }
+            >
+              <XCircle className="size-3.5" />{" "}
+              {bulkActualSelected.length === 1 ? "Nenastoupil" : "Nenastoupili"}
+            </Button>
+            <Button
+              disabled={bulkActualLoading || bulkActualSelected.length === 0}
+              className="gap-1 bg-blue-600 text-white hover:bg-blue-700"
+              onClick={() =>
+                void handleBulkRevertArrivals(
+                  filteredActual.filter((a) =>
+                    bulkActualSelected.includes(a.id)
+                  )
+                )
+              }
+            >
+              {bulkActualLoading && (
+                <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              )}
+              <RotateCcw className="size-3.5" /> Vrátit do plánovaných
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={bulkCancelledOpen}
+        onOpenChange={(open) => {
+          setBulkCancelledOpen(open)
+          if (!open) setBulkCancelledSelected([])
+        }}
+      >
+        <DialogContent
+          className="max-w-lg"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle>Hromadné akce – neuskutečněné nástupy</DialogTitle>
+            <DialogDescription>
+              Vyberte záznamy a obnovte je najednou zpět do stavu před zrušením
+              (plánované, nebo skutečné, pokud už měly vyplněné skutečné datum
+              nástupu).
+            </DialogDescription>
+          </DialogHeader>
+
+          <BulkSelectableRecordList
+            records={toBulkSelectableRecords(
+              filteredCancelled,
+              "plannedStart",
+              "plán. nástup"
+            )}
+            selected={bulkCancelledSelected}
+            onToggle={(id) =>
+              setBulkCancelledSelected((prev) =>
+                prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]
+              )
+            }
+            onToggleMany={(ids, checked) =>
+              setBulkCancelledSelected((prev) =>
+                checked
+                  ? Array.from(new Set([...prev, ...ids]))
+                  : prev.filter((id) => !ids.includes(id))
+              )
+            }
+          />
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={bulkCancelledLoading}
+              onClick={() =>
+                setBulkCancelledSelected(
+                  bulkCancelledSelected.length === filteredCancelled.length
+                    ? []
+                    : filteredCancelled.map((a) => a.id)
+                )
+              }
+            >
+              {bulkCancelledSelected.length === filteredCancelled.length
+                ? "Zrušit výběr"
+                : "Vybrat vše"}
+            </Button>
+            <Button
+              disabled={
+                bulkCancelledLoading || bulkCancelledSelected.length === 0
+              }
+              className="gap-1 bg-green-600 text-white hover:bg-green-700"
+              onClick={() =>
+                void handleBulkRestoreArrivals(
+                  filteredCancelled.filter((a) =>
+                    bulkCancelledSelected.includes(a.id)
+                  )
+                )
+              }
+            >
+              {bulkCancelledLoading && (
+                <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              )}
+              <RotateCcw className="size-3.5" /> Obnovit
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
         open={deleteDialog.open}
         onOpenChange={(open) => setDeleteDialog((prev) => ({ ...prev, open }))}
       >
@@ -4139,10 +4755,13 @@ export default function OnboardingPage() {
                 mode="edit"
                 editContext={editData.context}
                 personalNumberMeta={personalMeta}
-                onSuccess={async () => {
+                onSuccess={async (_id, managerNotifyPrompt) => {
                   setOpenEdit(false)
                   setEditData(null)
                   showSuccess("Změny uloženy", "Záznam byl úspěšně upraven.")
+                  if (managerNotifyPrompt) {
+                    setManagerNotifyPrompt(managerNotifyPrompt)
+                  }
                   await reload()
                 }}
               />
@@ -4167,6 +4786,11 @@ export default function OnboardingPage() {
         onOpenChange={(open) => setErrorModal((prev) => ({ ...prev, open }))}
         title={errorModal.title}
         message={errorModal.message}
+      />
+
+      <ManagerNotifyDialog
+        prompt={managerNotifyPrompt}
+        onClose={() => setManagerNotifyPrompt(null)}
       />
     </div>
   )

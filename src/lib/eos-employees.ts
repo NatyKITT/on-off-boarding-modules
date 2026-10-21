@@ -171,41 +171,36 @@ async function fetchPeople(url: URL): Promise<Employee[]> {
   return correctPositionNumbers(mapped)
 }
 
+function filterByQuery(employees: Employee[], q: string): Employee[] {
+  const fq = fold(q)
+
+  return employees.filter((e) => {
+    const hay = fold(
+      `${e.personalNumber} ${e.titleBefore ?? ""} ${e.name} ${e.surname} ${e.titleAfter ?? ""} ${e.positionName} ${e.department} ${e.unitName} ${e.email}`
+    )
+    return hay.includes(fq)
+  })
+}
+
 export async function getEmployees(query: string): Promise<Employee[]> {
   const q = (query ?? "").trim()
   const digits = q.replace(/\D+/g, "")
   const isNumericSearch = digits.length > 0
 
+  if (isNumericSearch) {
+    const url = new URL("/api/1.0/person/list/", EOS_API_BASE)
+    url.searchParams.set("detail", "1")
+    url.searchParams.set("number_pers", digits)
+
+    return fetchPeople(url)
+  }
+
   const url = new URL("/api/1.0/person/list/", EOS_API_BASE)
   url.searchParams.set("detail", "1")
 
-  if (q) {
-    if (isNumericSearch) {
-      url.searchParams.set("number_pers", digits)
-    } else {
-      const parts = q.split(/\s+/).filter(Boolean)
-      const givenName = String(parts[0] ?? "")
-      const surname = String(parts.length > 1 ? parts[parts.length - 1] : "")
-
-      if (givenName) url.searchParams.set("given_name", givenName)
-      if (surname) url.searchParams.set("surname", surname)
-    }
-  }
-
   const mapped = await fetchPeople(url)
 
-  if (!isNumericSearch && q) {
-    const fq = fold(q)
-
-    return mapped.filter((e) => {
-      const hay = fold(
-        `${e.personalNumber} ${e.name} ${e.surname} ${e.positionName} ${e.department} ${e.unitName} ${e.email}`
-      )
-      return hay.includes(fq)
-    })
-  }
-
-  return mapped
+  return q ? filterByQuery(mapped, q) : mapped
 }
 
 export async function getEmployeesByPersonalNumber(

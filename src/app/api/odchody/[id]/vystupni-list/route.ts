@@ -1060,7 +1060,7 @@ export async function GET(
     const user = session?.user
 
     if (!user) {
-      return new Response(JSON.stringify({ error: "Nejste přihlášen(a)." }), {
+      return new Response(JSON.stringify({ error: "Nejste přihlášeni." }), {
         status: 401,
         headers: { "Content-Type": "application/json" },
       })

@@ -13,10 +13,7 @@ export async function GET() {
   const session = await auth()
 
   if (!session?.user?.email) {
-    return NextResponse.json(
-      { message: "Nejste přihlášen(a)." },
-      { status: 401 }
-    )
+    return NextResponse.json({ message: "Nejste přihlášeni." }, { status: 401 })
   }
 
   const normalizedEmail = session.user.email.trim().toLowerCase()

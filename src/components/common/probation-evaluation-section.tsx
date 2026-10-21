@@ -24,6 +24,10 @@ import {
 import { useCurrentRole, useIsReadonly } from "@/hooks/use-current-role"
 import { useToast } from "@/hooks/use-toast"
 import { formatDayCountCs } from "@/lib/dates"
+import {
+  PROBATION_EVALUATION_DISABLED_MESSAGE,
+  PROBATION_EVALUATION_ENABLED,
+} from "@/lib/probation-evaluation-flag"
 import { canEditInternalApp } from "@/lib/rbac"
 
 import {
@@ -46,6 +50,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { ProbationEvaluationDialog } from "@/components/common/probation-evaluation-dialog"
+import { SavingButtonLabel } from "@/components/common/saving-button-label"
 
 type ProbationStatus =
   | "DRAFT"
@@ -1294,6 +1299,21 @@ export function ProbationEvaluationSection({
     )
   }
 
+  if (!PROBATION_EVALUATION_ENABLED) {
+    return (
+      <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+        <div>
+          <p className="font-medium">{PROBATION_EVALUATION_DISABLED_MESSAGE}</p>
+          <p className="mt-0.5 text-amber-700">
+            Nové pozvánky, připomínky ani úpravy formuláře se odsud už
+            neodesílají.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <section className="space-y-4">
       {error && (
@@ -2050,7 +2070,7 @@ export function ProbationEvaluationSection({
 
                   {(event.byName || event.byEmail) && (
                     <p className="mt-1 text-[11px] text-muted-foreground">
-                      Provedl(a): {event.byName || event.byEmail}
+                      Provedeno: {event.byName || event.byEmail}
                     </p>
                   )}
 
@@ -2167,7 +2187,11 @@ export function ProbationEvaluationSection({
                 disabled={!pdfEmail.trim() || sendingPdf}
                 className="bg-[#00847C] text-white hover:bg-[#0B6D73]"
               >
-                {sendingPdf ? "Odesílám…" : "Odeslat PDF"}
+                <SavingButtonLabel
+                  saving={sendingPdf}
+                  savingText="Odesílám…"
+                  idleText="Odeslat PDF"
+                />
               </Button>
             </div>
           </div>
@@ -2236,7 +2260,11 @@ export function ProbationEvaluationSection({
                 disabled={!tajemnikEmailInput.trim() || savingTajemnikOverride}
                 className="bg-[#00847C] text-white hover:bg-[#0B6D73]"
               >
-                {savingTajemnikOverride ? "Ukládám…" : "Uložit"}
+                <SavingButtonLabel
+                  saving={savingTajemnikOverride}
+                  savingText="Ukládám…"
+                  idleText="Uložit"
+                />
               </Button>
             </div>
           </div>

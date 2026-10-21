@@ -9,6 +9,7 @@ import type {
 } from "@prisma/client"
 import { AlertCircle, CheckCircle, Lock, Pencil } from "lucide-react"
 
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
 import { buildEmployeeMeta } from "@/lib/employee-meta"
 import type { PrefillSuggestion } from "@/lib/employment-document-prefill"
 import { ServerValidationError } from "@/lib/server-validation-error"
@@ -21,6 +22,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { PermissionAlert } from "@/components/common/permission-alert"
+import { UnsavedChangesDialog } from "@/components/common/unsaved-changes-dialog"
 import { AffidavitForm } from "@/components/forms/affidavit-form"
 import { PayrollInfoForm } from "@/components/forms/payroll-info-form"
 import { PersonalQuestionnaireForm } from "@/components/forms/personal-questionnaire-form"
@@ -120,6 +122,9 @@ export function InternalDocumentShell({
 
   const alreadyFilled = doc.status !== "DRAFT"
   const [editing, setEditing] = useState(!alreadyFilled)
+  const [dirty, setDirty] = useState(false)
+  const { isDialogOpen, guardAction, closeDialog, proceed } =
+    useUnsavedChangesGuard(dirty && editing)
   const router = useRouter()
 
   const employeeMeta = useMemo(() => {
@@ -140,7 +145,16 @@ export function InternalDocumentShell({
     : "/nastupy"
 
   function goBackToDocuments() {
-    router.push(backToDocumentsUrl)
+    guardAction(() => router.push(backToDocumentsUrl))
+  }
+
+  function requestCancelEdit() {
+    guardAction(() => setEditing(false))
+  }
+
+  function discardAndProceed() {
+    setDirty(false)
+    proceed()
   }
 
   async function handleSave(data: unknown) {
@@ -192,6 +206,7 @@ export function InternalDocumentShell({
 
       setLastChanges(json.changes ?? [])
       setEditing(false)
+      setDirty(false)
       setResultModal("success")
     } catch (saveError) {
       setError(
@@ -214,6 +229,7 @@ export function InternalDocumentShell({
       readOnly,
       onSubmitInternal: handleSave,
       employeeMeta,
+      onDirtyChange: setDirty,
     }
 
     switch (doc.type) {
@@ -364,7 +380,7 @@ export function InternalDocumentShell({
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() => setEditing(false)}
+            onClick={requestCancelEdit}
             disabled={saving}
           >
             Zrušit úpravu
@@ -483,6 +499,12 @@ export function InternalDocumentShell({
           Otevřít PDF k tisku
         </Button>
       </div>
+
+      <UnsavedChangesDialog
+        open={isDialogOpen}
+        onStay={closeDialog}
+        onDiscard={discardAndProceed}
+      />
     </div>
   )
 }

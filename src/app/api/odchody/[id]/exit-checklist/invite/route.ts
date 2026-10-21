@@ -17,6 +17,7 @@ import {
 } from "@/lib/exit-checklist"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
 import {
+  EXIT_CHECKLIST_MANAGER_HEADER_SUBTITLE,
   EXIT_CHECKLIST_MANAGER_ROLE_NOTE,
   EXIT_CHECKLIST_SECTION_B_ROLE_NOTE,
 } from "@/lib/exit-checklist-role-notes"
@@ -247,6 +248,10 @@ export async function POST(
         employmentEndDate,
         signUrl,
         roleNote: resolveRoleNote(inviteeEmail),
+        headerSubtitle:
+          inviteeEmail === managerEmail
+            ? EXIT_CHECKLIST_MANAGER_HEADER_SUBTITLE
+            : null,
       })
     }
 
@@ -317,8 +322,8 @@ export async function POST(
       byName: session.user.name ?? session.user.email ?? null,
       byEmail: session.user.email ?? null,
       message: isBehalf
-        ? `Pozvánka k podpisu v zastoupení za „${behalfLabel}" byla odeslána na adresu ${inviteeEmail}${nameSuffix}. Přidán(a) do seznamu příjemců k podpisu.`
-        : `Pozvánka k podpisu byla odeslána na adresu ${inviteeEmail}${nameSuffix}. Přidán(a) do seznamu příjemců k podpisu.`,
+        ? `Pozvánka k podpisu v zastoupení za „${behalfLabel}" byla odeslána na adresu ${inviteeEmail}${nameSuffix}. Přidáno do seznamu příjemců k podpisu.`
+        : `Pozvánka k podpisu byla odeslána na adresu ${inviteeEmail}${nameSuffix}. Přidáno do seznamu příjemců k podpisu.`,
     })
   } catch (error) {
     console.error(

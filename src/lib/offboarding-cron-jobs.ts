@@ -18,6 +18,7 @@ import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
 import { recipientIdentityKey } from "@/lib/exit-checklist-recipient-key"
 import {
   EXIT_CHECKLIST_EMPLOYEE_ROLE_NOTE,
+  EXIT_CHECKLIST_MANAGER_HEADER_SUBTITLE,
   EXIT_CHECKLIST_MANAGER_ROLE_NOTE,
   EXIT_CHECKLIST_SECTION_B_ROLE_NOTE,
 } from "@/lib/exit-checklist-role-notes"
@@ -32,6 +33,7 @@ type SignatureReminderDay = 14 | 7 | 5 | 3 | 2 | 1 | 0
 const SIGNATURE_REMINDER_DAYS: SignatureReminderDay[] = [14, 7, 5, 3, 2, 1, 0]
 
 const ACTIVE_MAIL_STATUSES: MailJobStatus[] = ["QUEUED", "PROCESSING", "SENT"]
+const REMINDER_REPEAT_EVERY_DAYS = 3
 
 function getPayloadRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -110,13 +112,47 @@ async function existsOffboardingReminderJob(args: {
   })
 }
 
-async function existsOffboardingDepartureConfirmationJob(
+async function existsOffboardingReminderJobRecently(args: {
   offboardingId: number
-) {
+  reminderKind: string
+  days: number
+}) {
+  const since = addDays(startOfDay(new Date()), -args.days)
+
   const jobs = await prisma.mailQueue.findMany({
     where: {
-      type: "OFFBOARDING_DEPARTURE_CONFIRMATION",
+      type: "NOTICE_WARNING",
       status: { in: ACTIVE_MAIL_STATUSES },
+      createdAt: { gte: since },
+    },
+    select: { payload: true },
+    take: 1000,
+  })
+
+  return jobs.some((job) => {
+    const payload = getPayloadRecord(job.payload)
+
+    if (asString(payload.reminderKind) !== args.reminderKind) return false
+
+    return isSameOffboardingPayload({
+      payload,
+      offboardingId: args.offboardingId,
+    })
+  })
+}
+
+async function wasRecentlyQueued(
+  offboardingId: number,
+  mailType: "OFFBOARDING_DEPARTURE_CONFIRMATION",
+  days: number
+) {
+  const since = addDays(startOfDay(new Date()), -days)
+
+  const jobs = await prisma.mailQueue.findMany({
+    where: {
+      type: mailType,
+      status: { in: ACTIVE_MAIL_STATUSES },
+      createdAt: { gte: since },
     },
     select: { payload: true },
     take: 1000,
@@ -131,7 +167,7 @@ async function existsOffboardingDepartureConfirmationJob(
 }
 
 async function queueOffboardingDepartureConfirmations(args: {
-  yesterdayFilter: { gte: Date; lt: Date }
+  today: Date
   baseUrl: string
   hrRecipients: string[]
   notifications: string[]
@@ -146,18 +182,20 @@ async function queueOffboardingDepartureConfirmations(args: {
       deletedAt: null,
       actualEnd: null,
       cancelledAt: null,
-      plannedEnd: args.yesterdayFilter,
+      plannedEnd: { lte: args.today },
     },
   })
 
   let queued = 0
 
   for (const off of candidates) {
-    const alreadyQueued = await existsOffboardingDepartureConfirmationJob(
-      off.id
+    const recentlyQueued = await wasRecentlyQueued(
+      off.id,
+      "OFFBOARDING_DEPARTURE_CONFIRMATION",
+      REMINDER_REPEAT_EVERY_DAYS
     )
 
-    if (alreadyQueued) {
+    if (recentlyQueued) {
       args.notifications.push(`departure_confirmation_already_active:${off.id}`)
       continue
     }
@@ -360,6 +398,9 @@ async function existsOffboardingSignatureReminderJob(args: {
 function managerHasSigned(data: ExitChecklistData): boolean {
   return (
     Boolean(data.signatures?.manager?.signedAt) &&
+    Boolean(
+      data.items.find((item) => item.key === "handoverProtocol")?.signedAt
+    ) &&
     Boolean(data.handoverManagerSignature?.signedAt)
   )
 }
@@ -535,6 +576,10 @@ async function queueExitChecklistSignatureReminders(args: {
             signUrl,
             reminderRole: label,
             roleNote,
+            headerSubtitle:
+              label === "vedoucí" || label === "vedoucí (zastoupení)"
+                ? EXIT_CHECKLIST_MANAGER_HEADER_SUBTITLE
+                : null,
             isBehalf: Boolean(recipient.behalfLabel),
             behalfLabel: recipient.behalfLabel ?? null,
             isEmployee:
@@ -621,6 +666,102 @@ async function queueExitChecklistSignatureReminders(args: {
   return queued
 }
 
+async function queueExitChecklistLockReminders(args: {
+  today: Date
+  hrRecipients: string[]
+  notifications: string[]
+}) {
+  const reminderKind = "COMPLETED_NOT_LOCKED"
+  const reminderDate = args.today.toISOString().slice(0, 10)
+
+  if (args.hrRecipients.length === 0) {
+    args.notifications.push("completed_not_locked_skipped_no_hr")
+    return 0
+  }
+
+  const candidates = await prisma.employeeOffboarding.findMany({
+    where: {
+      deletedAt: null,
+      actualEnd: null,
+      cancelledAt: null,
+    },
+    select: { id: true },
+  })
+
+  let queued = 0
+
+  for (const candidate of candidates) {
+    const result = await getOrCreateChecklist(candidate.id)
+    if (!result) continue
+
+    const { off, checklist } = result
+
+    if (checklist.lockedAt) continue
+
+    const data: ExitChecklistData = mapToExitChecklistData(off, checklist)
+
+    if (!getExitChecklistCompletionState(data).isComplete) continue
+
+    const recentlyQueued = await existsOffboardingReminderJobRecently({
+      offboardingId: off.id,
+      reminderKind,
+      days: REMINDER_REPEAT_EVERY_DAYS,
+    })
+
+    if (recentlyQueued) {
+      args.notifications.push(`completed_not_locked_already_active:${off.id}`)
+      continue
+    }
+
+    const employeeName = buildFullName(off)
+    const effectiveEnd = off.actualEnd ?? off.plannedEnd
+
+    const job = await prisma.mailQueue.create({
+      data: {
+        type: "NOTICE_WARNING",
+        payload: {
+          recipients: args.hrRecipients,
+          offboardingId: off.id,
+          employeeName,
+          employeePersonalNumber: off.personalNumber,
+          employeePosition: off.positionName,
+          employeeDepartment: off.department,
+          employeeUnitName: off.unitName,
+          employmentEndDate: effectiveEnd?.toISOString() ?? null,
+          subject: `Výstupní list je hotový, ale stále není uzamčený – ${employeeName}`,
+          intro:
+            "Výstupní list je kompletně vyplněný a podepsaný, ale v aplikaci stále není uzamčený pro další úpravy. Prosíme, zkontrolujte ho a uzamkněte jako definitivně dokončený.",
+          reminderKind,
+          reminderDate,
+          createdBy: "system-cron",
+          createdByName: "Systémový cron",
+        },
+        status: "QUEUED",
+        priority: 2,
+        createdBy: "system-cron",
+      },
+    })
+
+    await logExitChecklistEvent({
+      checklistId: checklist.id,
+      action: "DEADLINE_REMINDER_SENT",
+      by: "system-cron",
+      byName: "Systémový cron",
+      message: "Výstupní list je 100 % hotový, ale stále není uzamčený.",
+      meta: {
+        reminderKind,
+        mailQueueId: job.id,
+        recipients: args.hrRecipients,
+      },
+    })
+
+    queued += 1
+    args.notifications.push(`completed_not_locked_queued:${off.id}:${job.id}`)
+  }
+
+  return queued
+}
+
 export async function ensureOffboardingCronJobs(req: NextRequest) {
   const now = new Date()
   const today = startOfDay(now)
@@ -629,19 +770,24 @@ export async function ensureOffboardingCronJobs(req: NextRequest) {
 
   const notifications: string[] = []
 
-  const yesterday = addDays(today, -1)
   const dayOffsets = new Map<number, Date>(
     SIGNATURE_REMINDER_DAYS.map((day) => [day, addDays(today, day)])
   )
 
   const departureConfirmations = await queueOffboardingDepartureConfirmations({
-    yesterdayFilter: { gte: yesterday, lt: today },
+    today,
     baseUrl,
     hrRecipients,
     notifications,
   })
 
   const setupReminders = await queueExitChecklistSetupReminders({
+    today,
+    hrRecipients,
+    notifications,
+  })
+
+  const lockReminders = await queueExitChecklistLockReminders({
     today,
     hrRecipients,
     notifications,
@@ -678,11 +824,16 @@ export async function ensureOffboardingCronJobs(req: NextRequest) {
   return {
     status: "success" as const,
     notifications,
-    processed: setupReminders + signatureReminders + departureConfirmations,
+    processed:
+      setupReminders +
+      signatureReminders +
+      departureConfirmations +
+      lockReminders,
     queued,
     failed: 0,
     stats: {
       setupReminders,
+      lockReminders,
       ...sigStats,
       departureConfirmations,
       queued,

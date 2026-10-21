@@ -260,7 +260,7 @@ export default function OnboardingDetailPage({ params }: PageProps) {
   const statusLabels: Record<OnboardingDetail["status"], string> = {
     NEW: "Předpokládaný",
     IN_PROGRESS: "Zpracovává se",
-    COMPLETED: "Nastoupil/a",
+    COMPLETED: "Nástup proběhl",
     CANCELLED: "Zrušeno",
   }
 
@@ -381,7 +381,7 @@ export default function OnboardingDetailPage({ params }: PageProps) {
 
                   {data.linkedOffboarding.probationStopDecisionBy && (
                     <div>
-                      Rozhodl(a):{" "}
+                      Rozhodnuto:{" "}
                       {data.linkedOffboarding.probationStopDecisionBy}
                       {data.linkedOffboarding.probationStopDecisionAt
                         ? ` (${formatDate(data.linkedOffboarding.probationStopDecisionAt)})`

@@ -75,6 +75,7 @@ type Props = {
   mode?: "create" | "edit"
   initial?: Record<string, unknown> | null
   onSuccess?: (changeId?: number) => void | Promise<void>
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 const EMPTY_EXCLUDED_PERSONAL_NUMBERS: string[] = []
@@ -338,6 +339,7 @@ export function EmployeeChangeForm({
   mode = "create",
   initial,
   onSuccess,
+  onDirtyChange,
 }: Props) {
   const isReadonly = useIsReadonly()
   const isEdit = mode === "edit" && Boolean(id)
@@ -471,6 +473,11 @@ export function EmployeeChangeForm({
   })
 
   const isSubmitting = form.formState.isSubmitting
+  const isDirty = form.formState.isDirty
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty)
+  }, [isDirty, onDirtyChange])
 
   function setManualEmployeeMode(nextValue: boolean) {
     setManualEmployee(nextValue)
@@ -736,6 +743,7 @@ export function EmployeeChangeForm({
   ])
 
   async function finishSuccessfully(changeId?: number) {
+    form.reset(form.getValues())
     await onSuccess?.(changeId)
   }
 

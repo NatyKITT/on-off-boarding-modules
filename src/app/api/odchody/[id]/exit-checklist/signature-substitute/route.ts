@@ -43,7 +43,7 @@ export async function POST(
 
   if (!user) {
     return NextResponse.json(
-      { status: "error", message: "Nejste přihlášen(a)." },
+      { status: "error", message: "Nejste přihlášeni." },
       { status: 401 }
     )
   }
@@ -374,7 +374,7 @@ export async function POST(
     by: user.id,
     byName: user.name ?? user.email ?? null,
     byEmail: user.email ?? null,
-    message: `${original.name ?? originalEmail} bude při podpisu zastupovat(a) ${substitute.name ?? substituteEmail}, odeslána informační zpráva na ${original.email ?? originalEmail}.`,
+    message: `${original.name ?? originalEmail} bude při podpisu zastupovat ${substitute.name ?? substituteEmail}, odeslána informační zpráva na ${original.email ?? originalEmail}.`,
   })
 
   return NextResponse.json({ status: "ok" })

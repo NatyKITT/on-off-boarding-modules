@@ -188,7 +188,7 @@ export default auth((req) => {
     return NextResponse.next()
   }
 
-  if (!session?.user) {
+  if (!session?.user?.email) {
     if (isApi) {
       return jsonError(401, "Nejste přihlášen(a).")
     }

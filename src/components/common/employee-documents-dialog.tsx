@@ -16,6 +16,7 @@ import {
 
 import { useCurrentRole } from "@/hooks/use-current-role"
 import { useToast } from "@/hooks/use-toast"
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
 import {
   documentEventActionLabel,
   EMPLOYMENT_DOCUMENT_STATUS_COLOR_CLASSES,
@@ -47,9 +48,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { UnsavedChangesDialog } from "@/components/common/unsaved-changes-dialog"
 import { DocumentHistoryDialog } from "@/components/history/document-history-dialog"
 
-import { ProbationEvaluationSection } from "./probation-evaluation-section"
+import { MedicalExamRequestSection } from "./medical-exam-request-section"
 
 type IdentityMismatchItem = {
   field: string
@@ -88,6 +90,9 @@ type EmployeeDocumentsDialogProps = {
   onboardingId: number
   email: string
   employeeName?: string
+  positionName?: string | null
+  department?: string | null
+  unitName?: string | null
   supervisorName?: string | null
   supervisorEmail?: string | null
   probationEvaluationSentAt?: string | Date | null
@@ -97,7 +102,7 @@ type EmployeeDocumentsDialogProps = {
   readOnly?: boolean
 }
 
-type ActiveTab = "onboarding" | "probation"
+type ActiveTab = "onboarding" | "medicalExam"
 
 const ALL_TYPES: EmploymentDocumentType[] = [...ONBOARDING_TYPES]
 
@@ -399,10 +404,9 @@ export function EmployeeDocumentsDialog({
   onboardingId,
   email,
   employeeName,
-  supervisorName,
-  supervisorEmail,
-  probationEvaluationSentAt,
-  probationEvaluationSentBy,
+  positionName,
+  department,
+  unitName,
   onSent,
   onDocumentsChanged,
   readOnly = false,
@@ -413,6 +417,9 @@ export function EmployeeDocumentsDialog({
   const canViewHistory = canEditInternalApp(role)
 
   const [activeTab, setActiveTab] = useState<ActiveTab>("onboarding")
+  const [medicalExamDirty, setMedicalExamDirty] = useState(false)
+  const { isDialogOpen, guardAction, closeDialog, proceed } =
+    useUnsavedChangesGuard(medicalExamDirty)
 
   const [documents, setDocuments] = useState<EmploymentDocumentLite[]>([])
   const [loading, setLoading] = useState(false)
@@ -445,6 +452,22 @@ export function EmployeeDocumentsDialog({
   const [docToRegenerate, setDocToRegenerate] =
     useState<EmploymentDocumentLite | null>(null)
   const [renewingExpired, setRenewingExpired] = useState(false)
+
+  const [includeMedicalExam, setIncludeMedicalExam] = useState(false)
+  const [medicalTabAttachDocs, setMedicalTabAttachDocs] = useState(false)
+  const [medicalExamReadiness, setMedicalExamReadiness] = useState<{
+    ready: boolean
+    blockedReason: string | null
+    alreadySentAt: string | null
+  } | null>(null)
+  const [documentsReadiness, setDocumentsReadiness] = useState<{
+    status: "IN_PROGRESS" | "READY" | "LOCKED"
+    readyAt: string | null
+    lockedAt: string | null
+    lockedBy: string | null
+  } | null>(null)
+  const [locking, setLocking] = useState(false)
+  const [unlocking, setUnlocking] = useState(false)
 
   const emailSectionRef = useRef<HTMLElement | null>(null)
 
@@ -525,6 +548,134 @@ export function EmployeeDocumentsDialog({
     [onboardingId]
   )
 
+  const loadMedicalExamReadiness = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/nastupy/${onboardingId}/medical-exam-request`,
+        { cache: "no-store" }
+      )
+      const json = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        setMedicalExamReadiness(null)
+        return
+      }
+
+      const data = json?.data as
+        | {
+            personalQuestionnaireCompletedAt: string | null
+            medicalExamJobTitle: string | null
+            medicalExamJobDescription: string | null
+            medicalExamWorkCategory: string | null
+            medicalExamType: string | null
+            medicalExamExamReason: string | null
+            medicalExamVariant: string | null
+            medicalExamSignedFile: unknown
+            medicalExamRequestSentAt: string | null
+            documentsReadinessStatus: "IN_PROGRESS" | "READY" | "LOCKED"
+            documentsReadyAt: string | null
+            documentsLockedAt: string | null
+            documentsLockedBy: string | null
+          }
+        | undefined
+
+      if (!data) {
+        setMedicalExamReadiness(null)
+        setDocumentsReadiness(null)
+        return
+      }
+
+      setDocumentsReadiness({
+        status: data.documentsReadinessStatus,
+        readyAt: data.documentsReadyAt,
+        lockedAt: data.documentsLockedAt,
+        lockedBy: data.documentsLockedBy,
+      })
+
+      const blockedReason = !data.personalQuestionnaireCompletedAt
+        ? "zaměstnanec ještě nevyplnil osobní dotazník"
+        : !data.medicalExamJobTitle ||
+            !data.medicalExamJobDescription ||
+            !data.medicalExamWorkCategory ||
+            !data.medicalExamType ||
+            !data.medicalExamVariant
+          ? "v záložce „Lékařská prohlídka“ ještě nejsou vyplněné všechny povinné údaje"
+          : data.medicalExamType !== "vstupní" && !data.medicalExamExamReason
+            ? "u zvoleného druhu prohlídky chybí důvod k jejímu provedení"
+            : !data.medicalExamSignedFile
+              ? "ještě není nahraná podepsaná a orazítkovaná žádost"
+              : null
+
+      setMedicalExamReadiness({
+        ready: !blockedReason,
+        blockedReason,
+        alreadySentAt: data.medicalExamRequestSentAt,
+      })
+    } catch {
+      setMedicalExamReadiness(null)
+      setDocumentsReadiness(null)
+    }
+  }, [onboardingId])
+
+  async function handleLockDocuments() {
+    setLocking(true)
+
+    try {
+      const res = await fetch(`/api/nastupy/${onboardingId}/documents-lock`, {
+        method: "POST",
+        credentials: "include",
+      })
+      const json = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        throw new Error(json?.message ?? "Zamknutí se nezdařilo.")
+      }
+
+      toast({
+        title: "Uzamčeno",
+        description: "Nástupní dokumenty jsou označené jako hotové.",
+      })
+      await loadMedicalExamReadiness()
+    } catch (err) {
+      toast({
+        title: "Chyba při zamykání",
+        description:
+          err instanceof Error ? err.message : "Zamknutí se nezdařilo.",
+        variant: "destructive",
+      })
+    } finally {
+      setLocking(false)
+    }
+  }
+
+  async function handleUnlockDocuments() {
+    setUnlocking(true)
+
+    try {
+      const res = await fetch(`/api/nastupy/${onboardingId}/documents-unlock`, {
+        method: "POST",
+        credentials: "include",
+      })
+      const json = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        throw new Error(json?.message ?? "Odemknutí se nezdařilo.")
+      }
+
+      toast({ title: "Odemčeno", description: "Dokumenty lze zase upravovat." })
+      await loadMedicalExamReadiness()
+    } catch (err) {
+      toast({
+        title: "Chyba při odemykání",
+        description:
+          err instanceof Error ? err.message : "Odemknutí se nezdařilo.",
+        variant: "destructive",
+      })
+    } finally {
+      setUnlocking(false)
+    }
+  }
+
   useEffect(() => {
     if (!open) return
 
@@ -534,6 +685,9 @@ export function EmployeeDocumentsDialog({
     setNeedsResendTypes([])
     setPdfSentTypes([])
     setError(null)
+    setIncludeMedicalExam(false)
+    setMedicalTabAttachDocs(false)
+    void loadMedicalExamReadiness()
 
     void (async () => {
       const list = await loadDocuments()
@@ -551,7 +705,7 @@ export function EmployeeDocumentsDialog({
 
       setPdfEmailSelection(defaultPdfSelection)
     })()
-  }, [open, email, loadDocuments])
+  }, [open, email, loadDocuments, loadMedicalExamReadiness])
 
   async function handleGenerateSelected() {
     const toCreate = createSelection.filter((type) => !existingTypes.has(type))
@@ -664,18 +818,27 @@ export function EmployeeDocumentsDialog({
     }
   }
 
-  async function handleSendEmail() {
+  async function handleSendEmail(opts?: {
+    forceIncludeMedicalExam?: boolean
+    docTypesOverride?: EmploymentDocumentType[]
+  }) {
+    const includeMedicalExamNow =
+      opts?.forceIncludeMedicalExam ?? includeMedicalExam
+    const docTypesToSend = opts?.docTypesOverride ?? emailSelection
     const selectedDocs = onboardingDocuments
       .map((doc) => {
         const url = getPublicUrlForDoc(doc)
 
-        return url && emailSelection.includes(doc.type)
+        return url && docTypesToSend.includes(doc.type)
           ? { ...doc, effectiveUrl: url }
           : null
       })
       .filter(Boolean) as (EmploymentDocumentLite & { effectiveUrl: string })[]
 
-    if (!selectedDocs.length || !emailInput) return
+    const sendMedicalExam =
+      includeMedicalExamNow && Boolean(medicalExamReadiness?.ready)
+
+    if ((!selectedDocs.length && !sendMedicalExam) || !emailInput) return
 
     setSending(true)
     setError(null)
@@ -693,6 +856,7 @@ export function EmployeeDocumentsDialog({
             url: doc.effectiveUrl,
             type: doc.type,
           })),
+          includeMedicalExam: sendMedicalExam,
         }),
       })
 
@@ -709,11 +873,22 @@ export function EmployeeDocumentsDialog({
         previous.filter((type) => !justSentTypes.includes(type))
       )
 
+      if (sendMedicalExam) {
+        setIncludeMedicalExam(false)
+        setMedicalTabAttachDocs(false)
+        void loadMedicalExamReadiness()
+      }
+
       onSent?.()
 
       toast({
         title: "E-mail odeslán",
-        description: "Zaměstnanci byly odeslány odkazy na vybrané dokumenty.",
+        description:
+          sendMedicalExam && selectedDocs.length > 0
+            ? "Zaměstnanci byly odeslány odkazy na vybrané dokumenty a žádost o pracovnělékařskou prohlídku."
+            : sendMedicalExam
+              ? "Zaměstnanci byla odeslána žádost o pracovnělékařskou prohlídku."
+              : "Zaměstnanci byly odeslány odkazy na vybrané dokumenty.",
       })
     } catch (error) {
       const message =
@@ -1011,12 +1186,16 @@ export function EmployeeDocumentsDialog({
   }
 
   function handleDialogOpenChange(nextOpen: boolean) {
-    setOpen(nextOpen)
+    if (nextOpen) {
+      setOpen(true)
+      return
+    }
 
-    if (!nextOpen) {
+    guardAction(() => {
+      setOpen(false)
       setDocToReset(null)
       setDocToRegenerate(null)
-    }
+    })
   }
 
   function handleOpenDocumentsClick(
@@ -1028,342 +1207,317 @@ export function EmployeeDocumentsDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleDialogOpenChange}>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        title="Dokumenty k nástupu"
-        className="inline-flex items-center justify-center gap-1"
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={handleOpenDocumentsClick}
-      >
-        <FileText className="size-4" />
-        <span className="hidden pt-1.5 sm:inline">Dokumenty</span>
-      </Button>
-
-      <DialogContent
-        className="flex max-h-[95svh] w-[calc(100vw-2rem)] max-w-4xl flex-col gap-0 p-0"
-        style={{ overscrollBehavior: "contain" }}
-        onInteractOutside={(event) => {
-          event.preventDefault()
-        }}
-      >
-        <DialogHeader className="shrink-0 border-b p-4 pr-12 sm:px-6 sm:pr-14">
-          <DialogTitle className="leading-snug">
-            Dokumenty k nástupu{employeeName ? ` – ${employeeName}` : ""}
-          </DialogTitle>
-          <DialogDescription>
-            Správa nástupních dokumentů a vyhodnocení zkušební doby.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="shrink-0 border-b bg-muted/40 p-2 sm:px-4">
-          <div className="grid grid-cols-2 gap-2 rounded-lg bg-muted p-1">
-            <TabButton
-              active={activeTab === "onboarding"}
-              onClick={() => setActiveTab("onboarding")}
-            >
-              Nástupní dokumenty
-            </TabButton>
-
-            <TabButton
-              active={activeTab === "probation"}
-              onClick={() => setActiveTab("probation")}
-            >
-              Vyhodnocení zkušební doby
-            </TabButton>
-          </div>
-        </div>
-
-        <div
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
-          data-lenis-prevent=""
-          onWheelCapture={(event) => event.stopPropagation()}
+    <>
+      <Dialog open={open} onOpenChange={handleDialogOpenChange}>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          title="Dokumenty k nástupu"
+          className="inline-flex items-center justify-center gap-1"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={handleOpenDocumentsClick}
         >
-          <div className="space-y-5 p-4 sm:px-6">
-            {error && (
-              <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-                {error}
-              </p>
-            )}
+          <FileText className="size-4" />
+          <span className="hidden pt-1.5 sm:inline">Dokumenty</span>
+        </Button>
 
-            {activeTab === "onboarding" && (
-              <>
-                <section className="space-y-4">
-                  <div className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium">Vytvoření dokumentů</div>
+        <DialogContent
+          className="flex max-h-[95svh] w-[calc(100vw-2rem)] max-w-4xl flex-col gap-0 p-0"
+          style={{ overscrollBehavior: "contain" }}
+          onInteractOutside={(event) => {
+            event.preventDefault()
+          }}
+        >
+          <DialogHeader className="shrink-0 border-b p-4 pr-12 sm:px-6 sm:pr-14">
+            <DialogTitle className="leading-snug">
+              Dokumenty k nástupu{employeeName ? ` – ${employeeName}` : ""}
+            </DialogTitle>
+            <DialogDescription>
+              Správa nástupních dokumentů a žádosti o pracovnělékařskou
+              prohlídku.
+            </DialogDescription>
+          </DialogHeader>
 
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => void loadDocuments()}
-                        disabled={loading}
-                        title="Znovu načíst aktuální stav dokumentů (např. pokud byly upraveny jinde)"
-                      >
-                        Obnovit seznam
-                      </Button>
-                    </div>
+          {(positionName || department || unitName) && (
+            <div className="shrink-0 border-b bg-muted/20 px-4 py-1.5 text-xs text-muted-foreground sm:px-6">
+              {[positionName, department, unitName].filter(Boolean).join(" · ")}
+            </div>
+          )}
 
-                    <p className="text-xs text-muted-foreground">
-                      Dokumenty vyplňované při nástupu zaměstnance.
-                    </p>
-
-                    <div className="grid gap-2 md:grid-cols-2">
-                      {ONBOARDING_TYPES.map((type) => {
-                        const exists = existingTypes.has(type)
-                        const checked = createSelection.includes(type)
-
-                        return (
-                          <label
-                            key={type}
-                            className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-xs md:text-sm"
-                          >
-                            <Checkbox
-                              checked={checked}
-                              onCheckedChange={(value) => {
-                                const isChecked = value === true
-
-                                setCreateSelection((previous) =>
-                                  isChecked
-                                    ? [...previous, type]
-                                    : previous.filter((item) => item !== type)
-                                )
-                              }}
-                            />
-
-                            <span className="flex-1">{typeLabel(type)}</span>
-
-                            {exists && (
-                              <span className="text-[10px] text-muted-foreground">
-                                již existuje
-                              </span>
-                            )}
-                          </label>
-                        )
-                      })}
-                    </div>
-
+          {documentsReadiness &&
+            documentsReadiness.status !== "IN_PROGRESS" && (
+              <div className="flex shrink-0 items-center justify-between gap-2 border-b bg-muted/30 px-4 py-2 text-xs sm:px-6">
+                {documentsReadiness.status === "LOCKED" ? (
+                  <>
+                    <span className="text-emerald-700">
+                      Uzamčeno jako hotové
+                      {documentsReadiness.lockedAt
+                        ? ` ${new Date(documentsReadiness.lockedAt).toLocaleString("cs-CZ")}`
+                        : ""}
+                      {documentsReadiness.lockedBy
+                        ? ` (${documentsReadiness.lockedBy})`
+                        : ""}
+                      .
+                    </span>
                     <Button
                       size="sm"
-                      onClick={() => void handleGenerateSelected()}
-                      disabled={
-                        assigning ||
-                        readOnly ||
-                        !createSelection.some(
-                          (type) =>
-                            !existingTypes.has(type) &&
-                            ONBOARDING_TYPES.includes(type)
-                        )
-                      }
-                      className="mt-1 flex items-center gap-2"
+                      variant="outline"
+                      onClick={() => void handleUnlockDocuments()}
+                      disabled={unlocking}
                     >
-                      {assigning && (
-                        <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                      )}
-                      Vygenerovat vybrané dokumenty
+                      {unlocking ? "Odemykám…" : "Odemknout"}
                     </Button>
-                  </div>
-                </section>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-amber-700">
+                      Nástupní dokumenty i žádost o prohlídku jsou 100 % hotové
+                      – lze označit jako dokončené.
+                    </span>
+                    <Button
+                      size="sm"
+                      onClick={() => void handleLockDocuments()}
+                      disabled={locking}
+                    >
+                      {locking ? "Zamykám…" : "Označit jako hotové a zamknout"}
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
 
-                <section className="space-y-2 text-sm">
-                  <div className="font-medium">Nástupní dokumenty</div>
+          <div className="shrink-0 border-b bg-muted/40 p-2 sm:px-4">
+            <div className="grid grid-cols-2 gap-2 rounded-lg bg-muted p-1">
+              <TabButton
+                active={activeTab === "onboarding"}
+                onClick={() => setActiveTab("onboarding")}
+              >
+                Nástupní dokumenty
+              </TabButton>
 
-                  {expiredOnboardingDocuments.length > 0 && !readOnly && (
-                    <div className="flex flex-col gap-2 rounded-md border border-red-300 bg-red-50 px-3 py-2.5 text-sm dark:border-red-900 dark:bg-red-950/20 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="text-red-800 dark:text-red-300">
-                        <span className="font-medium">
-                          Platnost odkazu vypršela u:
-                        </span>{" "}
-                        {expiredOnboardingDocuments
-                          .map((doc) => typeLabel(doc.type))
-                          .join(", ")}
-                        . Zaměstnanec se přes tyto odkazy už nedostane k
-                        vyplnění.
+              <TabButton
+                active={activeTab === "medicalExam"}
+                onClick={() => setActiveTab("medicalExam")}
+              >
+                Lékařská prohlídka
+              </TabButton>
+            </div>
+          </div>
+
+          <div
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+            data-lenis-prevent=""
+            onWheelCapture={(event) => event.stopPropagation()}
+          >
+            <div className="space-y-5 p-4 sm:px-6">
+              {error && (
+                <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                  {error}
+                </p>
+              )}
+
+              {activeTab === "onboarding" && (
+                <>
+                  <section className="space-y-4">
+                    <div className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-medium">Vytvoření dokumentů</div>
+
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void loadDocuments()}
+                          disabled={loading}
+                          title="Znovu načíst aktuální stav dokumentů (např. pokud byly upraveny jinde)"
+                        >
+                          Obnovit seznam
+                        </Button>
+                      </div>
+
+                      <p className="text-xs text-muted-foreground">
+                        Dokumenty vyplňované při nástupu zaměstnance.
+                      </p>
+
+                      <div className="grid gap-2 md:grid-cols-2">
+                        {ONBOARDING_TYPES.map((type) => {
+                          const exists = existingTypes.has(type)
+                          const checked = createSelection.includes(type)
+
+                          return (
+                            <label
+                              key={type}
+                              className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-xs md:text-sm"
+                            >
+                              <Checkbox
+                                checked={checked}
+                                onCheckedChange={(value) => {
+                                  const isChecked = value === true
+
+                                  setCreateSelection((previous) =>
+                                    isChecked
+                                      ? [...previous, type]
+                                      : previous.filter((item) => item !== type)
+                                  )
+                                }}
+                              />
+
+                              <span className="flex-1">{typeLabel(type)}</span>
+
+                              {exists && (
+                                <span className="text-[10px] text-muted-foreground">
+                                  již existuje
+                                </span>
+                              )}
+                            </label>
+                          )
+                        })}
                       </div>
 
                       <Button
-                        type="button"
                         size="sm"
-                        className="shrink-0 gap-1.5 bg-red-600 text-white hover:bg-red-700"
-                        onClick={() => void handleRenewExpiredAndPrepareSend()}
-                        disabled={renewingExpired}
+                        onClick={() => void handleGenerateSelected()}
+                        disabled={
+                          assigning ||
+                          readOnly ||
+                          !createSelection.some(
+                            (type) =>
+                              !existingTypes.has(type) &&
+                              ONBOARDING_TYPES.includes(type)
+                          )
+                        }
+                        className="mt-1 flex items-center gap-2"
                       >
-                        {renewingExpired ? (
+                        {assigning && (
                           <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                        ) : (
-                          <RotateCw className="size-3" />
                         )}
-                        Vygenerovat nové odkazy
+                        Vygenerovat vybrané dokumenty
                       </Button>
                     </div>
-                  )}
+                  </section>
 
-                  {loading ? (
-                    <div className="flex items-center justify-center py-4 text-sm text-muted-foreground">
-                      Načítám dokumenty…
-                    </div>
-                  ) : onboardingDocuments.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      Zatím nejsou přiřazeny žádné nástupní dokumenty.
-                    </p>
-                  ) : (
-                    <div className="space-y-2 text-sm">
-                      {onboardingDocuments.map((doc) => (
-                        <DocumentCard
-                          key={doc.id}
-                          doc={doc}
-                          needsResend={needsResendTypes.includes(doc.type)}
-                          sent={sentTypes.includes(doc.type)}
-                          lockingId={lockingId}
-                          regeneratingId={regeneratingId}
-                          resettingId={resettingId}
-                          docToReset={docToReset}
-                          readOnly={readOnly}
-                          canViewHistory={canViewHistory}
-                          onOpen={() => openDocument(doc)}
-                          onOpenPdf={() => openPdf(doc)}
-                          onToggleLock={() => void handleToggleLock(doc)}
-                          onRegenerate={() => setDocToRegenerate(doc)}
-                          onReset={() => setDocToReset(doc)}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </section>
+                  <section className="space-y-2 text-sm">
+                    <div className="font-medium">Nástupní dokumenty</div>
 
-                <section
-                  ref={emailSectionRef}
-                  className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm"
-                >
-                  <div className="font-medium">
-                    Odeslat odkaz na vybrané dokumenty e-mailem
-                  </div>
+                    {expiredOnboardingDocuments.length > 0 && !readOnly && (
+                      <div className="flex flex-col gap-2 rounded-md border border-red-300 bg-red-50 px-3 py-2.5 text-sm dark:border-red-900 dark:bg-red-950/20 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="text-red-800 dark:text-red-300">
+                          <span className="font-medium">
+                            Platnost odkazu vypršela u:
+                          </span>{" "}
+                          {expiredOnboardingDocuments
+                            .map((doc) => typeLabel(doc.type))
+                            .join(", ")}
+                          . Zaměstnanec se přes tyto odkazy už nedostane k
+                          vyplnění.
+                        </div>
 
-                  <p className="text-xs text-muted-foreground">
-                    Na níže uvedenou adresu bude odeslán e-mail s odkazy na
-                    vybrané nástupní dokumenty.
-                  </p>
-
-                  {needsResendTypes.length > 0 && (
-                    <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
-                      ⚠ Je potřeba znovu odeslat:{" "}
-                      {needsResendTypes
-                        .map((type) => typeLabel(type))
-                        .join(", ")}
-                      .
-                    </div>
-                  )}
-
-                  <Input
-                    type="email"
-                    value={emailInput}
-                    onChange={(event) => setEmailInput(event.target.value)}
-                    placeholder="email zaměstnance"
-                  />
-
-                  <div className="mt-2 grid gap-2 md:grid-cols-2">
-                    {ONBOARDING_TYPES.map((type) => {
-                      const doc = documentsByType.get(type)
-                      const publicUrl = doc ? getPublicUrlForDoc(doc) : null
-
-                      if (!doc || !publicUrl) {
-                        return (
-                          <label
-                            key={type}
-                            className="flex items-center gap-2 rounded-md border bg-muted/30 px-2 py-1.5 text-xs text-muted-foreground md:text-sm"
-                          >
-                            <Checkbox checked={false} disabled />
-
-                            <span className="flex-1">{typeLabel(type)}</span>
-
-                            <span className="text-[10px]">
-                              Dokument ještě nebyl vygenerován
-                            </span>
-                          </label>
-                        )
-                      }
-
-                      const checked = emailSelection.includes(type)
-                      const statusKind = getEmploymentDocumentStatusKind(doc)
-
-                      return (
-                        <label
-                          key={type}
-                          className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-xs md:text-sm"
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="shrink-0 gap-1.5 bg-red-600 text-white hover:bg-red-700"
+                          onClick={() =>
+                            void handleRenewExpiredAndPrepareSend()
+                          }
+                          disabled={renewingExpired}
                         >
-                          <Checkbox
-                            checked={checked}
-                            onCheckedChange={(value) => {
-                              const isChecked = value === true
-
-                              setEmailSelection((previous) =>
-                                isChecked
-                                  ? [...previous, type]
-                                  : previous.filter((item) => item !== type)
-                              )
-                            }}
-                          />
-
-                          <span className="flex-1">{typeLabel(type)}</span>
-
-                          <span
-                            className={`text-[10px] ${EMPLOYMENT_DOCUMENT_STATUS_COLOR_CLASSES[statusKind].icon}`}
-                          >
-                            {EMPLOYMENT_DOCUMENT_STATUS_LABELS[statusKind]}
-                          </span>
-                        </label>
-                      )
-                    })}
-                  </div>
-
-                  <Button
-                    size="sm"
-                    onClick={() => void handleSendEmail()}
-                    disabled={
-                      sending ||
-                      readOnly ||
-                      !emailInput ||
-                      !emailSelection.some((type) => {
-                        const doc = documentsByType.get(type)
-                        return Boolean(doc && getPublicUrlForDoc(doc))
-                      })
-                    }
-                    className="mt-1 flex items-center gap-2"
-                  >
-                    {sending && (
-                      <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                          {renewingExpired ? (
+                            <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                          ) : (
+                            <RotateCw className="size-3" />
+                          )}
+                          Vygenerovat nové odkazy
+                        </Button>
+                      </div>
                     )}
-                    Odeslat e-mail s odkazy
-                  </Button>
-                </section>
 
-                {completedOnboardingDocuments.length > 0 && (
-                  <section className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm">
+                    {loading ? (
+                      <div className="flex items-center justify-center py-4 text-sm text-muted-foreground">
+                        Načítám dokumenty…
+                      </div>
+                    ) : onboardingDocuments.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        Zatím nejsou přiřazeny žádné nástupní dokumenty.
+                      </p>
+                    ) : (
+                      <div className="space-y-2 text-sm">
+                        {onboardingDocuments.map((doc) => (
+                          <DocumentCard
+                            key={doc.id}
+                            doc={doc}
+                            needsResend={needsResendTypes.includes(doc.type)}
+                            sent={sentTypes.includes(doc.type)}
+                            lockingId={lockingId}
+                            regeneratingId={regeneratingId}
+                            resettingId={resettingId}
+                            docToReset={docToReset}
+                            readOnly={readOnly}
+                            canViewHistory={canViewHistory}
+                            onOpen={() => openDocument(doc)}
+                            onOpenPdf={() => openPdf(doc)}
+                            onToggleLock={() => void handleToggleLock(doc)}
+                            onRegenerate={() => setDocToRegenerate(doc)}
+                            onReset={() => setDocToReset(doc)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </section>
+
+                  <section
+                    ref={emailSectionRef}
+                    className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm"
+                  >
                     <div className="font-medium">
-                      Odeslat vyplněné PDF e-mailem
+                      Odeslat odkaz na vybrané dokumenty e-mailem
                     </div>
 
                     <p className="text-xs text-muted-foreground">
-                      Na níže uvedenou adresu bude odeslán e-mail s vyplněnými
-                      dokumenty přiloženými jako PDF.
+                      Na níže uvedenou adresu bude odeslán e-mail s odkazy na
+                      vybrané nástupní dokumenty.
                     </p>
+
+                    {needsResendTypes.length > 0 && (
+                      <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+                        ⚠ Je potřeba znovu odeslat:{" "}
+                        {needsResendTypes
+                          .map((type) => typeLabel(type))
+                          .join(", ")}
+                        .
+                      </div>
+                    )}
 
                     <Input
                       type="email"
                       value={emailInput}
                       onChange={(event) => setEmailInput(event.target.value)}
-                      placeholder="e-mail příjemce"
+                      placeholder="email zaměstnance"
                     />
 
                     <div className="mt-2 grid gap-2 md:grid-cols-2">
                       {ONBOARDING_TYPES.map((type) => {
                         const doc = documentsByType.get(type)
+                        const publicUrl = doc ? getPublicUrlForDoc(doc) : null
 
-                        if (!doc || doc.status === "DRAFT") return null
+                        if (!doc || !publicUrl) {
+                          return (
+                            <label
+                              key={type}
+                              className="flex items-center gap-2 rounded-md border bg-muted/30 px-2 py-1.5 text-xs text-muted-foreground md:text-sm"
+                            >
+                              <Checkbox checked={false} disabled />
 
-                        const checked = pdfEmailSelection.includes(type)
+                              <span className="flex-1">{typeLabel(type)}</span>
+
+                              <span className="text-[10px]">
+                                Dokument ještě nebyl vygenerován
+                              </span>
+                            </label>
+                          )
+                        }
+
+                        const checked = emailSelection.includes(type)
+                        const statusKind = getEmploymentDocumentStatusKind(doc)
 
                         return (
                           <label
@@ -1375,7 +1529,7 @@ export function EmployeeDocumentsDialog({
                               onCheckedChange={(value) => {
                                 const isChecked = value === true
 
-                                setPdfEmailSelection((previous) =>
+                                setEmailSelection((previous) =>
                                   isChecked
                                     ? [...previous, type]
                                     : previous.filter((item) => item !== type)
@@ -1385,135 +1539,346 @@ export function EmployeeDocumentsDialog({
 
                             <span className="flex-1">{typeLabel(type)}</span>
 
-                            <span className="text-[10px] text-muted-foreground">
-                              {statusLabel(doc.status)}
+                            <span
+                              className={`text-[10px] ${EMPLOYMENT_DOCUMENT_STATUS_COLOR_CLASSES[statusKind].icon}`}
+                            >
+                              {EMPLOYMENT_DOCUMENT_STATUS_LABELS[statusKind]}
                             </span>
                           </label>
                         )
                       })}
                     </div>
 
+                    {medicalExamReadiness?.alreadySentAt ? (
+                      <p className="text-xs text-emerald-600">
+                        Žádost o pracovnělékařskou prohlídku už byla zaměstnanci
+                        odeslána{" "}
+                        {new Date(
+                          medicalExamReadiness.alreadySentAt
+                        ).toLocaleString("cs-CZ")}
+                        .
+                      </p>
+                    ) : (
+                      <label className="flex items-start gap-2 rounded-md border bg-background px-2 py-1.5 text-xs md:text-sm">
+                        <Checkbox
+                          checked={includeMedicalExam}
+                          disabled={!medicalExamReadiness?.ready}
+                          onCheckedChange={(value) =>
+                            setIncludeMedicalExam(value === true)
+                          }
+                        />
+                        <span className="flex-1">
+                          Přiložit i žádost o pracovnělékařskou prohlídku
+                          {medicalExamReadiness?.blockedReason ? (
+                            <span className="block text-[10px] text-muted-foreground">
+                              Zatím nejde přiložit –{" "}
+                              {medicalExamReadiness.blockedReason}.
+                            </span>
+                          ) : null}
+                        </span>
+                      </label>
+                    )}
+
                     <Button
                       size="sm"
-                      onClick={() => void handleSendPdf()}
+                      onClick={() => void handleSendEmail()}
                       disabled={
-                        sendingPdf ||
+                        sending ||
+                        readOnly ||
                         !emailInput ||
-                        !pdfEmailSelection.some((type) =>
-                          completedOnboardingDocuments.some(
-                            (doc) => doc.type === type
-                          )
-                        )
+                        (!includeMedicalExam || !medicalExamReadiness?.ready
+                          ? !emailSelection.some((type) => {
+                              const doc = documentsByType.get(type)
+                              return Boolean(doc && getPublicUrlForDoc(doc))
+                            })
+                          : false)
                       }
                       className="mt-1 flex items-center gap-2"
                     >
-                      {sendingPdf && (
+                      {sending && (
                         <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
                       )}
-                      Odeslat PDF e-mailem
+                      {includeMedicalExam && medicalExamReadiness?.ready
+                        ? "Odeslat e-mail s odkazy a žádostí"
+                        : "Odeslat e-mail s odkazy"}
                     </Button>
-
-                    {pdfSentTypes.length > 0 && (
-                      <span className="block text-[10px] text-emerald-600">
-                        PDF odesláno
-                      </span>
-                    )}
                   </section>
-                )}
-              </>
-            )}
 
-            <div className={activeTab === "probation" ? "block" : "hidden"}>
-              <ProbationEvaluationSection
-                active={activeTab === "probation"}
-                onboardingId={onboardingId}
-                supervisorName={supervisorName}
-                supervisorEmail={supervisorEmail}
-                probationEvaluationSentAt={probationEvaluationSentAt}
-                probationEvaluationSentBy={probationEvaluationSentBy}
-                onSent={onSent}
-              />
+                  {completedOnboardingDocuments.length > 0 && (
+                    <section className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm">
+                      <div className="font-medium">
+                        Odeslat vyplněné PDF e-mailem
+                      </div>
+
+                      <p className="text-xs text-muted-foreground">
+                        Na níže uvedenou adresu bude odeslán e-mail s vyplněnými
+                        dokumenty přiloženými jako PDF.
+                      </p>
+
+                      <Input
+                        type="email"
+                        value={emailInput}
+                        onChange={(event) => setEmailInput(event.target.value)}
+                        placeholder="e-mail příjemce"
+                      />
+
+                      <div className="mt-2 grid gap-2 md:grid-cols-2">
+                        {ONBOARDING_TYPES.map((type) => {
+                          const doc = documentsByType.get(type)
+
+                          if (!doc || doc.status === "DRAFT") return null
+
+                          const checked = pdfEmailSelection.includes(type)
+
+                          return (
+                            <label
+                              key={type}
+                              className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-xs md:text-sm"
+                            >
+                              <Checkbox
+                                checked={checked}
+                                onCheckedChange={(value) => {
+                                  const isChecked = value === true
+
+                                  setPdfEmailSelection((previous) =>
+                                    isChecked
+                                      ? [...previous, type]
+                                      : previous.filter((item) => item !== type)
+                                  )
+                                }}
+                              />
+
+                              <span className="flex-1">{typeLabel(type)}</span>
+
+                              <span className="text-[10px] text-muted-foreground">
+                                {statusLabel(doc.status)}
+                              </span>
+                            </label>
+                          )
+                        })}
+                      </div>
+
+                      <Button
+                        size="sm"
+                        onClick={() => void handleSendPdf()}
+                        disabled={
+                          sendingPdf ||
+                          !emailInput ||
+                          !pdfEmailSelection.some((type) =>
+                            completedOnboardingDocuments.some(
+                              (doc) => doc.type === type
+                            )
+                          )
+                        }
+                        className="mt-1 flex items-center gap-2"
+                      >
+                        {sendingPdf && (
+                          <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                        )}
+                        Odeslat PDF e-mailem
+                      </Button>
+
+                      {pdfSentTypes.length > 0 && (
+                        <span className="block text-[10px] text-emerald-600">
+                          PDF odesláno
+                        </span>
+                      )}
+                    </section>
+                  )}
+                </>
+              )}
+
+              <div className={activeTab === "medicalExam" ? "block" : "hidden"}>
+                <MedicalExamRequestSection
+                  active={activeTab === "medicalExam"}
+                  onboardingId={onboardingId}
+                  onDirtyChange={setMedicalExamDirty}
+                />
+              </div>
+
+              {activeTab === "medicalExam" &&
+                (() => {
+                  const unfilledDocs = onboardingDocuments.filter((doc) => {
+                    const kind = getEmploymentDocumentStatusKind(doc)
+                    return (
+                      Boolean(getPublicUrlForDoc(doc)) &&
+                      (kind === "NOT_SENT" || kind === "SENT_PENDING")
+                    )
+                  })
+                  const docTypesToSend = medicalTabAttachDocs
+                    ? unfilledDocs.map((doc) => doc.type)
+                    : []
+
+                  return (
+                    <section className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm">
+                      <div className="font-medium">
+                        Odeslat žádost o pracovnělékařskou prohlídku e-mailem
+                      </div>
+
+                      {medicalExamReadiness?.alreadySentAt ? (
+                        <p className="text-xs text-emerald-600">
+                          Žádost už byla zaměstnanci odeslána{" "}
+                          {new Date(
+                            medicalExamReadiness.alreadySentAt
+                          ).toLocaleString("cs-CZ")}
+                          .
+                        </p>
+                      ) : (
+                        <>
+                          <p className="text-xs text-muted-foreground">
+                            Na níže uvedenou adresu bude odeslána žádost o
+                            pracovnělékařskou prohlídku.
+                          </p>
+
+                          {!medicalExamReadiness?.ready && (
+                            <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+                              Zatím nejde odeslat –{" "}
+                              {medicalExamReadiness?.blockedReason}.
+                            </p>
+                          )}
+
+                          <Input
+                            type="email"
+                            value={emailInput}
+                            onChange={(event) =>
+                              setEmailInput(event.target.value)
+                            }
+                            placeholder="email zaměstnance"
+                          />
+
+                          {unfilledDocs.length > 0 && (
+                            <label className="flex items-start gap-2 rounded-md border bg-background px-2 py-1.5 text-xs md:text-sm">
+                              <Checkbox
+                                checked={medicalTabAttachDocs}
+                                onCheckedChange={(value) =>
+                                  setMedicalTabAttachDocs(value === true)
+                                }
+                              />
+                              <span className="flex-1">
+                                Přiložit i odkazy na nástupní dokumenty k
+                                vyplnění ({unfilledDocs.length})
+                              </span>
+                            </label>
+                          )}
+
+                          <Button
+                            size="sm"
+                            onClick={() =>
+                              void handleSendEmail({
+                                forceIncludeMedicalExam: true,
+                                docTypesOverride: docTypesToSend,
+                              })
+                            }
+                            disabled={
+                              sending ||
+                              readOnly ||
+                              !emailInput ||
+                              !medicalExamReadiness?.ready
+                            }
+                            className="mt-1 flex items-center gap-2"
+                          >
+                            {sending && (
+                              <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                            )}
+                            {docTypesToSend.length > 0
+                              ? "Odeslat žádost a odkazy"
+                              : "Odeslat žádost"}
+                          </Button>
+                        </>
+                      )}
+                    </section>
+                  )
+                })()}
             </div>
           </div>
-        </div>
 
-        <AlertDialog
-          open={Boolean(docToReset)}
-          onOpenChange={(isOpen) => {
-            if (!isOpen) setDocToReset(null)
-          }}
-        >
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>
-                Vymazat vyplněná data dokumentu?
-              </AlertDialogTitle>
-              <AlertDialogDescription>
-                Vyplněné údaje budou odstraněny a dokument se vrátí do stavu
-                „Čeká na vyplnění“.
-                <br />
-                <strong>
-                  Odkaz bude stále platný po dobu 14 dní od zaslání e-mailů s
-                  dokumenty.
-                </strong>
-              </AlertDialogDescription>
-            </AlertDialogHeader>
+          <AlertDialog
+            open={Boolean(docToReset)}
+            onOpenChange={(isOpen) => {
+              if (!isOpen) setDocToReset(null)
+            }}
+          >
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  Vymazat vyplněná data dokumentu?
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  Vyplněné údaje budou odstraněny a dokument se vrátí do stavu
+                  „Čeká na vyplnění“.
+                  <br />
+                  <strong>
+                    Odkaz bude stále platný po dobu 14 dní od zaslání e-mailů s
+                    dokumenty.
+                  </strong>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
 
-            <AlertDialogFooter>
-              <AlertDialogCancel>Zrušit</AlertDialogCancel>
-              <AlertDialogAction
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                onClick={() => {
-                  if (docToReset) {
-                    void handleResetDocumentConfirmed(docToReset)
-                  }
-                }}
-              >
-                Vymazat data
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Zrušit</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  onClick={() => {
+                    if (docToReset) {
+                      void handleResetDocumentConfirmed(docToReset)
+                    }
+                  }}
+                >
+                  Vymazat data
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
 
-        <AlertDialog
-          open={Boolean(docToRegenerate)}
-          onOpenChange={(isOpen) => {
-            if (!isOpen) setDocToRegenerate(null)
-          }}
-        >
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>
-                Vymazat data a vygenerovat nový odkaz?
-              </AlertDialogTitle>
-              <AlertDialogDescription>
-                <strong>
-                  Veškerá dosud vyplněná data budou nenávratně smazána
-                </strong>{" "}
-                a dokument se vrátí do stavu „Čeká na vyplnění“.
-                <br />
-                Zároveň se vygeneruje <strong>nový odkaz</strong> platný 14 dní.
-                Starý odkaz přestane fungovat.{" "}
-                <strong>Poté je potřeba e-mail odeslat znovu.</strong>
-              </AlertDialogDescription>
-            </AlertDialogHeader>
+          <AlertDialog
+            open={Boolean(docToRegenerate)}
+            onOpenChange={(isOpen) => {
+              if (!isOpen) setDocToRegenerate(null)
+            }}
+          >
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  Vymazat data a vygenerovat nový odkaz?
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  <strong>
+                    Veškerá dosud vyplněná data budou nenávratně smazána
+                  </strong>{" "}
+                  a dokument se vrátí do stavu „Čeká na vyplnění“.
+                  <br />
+                  Zároveň se vygeneruje <strong>nový odkaz</strong> platný 14
+                  dní. Starý odkaz přestane fungovat.{" "}
+                  <strong>Poté je potřeba e-mail odeslat znovu.</strong>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
 
-            <AlertDialogFooter>
-              <AlertDialogCancel>Zrušit</AlertDialogCancel>
-              <AlertDialogAction
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                onClick={() => {
-                  if (docToRegenerate) {
-                    void handleRegenerateConfirmed(docToRegenerate)
-                  }
-                }}
-              >
-                Vymazat a vygenerovat nový odkaz
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </DialogContent>
-    </Dialog>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Zrušit</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  onClick={() => {
+                    if (docToRegenerate) {
+                      void handleRegenerateConfirmed(docToRegenerate)
+                    }
+                  }}
+                >
+                  Vymazat a vygenerovat nový odkaz
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </DialogContent>
+      </Dialog>
+
+      <UnsavedChangesDialog
+        open={isDialogOpen}
+        onStay={closeDialog}
+        onDiscard={() => {
+          setMedicalExamDirty(false)
+          proceed()
+        }}
+      />
+    </>
   )
 }

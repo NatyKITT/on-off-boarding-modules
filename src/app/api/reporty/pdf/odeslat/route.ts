@@ -29,10 +29,7 @@ export async function POST(request: NextRequest) {
   const session = await auth()
 
   if (!session?.user) {
-    return NextResponse.json(
-      { message: "Nejste přihlášen(a)." },
-      { status: 401 }
-    )
+    return NextResponse.json({ message: "Nejste přihlášeni." }, { status: 401 })
   }
 
   if (!canSendMonthlyReports(session.user.role)) {
@@ -84,7 +81,7 @@ export async function POST(request: NextRequest) {
 
         <div style="margin: 12px 0 0 0; padding: 10px 12px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
           <div style="font-size: 12px; color: #374151;">
-            <div><strong>Odeslal(a):</strong> ${generatedByName}</div>
+            <div><strong>Odesláno:</strong> ${generatedByName}</div>
             <div><strong>Vygenerováno:</strong> ${generatedAt.toLocaleString("cs-CZ")}</div>
           </div>
         </div>

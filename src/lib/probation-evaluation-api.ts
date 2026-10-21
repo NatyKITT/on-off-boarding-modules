@@ -9,7 +9,6 @@ import { z } from "zod"
 
 import { prisma } from "@/lib/db"
 import {
-  genderedPastVerb,
   sendProbationEvaluationPdfEmail,
   sendProbationEvaluationTajemnikReviewRequestEmail,
   sendTajemnikReviewCompletedToSupervisorEmail,
@@ -21,6 +20,10 @@ import {
 } from "@/lib/employment-linking"
 import { getEmployees, type Employee } from "@/lib/eos-employees"
 import { buildPersonFullName } from "@/lib/person-snapshot"
+import {
+  PROBATION_EVALUATION_DISABLED_MESSAGE,
+  PROBATION_EVALUATION_ENABLED,
+} from "@/lib/probation-evaluation-flag"
 import { renderProbationEvaluationPdfBuffer } from "@/lib/probation-evaluation-pdf"
 import {
   addProbationEvent,
@@ -288,13 +291,20 @@ export function canSaveInternalProbation(role?: string | null) {
 }
 
 export async function requireInternalProbationRead() {
+  if (!PROBATION_EVALUATION_ENABLED) {
+    return {
+      ok: false as const,
+      response: jsonError(PROBATION_EVALUATION_DISABLED_MESSAGE, 403),
+    }
+  }
+
   const session = await auth()
   const user = session?.user as CurrentUser | undefined
 
   if (!user) {
     return {
       ok: false as const,
-      response: jsonError("Nejste přihlášen(a).", 401),
+      response: jsonError("Nejste přihlášeni.", 401),
     }
   }
 
@@ -312,13 +322,20 @@ export async function requireInternalProbationRead() {
 }
 
 export async function requireInternalProbationManage() {
+  if (!PROBATION_EVALUATION_ENABLED) {
+    return {
+      ok: false as const,
+      response: jsonError(PROBATION_EVALUATION_DISABLED_MESSAGE, 403),
+    }
+  }
+
   const session = await auth()
   const user = session?.user as CurrentUser | undefined
 
   if (!user) {
     return {
       ok: false as const,
-      response: jsonError("Nejste přihlášen(a).", 401),
+      response: jsonError("Nejste přihlášeni.", 401),
     }
   }
 
@@ -336,13 +353,20 @@ export async function requireInternalProbationManage() {
 }
 
 export async function requireInternalProbationSend() {
+  if (!PROBATION_EVALUATION_ENABLED) {
+    return {
+      ok: false as const,
+      response: jsonError(PROBATION_EVALUATION_DISABLED_MESSAGE, 403),
+    }
+  }
+
   const session = await auth()
   const user = session?.user as CurrentUser | undefined
 
   if (!user) {
     return {
       ok: false as const,
-      response: jsonError("Nejste přihlášen(a).", 401),
+      response: jsonError("Nejste přihlášeni.", 401),
     }
   }
 
@@ -360,13 +384,20 @@ export async function requireInternalProbationSend() {
 }
 
 export async function requireInternalProbationSave() {
+  if (!PROBATION_EVALUATION_ENABLED) {
+    return {
+      ok: false as const,
+      response: jsonError(PROBATION_EVALUATION_DISABLED_MESSAGE, 403),
+    }
+  }
+
   const session = await auth()
   const user = session?.user as CurrentUser | undefined
 
   if (!user) {
     return {
       ok: false as const,
-      response: jsonError("Nejste přihlášen(a).", 401),
+      response: jsonError("Nejste přihlášeni.", 401),
     }
   }
 
@@ -384,13 +415,20 @@ export async function requireInternalProbationSave() {
 }
 
 export async function requirePublicProbationAccess() {
+  if (!PROBATION_EVALUATION_ENABLED) {
+    return {
+      ok: false as const,
+      response: jsonError(PROBATION_EVALUATION_DISABLED_MESSAGE, 403),
+    }
+  }
+
   const session = await auth()
   const user = session?.user as CurrentUser | undefined
 
   if (!user?.email) {
     return {
       ok: false as const,
-      response: jsonError("Nejste přihlášen(a).", 401),
+      response: jsonError("Nejste přihlášeni.", 401),
     }
   }
 
@@ -1914,7 +1952,7 @@ export async function buildEarlyExitNote(params: {
 
     return [
       `${baseInfo} Vyhodnocení zkušební doby bylo zastaveno${
-        decidedByName ? ` (rozhodl(a): ${decidedByName})` : ""
+        decidedByName ? ` (rozhodnuto: ${decidedByName})` : ""
       }.`,
       noteText ? `Poznámka: ${noteText}` : null,
     ]
@@ -1928,7 +1966,7 @@ export async function buildEarlyExitNote(params: {
     )
 
     return `${baseInfo} Personální oddělení rozhodlo vyhodnocení zkušební doby nezastavovat${
-      decidedByName ? ` (rozhodl(a): ${decidedByName})` : ""
+      decidedByName ? ` (rozhodnuto: ${decidedByName})` : ""
     } – formulář zůstává v platnosti.`
   }
 
@@ -1963,24 +2001,14 @@ export async function sendCompletedProbationPdfToHr(args: {
     args.request.supervisorName ||
     null
 
-  const evaluatorVerb = genderedPastVerb(
-    evaluatorDisplayName,
-    "vyplnil",
-    "vyplnila"
-  )
-  const evaluatorRecommendVerb = genderedPastVerb(
-    evaluatorDisplayName,
-    "doporučil",
-    "doporučila"
-  )
   const emailIntro = isTajemnikMode
-    ? `tajemník${args.tajemnikInfo?.name ? ` ${args.tajemnikInfo.name}` : " úřadu"} vyplnil finální vyjádření k vyhodnocení zkušební doby níže uvedeného zaměstnance. Aktuální PDF formulář naleznete v příloze.`
+    ? `finální vyjádření tajemníka${args.tajemnikInfo?.name ? ` ${args.tajemnikInfo.name}` : " úřadu"} k vyhodnocení zkušební doby níže uvedeného zaměstnance bylo vyplněno. Aktuální PDF formulář naleznete v příloze.`
     : isRevision
       ? "Formulář k vyhodnocení zkušební doby byl upraven. Aktuální PDF formulář naleznete v příloze."
-      : `Vedoucí odboru${evaluatorDisplayName ? ` ${evaluatorDisplayName}` : ""} ${evaluatorVerb} formulář Vyhodnocení zkušební doby níže uvedeného zaměstnance. Vyplněný formulář naleznete v PDF příloze.`
+      : `Formulář Vyhodnocení zkušební doby níže uvedeného zaměstnance byl vyplněn${evaluatorDisplayName ? ` (vedoucí odboru: ${evaluatorDisplayName})` : ""}. Vyplněný formulář naleznete v PDF příloze.`
 
   const emailMessage = isTajemnikMode
-    ? `Vedoucí odboru ${evaluatorRecommendVerb} pokračování pracovního poměru: ${vedouciRecommendationLabel}. Tajemník se k vyhodnocení vyjádřil - ${
+    ? `Vedoucí odboru doporučuje pokračování pracovního poměru: ${vedouciRecommendationLabel}. Tajemník se k vyhodnocení vyjádřil - ${
         args.tajemnikInfo?.agreement === "no" ? "nesouhlasí" : "souhlasí"
       } s doporučením.`
     : !isRevision && args.tajemnikInfo?.required
@@ -2130,7 +2158,7 @@ export async function sendCompletedProbationPdfToHr(args: {
         }),
         byEmail: args.user.email ?? null,
         message: isTajemnikMode
-          ? `Personálnímu oddělení bylo odesláno vyjádření tajemníka včetně aktuální PDF přílohy.${supervisorEmail ? " Vedoucí byl(a) o vyjádření tajemníka informován(a) e-mailem." : ""}`
+          ? `Personálnímu oddělení bylo odesláno vyjádření tajemníka včetně aktuální PDF přílohy.${supervisorEmail ? " Zároveň vedoucí odboru dostává e-mailem informaci o vyjádření tajemníka." : ""}`
           : isRevision
             ? "Personálnímu oddělení bylo odesláno upravené vyhodnocení zkušební doby včetně nové PDF přílohy."
             : "Personálnímu oddělení bylo odesláno finální vyhodnocení zkušební doby včetně PDF přílohy.",

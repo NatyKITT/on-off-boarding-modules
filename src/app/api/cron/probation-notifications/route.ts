@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireCronAuthorization } from "@/lib/cron-auth"
 import { isLocalHourNow } from "@/lib/cron-schedule"
 import { ensureEmploymentDocumentReminders } from "@/lib/employment-document-cron-jobs"
+import { ensureOnboardingManagerWatchJobs } from "@/lib/new-record-manager-watch"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -35,10 +36,12 @@ export async function GET(req: NextRequest) {
   try {
     const employmentDocumentReminders =
       await ensureEmploymentDocumentReminders(req)
+    const newRecordManagerWatch = await ensureOnboardingManagerWatchJobs(req)
 
     return NextResponse.json({
       status: "success",
       employmentDocumentReminders,
+      newRecordManagerWatch,
     })
   } catch (error) {
     console.error("[CRON_PROBATION_NOTIFICATIONS_ERROR]", error)

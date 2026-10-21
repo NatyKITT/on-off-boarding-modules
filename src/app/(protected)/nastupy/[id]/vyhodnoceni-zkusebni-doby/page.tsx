@@ -3,6 +3,10 @@ import { auth } from "@/auth"
 import type { Role } from "@prisma/client"
 
 import { prisma } from "@/lib/db"
+import {
+  PROBATION_EVALUATION_DISABLED_MESSAGE,
+  PROBATION_EVALUATION_ENABLED,
+} from "@/lib/probation-evaluation-flag"
 import { buildFullName } from "@/lib/probation-evaluation-request"
 import { canReadInternalApp } from "@/lib/rbac"
 
@@ -13,6 +17,14 @@ type Props = {
 }
 
 export default async function VyhodnoceniZkusebniDobyPage({ params }: Props) {
+  if (!PROBATION_EVALUATION_ENABLED) {
+    return (
+      <div className="mx-auto max-w-xl px-4 py-16 text-center text-sm text-muted-foreground">
+        {PROBATION_EVALUATION_DISABLED_MESSAGE}
+      </div>
+    )
+  }
+
   const session = await auth()
 
   if (!session?.user) {

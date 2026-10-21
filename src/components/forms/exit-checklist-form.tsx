@@ -88,6 +88,7 @@ import {
   PositionCombobox,
   type PositionSearchItem,
 } from "@/components/common/position-combobox"
+import { SavingButtonLabel } from "@/components/common/saving-button-label"
 import { SignatureRecipientsDialog } from "@/components/common/signature-recipients-dialog"
 import { DocumentHistoryDialog } from "@/components/history/document-history-dialog"
 
@@ -97,6 +98,7 @@ type Props = {
   mode?: "internal" | "public"
   initialData: ExitChecklistData
   onDirtyChange?: (dirty: boolean) => void
+  onSavingChange?: (saving: boolean) => void
   onSaved?: (data: ExitChecklistData, requestClose?: boolean) => void
   externalSaveTrigger?: number
   onRequestSave?: () => void
@@ -106,7 +108,7 @@ type HeaderSignatureKey = "employee" | "manager" | "issuer"
 
 type FeedbackDialogState = {
   open: boolean
-  type: "success" | "error"
+  type: "success" | "error" | "warning"
   title: string
   message: string
 }
@@ -116,6 +118,33 @@ const emptySignature = (): ExitChecklistSignatureValue => ({
   signedByEmail: null,
   signedAt: null,
 })
+
+type ItemSnapshot = Pick<
+  ExitChecklistItem,
+  "resolved" | "note" | "signedByName" | "signedByEmail" | "signedAt"
+>
+
+function snapshotItemsByKey(
+  items: ExitChecklistItem[]
+): Record<string, ItemSnapshot> {
+  const result: Record<string, ItemSnapshot> = {}
+
+  for (const item of items) {
+    result[item.key] = {
+      resolved: item.resolved,
+      note: item.note,
+      signedByName: item.signedByName,
+      signedByEmail: item.signedByEmail,
+      signedAt: item.signedAt,
+    }
+  }
+
+  return result
+}
+
+function valuesEqual(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b)
+}
 
 function getTodayIsoDate() {
   return new Date().toISOString().slice(0, 10)
@@ -578,6 +607,7 @@ export function ExitChecklistForm({
   mode = "internal",
   initialData,
   onDirtyChange,
+  onSavingChange,
   onSaved,
   externalSaveTrigger,
   onRequestSave,
@@ -709,6 +739,26 @@ export function ExitChecklistForm({
   const [managerDepartment, setManagerDepartment] = useState<string>(
     initialData.managerDepartment ?? ""
   )
+
+  const baselineRef = useRef({
+    conflictOfInterest: initialData.conflictOfInterest ?? null,
+    noAssets: initialData.noAssets ?? false,
+    managerEmail: initialData.managerEmail ?? null,
+    managerName: initialData.managerName ?? null,
+    managerPosition: initialData.managerPosition ?? null,
+    managerDepartment: initialData.managerDepartment ?? null,
+    assetsEditedByHR: initialData.assetsEditedByHR ?? null,
+    handoverEditedByHR: initialData.handoverEditedByHR ?? null,
+    handover: initialData.handover ?? null,
+    items: snapshotItemsByKey(initialData.items ?? []),
+    signatures: {
+      employee: initialData.signatures?.employee ?? emptySignature(),
+      manager: initialData.signatures?.manager ?? emptySignature(),
+      issuer: initialData.signatures?.issuer ?? emptySignature(),
+    },
+    handoverManagerSignature:
+      initialData.handoverManagerSignature ?? emptySignature(),
+  })
   const [sectionBResponsible, setSectionBResponsible] = useState(
     initialData.sectionBResponsible ?? null
   )
@@ -730,6 +780,12 @@ export function ExitChecklistForm({
   const [dirty, setDirty] = useState(false)
   const dirtyRef = useRef(false)
   const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
+
+  useEffect(() => {
+    savingRef.current = saving
+    onSavingChange?.(saving)
+  }, [saving, onSavingChange])
   const [lastSaveTrigger, setLastSaveTrigger] = useState<number | undefined>(
     externalSaveTrigger
   )
@@ -1081,7 +1137,7 @@ export function ExitChecklistForm({
       )
 
       if (!res.ok) {
-        setManagerLoadError("Vedoucí nebyl nalezen.")
+        setManagerLoadError("Vedoucího odboru se nepodařilo dohledat.")
         return
       }
 
@@ -1089,7 +1145,7 @@ export function ExitChecklistForm({
       const sup = json?.supervisor
 
       if (!sup) {
-        setManagerLoadError("Vedoucí nebyl nalezen.")
+        setManagerLoadError("Vedoucího odboru se nepodařilo dohledat.")
         return
       }
 
@@ -1099,7 +1155,7 @@ export function ExitChecklistForm({
         .trim()
 
       if (!fullName) {
-        setManagerLoadError("Vedoucí nebyl nalezen.")
+        setManagerLoadError("Vedoucího odboru se nepodařilo dohledat.")
         return
       }
 
@@ -1128,7 +1184,7 @@ export function ExitChecklistForm({
       showFeedback(
         "error",
         "Nesouhlasí e-mail",
-        "Podpis zaměstnance může provést jen odcházející zaměstnanec, přihlášený přes Google se svým vlastním e-mailem."
+        "Podpis zaměstnance může provést jen odcházející osoba, přihlášená přes Google svým vlastním e-mailem."
       )
       return
     }
@@ -1165,22 +1221,6 @@ export function ExitChecklistForm({
         },
       }
     })
-
-    if (key === "manager") {
-      setItems((prev) =>
-        prev.map((item) => {
-          if (item.key !== "handoverProtocol" || item.signedAt) return item
-
-          return {
-            ...item,
-            resolved: "YES",
-            signedByName: currentUserName || currentUserEmail,
-            signedByEmail: currentUserEmail || null,
-            signedAt: now,
-          }
-        })
-      )
-    }
 
     markDirty()
   }
@@ -1221,22 +1261,6 @@ export function ExitChecklistForm({
       }
     })
 
-    if (key === "manager") {
-      setItems((prev) =>
-        prev.map((item) => {
-          if (item.key !== "handoverProtocol" || item.signedAt) return item
-
-          return {
-            ...item,
-            resolved: "YES",
-            signedByName: `${currentUserName || currentUserEmail} — v zastoupení`,
-            signedByEmail: currentUserEmail || null,
-            signedAt: now,
-          }
-        })
-      )
-    }
-
     markDirty()
   }
 
@@ -1264,31 +1288,6 @@ export function ExitChecklistForm({
 
     if (key === "issuer") {
       setAssetsEditedByHR(null)
-    }
-
-    if (key === "manager") {
-      setItems((prev) =>
-        prev.map((item) => {
-          if (item.key !== "handoverProtocol" || !item.signedAt) return item
-
-          const signerEmail = normalizeEmail(item.signedByEmail)
-
-          if (
-            !canOverrideOthersSignature &&
-            signerEmail !== currentUserEmailNormalized
-          ) {
-            return item
-          }
-
-          return {
-            ...item,
-            resolved: null,
-            signedByName: null,
-            signedByEmail: null,
-            signedAt: null,
-          }
-        })
-      )
     }
 
     markDirty()
@@ -1364,21 +1363,6 @@ export function ExitChecklistForm({
       )
     )
 
-    if (key === "handoverProtocol") {
-      setSignatures((prev) => {
-        if (prev.manager?.signedAt) return prev
-
-        return {
-          ...prev,
-          manager: {
-            signedByName: currentUserName || currentUserEmail,
-            signedByEmail: currentUserEmail || null,
-            signedAt: now,
-          },
-        }
-      })
-    }
-
     markDirty()
   }
 
@@ -1415,21 +1399,6 @@ export function ExitChecklistForm({
       )
     )
 
-    if (key === "handoverProtocol") {
-      setSignatures((prev) => {
-        if (prev.manager?.signedAt) return prev
-
-        return {
-          ...prev,
-          manager: {
-            signedByName: `${currentUserName || currentUserEmail} — v zastoupení`,
-            signedByEmail: currentUserEmail || null,
-            signedAt: now,
-          },
-        }
-      })
-    }
-
     markDirty()
   }
 
@@ -1459,28 +1428,6 @@ export function ExitChecklistForm({
           : item
       )
     )
-
-    if (key === "handoverProtocol") {
-      setSignatures((prev) => {
-        const current = prev.manager
-
-        if (!current?.signedAt) return prev
-
-        const managerSignerEmail = normalizeEmail(current.signedByEmail)
-
-        if (
-          !canOverrideOthersSignature &&
-          managerSignerEmail !== currentUserEmailNormalized
-        ) {
-          return prev
-        }
-
-        return {
-          ...prev,
-          manager: emptySignature(),
-        }
-      })
-    }
 
     markDirty()
   }
@@ -1821,12 +1768,31 @@ export function ExitChecklistForm({
         ? `/api/odchody/${resolvedOffboardingId}/exit-checklist`
         : `/api/odchody/public/${publicToken}`
 
+      const baselineItemsSnapshot = baselineRef.current.items
+      const attemptedSignKeys = items
+        .filter((item) => {
+          const isMine =
+            Boolean(item.signedAt) &&
+            normalizeEmail(item.signedByEmail) === currentUserEmailNormalized
+          if (!isMine) return false
+
+          const baselineItem = baselineItemsSnapshot[item.key]
+          const wasAlreadyMine = Boolean(
+            baselineItem?.signedAt &&
+              normalizeEmail(baselineItem.signedByEmail) ===
+                currentUserEmailNormalized
+          )
+          return !wasAlreadyMine
+        })
+        .map((item) => item.key)
+
       const res = await fetch(saveUrl, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
           lock: isInternalMode ? lockAfterSave : false,
+          baseline: baselineRef.current,
           conflictOfInterest,
           managerEmail: managerEmail || null,
           managerName: managerName || null,
@@ -1955,17 +1921,75 @@ export function ExitChecklistForm({
         setManagerEmail(payload.data.managerEmail ?? "")
         setManagerPosition(payload.data.managerPosition ?? "")
         setManagerDepartment(payload.data.managerDepartment ?? "")
+        baselineRef.current = {
+          conflictOfInterest: payload.data.conflictOfInterest ?? null,
+          noAssets: payload.data.noAssets ?? false,
+          managerEmail: payload.data.managerEmail ?? null,
+          managerName: payload.data.managerName ?? null,
+          managerPosition: payload.data.managerPosition ?? null,
+          managerDepartment: payload.data.managerDepartment ?? null,
+          assetsEditedByHR: payload.data.assetsEditedByHR ?? null,
+          handoverEditedByHR: payload.data.handoverEditedByHR ?? null,
+          handover: payload.data.handover ?? null,
+          items: snapshotItemsByKey(payload.data.items ?? []),
+          signatures: {
+            employee: payload.data.signatures?.employee ?? emptySignature(),
+            manager: payload.data.signatures?.manager ?? emptySignature(),
+            issuer: payload.data.signatures?.issuer ?? emptySignature(),
+          },
+          handoverManagerSignature:
+            payload.data.handoverManagerSignature ?? emptySignature(),
+        }
         markClean()
 
-        showFeedback(
-          "success",
-          lockAfterSave
-            ? "Výstupní list byl uzamčen"
-            : "Výstupní list byl uložen",
-          lockAfterSave
-            ? "Formulář je uložený a uzamčený k dalším úpravám."
-            : "Všechny změny a podpisy byly úspěšně zaznamenány."
-        )
+        const rejectedRows = attemptedSignKeys
+          .map((key) => {
+            const serverItem = (payload.data?.items ?? []).find(
+              (i) => i.key === key
+            )
+            const stillMine = Boolean(
+              serverItem?.signedAt &&
+                normalizeEmail(serverItem.signedByEmail) ===
+                  currentUserEmailNormalized
+            )
+            if (stillMine) return null
+
+            const rowDef = EXIT_CHECKLIST_ROWS.find((r) => r.key === key)
+            return {
+              label: rowDef?.obligation ?? key,
+              signedByName: serverItem?.signedByName ?? null,
+            }
+          })
+          .filter(
+            (row): row is { label: string; signedByName: string | null } =>
+              row !== null
+          )
+
+        if (rejectedRows.length > 0) {
+          const details = rejectedRows
+            .map((row) =>
+              row.signedByName
+                ? `${row.label} (podepsáno: ${row.signedByName})`
+                : row.label
+            )
+            .join(", ")
+
+          showFeedback(
+            "warning",
+            "Výstupní list byl uložen, ale některé položky mezitím podepsal někdo jiný",
+            `Váš podpis se neuložil u těchto položek, protože je mezitím podepsal někdo jiný: ${details}. Ostatní změny a podpisy byly uloženy v pořádku. Pokud si myslíte, že jde o omyl, kontaktujte Personální oddělení.`
+          )
+        } else {
+          showFeedback(
+            "success",
+            lockAfterSave
+              ? "Výstupní list byl uzamčen"
+              : "Výstupní list byl uložen",
+            lockAfterSave
+              ? "Formulář je uložený a uzamčený k dalším úpravám."
+              : "Všechny změny a podpisy byly úspěšně zaznamenány."
+          )
+        }
 
         if (Boolean(payload.data.handoverManagerSignature?.signedAt)) {
           if (
@@ -2005,6 +2029,155 @@ export function ExitChecklistForm({
       setSaving(false)
     }
   }
+
+  function applyPolledData(serverData: ExitChecklistData) {
+    const baseline = baselineRef.current
+
+    if (valuesEqual(conflictOfInterest, baseline.conflictOfInterest)) {
+      baseline.conflictOfInterest = serverData.conflictOfInterest ?? null
+      setConflictOfInterest(serverData.conflictOfInterest ?? null)
+    }
+
+    if (valuesEqual(noAssets, baseline.noAssets)) {
+      baseline.noAssets = serverData.noAssets ?? false
+      setNoAssets(serverData.noAssets ?? false)
+    }
+
+    if (valuesEqual(managerEmail || null, baseline.managerEmail)) {
+      baseline.managerEmail = serverData.managerEmail ?? null
+      setManagerEmail(serverData.managerEmail ?? "")
+    }
+
+    if (valuesEqual(managerName || null, baseline.managerName)) {
+      baseline.managerName = serverData.managerName ?? null
+      setManagerName(serverData.managerName ?? "")
+    }
+
+    if (valuesEqual(managerPosition || null, baseline.managerPosition)) {
+      baseline.managerPosition = serverData.managerPosition ?? null
+      setManagerPosition(serverData.managerPosition ?? "")
+    }
+
+    if (valuesEqual(managerDepartment || null, baseline.managerDepartment)) {
+      baseline.managerDepartment = serverData.managerDepartment ?? null
+      setManagerDepartment(serverData.managerDepartment ?? "")
+    }
+
+    if (valuesEqual(assetsEditedByHR, baseline.assetsEditedByHR)) {
+      baseline.assetsEditedByHR = serverData.assetsEditedByHR ?? null
+      setAssetsEditedByHR(serverData.assetsEditedByHR ?? null)
+    }
+
+    if (valuesEqual(handoverEditedByHR, baseline.handoverEditedByHR)) {
+      baseline.handoverEditedByHR = serverData.handoverEditedByHR ?? null
+      setHandoverEditedByHR(serverData.handoverEditedByHR ?? null)
+    }
+
+    const signatureSlots = ["employee", "manager", "issuer"] as const
+    const nextSignatures = { ...signatures }
+    let signaturesChanged = false
+
+    signatureSlots.forEach((slot) => {
+      if (!valuesEqual(signatures[slot], baseline.signatures[slot])) return
+
+      const serverValue = serverData.signatures?.[slot] ?? emptySignature()
+      baseline.signatures[slot] = serverValue
+
+      if (!valuesEqual(serverValue, signatures[slot])) {
+        nextSignatures[slot] = serverValue
+        signaturesChanged = true
+      }
+    })
+
+    if (signaturesChanged) {
+      setSignatures(nextSignatures)
+    }
+
+    if (
+      valuesEqual(handoverManagerSignature, baseline.handoverManagerSignature)
+    ) {
+      const serverValue =
+        serverData.handoverManagerSignature ?? emptySignature()
+      baseline.handoverManagerSignature = serverValue
+
+      if (!valuesEqual(serverValue, handoverManagerSignature)) {
+        setHandoverManagerSignature(serverValue)
+      }
+    }
+
+    const serverItemsByKey = snapshotItemsByKey(serverData.items ?? [])
+    let itemsChanged = false
+
+    const nextItems = items.map((item) => {
+      const currentSnapshot: ItemSnapshot = {
+        resolved: item.resolved,
+        note: item.note,
+        signedByName: item.signedByName,
+        signedByEmail: item.signedByEmail,
+        signedAt: item.signedAt,
+      }
+      const localBaselineSnapshot = baseline.items[item.key]
+
+      if (
+        !localBaselineSnapshot ||
+        !valuesEqual(currentSnapshot, localBaselineSnapshot)
+      ) {
+        return item
+      }
+
+      const serverSnapshot = serverItemsByKey[item.key]
+      if (!serverSnapshot) return item
+
+      baseline.items[item.key] = serverSnapshot
+
+      if (valuesEqual(serverSnapshot, currentSnapshot)) return item
+
+      itemsChanged = true
+      return { ...item, ...serverSnapshot }
+    })
+
+    if (itemsChanged) {
+      setItems(nextItems)
+    }
+  }
+
+  const applyPolledDataRef = useRef(applyPolledData)
+  useEffect(() => {
+    applyPolledDataRef.current = applyPolledData
+  })
+
+  useEffect(() => {
+    if (isLocked) return
+    if (!resolvedOffboardingId && !publicToken) return
+
+    const pollUrl = isInternalMode
+      ? `/api/odchody/${resolvedOffboardingId}/exit-checklist`
+      : `/api/odchody/public/${publicToken}`
+
+    const interval = window.setInterval(() => {
+      if (savingRef.current) return
+
+      void (async () => {
+        try {
+          const res = await fetch(pollUrl, {
+            credentials: "include",
+            cache: "no-store",
+          })
+          if (!res.ok) return
+
+          const json = await res.json().catch(() => null)
+          const serverData = json?.data as ExitChecklistData | undefined
+          if (!serverData) return
+
+          applyPolledDataRef.current(serverData)
+        } catch {
+          return
+        }
+      })()
+    }, 45000)
+
+    return () => window.clearInterval(interval)
+  }, [isInternalMode, resolvedOffboardingId, publicToken, isLocked])
 
   function openPdf() {
     if (!resolvedOffboardingId) return
@@ -2281,6 +2454,33 @@ export function ExitChecklistForm({
       )
     }
 
+    if (isManagerVisitor) {
+      const managerMissing: string[] = []
+
+      if (!signatures.manager?.signedAt) {
+        managerMissing.push("podpis v hlavičce formuláře")
+      }
+
+      const handoverProtocolRow = items.find(
+        (item) => item.key === "handoverProtocol"
+      )
+      if (!handoverProtocolRow?.signedAt) {
+        managerMissing.push(
+          "podpis u řádku „předávací protokol“ v sekci A (Vyrovnání závazků)"
+        )
+      }
+
+      if (!handoverManagerSignature.signedAt) {
+        managerMissing.push("vyplnění a podpis sekce C (Předávaná agenda)")
+      }
+
+      if (managerMissing.length > 0) {
+        missingLines.push(
+          `Jako vedoucí odboru ještě musíte dokončit: ${managerMissing.join(", ")}.`
+        )
+      }
+    }
+
     return { sendLines, missingLines }
   }
 
@@ -2303,6 +2503,30 @@ export function ExitChecklistForm({
     setForeignSignTarget(null)
     if (behalf) signRowOnBehalf(key)
     else signRow(key)
+  }
+
+  function signAllOwnRows(behalf: boolean) {
+    const keysToSign = items
+      .filter(
+        (item) =>
+          ownRowKeys.has(item.key) &&
+          !item.signedAt &&
+          !signingDisabledKeys.includes(item.key)
+      )
+      .map((item) => item.key)
+
+    keysToSign.forEach((key) => {
+      if (behalf) signRowOnBehalf(key)
+      else signRow(key)
+    })
+  }
+
+  function revokeAllOwnRows() {
+    const keysToRevoke = items
+      .filter((item) => ownRowKeys.has(item.key) && item.signedAt)
+      .map((item) => item.key)
+
+    keysToRevoke.forEach((key) => revokeSignature(key))
   }
 
   const completion = getExitChecklistCompletionState({
@@ -2379,6 +2603,8 @@ export function ExitChecklistForm({
             <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-muted">
               {feedbackDialog.type === "success" ? (
                 <CheckCircle className="size-7 text-green-600" />
+              ) : feedbackDialog.type === "warning" ? (
+                <AlertTriangle className="size-7 text-amber-600" />
               ) : (
                 <XCircle className="size-7 text-red-600" />
               )}
@@ -2590,7 +2816,11 @@ export function ExitChecklistForm({
                     }
                     disabled={saving}
                   >
-                    {saving ? "Ukládám…" : "Uložit"}
+                    <SavingButtonLabel
+                      saving={saving}
+                      savingText="Ukládám…"
+                      idleText="Uložit"
+                    />
                   </Button>
 
                   {canLock && (
@@ -2694,10 +2924,18 @@ export function ExitChecklistForm({
                       size="sm"
                       className="gap-1 bg-[#00847C] text-white hover:bg-[#0B6D73]"
                       onClick={onRequestSave}
-                      disabled={!dirty}
+                      disabled={!dirty || saving}
                     >
-                      <Save className="size-4" />
-                      Uložit
+                      <SavingButtonLabel
+                        saving={saving}
+                        savingText="Ukládám…"
+                        idleText={
+                          <>
+                            <Save className="size-4" />
+                            Uložit
+                          </>
+                        }
+                      />
                     </Button>
                   )}
                 </>
@@ -2721,11 +2959,11 @@ export function ExitChecklistForm({
           )}
 
           {!isInternalMode && isManagerVisitor && (
-            <div className="flex items-start gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+            <div className="flex items-start gap-2 rounded-md border border-indigo-200 bg-indigo-100 px-3 py-2 text-sm text-indigo-900">
               <Info className="mt-0.5 size-4 shrink-0" />
               <span>
-                Jste vedoucí odboru u tohoto výstupního listu (případně jeho
-                zástupce). Zkontrolujte prosím všechny sekce
+                Jste vedoucí odboru u tohoto výstupního listu, nebo jste v
+                zastoupení. Zkontrolujte prosím všechny sekce
                 {!includeHandoverAgenda
                   ? ", v sekci C vyberte způsob předání agendy"
                   : ""}{" "}
@@ -2738,7 +2976,7 @@ export function ExitChecklistForm({
           {!isInternalMode &&
             isSectionBResponsibleVisitor &&
             !assetsComplete && (
-              <div className="flex items-start gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+              <div className="flex items-start gap-2 rounded-md border border-indigo-200 bg-indigo-100 px-3 py-2 text-sm text-indigo-900">
                 <Info className="mt-0.5 size-4 shrink-0" />
                 <span>
                   Jste odpovědná osoba za sekci B (vyrovnání majetku), nebo ji
@@ -3002,7 +3240,7 @@ export function ExitChecklistForm({
         </CardContent>
       </Card>
 
-      <Card className="bg-green-50">
+      <Card className="bg-slate-50">
         <CardHeader>
           <CardTitle className="text-base">
             A. Vyrovnání závazků zaměstnance k zaměstnavateli
@@ -3010,6 +3248,71 @@ export function ExitChecklistForm({
         </CardHeader>
 
         <CardContent className="bg-background p-0 sm:p-6">
+          {!isInternalMode &&
+            !isLocked &&
+            !isEmployeeVisitor &&
+            ownRowKeys.size > 1 &&
+            (() => {
+              const ownItems = items.filter((item) => ownRowKeys.has(item.key))
+              const unsignedOwnCount = ownItems.filter(
+                (item) =>
+                  !item.signedAt && !signingDisabledKeys.includes(item.key)
+              ).length
+              const signedOwnCount = ownItems.filter((item) =>
+                Boolean(item.signedAt)
+              ).length
+
+              if (unsignedOwnCount === 0 && signedOwnCount === 0) return null
+
+              return (
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-emerald-50/60 px-4 py-2.5 sm:px-6">
+                  <span className="text-xs font-medium text-emerald-900">
+                    Vaše agenda: {signedOwnCount} z {ownItems.length} řádků
+                    podepsaných
+                  </span>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    {unsignedOwnCount > 0 && (
+                      <>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8 gap-1 border-emerald-300 bg-white text-xs"
+                          onClick={() => signAllOwnRows(false)}
+                        >
+                          <Check className="size-3 shrink-0" />
+                          Podepsat všechny své řádky ({unsignedOwnCount})
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8 gap-1 border-emerald-300 bg-emerald-50 text-xs text-emerald-800"
+                          onClick={() => signAllOwnRows(true)}
+                        >
+                          <Check className="size-3 shrink-0" />
+                          Podepsat všechny v zastoupení ({unsignedOwnCount})
+                        </Button>
+                      </>
+                    )}
+                    {signedOwnCount > 0 && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 gap-1 text-xs text-muted-foreground"
+                        onClick={revokeAllOwnRows}
+                      >
+                        <Undo2 className="size-3 shrink-0" />
+                        Zrušit podpis všech ({signedOwnCount})
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )
+            })()}
+
           <div className="divide-y lg:hidden">
             {items.map((item) => {
               const isSigned = Boolean(item.signedAt)
@@ -3047,7 +3350,7 @@ export function ExitChecklistForm({
                     isLawInfoGreyed ? "opacity-50" : ""
                   } ${isOwnRow ? "bg-emerald-50/40" : ""}`}
                 >
-                  <div className="flex items-center gap-2 text-xs">
+                  <div className="flex flex-wrap items-start gap-2 text-xs">
                     {renderOrganization(
                       item.organization,
                       item.key === "handoverProtocol" ? managerName : null
@@ -3055,7 +3358,7 @@ export function ExitChecklistForm({
                     {isOwnRow && (
                       <Badge
                         variant="outline"
-                        className="border-emerald-200 bg-emerald-50 text-[10px] text-emerald-800"
+                        className="shrink-0 border-emerald-200 bg-emerald-50 text-[10px] text-emerald-800"
                       >
                         Vaše agenda
                       </Badge>
@@ -3350,9 +3653,9 @@ export function ExitChecklistForm({
             <div className="flex items-start gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
               <Lock className="mt-0.5 size-3.5 shrink-0" />
               <span>
-                Tuto sekci už potvrdil(a) {signatures.issuer.signedByName} a
-                nelze ji dál upravovat. V případě potřeby kontaktujte Personální
-                oddělení.
+                Tuto sekci už podepsala jiná pověřená osoba (
+                {signatures.issuer.signedByName}) a nelze ji dál upravovat. V
+                případě potřeby kontaktujte Personální oddělení.
               </span>
             </div>
           )}
@@ -3625,8 +3928,8 @@ export function ExitChecklistForm({
             <div className="flex items-start gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
               <Lock className="mt-0.5 size-4 shrink-0" />
               <span>
-                Tuto sekci už potvrdil(a){" "}
-                {handoverManagerSignature.signedByName} a nelze ji dál
+                Tuto sekci už podepsala jiná pověřená osoba (
+                {handoverManagerSignature.signedByName}) a nelze ji dál
                 upravovat. V případě potřeby kontaktujte Personální oddělení.
               </span>
             </div>
@@ -4437,7 +4740,9 @@ export function ExitChecklistForm({
                   action?.()
                 }}
               >
-                Uložit a odeslat
+                {buildSaveSummary().sendLines.length > 0
+                  ? "Uložit a odeslat"
+                  : "Uložit"}
               </Button>
             </AlertDialogFooter>
           </div>

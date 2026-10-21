@@ -16,6 +16,7 @@ type PublicDocumentFormProps = {
   onSubmitted?: () => void
   employeeMeta?: EmployeeMeta
   prefillSuggestion?: PrefillSuggestion | null
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 export function PublicDocumentForm({
@@ -25,6 +26,7 @@ export function PublicDocumentForm({
   onSubmitted,
   employeeMeta,
   prefillSuggestion,
+  onDirtyChange,
 }: PublicDocumentFormProps) {
   switch (type) {
     case EmploymentDocumentType.AFFIDAVIT:
@@ -35,6 +37,7 @@ export function PublicDocumentForm({
           hash={hash}
           onSubmitted={onSubmitted}
           employeeMeta={employeeMeta}
+          onDirtyChange={onDirtyChange}
         />
       )
 
@@ -47,6 +50,7 @@ export function PublicDocumentForm({
           onSubmitted={onSubmitted}
           employeeMeta={employeeMeta}
           prefillSuggestion={prefillSuggestion}
+          onDirtyChange={onDirtyChange}
         />
       )
 
@@ -59,6 +63,7 @@ export function PublicDocumentForm({
           onSubmitted={onSubmitted}
           employeeMeta={employeeMeta}
           prefillSuggestion={prefillSuggestion}
+          onDirtyChange={onDirtyChange}
         />
       )
 

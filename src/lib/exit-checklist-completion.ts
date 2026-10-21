@@ -50,11 +50,14 @@ export function getExitChecklistCompletionState(data: ExitChecklistData) {
     { label: "Rozhodnutí o střetu zájmů", done: conflictDecided },
     { label: "Sekce B – majetek", done: assetsComplete },
     { label: "Sekce C – způsob předání agendy", done: handoverChoiceMade },
-    {
-      label: "Podpis předání agendy vedoucím",
-      done:
-        !handoverChoiceMade || Boolean(data.handoverManagerSignature?.signedAt),
-    },
+    ...(handoverChoiceMade
+      ? [
+          {
+            label: "Podpis předání agendy vedoucím",
+            done: Boolean(data.handoverManagerSignature?.signedAt),
+          },
+        ]
+      : []),
     {
       label: "Podpis zaměstnance",
       done: Boolean(data.signatures?.employee?.signedAt),

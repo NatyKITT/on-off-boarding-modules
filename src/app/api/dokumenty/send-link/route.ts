@@ -7,6 +7,7 @@ import { prisma } from "@/lib/db"
 import { logEmailHistory, sendEmploymentDocumentLinkEmail } from "@/lib/email"
 import { buildEmployeeMeta } from "@/lib/employee-meta"
 import { logEmploymentDocumentEvent } from "@/lib/employment-document-events"
+import { recomputeOnboardingReadiness } from "@/lib/onboarding-readiness"
 import { canManageEmploymentDocuments } from "@/lib/rbac"
 import { absoluteUrl } from "@/lib/url"
 
@@ -24,7 +25,8 @@ const postSchema = z.object({
         url: z.string().optional(),
       })
     )
-    .min(1),
+    .default([]),
+  includeMedicalExam: z.boolean().optional().default(false),
 })
 
 function docTypeLabel(t: EmploymentDocumentType) {
@@ -44,10 +46,7 @@ export async function POST(req: NextRequest) {
   const session = await auth()
 
   if (!session?.user) {
-    return NextResponse.json(
-      { message: "Nejste přihlášen(a)." },
-      { status: 401 }
-    )
+    return NextResponse.json({ message: "Nejste přihlášeni." }, { status: 401 })
   }
 
   if (!canManageEmploymentDocuments(session.user.role)) {
@@ -67,7 +66,7 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const { onboardingId, email, documents } = parsed.data
+  const { onboardingId, email, documents, includeMedicalExam } = parsed.data
   const ids = documents.map((document) => document.id)
 
   const onboarding = await prisma.employeeOnboarding.findFirst({
@@ -87,6 +86,20 @@ export async function POST(req: NextRequest) {
       positionName: true,
       email: true,
       userEmail: true,
+      medicalExamJobTitle: true,
+      medicalExamJobDescription: true,
+      medicalExamWorkCategory: true,
+      medicalExamType: true,
+      medicalExamExamReason: true,
+      medicalExamVariant: true,
+      medicalExamAppointmentAt: true,
+      medicalExamSelfArranged: true,
+      documentsReadinessStatus: true,
+      documents: {
+        where: { type: "PERSONAL_QUESTIONNAIRE" },
+        select: { completedAt: true },
+        take: 1,
+      },
     },
   })
 
@@ -94,6 +107,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { message: "Nástup nebyl nalezen." },
       { status: 404 }
+    )
+  }
+
+  if (onboarding.documentsReadinessStatus === "LOCKED") {
+    return NextResponse.json(
+      {
+        message:
+          "Nástupní dokumenty jsou uzamčené jako hotové. Nejdřív je odemkněte.",
+      },
+      { status: 423 }
     )
   }
 
@@ -153,7 +176,7 @@ export async function POST(req: NextRequest) {
       label: docTypeLabel(document.type),
     }))
 
-  if (!mapped.length) {
+  if (!mapped.length && !includeMedicalExam) {
     const detail = skipped
       .map((item) => `${item.label} – ${item.reason}`)
       .join("; ")
@@ -168,6 +191,82 @@ export async function POST(req: NextRequest) {
     )
   }
 
+  let medicalExamAttachment:
+    | {
+        variant: "ULZ" | "OWN_DOCTOR"
+        appointmentAt: string | null
+        selfArranged: boolean
+        attachment: { filename: string; content: Buffer }
+      }
+    | undefined
+
+  if (includeMedicalExam) {
+    if (!onboarding.documents[0]?.completedAt) {
+      return NextResponse.json(
+        {
+          message:
+            "Žádost o pracovnělékařskou prohlídku lze přiložit až po vyplnění osobního dotazníku zaměstnancem.",
+        },
+        { status: 400 }
+      )
+    }
+
+    if (
+      !onboarding.medicalExamJobTitle ||
+      !onboarding.medicalExamJobDescription ||
+      !onboarding.medicalExamWorkCategory ||
+      !onboarding.medicalExamType ||
+      !onboarding.medicalExamVariant
+    ) {
+      return NextResponse.json(
+        {
+          message:
+            "Nejdřív v záložce „Lékařská prohlídka“ vyplňte pracovní zařazení, druh práce, kategorii práce, druh prohlídky a variantu vstupní prohlídky.",
+        },
+        { status: 400 }
+      )
+    }
+
+    if (
+      onboarding.medicalExamType !== "vstupní" &&
+      !onboarding.medicalExamExamReason
+    ) {
+      return NextResponse.json(
+        {
+          message:
+            "U zvoleného druhu prohlídky je potřeba vyplnit důvod k jejímu provedení.",
+        },
+        { status: 400 }
+      )
+    }
+
+    const signedFile = await prisma.medicalExamSignedFile.findFirst({
+      where: { onboardingId },
+      orderBy: { uploadedAt: "desc" },
+      select: { fileName: true, fileData: true },
+    })
+
+    if (!signedFile) {
+      return NextResponse.json(
+        {
+          message:
+            "Nejdřív nahrajte podepsanou a orazítkovanou žádost o pracovnělékařskou prohlídku.",
+        },
+        { status: 400 }
+      )
+    }
+
+    medicalExamAttachment = {
+      variant: onboarding.medicalExamVariant,
+      appointmentAt: onboarding.medicalExamAppointmentAt?.toISOString() ?? null,
+      selfArranged: onboarding.medicalExamSelfArranged,
+      attachment: {
+        filename: signedFile.fileName,
+        content: Buffer.from(signedFile.fileData),
+      },
+    }
+  }
+
   const { subject, html } = await sendEmploymentDocumentLinkEmail({
     to: email,
     employeeName,
@@ -180,6 +279,7 @@ export async function POST(req: NextRequest) {
       url: document.url,
       type: document.type,
     })),
+    medicalExam: medicalExamAttachment,
   })
 
   const sentBy = session.user.name ?? session.user.email ?? "unknown"
@@ -195,10 +295,12 @@ export async function POST(req: NextRequest) {
       status: "SENT",
       createdBy: session.user.id ?? session.user.email ?? "unknown",
     }),
-    prisma.employmentDocument.updateMany({
-      where: { id: { in: mapped.map((document) => document.id) } },
-      data: { sentAt, sentBy },
-    }),
+    mapped.length
+      ? prisma.employmentDocument.updateMany({
+          where: { id: { in: mapped.map((document) => document.id) } },
+          data: { sentAt, sentBy },
+        })
+      : Promise.resolve(),
     ...mapped.map((document) =>
       logEmploymentDocumentEvent({
         documentId: document.id,
@@ -209,7 +311,35 @@ export async function POST(req: NextRequest) {
         message: `Odkaz na dokument byl odeslán na e-mail ${email}.`,
       })
     ),
+    medicalExamAttachment
+      ? prisma.employeeOnboarding.update({
+          where: { id: onboardingId },
+          data: {
+            medicalExamRequestSentAt: sentAt,
+            medicalExamRequestSentBy: sentBy,
+          },
+        })
+      : Promise.resolve(),
   ])
+
+  if (medicalExamAttachment) {
+    const userId = (session.user as { id?: string }).id
+
+    if (userId) {
+      await prisma.onboardingChangeLog.create({
+        data: {
+          employeeId: onboardingId,
+          userId,
+          action: "MAIL_SENT",
+          field: "medical_exam_request",
+          oldValue: null,
+          newValue: `Žádost o pracovnělékařskou prohlídku odeslána na ${email}.`,
+        },
+      })
+    }
+
+    await recomputeOnboardingReadiness(onboardingId)
+  }
 
   return NextResponse.json({
     ok: true,

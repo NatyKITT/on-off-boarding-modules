@@ -113,6 +113,39 @@ export function toTriStateBoolean(value: unknown): boolean | null {
   return null
 }
 
+export function getBaselineRecord(bodyRecord: Record<string, unknown>): {
+  baseline: Record<string, unknown>
+  provided: boolean
+} {
+  const raw = bodyRecord.baseline
+
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { baseline: {}, provided: false }
+  }
+
+  return { baseline: raw as Record<string, unknown>, provided: true }
+}
+
+export function resolveEditableField<T>(args: {
+  canEdit: boolean
+  bodyValue: unknown
+  baselineValue: unknown
+  baselineProvided: boolean
+  currentValue: T
+  sanitizer: (value: unknown) => T
+}): T {
+  if (!args.canEdit) return args.currentValue
+
+  const nextValue = args.sanitizer(args.bodyValue)
+
+  const changedByClient =
+    !args.baselineProvided ||
+    JSON.stringify(nextValue) !==
+      JSON.stringify(args.sanitizer(args.baselineValue))
+
+  return changedByClient ? nextValue : args.currentValue
+}
+
 export function sanitizeResponsibleParty(
   value: unknown
 ): "KITT6" | "OSS_KT" | null {
@@ -1194,6 +1227,46 @@ export async function getChecklistByPublicToken(token: string) {
       offboarding: true,
     },
   })
+}
+
+export class ExitChecklistTransactionError extends Error {
+  code: "NOT_FOUND" | "LOCKED"
+
+  constructor(code: "NOT_FOUND" | "LOCKED") {
+    super(code)
+    this.code = code
+  }
+}
+
+// Čtení aktuálního stavu a zápis hlavičky probíhají v jedné DB transakci se
+// Serializable izolací, aby při souběžném uložení více lidí (veřejný odkaz
+// může otevřít více podepisujících najednou) nemohl jeden zápis tiše
+// přepsat druhý – při kolizi Prisma vrátí P2034 a zkusíme to znovu.
+export async function withSerializableRetry<T>(
+  fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  maxAttempts = 3
+): Promise<T> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await prisma.$transaction(fn, {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        maxWait: 5000,
+        timeout: 20000,
+      })
+    } catch (error) {
+      const isRetryableConflict =
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2034"
+
+      if (!isRetryableConflict || attempt === maxAttempts) {
+        throw error
+      }
+    }
+  }
+
+  throw new Error(
+    "Nepodařilo se uložit výstupní list kvůli opakovanému souběžnému zápisu."
+  )
 }
 
 export function isPraha6OrKitt6(email?: string | null) {

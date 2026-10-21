@@ -214,7 +214,7 @@ export function OffboardingDetailPageClient({ data }: Props) {
   const statusLabels: Record<OffboardingDetail["status"], string> = {
     NEW: "Plánovaný",
     IN_PROGRESS: "Zpracovává se",
-    COMPLETED: "Odešel/a",
+    COMPLETED: "Pracovní poměr ukončen",
     CANCELLED: "Zrušeno",
   }
 
@@ -448,7 +448,7 @@ export function OffboardingDetailPageClient({ data }: Props) {
 
                     {data.probationStopDecisionBy && (
                       <div>
-                        Rozhodl(a): {data.probationStopDecisionBy}
+                        Rozhodnuto: {data.probationStopDecisionBy}
                         {data.probationStopDecisionAt
                           ? ` (${formatDate(data.probationStopDecisionAt)})`
                           : ""}

@@ -6,10 +6,16 @@ import { format } from "date-fns"
 import { CheckCircle, XCircle } from "lucide-react"
 
 import { useIsReadonly } from "@/hooks/use-current-role"
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import {
+  ManagerNotifyDialog,
+  type ManagerNotifyPrompt,
+} from "@/components/common/manager-notify-dialog"
+import { UnsavedChangesDialog } from "@/components/common/unsaved-changes-dialog"
 import { OffboardingFormUnified } from "@/components/forms/offboarding-form"
 
 type OffRow = {
@@ -108,6 +114,11 @@ export default function OffboardingEditPage({ params }: PageProps) {
 
   const [loading, setLoading] = React.useState(true)
   const [row, setRow] = React.useState<OffRow | null>(null)
+  const [dirty, setDirty] = React.useState(false)
+  const [managerNotifyPrompt, setManagerNotifyPrompt] =
+    React.useState<ManagerNotifyPrompt>(null)
+  const { isDialogOpen, guardAction, closeDialog, proceed } =
+    useUnsavedChangesGuard(dirty)
 
   const [successModal, setSuccessModal] = React.useState({
     open: false,
@@ -181,7 +192,10 @@ export default function OffboardingEditPage({ params }: PageProps) {
     <div className="mx-auto w-full max-w-5xl p-4">
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-bold">Upravit odchod</h1>
-        <Button variant="outline" onClick={() => router.push("/odchody")}>
+        <Button
+          variant="outline"
+          onClick={() => guardAction(() => router.push("/odchody"))}
+        >
           Zpět na přehled
         </Button>
       </div>
@@ -226,11 +240,16 @@ export default function OffboardingEditPage({ params }: PageProps) {
               }}
               mode="edit"
               editContext={editContext}
-              onSuccess={() => {
+              onDirtyChange={setDirty}
+              onSuccess={(_id, prompt) => {
                 showSuccess("Změny uloženy", "Záznam byl úspěšně upraven.")
-                setTimeout(() => {
-                  router.push("/odchody")
-                }, 1500)
+                if (prompt) {
+                  setManagerNotifyPrompt(prompt)
+                } else {
+                  setTimeout(() => {
+                    router.push("/odchody")
+                  }, 1500)
+                }
               }}
             />
           )}
@@ -266,6 +285,23 @@ export default function OffboardingEditPage({ params }: PageProps) {
         onOpenChange={(open) => setErrorModal((prev) => ({ ...prev, open }))}
         title={errorModal.title}
         message={errorModal.message}
+      />
+
+      <UnsavedChangesDialog
+        open={isDialogOpen}
+        onStay={closeDialog}
+        onDiscard={() => {
+          setDirty(false)
+          proceed()
+        }}
+      />
+
+      <ManagerNotifyDialog
+        prompt={managerNotifyPrompt}
+        onClose={() => {
+          setManagerNotifyPrompt(null)
+          router.push("/odchody")
+        }}
       />
     </div>
   )

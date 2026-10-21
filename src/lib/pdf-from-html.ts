@@ -21,7 +21,20 @@ function resolvePuppeteerExecutablePath(): string | undefined {
   return undefined
 }
 
-export async function renderHtmlToPdfBuffer(html: string): Promise<Buffer> {
+export async function renderHtmlToPdfBuffer(
+  html: string,
+  options?: {
+    landscape?: boolean
+    margin?: { top: string; bottom: string; left: string; right: string }
+  }
+): Promise<Buffer> {
+  const landscape = options?.landscape ?? true
+  const margin = options?.margin ?? {
+    top: "14mm",
+    bottom: "14mm",
+    left: "10mm",
+    right: "10mm",
+  }
   const browser = await puppeteer.launch({
     headless: true,
     executablePath: resolvePuppeteerExecutablePath(),
@@ -86,9 +99,9 @@ export async function renderHtmlToPdfBuffer(html: string): Promise<Buffer> {
 
     const pdf = await page.pdf({
       format: "A4",
-      landscape: true,
+      landscape,
       printBackground: true,
-      margin: { top: "14mm", bottom: "14mm", left: "10mm", right: "10mm" },
+      margin,
     })
 
     return Buffer.from(pdf)

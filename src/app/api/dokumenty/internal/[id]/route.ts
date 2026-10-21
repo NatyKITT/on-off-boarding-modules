@@ -4,6 +4,7 @@ import { DocumentStatus, EmploymentDocumentType, Prisma } from "@prisma/client"
 
 import { prisma } from "@/lib/db"
 import { logEmploymentDocumentEvent } from "@/lib/employment-document-events"
+import { recomputeOnboardingReadiness } from "@/lib/onboarding-readiness"
 import {
   canManageEmploymentDocuments,
   canReadEmploymentDocuments,
@@ -202,10 +203,7 @@ export async function GET(_: NextRequest, { params }: Params) {
   const session = await auth()
 
   if (!session?.user) {
-    return NextResponse.json(
-      { message: "Nejste přihlášen(a)." },
-      { status: 401 }
-    )
+    return NextResponse.json({ message: "Nejste přihlášeni." }, { status: 401 })
   }
 
   if (!canReadEmploymentDocuments(session.user.role)) {
@@ -260,10 +258,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const session = await auth()
 
   if (!session?.user) {
-    return NextResponse.json(
-      { message: "Nejste přihlášen(a)." },
-      { status: 401 }
-    )
+    return NextResponse.json({ message: "Nejste přihlášeni." }, { status: 401 })
   }
 
   if (!canManageEmploymentDocuments(session.user.role)) {
@@ -290,6 +285,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       status: true,
       isLocked: true,
       data: true,
+      onboardingId: true,
     },
   })
 
@@ -380,6 +376,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         lastEditSummary: true,
       },
     })
+
+    if (existing.onboardingId) {
+      await recomputeOnboardingReadiness(existing.onboardingId)
+    }
 
     await logEmploymentDocumentEvent({
       documentId: doc.id,

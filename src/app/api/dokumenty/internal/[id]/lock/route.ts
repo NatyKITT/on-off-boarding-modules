@@ -13,10 +13,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const session = await auth()
 
   if (!session?.user) {
-    return NextResponse.json(
-      { message: "Nejste přihlášen(a)." },
-      { status: 401 }
-    )
+    return NextResponse.json({ message: "Nejste přihlášeni." }, { status: 401 })
   }
 
   if (!canManageEmploymentDocuments(session.user.role)) {

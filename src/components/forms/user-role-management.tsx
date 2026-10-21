@@ -495,7 +495,7 @@ function DbUsersList({
                       <p className="text-sm italic text-muted-foreground">
                         {user.hasSignedIn
                           ? "Bez vyplněného jména"
-                          : "Nepřihlášen/a"}
+                          : "Nepřihlášeno"}
                       </p>
                     )}
 
@@ -539,7 +539,7 @@ function DbUsersList({
                         : "text-xs text-muted-foreground"
                     }
                   >
-                    {user.hasSignedIn ? "Přihlášen/a" : "Nepřihlášen/a"}
+                    {user.hasSignedIn ? "Přihlášeno" : "Nepřihlášeno"}
                   </Badge>
                 </div>
 
@@ -590,28 +590,29 @@ function DbUsersList({
       </div>
 
       <div className="hidden overflow-x-auto rounded-md border md:block">
-        <table className="w-full text-sm">
+        <table className="w-full table-fixed text-sm">
+          <colgroup>
+            <col className="w-[27%]" />
+            <col className="w-[27%]" />
+            <col className="w-[19%]" />
+            <col className="w-[14%]" />
+            <col className="w-[13%]" />
+          </colgroup>
           <thead>
             <tr className="border-b bg-muted/50">
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+              <th className="p-3 text-left font-medium text-muted-foreground">
                 Jméno
               </th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+              <th className="p-3 text-left font-medium text-muted-foreground">
                 E-mail
               </th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                Přístup
+              <th className="p-3 text-left font-medium text-muted-foreground">
+                Stav
               </th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                Přihlášení
-              </th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+              <th className="p-3 text-left font-medium text-muted-foreground">
                 Role
               </th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                Změnit roli
-              </th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+              <th className="p-3 text-left font-medium text-muted-foreground">
                 Akce
               </th>
             </tr>
@@ -620,13 +621,15 @@ function DbUsersList({
           <tbody className="divide-y">
             {users.map((user) => (
               <tr key={user.id}>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-1.5">
-                    {getFullName(user) || (
-                      <span className="italic text-muted-foreground">
-                        {user.hasSignedIn ? "Bez vyplněného jména" : "—"}
-                      </span>
-                    )}
+                <td className="p-3">
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <span className="truncate">
+                      {getFullName(user) || (
+                        <span className="italic text-muted-foreground">
+                          {user.hasSignedIn ? "Bez vyplněného jména" : "—"}
+                        </span>
+                      )}
+                    </span>
 
                     <EditNameDialog
                       user={user}
@@ -638,41 +641,44 @@ function DbUsersList({
                   </div>
                 </td>
 
-                <td className="px-4 py-3 text-muted-foreground">
+                <td
+                  className="truncate p-3 text-muted-foreground"
+                  title={user.email}
+                >
                   {user.email}
                 </td>
 
-                <td className="px-4 py-3">
-                  {user.canAccessApp ? (
-                    <Badge className="border-green-200 bg-green-100 text-green-800">
-                      Aplikace
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-muted-foreground">
-                      Výstupní listy
-                    </Badge>
-                  )}
+                <td className="p-3">
+                  <div className="flex flex-col gap-1">
+                    {user.canAccessApp ? (
+                      <Badge className="w-fit border-green-200 bg-green-100 text-green-800">
+                        Aplikace
+                      </Badge>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className="w-fit text-muted-foreground"
+                      >
+                        Výstupní listy
+                      </Badge>
+                    )}
+
+                    {user.hasSignedIn ? (
+                      <Badge className="w-fit border-green-200 bg-green-50 text-green-800">
+                        Přihlášeno
+                      </Badge>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className="w-fit text-muted-foreground"
+                      >
+                        Nepřihlášeno
+                      </Badge>
+                    )}
+                  </div>
                 </td>
 
-                <td className="px-4 py-3">
-                  {user.hasSignedIn ? (
-                    <Badge className="border-green-200 bg-green-50 text-green-800">
-                      Přihlášen/a
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-muted-foreground">
-                      Nepřihlášen/a
-                    </Badge>
-                  )}
-                </td>
-
-                <td className="px-4 py-3">
-                  <Badge className={ROLE_BADGE_CLASS[user.role]}>
-                    {ROLE_LABELS[user.role]}
-                  </Badge>
-                </td>
-
-                <td className="px-4 py-3">
+                <td className="p-3">
                   <Select
                     value={user.role}
                     onValueChange={(value) =>
@@ -680,7 +686,7 @@ function DbUsersList({
                     }
                     disabled={updatingUserId === user.id}
                   >
-                    <SelectTrigger className="w-[160px]">
+                    <SelectTrigger className="w-full">
                       {updatingUserId === user.id ? (
                         <Icons.spinner className="size-4 animate-spin" />
                       ) : (
@@ -700,16 +706,16 @@ function DbUsersList({
                   </Select>
                 </td>
 
-                <td className="px-4 py-3">
+                <td className="p-3">
                   <Button
                     variant="outline"
                     size="sm"
-                    className="text-destructive hover:text-destructive"
+                    className="w-full text-destructive hover:text-destructive"
                     disabled={updatingUserId === user.id}
                     onClick={() => onRemoveUser(user)}
                   >
-                    <Trash2 className="mr-2 size-4" />
-                    Odebrat
+                    <Trash2 className="mr-1.5 size-4 shrink-0" />
+                    <span className="truncate">Odebrat</span>
                   </Button>
                 </td>
               </tr>

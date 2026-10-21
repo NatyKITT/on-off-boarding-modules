@@ -71,10 +71,10 @@ const CZ_FIELD_LABEL: Record<string, string> = {
   noticeMonths: "Délka výpovědní lhůty",
   deleted_at: "Smazání",
   deletedAt: "Smazání",
-  deletedBy: "Smazal(a)",
+  deletedBy: "Smazáno",
   deleteReason: "Důvod smazání",
   restore_info: "Obnovení",
-  restoredBy: "Obnovil(a)",
+  restoredBy: "Obnoveno",
   restoredAt: "Datum obnovení",
   probationExtensions: "Prodloužení zkušební doby",
   probationExtensionSummary: "Shrnutí prodloužení zkušební doby",
@@ -84,7 +84,7 @@ const CZ_FIELD_LABEL: Record<string, string> = {
   note: "Poznámka",
   cancelled_at: "Zrušení",
   cancel_reason: "Důvod zrušení",
-  cancelled_by: "Zrušil(a)",
+  cancelled_by: "Zrušeno",
   probationStopDecision: "Zastavení zkušební doby",
   mentorName: "Jméno mentora",
   mentorEmail: "E-mail mentora",
@@ -171,6 +171,7 @@ function humanizeFieldName(field: string): string {
 
 function fieldLabel(field: string | null | undefined): string {
   if (!field) return "Záznam"
+
   return CZ_FIELD_LABEL[field] ?? humanizeFieldName(field)
 }
 
@@ -241,6 +242,7 @@ const CZ_VALUE_LABEL: Record<string, string> = {
   SYSTEM_NOTIFICATION: "Systémové oznámení",
   GENERIC_EMAIL: "E-mail",
   MENTOR_ASSIGNED: "Přiřazen mentor",
+  NEW_RECORD_MANAGER_NOTICE: "Info vedoucímu o novém záznamu",
   STATISTICS_REPORT: "Statistický report",
 
   sick_leave: "Dočasná pracovní neschopnost / nemoc",

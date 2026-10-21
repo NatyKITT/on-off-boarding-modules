@@ -26,6 +26,7 @@ import {
   LAW_SIGNATORY,
 } from "@/config/exit-checklist-signatories"
 
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
 import {
   buildBehalfOptions,
   formatObligations,
@@ -68,6 +69,7 @@ import {
 } from "@/components/ui/select"
 import type { EmployeeItem } from "@/components/common/employee-combobox"
 import { EosPersonPickerDialog } from "@/components/common/eos-person-picker-dialog"
+import { UnsavedChangesDialog } from "@/components/common/unsaved-changes-dialog"
 import { DocumentHistoryDialog } from "@/components/history/document-history-dialog"
 
 type Recipient = {
@@ -437,6 +439,8 @@ export function SignatureRecipientsDialog({
 
   const hasUnsavedDialogChanges =
     toInviteNew.length > 0 || toRevoke.length > 0 || coiDirty || contactsDirty
+
+  useUnsavedChangesGuard(open && hasUnsavedDialogChanges)
 
   const signedEmailSet = useMemo(
     () => new Set((signedEmails ?? []).map((e) => e.trim().toLowerCase())),
@@ -930,7 +934,7 @@ export function SignatureRecipientsDialog({
     setBehalfOf("")
     setCustomBehalfLabel("")
     setInfoTone("success")
-    setInfo(`${name || email} byl(a) přidán(a) do návrhu seznamu.`)
+    setInfo(`Přidání do návrhu seznamu: ${name || email}.`)
   }
 
   function syncSectionBResponsibleIntoRecipients(
@@ -982,7 +986,7 @@ export function SignatureRecipientsDialog({
       })
       setInfoTone("success")
       setInfo(
-        `${updated.name} byl(a) aktualizován(a) v návrhu seznamu jako odpovědná osoba za sekci B.`
+        `Aktualizace v návrhu seznamu: ${updated.name} jako odpovědná osoba za sekci B.`
       )
       return
     }
@@ -999,7 +1003,7 @@ export function SignatureRecipientsDialog({
     )
     setInfoTone("success")
     setInfo(
-      `${newRecipient.name} byl(a) přidán(a) do návrhu seznamu jako odpovědná osoba za sekci B.`
+      `Přidání do návrhu seznamu: ${newRecipient.name} jako odpovědná osoba za sekci B.`
     )
   }
 
@@ -1575,7 +1579,7 @@ export function SignatureRecipientsDialog({
     setSelectedKeys((prev) => new Set(prev).add(candidateKey))
     setInfoTone("success")
     setInfo(
-      `${name || email} byl(a) přidán(a) jako zástupce za ${substituteTarget.name} – zaškrtnutý/á, pošle se mu/jí pozvánka až po potvrzení seznamu.`
+      `Přidání jako zástupce za ${substituteTarget.name}: ${name || email} – zaškrtnuto k odeslání, pozvánka se pošle až po potvrzení seznamu.`
     )
     setSubstituteTarget(null)
     setSubstituteName("")
@@ -3064,8 +3068,9 @@ export function SignatureRecipientsDialog({
               Odebrat osobu, která už podepsala?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {signedRemovalConfirm?.map((r) => r.name).join(", ")} již
-              podepsal(a) výstupní list. Odebráním ze seznamu osob k podpisu se
+              {signedRemovalConfirm?.map((r) => r.name).join(", ")}{" "}
+              {signedRemovalConfirm?.length === 1 ? "již má" : "již mají"}{" "}
+              podepsaný výstupní list. Odebráním ze seznamu osob k podpisu se
               jejich podpis zruší a bude potřeba podepsat znovu. Chcete
               pokračovat?
             </AlertDialogDescription>
@@ -3135,44 +3140,17 @@ export function SignatureRecipientsDialog({
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog
+      <UnsavedChangesDialog
         open={closeConfirmOpen}
-        onOpenChange={(nextOpen) => {
-          if (!nextOpen) setCloseConfirmOpen(false)
+        onStay={() => setCloseConfirmOpen(false)}
+        onDiscard={discardAndClose}
+        onSaveAndLeave={() => {
+          setCloseConfirmOpen(false)
+          handleConfirmClick()
         }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Uložit neuložené změny?</AlertDialogTitle>
-            <AlertDialogDescription>
-              V okně jsou neuložené změny (seznam příjemců, střet zájmů nebo
-              odpovědné osoby), které ještě nebyly potvrzené tlačítkem Uložit –
-              nikomu se nic neposlalo. Chcete je uložit a případně odeslat
-              e-maily, nebo je zahodit?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setCloseConfirmOpen(false)}>
-              Zůstat
-            </AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={discardAndClose}
-            >
-              Zavřít bez uložení
-            </AlertDialogAction>
-            <AlertDialogAction
-              className="bg-[#00847C] text-white hover:bg-[#0B6D73]"
-              onClick={() => {
-                setCloseConfirmOpen(false)
-                handleConfirmClick()
-              }}
-            >
-              Uložit
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        description="V okně jsou neuložené změny (seznam příjemců, střet zájmů nebo odpovědné osoby), které ještě nebyly potvrzené tlačítkem Uložit – nikomu se nic neposlalo. Chcete je uložit a případně odeslat e-maily, nebo je zahodit?"
+        saveLabel={willSendAnyEmail ? "Uložit a odeslat" : "Uložit"}
+      />
     </Dialog>
   )
 }

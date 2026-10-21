@@ -2,16 +2,8 @@ import * as React from "react"
 import { CheckCircle, Loader2, XCircle } from "lucide-react"
 import { useSession } from "next-auth/react"
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
+
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -22,6 +14,7 @@ import {
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Textarea } from "@/components/ui/textarea"
+import { UnsavedChangesDialog } from "@/components/common/unsaved-changes-dialog"
 import {
   ProbationEvaluationForm,
   type ProbationEvaluationFormValues,
@@ -229,7 +222,8 @@ export function ProbationEvaluationDialog({
   const [saved, setSaved] = React.useState(false)
   const [savedMessage, setSavedMessage] = React.useState<string | null>(null)
   const [dirty, setDirty] = React.useState(false)
-  const [confirmCloseOpen, setConfirmCloseOpen] = React.useState(false)
+  const { isDialogOpen, guardAction, closeDialog, proceed } =
+    useUnsavedChangesGuard(open && dirty)
   const [savingMode, setSavingMode] = React.useState<
     ProbationEvaluationFormValues["submitMode"] | null
   >(null)
@@ -334,26 +328,10 @@ export function ProbationEvaluationDialog({
       setSaved(false)
       setSavedMessage(null)
       setError(null)
-      setConfirmCloseOpen(false)
       setSavingMode(null)
       setData(null)
     }
   }, [open])
-
-  React.useEffect(() => {
-    if (!open || !dirty) return
-
-    function handleBeforeUnload(event: BeforeUnloadEvent) {
-      event.preventDefault()
-      event.returnValue = ""
-    }
-
-    window.addEventListener("beforeunload", handleBeforeUnload)
-
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload)
-    }
-  }, [dirty, open])
 
   function handleDirtyChange(nextDirty: boolean) {
     setDirty(nextDirty)
@@ -519,13 +497,10 @@ export function ProbationEvaluationDialog({
   }
 
   function requestClose() {
-    if (dirty) {
-      setConfirmCloseOpen(true)
-      return
-    }
-
-    onOpenChange(false)
-    onClosed?.()
+    guardAction(() => {
+      onOpenChange(false)
+      onClosed?.()
+    })
   }
 
   function handleDialogOpenChange(nextOpen: boolean) {
@@ -539,9 +514,7 @@ export function ProbationEvaluationDialog({
 
   function confirmCloseWithoutSaving() {
     setDirty(false)
-    setConfirmCloseOpen(false)
-    onOpenChange(false)
-    onClosed?.()
+    proceed()
   }
 
   return (
@@ -550,16 +523,12 @@ export function ProbationEvaluationDialog({
         <DialogContent
           className="max-h-[92vh] max-w-5xl overflow-y-auto p-0"
           onInteractOutside={(event) => {
-            if (dirty) {
-              event.preventDefault()
-              setConfirmCloseOpen(true)
-            }
+            event.preventDefault()
+            requestClose()
           }}
           onEscapeKeyDown={(event) => {
-            if (dirty) {
-              event.preventDefault()
-              setConfirmCloseOpen(true)
-            }
+            event.preventDefault()
+            requestClose()
           }}
         >
           <DialogHeader className="border-b px-6 py-4">
@@ -636,7 +605,7 @@ export function ProbationEvaluationDialog({
                   Po úpravě použijte tlačítko „Uložit změny“. Průběžné uložení v
                   tomto režimu není dostupné.
                   {revisionMeta.openedByName || revisionMeta.openedByEmail
-                    ? ` Otevřel(a): ${revisionMeta.openedByName || revisionMeta.openedByEmail}.`
+                    ? ` Otevřeno: ${revisionMeta.openedByName || revisionMeta.openedByEmail}.`
                     : ""}
                   {revisionMeta.openedAt
                     ? ` ${formatDateTime(revisionMeta.openedAt)}.`
@@ -797,27 +766,12 @@ export function ProbationEvaluationDialog({
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={confirmCloseOpen} onOpenChange={setConfirmCloseOpen}>
-        <AlertDialogContent className="max-w-md">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Neuložené změny</AlertDialogTitle>
-            <AlertDialogDescription>
-              Ve formuláři k vyhodnocení zkušební doby jsou neuložené změny.
-              Nejdříve je můžete uložit, nebo odejít bez uložení.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-
-          <AlertDialogFooter>
-            <AlertDialogCancel>Zůstat ve formuláři</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={confirmCloseWithoutSaving}
-            >
-              Odejít bez uložení
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <UnsavedChangesDialog
+        open={isDialogOpen}
+        onStay={closeDialog}
+        onDiscard={confirmCloseWithoutSaving}
+        description="Ve formuláři k vyhodnocení zkušební doby jsou neuložené změny. Nejdříve je můžete uložit tlačítkem ve formuláři, nebo odejít bez uložení."
+      />
     </>
   )
 }

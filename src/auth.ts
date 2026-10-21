@@ -256,7 +256,7 @@ export const authConfig = {
       return baseUrl
     },
 
-    async jwt({ token, user, profile }) {
+    async jwt({ token, user, profile, trigger }) {
       const email =
         (typeof token.email === "string" && token.email) ||
         (typeof user?.email === "string" && user.email) ||
@@ -282,7 +282,7 @@ export const authConfig = {
         token.name = user.name
       }
 
-      if (userId && token.email) {
+      if (userId && token.email && (user || trigger === "update")) {
         try {
           const dbUser = await syncUserAccess(
             userId,

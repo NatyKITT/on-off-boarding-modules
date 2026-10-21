@@ -76,6 +76,8 @@ enum MailJobType {
 
   MENTOR_ASSIGNED
 
+  NEW_RECORD_MANAGER_NOTICE
+
   STATISTICS_REPORT
 }
 
@@ -171,6 +173,17 @@ enum ChecklistResolution {
 enum PositionType {
   REGULAR
   MANAGERIAL
+}
+
+enum MedicalExamVariant {
+  ULZ
+  OWN_DOCTOR
+}
+
+enum OnboardingReadinessStatus {
+  IN_PROGRESS
+  READY
+  LOCKED
 }
 
 enum ProbationFormType {
@@ -350,6 +363,28 @@ model EmployeeOnboarding {
 
   positionType PositionType @default(REGULAR)
 
+  medicalExamJobTitle           String?
+  medicalExamJobDescription     String?             @db.Text
+  medicalExamWorkRegime         String?
+  medicalExamRiskFactors        String?             @db.Text
+  medicalExamWorkCategory       String?
+  medicalExamProfessionalRisk   String?             @db.Text
+  medicalExamType               String?
+  medicalExamExamReason         String?             @db.Text
+  medicalExamVariant            MedicalExamVariant?
+  medicalExamAppointmentAt      DateTime?
+  medicalExamSelfArranged       Boolean             @default(false)
+  medicalExamBirthDate          DateTime?
+  medicalExamAddress            String?             @db.Text
+  medicalExamRequestGeneratedAt DateTime?
+  medicalExamRequestSentAt      DateTime?
+  medicalExamRequestSentBy      String?
+
+  documentsReadinessStatus OnboardingReadinessStatus @default(IN_PROGRESS)
+  documentsReadyAt         DateTime?
+  documentsLockedAt        DateTime?
+  documentsLockedBy        String?
+
   mentorId                 String?
   mentor                   User?         @relation("MentorRelation", fields: [mentorId], references: [id])
   mentorSource             PersonSource?
@@ -389,6 +424,7 @@ model EmployeeOnboarding {
   documents                  EmploymentDocument[]
   probationEvaluationRequest ProbationEvaluationRequest?
   probationEvaluations       ProbationEvaluation[]
+  medicalExamSignedFiles     MedicalExamSignedFile[]
 
   @@index([plannedStart])
   @@index([actualStart])
@@ -1053,6 +1089,20 @@ model ProbationEvaluation {
   @@index([formType])
   @@index([status])
   @@index([evaluatedAt])
+}
+
+model MedicalExamSignedFile {
+  id           Int                @id @default(autoincrement())
+  onboardingId Int
+  onboarding   EmployeeOnboarding @relation(fields: [onboardingId], references: [id], onDelete: Cascade)
+
+  fileName String
+  fileData Bytes  @db.LongBlob
+
+  uploadedAt DateTime @default(now())
+  uploadedBy String?
+
+  @@index([onboardingId, uploadedAt])
 }
 
 model StatisticsSavedView {

@@ -53,6 +53,7 @@ type PayrollInfoFormBaseProps = {
   readOnly?: boolean
   employeeMeta?: EmployeeMeta
   prefillSuggestion?: PrefillSuggestion | null
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 type PayrollInfoFormPublicProps = PayrollInfoFormBaseProps & {
@@ -196,8 +197,14 @@ export function PayrollInfoForm(props: PayrollInfoFormProps) {
     setError,
     watch,
     control,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = form
+
+  const onDirtyChange = props.onDirtyChange
+
+  React.useEffect(() => {
+    onDirtyChange?.(status === "filling" && isDirty)
+  }, [isDirty, status, onDirtyChange])
 
   const [prefillResolved, setPrefillResolved] = React.useState(false)
 

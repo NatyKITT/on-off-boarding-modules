@@ -54,6 +54,7 @@ type AffidavitFormBaseProps = {
   initialData?: unknown
   readOnly?: boolean
   employeeMeta?: EmployeeMeta
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 type AffidavitFormPublicProps = AffidavitFormBaseProps & {
@@ -268,7 +269,7 @@ export function AffidavitForm(props: AffidavitFormProps) {
     setValue,
     setError,
     control,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = form
 
   React.useEffect(() => {
@@ -278,6 +279,12 @@ export function AffidavitForm(props: AffidavitFormProps) {
 
     return () => subscription.unsubscribe()
   }, [form])
+
+  const onDirtyChange = props.onDirtyChange
+
+  React.useEffect(() => {
+    onDirtyChange?.(status === "filling" && isDirty)
+  }, [isDirty, status, onDirtyChange])
 
   const isTruthful = form.watch("isTruthful") as boolean | undefined
   const noExperience = form.watch("noExperience") as boolean

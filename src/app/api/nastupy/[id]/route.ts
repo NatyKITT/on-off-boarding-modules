@@ -12,6 +12,10 @@ import {
   normalizePersonalNumber,
   pickMostRelevantOffboarding,
 } from "@/lib/employment-linking"
+import {
+  buildManagerNotifyPromptForChanges,
+  buildManagerNotifyPromptForRemoval,
+} from "@/lib/new-record-manager-watch"
 import { canReadOnboarding, canWriteOnboarding } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
@@ -586,13 +590,20 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         })
       }
 
-      return updatedRecord
+      return { updatedRecord, changes }
+    })
+
+    const managerNotifyPrompt = await buildManagerNotifyPromptForChanges({
+      kind: "ONBOARDING",
+      recordId: id,
+      changes: updated.changes,
     })
 
     return NextResponse.json({
       status: "success",
       message: "Záznam byl úspěšně aktualizován.",
-      data: await serializeOnboardingRecord(updated),
+      data: await serializeOnboardingRecord(updated.updatedRecord),
+      managerNotifyPrompt,
     })
   } catch (err) {
     if (err instanceof ZodError) {
@@ -723,6 +734,12 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
     }
   })
 
+  const managerNotifyPrompt = await buildManagerNotifyPromptForRemoval({
+    kind: "ONBOARDING",
+    recordId: before.id,
+    reason: "RECORD_DELETED",
+  })
+
   return NextResponse.json({
     status: "success",
     message: "Záznam byl úspěšně smazán.",
@@ -732,5 +749,6 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
       deletedAt: now.toISOString(),
       deletedBy: userKey,
     },
+    managerNotifyPrompt,
   })
 }

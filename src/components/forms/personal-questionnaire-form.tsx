@@ -62,6 +62,7 @@ type PersonalQuestionnaireBaseProps = {
   readOnly?: boolean
   employeeMeta?: EmployeeMeta
   prefillSuggestion?: PrefillSuggestion | null
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 type PersonalQuestionnairePublicProps = PersonalQuestionnaireBaseProps & {
@@ -228,8 +229,14 @@ export function PersonalQuestionnaireForm(
     watch,
     setValue,
     setError,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = form
+
+  const onDirtyChange = props.onDirtyChange
+
+  React.useEffect(() => {
+    onDirtyChange?.(status === "filling" && isDirty)
+  }, [isDirty, status, onDirtyChange])
 
   const [prefillResolved, setPrefillResolved] = React.useState(false)
 

@@ -6,6 +6,8 @@ import { CheckCircle, Loader2, Lock, XCircle } from "lucide-react"
 
 import type { ExitChecklistData } from "@/types/exit-checklist"
 
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
+
 import { ExitChecklistForm } from "@/components/forms/exit-checklist-form"
 
 type Props = {
@@ -26,6 +28,8 @@ export function PublicExitChecklistShell({ token }: Props) {
   const [showLoginSuccess, setShowLoginSuccess] = useState(loginSuccess)
 
   const isLockedForPublic = Boolean(data?.lockedAt)
+
+  useUnsavedChangesGuard(dirty)
 
   useEffect(() => {
     let cancelled = false
@@ -74,17 +78,6 @@ export function PublicExitChecklistShell({ token }: Props) {
       cancelled = true
     }
   }, [token])
-
-  useEffect(() => {
-    if (!dirty) return
-
-    function handleBeforeUnload(e: BeforeUnloadEvent) {
-      e.preventDefault()
-    }
-
-    window.addEventListener("beforeunload", handleBeforeUnload)
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload)
-  }, [dirty])
 
   useEffect(() => {
     if (!showLoginSuccess) return

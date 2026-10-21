@@ -26,11 +26,14 @@ import {
   assetLabel,
   buildHeaderFromOff,
   computeHandoverSupersededNotifications,
+  ExitChecklistTransactionError,
+  getBaselineRecord,
   getOrCreateChecklist,
   handoverSummaryLabel,
   mapToExitChecklistData,
   preserveHandoverSendMetadata,
   resolutionLabel,
+  resolveEditableField,
   sanitizeExitChecklistFilename,
   sanitizeHandoverForJson,
   sanitizeHrEditMarker,
@@ -41,6 +44,7 @@ import {
   toTriStateBoolean,
   trackSignatureChange,
   tryFetchExitChecklistPdfBuffer,
+  withSerializableRetry,
 } from "@/lib/exit-checklist"
 import { getExitChecklistCompletionState } from "@/lib/exit-checklist-completion"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
@@ -259,7 +263,7 @@ async function requireExitChecklistRead() {
   if (!user) {
     return {
       error: NextResponse.json(
-        { status: "error", message: "Nejste přihlášen(a)." },
+        { status: "error", message: "Nejste přihlášeni." },
         { status: 401 }
       ),
     }
@@ -349,7 +353,7 @@ export async function PUT(
 
   if (!user) {
     return NextResponse.json(
-      { status: "error", message: "Nejste přihlášen(a)." },
+      { status: "error", message: "Nejste přihlášeni." },
       { status: 401 }
     )
   }
@@ -388,6 +392,7 @@ export async function PUT(
   }
 
   const bodyRecord = body as Record<string, unknown>
+  const { baseline, provided: baselineProvided } = getBaselineRecord(bodyRecord)
   const lock = Boolean(bodyRecord.lock)
   const unlock = Boolean(bodyRecord.unlock)
 
@@ -479,407 +484,555 @@ export async function PUT(
       Array.isArray(bodyRecord.assets) ? bodyRecord.assets : []
     ) as ExitAssetItem[]
 
-    const currentHeader = getJsonRecord(checklist.header)
-    const currentHandover = currentHeader.handover
-    const currentSignatures = getCurrentSignatures(currentHeader)
+    const checklistId = checklist.id
 
-    const incomingSignatures = getJsonRecord(
-      bodyRecord.signatures
-    ) as unknown as ExitChecklistSignatures
-
-    const signatures = buildNextSignatures({
-      incoming: incomingSignatures,
-      current: currentSignatures,
-      currentUserEmail: user.email,
-      canAdmin,
-    })
-
-    const handoverManagerSignature = buildNextHandoverManagerSignature({
-      incoming: bodyRecord.handoverManagerSignature,
-      currentHeader,
-      currentUserEmail: user.email,
-      canAdmin,
-    })
-
-    const signedLabels: string[] = []
-    const clearedLabels: string[] = []
-
-    const currentHandoverManagerSignature = normalizeCurrentSignatureValue(
-      currentHeader.handoverManagerSignature
-    )
-
-    trackSignatureChange(
-      "Podpis zaměstnance",
-      currentSignatures.employee,
-      signatures.employee,
-      signedLabels,
-      clearedLabels
-    )
-    trackSignatureChange(
-      "Podpis vedoucího odboru",
-      currentSignatures.manager,
-      signatures.manager,
-      signedLabels,
-      clearedLabels
-    )
-    trackSignatureChange(
-      "Podpis Odboru služeb",
-      currentSignatures.issuer,
-      signatures.issuer,
-      signedLabels,
-      clearedLabels
-    )
-    trackSignatureChange(
-      "Podpis k předávané agendě",
-      currentHandoverManagerSignature,
-      handoverManagerSignature,
-      signedLabels,
-      clearedLabels
-    )
-
-    const incomingHandover = canEditContent
-      ? (sanitizeHandoverForJson(bodyRecord.handover) ??
-        sanitizeHandoverForJson(currentHandover))
-      : sanitizeHandoverForJson(currentHandover)
-
-    const handover = preserveHandoverSendMetadata(
-      incomingHandover,
-      currentHandover
-    )
-
-    let finalHandover = handover
-    let handoverKitt6Cancellation: {
-      email: string
-      target: string | null
-    } | null = null
-    let handoverRecipientCancellations: {
-      email: string
-      name: string
-    }[] = []
-
-    if (handover && Boolean(handoverManagerSignature?.signedAt)) {
-      const superseded = computeHandoverSupersededNotifications(
-        currentHandover,
-        handover
-      )
-      finalHandover = superseded.handover
-      handoverKitt6Cancellation = superseded.kitt6
-      handoverRecipientCancellations = superseded.recipients
+    type TxOutcome = {
+      updatedChecklist: NonNullable<
+        Awaited<ReturnType<typeof getOrCreateChecklist>>
+      >["checklist"]
+      header: ReturnType<typeof buildHeaderFromOff>
+      managerName: string | null
+      managerPosition: string | null
+      managerDepartment: string | null
+      currentHeader: Record<string, unknown>
+      currentHandover: unknown
+      updatedHeader: Prisma.InputJsonObject
+      handoverKitt6Cancellation: { email: string; target: string | null } | null
+      handoverRecipientCancellations: { email: string; name: string }[]
+      resolutionChanges: string[]
+      unresolvedItems: {
+        label: string
+        organization: string
+        note: string | null
+      }[]
+      unresolvedChanged: boolean
+      assetsAddedLabels: string[]
+      assetsUpdatedLabels: string[]
+      assetsRemovedLabels: string[]
+      signedLabels: string[]
+      clearedLabels: string[]
+      conflictOfInterestChanged: boolean
+      conflictOfInterest: boolean | null
+      handoverChanged: boolean
+      nextHandoverSummary: string
     }
 
-    const existingConflictOfInterest = toTriStateBoolean(
-      currentHeader.conflictOfInterest
-    )
-
-    const conflictOfInterest = canEditContent
-      ? toTriStateBoolean(bodyRecord.conflictOfInterest)
-      : existingConflictOfInterest
-
-    const conflictOfInterestChanged =
-      existingConflictOfInterest !== conflictOfInterest
-
-    const noAssets = canEditContent
-      ? Boolean(bodyRecord.noAssets)
-      : Boolean(currentHeader.noAssets)
-
-    const previousHandoverSummary = handoverSummaryLabel(currentHandover)
-    const nextHandoverSummary = handoverSummaryLabel(handover)
-    const handoverChanged = previousHandoverSummary !== nextHandoverSummary
-
-    const managerEmail = canEditContent
-      ? sanitizeText(bodyRecord.managerEmail) ||
-        sanitizeText(currentHeader.managerEmail) ||
-        null
-      : sanitizeText(currentHeader.managerEmail) || null
-
-    const managerName = canEditContent
-      ? sanitizeText(bodyRecord.managerName) ||
-        sanitizeText(currentHeader.managerName) ||
-        null
-      : sanitizeText(currentHeader.managerName) || null
-
-    const managerPosition = canEditContent
-      ? sanitizeText(bodyRecord.managerPosition) ||
-        sanitizeText(currentHeader.managerPosition) ||
-        null
-      : sanitizeText(currentHeader.managerPosition) || null
-
-    const managerDepartment = canEditContent
-      ? sanitizeText(bodyRecord.managerDepartment) ||
-        sanitizeText(currentHeader.managerDepartment) ||
-        null
-      : sanitizeText(currentHeader.managerDepartment) || null
-
-    const assetsEditedByHR = canEditContent
-      ? sanitizeHrEditMarker(bodyRecord.assetsEditedByHR)
-      : sanitizeHrEditMarker(currentHeader.assetsEditedByHR)
-
-    const handoverEditedByHR = canEditContent
-      ? sanitizeHrEditMarker(bodyRecord.handoverEditedByHR)
-      : sanitizeHrEditMarker(currentHeader.handoverEditedByHR)
-
-    const header = buildHeaderFromOff(off)
-    const existingCompletionMetadata =
-      getExistingCompletionMetadata(currentHeader)
-
-    const updatedHeader: Prisma.InputJsonObject = {
-      employeeName: header.employeeName,
-      personalNumber: header.personalNumber,
-      department: header.department,
-      unitName: header.unitName,
-      employmentEndDate: header.employmentEndDate,
-      managerEmail,
-      managerName,
-      managerPosition,
-      managerDepartment,
-      conflictOfInterest,
-      noAssets,
-      handoverManagerSignature: sanitizeSignatureValueForJson(
-        handoverManagerSignature
-      ),
-      assetsEditedByHR,
-      handoverEditedByHR,
-      handover: finalHandover,
-      signatures: sanitizeSignaturesForJson(signatures),
-      ...existingCompletionMetadata,
-      ...getExistingSignatureRecipientsMetadata(currentHeader),
-      sectionBResponsible: currentHeader.sectionBResponsible ?? null,
-      kitt6OptionContact: currentHeader.kitt6OptionContact ?? null,
-    }
-
-    const resolutionChanges: string[] = []
-    const unresolvedItems: {
-      label: string
-      organization: string
-      note: string | null
-    }[] = []
-    let unresolvedChanged = false
-
-    for (let index = 0; index < EXIT_CHECKLIST_ROWS.length; index++) {
-      const rowDef = EXIT_CHECKLIST_ROWS[index]
-      const incoming = items.find((item) => item.key === rowDef.key)
-      const existing = checklist.items.find((item) => item.key === rowDef.key)
-
-      const canTouchRow = canOverwriteSignature(
-        {
-          signedByEmail: existing?.signedByEmail ?? null,
-          signedAt: existing?.signedAt ?? null,
+    const txOutcome = await withSerializableRetry<TxOutcome>(async (tx) => {
+      const checklist = await tx.exitChecklist.findUnique({
+        where: { id: checklistId },
+        include: {
+          items: true,
+          assets: true,
+          offboarding: true,
         },
-        user.email,
-        canAdmin
+      })
+
+      if (!checklist) {
+        throw new ExitChecklistTransactionError("NOT_FOUND")
+      }
+
+      if (checklist.lockedAt) {
+        throw new ExitChecklistTransactionError("LOCKED")
+      }
+
+      const currentHeader = getJsonRecord(checklist.header)
+      const currentHandover = currentHeader.handover
+      const currentSignatures = getCurrentSignatures(currentHeader)
+
+      const incomingSignatures = getJsonRecord(
+        bodyRecord.signatures
+      ) as unknown as ExitChecklistSignatures
+
+      const signatures = buildNextSignatures({
+        incoming: incomingSignatures,
+        current: currentSignatures,
+        currentUserEmail: user.email,
+        canAdmin,
+      })
+
+      const handoverManagerSignature = buildNextHandoverManagerSignature({
+        incoming: bodyRecord.handoverManagerSignature,
+        currentHeader,
+        currentUserEmail: user.email,
+        canAdmin,
+      })
+
+      const signedLabels: string[] = []
+      const clearedLabels: string[] = []
+
+      const currentHandoverManagerSignature = normalizeCurrentSignatureValue(
+        currentHeader.handoverManagerSignature
       )
-
-      const isInactiveLawInfo = rowDef.key === "lawInfo" && !conflictOfInterest
-
-      const resolution = isInactiveLawInfo
-        ? ChecklistResolution.NOT_APPLICABLE
-        : incoming && canTouchRow
-          ? toResolution(incoming.resolved)
-          : (existing?.resolution ?? ChecklistResolution.NOT_APPLICABLE)
-
-      const signedByName = isInactiveLawInfo
-        ? null
-        : incoming && canTouchRow
-          ? sanitizeText(incoming.signedByName) || null
-          : (existing?.signedByName ?? null)
-
-      const signedByEmail = isInactiveLawInfo
-        ? null
-        : incoming && canTouchRow
-          ? sanitizeText(incoming.signedByEmail) || null
-          : (existing?.signedByEmail ?? null)
-
-      const signedAt = isInactiveLawInfo
-        ? null
-        : incoming && canTouchRow
-          ? incoming.signedAt
-            ? new Date(incoming.signedAt)
-            : null
-          : (existing?.signedAt ?? null)
-
-      const note = isInactiveLawInfo
-        ? null
-        : incoming && canTouchRow
-          ? sanitizeText(incoming.note) || null
-          : (existing?.note ?? null)
-
-      if (
-        existing &&
-        existing.resolution !== resolution &&
-        !isInactiveLawInfo
-      ) {
-        resolutionChanges.push(
-          `${rowDef.obligation}: ${resolutionLabel(resolution)}`
-        )
-      }
-
-      if (resolution === ChecklistResolution.NO) {
-        unresolvedItems.push({
-          label: rowDef.obligation,
-          organization: rowDef.organization,
-          note,
-        })
-
-        if (
-          existing?.resolution !== ChecklistResolution.NO ||
-          (existing?.note ?? null) !== note
-        ) {
-          unresolvedChanged = true
-        }
-      }
 
       trackSignatureChange(
-        rowDef.obligation,
-        existing
-          ? {
-              signedAt: existing.signedAt,
-              signedByEmail: existing.signedByEmail,
-            }
-          : null,
-        { signedAt, signedByEmail },
+        "Podpis zaměstnance",
+        currentSignatures.employee,
+        signatures.employee,
+        signedLabels,
+        clearedLabels
+      )
+      trackSignatureChange(
+        "Podpis vedoucího odboru",
+        currentSignatures.manager,
+        signatures.manager,
+        signedLabels,
+        clearedLabels
+      )
+      trackSignatureChange(
+        "Podpis Odboru služeb",
+        currentSignatures.issuer,
+        signatures.issuer,
+        signedLabels,
+        clearedLabels
+      )
+      trackSignatureChange(
+        "Podpis k předávané agendě",
+        currentHandoverManagerSignature,
+        handoverManagerSignature,
         signedLabels,
         clearedLabels
       )
 
-      await prisma.exitChecklistItem.upsert({
-        where: {
-          checklistId_key: {
-            checklistId: checklist.id,
-            key: rowDef.key,
-          },
-        },
-        update: {
-          department: rowDef.organization,
-          label: rowDef.obligation,
-          order: index,
-          resolution,
-          note,
-          signedByName,
-          signedByEmail,
-          signedAt,
-        },
-        create: {
-          checklistId: checklist.id,
-          key: rowDef.key,
-          department: rowDef.organization,
-          label: rowDef.obligation,
-          order: index,
-          resolution,
-          note,
-          signedByName,
-          signedByEmail,
-          signedAt,
-        },
-      })
-    }
+      const sanitizedIncomingHandover = sanitizeHandoverForJson(
+        bodyRecord.handover
+      )
+      const sanitizedCurrentHandover = sanitizeHandoverForJson(currentHandover)
 
-    const assetsAddedLabels: string[] = []
-    const assetsUpdatedLabels: string[] = []
-    const assetsRemovedLabels: string[] = []
+      const handoverChangedByClient =
+        canEditContent &&
+        sanitizedIncomingHandover !== null &&
+        (!baselineProvided ||
+          JSON.stringify(sanitizedIncomingHandover) !==
+            JSON.stringify(sanitizeHandoverForJson(baseline.handover)))
 
-    if (canEditContent) {
-      const existingAssets = await prisma.exitChecklistAsset.findMany({
-        where: { checklistId: checklist.id },
-      })
+      const incomingHandover = handoverChangedByClient
+        ? sanitizedIncomingHandover
+        : sanitizedCurrentHandover
 
-      const existingById = new Map<number, ExitChecklistAssetModel>(
-        existingAssets.map((asset) => [asset.id, asset])
+      const handover = preserveHandoverSendMetadata(
+        incomingHandover,
+        currentHandover
       )
 
-      const seenExistingIds = new Set<number>()
+      let finalHandover = handover
+      let handoverKitt6Cancellation: {
+        email: string
+        target: string | null
+      } | null = null
+      let handoverRecipientCancellations: {
+        email: string
+        name: string
+      }[] = []
 
-      for (const asset of assets) {
-        const subject = sanitizeText(asset.subject)
-        const inventoryNumber = sanitizeText(asset.inventoryNumber) || null
+      if (handover && Boolean(handoverManagerSignature?.signedAt)) {
+        const superseded = computeHandoverSupersededNotifications(
+          currentHandover,
+          handover
+        )
+        finalHandover = superseded.handover
+        handoverKitt6Cancellation = superseded.kitt6
+        handoverRecipientCancellations = superseded.recipients
+      }
 
-        if (!subject && !inventoryNumber) continue
+      const existingConflictOfInterest = toTriStateBoolean(
+        currentHeader.conflictOfInterest
+      )
 
-        const numericId = Number(asset.id)
+      const conflictOfInterest = resolveEditableField({
+        canEdit: canEditContent,
+        bodyValue: bodyRecord.conflictOfInterest,
+        baselineValue: baseline.conflictOfInterest,
+        baselineProvided,
+        currentValue: existingConflictOfInterest,
+        sanitizer: toTriStateBoolean,
+      })
 
-        if (!Number.isNaN(numericId)) {
-          const existing = existingById.get(numericId)
+      const conflictOfInterestChanged =
+        existingConflictOfInterest !== conflictOfInterest
 
-          if (!existing) continue
+      const noAssets = resolveEditableField({
+        canEdit: canEditContent,
+        bodyValue: bodyRecord.noAssets,
+        baselineValue: baseline.noAssets,
+        baselineProvided,
+        currentValue: Boolean(currentHeader.noAssets),
+        sanitizer: Boolean,
+      })
 
-          seenExistingIds.add(numericId)
+      const previousHandoverSummary = handoverSummaryLabel(currentHandover)
+      const nextHandoverSummary = handoverSummaryLabel(handover)
+      const handoverChanged = previousHandoverSummary !== nextHandoverSummary
 
-          const canTouchAsset = canAdmin || existing.createdById === userId
+      const sanitizeTextOrNull = (value: unknown) => sanitizeText(value) || null
 
-          if (!canTouchAsset) continue
+      const managerEmail = resolveEditableField({
+        canEdit: canEditContent,
+        bodyValue: bodyRecord.managerEmail,
+        baselineValue: baseline.managerEmail,
+        baselineProvided,
+        currentValue: sanitizeTextOrNull(currentHeader.managerEmail),
+        sanitizer: sanitizeTextOrNull,
+      })
+
+      const managerName = resolveEditableField({
+        canEdit: canEditContent,
+        bodyValue: bodyRecord.managerName,
+        baselineValue: baseline.managerName,
+        baselineProvided,
+        currentValue: sanitizeTextOrNull(currentHeader.managerName),
+        sanitizer: sanitizeTextOrNull,
+      })
+
+      const managerPosition = resolveEditableField({
+        canEdit: canEditContent,
+        bodyValue: bodyRecord.managerPosition,
+        baselineValue: baseline.managerPosition,
+        baselineProvided,
+        currentValue: sanitizeTextOrNull(currentHeader.managerPosition),
+        sanitizer: sanitizeTextOrNull,
+      })
+
+      const managerDepartment = resolveEditableField({
+        canEdit: canEditContent,
+        bodyValue: bodyRecord.managerDepartment,
+        baselineValue: baseline.managerDepartment,
+        baselineProvided,
+        currentValue: sanitizeTextOrNull(currentHeader.managerDepartment),
+        sanitizer: sanitizeTextOrNull,
+      })
+
+      const assetsEditedByHR = resolveEditableField({
+        canEdit: canEditContent,
+        bodyValue: bodyRecord.assetsEditedByHR,
+        baselineValue: baseline.assetsEditedByHR,
+        baselineProvided,
+        currentValue: sanitizeHrEditMarker(currentHeader.assetsEditedByHR),
+        sanitizer: sanitizeHrEditMarker,
+      })
+
+      const handoverEditedByHR = resolveEditableField({
+        canEdit: canEditContent,
+        bodyValue: bodyRecord.handoverEditedByHR,
+        baselineValue: baseline.handoverEditedByHR,
+        baselineProvided,
+        currentValue: sanitizeHrEditMarker(currentHeader.handoverEditedByHR),
+        sanitizer: sanitizeHrEditMarker,
+      })
+
+      const header = buildHeaderFromOff(checklist.offboarding)
+      const existingCompletionMetadata =
+        getExistingCompletionMetadata(currentHeader)
+
+      const updatedHeader: Prisma.InputJsonObject = {
+        employeeName: header.employeeName,
+        personalNumber: header.personalNumber,
+        department: header.department,
+        unitName: header.unitName,
+        employmentEndDate: header.employmentEndDate,
+        managerEmail,
+        managerName,
+        managerPosition,
+        managerDepartment,
+        conflictOfInterest,
+        noAssets,
+        handoverManagerSignature: sanitizeSignatureValueForJson(
+          handoverManagerSignature
+        ),
+        assetsEditedByHR,
+        handoverEditedByHR,
+        handover: finalHandover,
+        signatures: sanitizeSignaturesForJson(signatures),
+        ...existingCompletionMetadata,
+        ...getExistingSignatureRecipientsMetadata(currentHeader),
+        sectionBResponsible: currentHeader.sectionBResponsible ?? null,
+        kitt6OptionContact: currentHeader.kitt6OptionContact ?? null,
+      }
+
+      const resolutionChanges: string[] = []
+      const unresolvedItems: {
+        label: string
+        organization: string
+        note: string | null
+      }[] = []
+      let unresolvedChanged = false
+
+      for (let index = 0; index < EXIT_CHECKLIST_ROWS.length; index++) {
+        const rowDef = EXIT_CHECKLIST_ROWS[index]
+        const incoming = items.find((item) => item.key === rowDef.key)
+        const existing = checklist.items.find((item) => item.key === rowDef.key)
+
+        const canTouchRow = canOverwriteSignature(
+          {
+            signedByEmail: existing?.signedByEmail ?? null,
+            signedAt: existing?.signedAt ?? null,
+          },
+          user.email,
+          canAdmin
+        )
+
+        const isInactiveLawInfo =
+          rowDef.key === "lawInfo" && !conflictOfInterest
+
+        const resolution = isInactiveLawInfo
+          ? ChecklistResolution.NOT_APPLICABLE
+          : incoming && canTouchRow
+            ? toResolution(incoming.resolved)
+            : (existing?.resolution ?? ChecklistResolution.NOT_APPLICABLE)
+
+        const signedByName = isInactiveLawInfo
+          ? null
+          : incoming && canTouchRow
+            ? sanitizeText(incoming.signedByName) || null
+            : (existing?.signedByName ?? null)
+
+        const signedByEmail = isInactiveLawInfo
+          ? null
+          : incoming && canTouchRow
+            ? sanitizeText(incoming.signedByEmail) || null
+            : (existing?.signedByEmail ?? null)
+
+        const signedAt = isInactiveLawInfo
+          ? null
+          : incoming && canTouchRow
+            ? incoming.signedAt
+              ? new Date(incoming.signedAt)
+              : null
+            : (existing?.signedAt ?? null)
+
+        const note = isInactiveLawInfo
+          ? null
+          : incoming && canTouchRow
+            ? sanitizeText(incoming.note) || null
+            : (existing?.note ?? null)
+
+        if (
+          existing &&
+          existing.resolution !== resolution &&
+          !isInactiveLawInfo
+        ) {
+          resolutionChanges.push(
+            `${rowDef.obligation}: ${resolutionLabel(resolution)}`
+          )
+        }
+
+        if (resolution === ChecklistResolution.NO) {
+          unresolvedItems.push({
+            label: rowDef.obligation,
+            organization: rowDef.organization,
+            note,
+          })
 
           if (
-            existing.subject !== subject ||
-            existing.inventoryNumber !== inventoryNumber
+            existing?.resolution !== ChecklistResolution.NO ||
+            (existing?.note ?? null) !== note
           ) {
-            assetsUpdatedLabels.push(assetLabel(subject, inventoryNumber))
+            unresolvedChanged = true
+          }
+        }
+
+        trackSignatureChange(
+          rowDef.obligation,
+          existing
+            ? {
+                signedAt: existing.signedAt,
+                signedByEmail: existing.signedByEmail,
+              }
+            : null,
+          { signedAt, signedByEmail },
+          signedLabels,
+          clearedLabels
+        )
+
+        await tx.exitChecklistItem.upsert({
+          where: {
+            checklistId_key: {
+              checklistId: checklist.id,
+              key: rowDef.key,
+            },
+          },
+          update: {
+            department: rowDef.organization,
+            label: rowDef.obligation,
+            order: index,
+            resolution,
+            note,
+            signedByName,
+            signedByEmail,
+            signedAt,
+          },
+          create: {
+            checklistId: checklist.id,
+            key: rowDef.key,
+            department: rowDef.organization,
+            label: rowDef.obligation,
+            order: index,
+            resolution,
+            note,
+            signedByName,
+            signedByEmail,
+            signedAt,
+          },
+        })
+      }
+
+      const assetsAddedLabels: string[] = []
+      const assetsUpdatedLabels: string[] = []
+      const assetsRemovedLabels: string[] = []
+
+      if (canEditContent) {
+        const existingAssets = await tx.exitChecklistAsset.findMany({
+          where: { checklistId: checklist.id },
+        })
+
+        const existingById = new Map<number, ExitChecklistAssetModel>(
+          existingAssets.map((asset) => [asset.id, asset])
+        )
+
+        const seenExistingIds = new Set<number>()
+
+        for (const asset of assets) {
+          const subject = sanitizeText(asset.subject)
+          const inventoryNumber = sanitizeText(asset.inventoryNumber) || null
+
+          if (!subject && !inventoryNumber) continue
+
+          const numericId = Number(asset.id)
+
+          if (!Number.isNaN(numericId)) {
+            const existing = existingById.get(numericId)
+
+            if (!existing) continue
+
+            seenExistingIds.add(numericId)
+
+            const canTouchAsset = canAdmin || existing.createdById === userId
+
+            if (!canTouchAsset) continue
+
+            if (
+              existing.subject !== subject ||
+              existing.inventoryNumber !== inventoryNumber
+            ) {
+              assetsUpdatedLabels.push(assetLabel(subject, inventoryNumber))
+            }
+
+            await tx.exitChecklistAsset.update({
+              where: { id: numericId },
+              data: {
+                subject,
+                inventoryNumber,
+              },
+            })
+
+            continue
           }
 
-          await prisma.exitChecklistAsset.update({
-            where: { id: numericId },
+          await tx.exitChecklistAsset.create({
             data: {
+              checklistId: checklist.id,
               subject,
               inventoryNumber,
+              createdById: userId,
+            },
+          })
+          assetsAddedLabels.push(assetLabel(subject, inventoryNumber))
+        }
+
+        const deletableAssets = existingAssets.filter(
+          (asset) =>
+            !seenExistingIds.has(asset.id) &&
+            (canAdmin || asset.createdById === userId)
+        )
+
+        if (deletableAssets.length > 0) {
+          await tx.exitChecklistAsset.deleteMany({
+            where: {
+              id: {
+                in: deletableAssets.map((asset) => asset.id),
+              },
             },
           })
 
-          continue
-        }
-
-        await prisma.exitChecklistAsset.create({
-          data: {
-            checklistId: checklist.id,
-            subject,
-            inventoryNumber,
-            createdById: userId,
-          },
-        })
-        assetsAddedLabels.push(assetLabel(subject, inventoryNumber))
-      }
-
-      const deletableAssets = existingAssets.filter(
-        (asset) =>
-          !seenExistingIds.has(asset.id) &&
-          (canAdmin || asset.createdById === userId)
-      )
-
-      if (deletableAssets.length > 0) {
-        await prisma.exitChecklistAsset.deleteMany({
-          where: {
-            id: {
-              in: deletableAssets.map((asset) => asset.id),
-            },
-          },
-        })
-
-        for (const asset of deletableAssets) {
-          assetsRemovedLabels.push(
-            assetLabel(asset.subject, asset.inventoryNumber)
-          )
+          for (const asset of deletableAssets) {
+            assetsRemovedLabels.push(
+              assetLabel(asset.subject, asset.inventoryNumber)
+            )
+          }
         }
       }
-    }
 
-    let nextLockedAt: Date | null = checklist.lockedAt ?? null
-    let nextLockedById: string | null = checklist.lockedById ?? null
+      let nextLockedAt: Date | null = checklist.lockedAt ?? null
+      let nextLockedById: string | null = checklist.lockedById ?? null
 
-    if (lock && !nextLockedAt) {
-      nextLockedAt = new Date()
-      nextLockedById = userId
-    }
+      if (lock && !nextLockedAt) {
+        nextLockedAt = new Date()
+        nextLockedById = userId
+      }
 
-    const updatedChecklist = await prisma.exitChecklist.update({
-      where: { id: checklist.id },
-      data: {
-        header: updatedHeader,
-        lockedAt: nextLockedAt,
-        lockedById: nextLockedById,
-      },
-      include: {
-        items: true,
-        assets: true,
-        offboarding: true,
-      },
+      const updatedChecklist = await tx.exitChecklist.update({
+        where: { id: checklist.id },
+        data: {
+          header: updatedHeader,
+          lockedAt: nextLockedAt,
+          lockedById: nextLockedById,
+        },
+        include: {
+          items: true,
+          assets: true,
+          offboarding: true,
+        },
+      })
+
+      return {
+        updatedChecklist,
+        header,
+        managerName,
+        managerPosition,
+        managerDepartment,
+        currentHeader,
+        currentHandover,
+        updatedHeader,
+        handoverKitt6Cancellation,
+        handoverRecipientCancellations,
+        resolutionChanges,
+        unresolvedItems,
+        unresolvedChanged,
+        assetsAddedLabels,
+        assetsUpdatedLabels,
+        assetsRemovedLabels,
+        signedLabels,
+        clearedLabels,
+        conflictOfInterestChanged,
+        conflictOfInterest,
+        handoverChanged,
+        nextHandoverSummary,
+      }
     })
+
+    const {
+      updatedChecklist,
+      header,
+      managerName,
+      managerPosition,
+      managerDepartment,
+      currentHeader,
+      currentHandover,
+      updatedHeader,
+      handoverKitt6Cancellation,
+      handoverRecipientCancellations,
+      resolutionChanges,
+      unresolvedItems,
+      unresolvedChanged,
+      assetsAddedLabels,
+      assetsUpdatedLabels,
+      assetsRemovedLabels,
+      signedLabels,
+      clearedLabels,
+      conflictOfInterestChanged,
+      conflictOfInterest,
+      handoverChanged,
+      nextHandoverSummary,
+    } = txOutcome
 
     if (
       handoverKitt6Cancellation ||
@@ -1038,7 +1191,10 @@ export async function PUT(
       })
     }
 
-    let data = mapToExitChecklistData(off, updatedChecklist)
+    let data = mapToExitChecklistData(
+      updatedChecklist.offboarding,
+      updatedChecklist
+    )
     const completion = getExitChecklistCompletionState(data)
 
     const alreadyNotified = Boolean(
@@ -1057,7 +1213,8 @@ export async function PUT(
             offboardingId,
           })
 
-          const employeeEmail = off.userEmail?.trim() || null
+          const employeeEmail =
+            updatedChecklist.offboarding.userEmail?.trim() || null
           let employeeNotified = false
 
           if (employeeEmail) {
@@ -1078,12 +1235,14 @@ export async function PUT(
           await sendExitChecklistCompletedEmail({
             to: recipients,
             employeeName: data.employeeName,
-            employeePosition: off.positionName ?? "",
+            employeePosition: updatedChecklist.offboarding.positionName ?? "",
             employeeDepartment: [data.department, data.unitName]
               .filter(Boolean)
               .join(" – "),
             employmentEndDate:
-              off.actualEnd ?? off.plannedEnd ?? data.employmentEndDate,
+              updatedChecklist.offboarding.actualEnd ??
+              updatedChecklist.offboarding.plannedEnd ??
+              data.employmentEndDate,
             completedByName: user.name ?? user.email ?? null,
             checklistUrl: `${baseUrl}/odchody/${offboardingId}/vystupni-list`,
             pdfBuffer,
@@ -1115,7 +1274,10 @@ export async function PUT(
             },
           })
 
-          data = mapToExitChecklistData(off, completedChecklist)
+          data = mapToExitChecklistData(
+            completedChecklist.offboarding,
+            completedChecklist
+          )
         } catch (emailError) {
           console.warn(
             "[EXIT-CHECKLIST PUT] Výstupní list je dokončený, ale HR e-mail se nepodařilo odeslat:",
@@ -1131,11 +1293,13 @@ export async function PUT(
 
       if (unresolvedRecipients.length > 0) {
         try {
-          const unresolvedEndDate = off.actualEnd ?? off.plannedEnd
+          const unresolvedEndDate =
+            updatedChecklist.offboarding.actualEnd ??
+            updatedChecklist.offboarding.plannedEnd
           await sendExitChecklistUnresolvedItemsEmail({
             to: unresolvedRecipients,
             employeeName: data.employeeName,
-            employeePosition: off.positionName ?? "",
+            employeePosition: updatedChecklist.offboarding.positionName ?? "",
             employeeDepartment: [data.department, data.unitName]
               .filter(Boolean)
               .join(" – "),
@@ -1162,6 +1326,24 @@ export async function PUT(
       completion,
     })
   } catch (error) {
+    if (error instanceof ExitChecklistTransactionError) {
+      if (error.code === "LOCKED") {
+        return NextResponse.json(
+          {
+            status: "error",
+            message:
+              "Výstupní list je uzamčený. Pro další úpravy ho nejdříve odemkněte.",
+          },
+          { status: 423 }
+        )
+      }
+
+      return NextResponse.json(
+        { status: "error", message: "Odchod nenalezen." },
+        { status: 404 }
+      )
+    }
+
     console.error("[EXIT-CHECKLIST PUT] Error:", error)
 
     return NextResponse.json(

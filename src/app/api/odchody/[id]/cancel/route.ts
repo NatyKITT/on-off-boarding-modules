@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
+import { buildManagerNotifyPromptForRemoval } from "@/lib/new-record-manager-watch"
 import { canWriteOffboarding } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
@@ -135,6 +136,12 @@ export async function POST(request: NextRequest, { params }: Params) {
       return updatedRecord
     })
 
+    const managerNotifyPrompt = await buildManagerNotifyPromptForRemoval({
+      kind: "OFFBOARDING",
+      recordId: updated.id,
+      reason: "RECORD_CANCELLED",
+    })
+
     return NextResponse.json({
       status: "success",
       message: "Odchod byl zrušen.",
@@ -144,6 +151,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         cancelledBy: updated.cancelledBy,
         cancelReason: updated.cancelReason,
       },
+      managerNotifyPrompt,
     })
   } catch (error) {
     console.error("Error cancelling offboarding:", error)

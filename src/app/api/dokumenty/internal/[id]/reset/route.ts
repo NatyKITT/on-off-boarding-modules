@@ -4,6 +4,7 @@ import { DocumentStatus, Prisma } from "@prisma/client"
 
 import { prisma } from "@/lib/db"
 import { logEmploymentDocumentEvent } from "@/lib/employment-document-events"
+import { recomputeOnboardingReadiness } from "@/lib/onboarding-readiness"
 import { canManageEmploymentDocuments } from "@/lib/rbac"
 
 export const runtime = "nodejs"
@@ -15,10 +16,7 @@ export async function PATCH(_req: NextRequest, { params }: Params) {
   const session = await auth()
 
   if (!session?.user) {
-    return NextResponse.json(
-      { message: "Nejste přihlášen(a)." },
-      { status: 401 }
-    )
+    return NextResponse.json({ message: "Nejste přihlášeni." }, { status: 401 })
   }
 
   if (!canManageEmploymentDocuments(session.user.role)) {
@@ -42,6 +40,8 @@ export async function PATCH(_req: NextRequest, { params }: Params) {
     select: {
       id: true,
       isLocked: true,
+      onboardingId: true,
+      onboarding: { select: { documentsReadinessStatus: true } },
     },
   })
 
@@ -55,6 +55,16 @@ export async function PATCH(_req: NextRequest, { params }: Params) {
   if (existing.isLocked) {
     return NextResponse.json(
       { message: "Dokument je uzamčený. Nejdříve ho odemkněte." },
+      { status: 423 }
+    )
+  }
+
+  if (existing.onboarding?.documentsReadinessStatus === "LOCKED") {
+    return NextResponse.json(
+      {
+        message:
+          "Nástupní dokumenty jsou uzamčené jako hotové. Nejdřív je odemkněte.",
+      },
       { status: 423 }
     )
   }
@@ -75,6 +85,10 @@ export async function PATCH(_req: NextRequest, { params }: Params) {
       isLocked: true,
     },
   })
+
+  if (existing.onboardingId) {
+    await recomputeOnboardingReadiness(existing.onboardingId)
+  }
 
   await logEmploymentDocumentEvent({
     documentId: updated.id,

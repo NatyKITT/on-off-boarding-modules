@@ -3,6 +3,7 @@
 import { useState } from "react"
 import type { EmploymentDocumentType } from "@prisma/client"
 
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
 import { EmployeeMeta } from "@/lib/employee-meta"
 import type { PrefillSuggestion } from "@/lib/employment-document-prefill"
 
@@ -25,6 +26,9 @@ export function PublicDocumentShell({
   prefillSuggestion,
 }: Props) {
   const [submitted, setSubmitted] = useState(false)
+  const [dirty, setDirty] = useState(false)
+
+  useUnsavedChangesGuard(dirty && !submitted)
 
   if (submitted) {
     return <PublicDocumentThankYou fullPage={false} />
@@ -38,6 +42,7 @@ export function PublicDocumentShell({
       employeeMeta={employeeMeta}
       prefillSuggestion={prefillSuggestion}
       onSubmitted={() => setSubmitted(true)}
+      onDirtyChange={setDirty}
     />
   )
 }

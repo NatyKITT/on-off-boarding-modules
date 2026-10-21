@@ -42,15 +42,16 @@ GET /api/cron/probation-notifications
 
 Název endpointu je historický – původně kontroloval jen zkušební doby.
 Od verze 0.14.0 je automatika k vyhodnocení zkušební doby (logika v
-`@/lib/probation-cron-jobs`) z tohoto endpointu odebraná a dočasně
-vypnutá, protože bude řešena přes jinou aplikaci. Samotná logika v
-kódu zůstala beze změny, jen se nevolá – pro obnovení stačí
-odkomentovat import a volání v
-`src/app/api/cron/probation-notifications/route.ts`. E-mailové šablony
-a zbytek logiky k vyhodnocení zkušební doby (finální PDF, vyjádření
-tajemníka) zůstávají funkční a dál se používají při ručním odeslání
-(viz kapitola 11), jen se automaticky nezakládají nové pozvánky ani
-připomínky k vyplnění.
+`@/lib/probation-cron-jobs`) z tohoto endpointu odebraná – kód zůstal
+beze změny, jen se nevolá. Od verze 0.15.0 je navíc celé vyhodnocení
+zkušební doby vypnuté i mimo cron (agendu od 30. 10. 2026 přebírá
+Systemizace) – tlačítka v appce, veřejný formulář i jeho API routy
+jsou needitovatelné, historie dřívějších vyhodnocení zůstává vidět.
+Pro obnovení by bylo potřeba jak znovu zapojit tuto cronovou
+logiku, tak vrátit přepínač `PROBATION_EVALUATION_ENABLED` v
+`@/lib/probation-evaluation-flag`. E-mailové šablony a zbytek logiky k
+vyhodnocení zkušební doby (finální PDF, vyjádření tajemníka) v kódu
+zůstávají, ale nejsou odnikud dosažitelné, dokud je přepínač vypnutý.
 
 Tento endpoint teď na stejném denním spouštění hlídá vypršení odkazů
 k vyplnění nástupních dokumentů (čestné prohlášení, osobní dotazník,
@@ -64,23 +65,58 @@ Typicky zajišťuje:
   nevyplněné dokumenty,
 - **v den vypršení**, pokud dokument pořád není vyplněný, pošle
   upozornění Personálnímu oddělení,
-- **3 dny před plánovaným nástupem** (i zpětně, pokud je nástup už po
-  termínu) pošle upozornění Personálnímu oddělení na dokumenty, které
-  ještě vůbec nebyly zaměstnanci odeslány (`sentAt` je `null`) –
-  dokument sice i bez odeslání má `expiresAt` (nastavuje se hned při
-  vytvoření, na 14 dní dopředu), ale tahle připomínka na vypršení
-  nehledí, protože smysl má odeslat i dokument, jehož časové okno už
-  doběhlo (prostě se u něj nejdřív musí vygenerovat nový odkaz),
-- ostatní dvě připomínky výše počítají jen u dokumentů, které už byly
-  opravdu odeslány (`sentAt` vyplněné) – dokument jen založený, ale
-  neodeslaný, tam cron nehlídá (na to je právě předchozí bod),
+- **7 dní po založení záznamu nástupu** (ne podle plánovaného data
+  nástupu – u nástupů je to obráceně než u výstupního listu, kde se
+  čeká až do posledního měsíce před koncem) pošle upozornění
+  Personálnímu oddělení na dokumenty, které ještě vůbec nebyly
+  zaměstnanci odeslány (`sentAt` je `null`) – dokument sice i bez
+  odeslání má `expiresAt` (nastavuje se hned při vytvoření, na 14 dní
+  dopředu), ale tahle připomínka na vypršení nehledí, protože smysl má
+  odeslat i dokument, jehož časové okno už doběhlo (prostě se u něj
+  nejdřív musí vygenerovat nový odkaz). Pokud HR do dalších 3 dnů
+  odkazy pořád neodešle, připomínka se **opakuje každé 3 dny**, dokud
+  se nevyřeší,
+- **stejné okno a stejné opakování (7 dní po založení, pak každé 3
+  dny)** navíc hlídá, jestli u nástupu, kde už je vyplněný osobní
+  dotazník, nebyla ještě zaslána **žádost o pracovnělékařskou
+  prohlídku** (`medicalExamRequestSentAt` je `null`) – logika v
+  `@/lib/employment-document-cron-jobs`, funkce
+  `ensureEmploymentDocumentReminders`. Pokud u jednoho nástupu ve
+  stejný den platí obě upozornění (dokumenty i žádost), pošle se
+  **jeden společný e-mail** s oběma částmi pod sebou, ne dva
+  samostatné. Idempotence řešená přes `OnboardingChangeLog` (ne přes
+  historii konkrétního dokumentu, žádost o prohlídku žádný dokument
+  v tomto smyslu nemá), časově omezená na posledních 3 dny – starší
+  záznam se už nepočítá a připomínka se zařadí znovu,
+- **jakmile uplyne plánovaný den nástupu a nikdo v appce nepotvrdil
+  skutečný nástup** (`actualStart` je `null`), appka to připomene
+  Personálnímu oddělení – pokud je takových nástupů ve stejný běh
+  cronu víc, sejdou se v **jednom společném e-mailu** (ne jeden e-mail
+  na každý záznam). Opakuje se každé 3 dny, dokud někdo v appce
+  nepotvrdí skutečný nástup, nebo dokud se záznam nezruší/nesmaže,
+- **jakmile jsou u nástupu nástupní dokumenty i žádost o
+  pracovnělékařskou prohlídku kompletně hotové na 100 %** (appka to
+  pozná sama – pole `documentsReadinessStatus` se automaticky přepne
+  na `READY`), ale HR to v okně Dokumenty ještě neoznačila jako hotové
+  a nezamkla, appka o tom pošle Personálnímu oddělení e-mail – opět
+  případně víc záznamů najednou v jednom e-mailu, opakovaně každé
+  3 dny, **bez ohledu na to, jestli už nástup mezitím přešel na
+  skutečný** – i tam je potřeba to doplnit a zamknout. Zamčení pak
+  blokuje další úpravy dokumentů i žádosti o prohlídku, dokud HR nebo
+  ADMIN záznam neodemkne,
+- ostatní dvě připomínky na začátku této kapitoly počítají jen
+  u dokumentů, které už byly opravdu odeslány (`sentAt` vyplněné) –
+  dokument jen založený, ale neodeslaný, tam cron nehlídá (na to jsou
+  právě předchozí body),
 - e-maily posílá přímo (synchronně), ne přes `MailQueue` – idempotence
-  (aby se stejná připomínka neposlala dvakrát) je řešená přes historii
-  dokumentu (`EmploymentDocumentEvent`), ne přes frontu. Počítá se
-  vždy jen od posledního vytvoření/obnovení odkazu (`CREATED`/
+  (aby se stejná připomínka neposlala dvakrát) je u expirace řešená
+  přes historii dokumentu (`EmploymentDocumentEvent`), počítanou vždy
+  jen od posledního vytvoření/obnovení odkazu (`CREATED`/
   `REGENERATED` událost) – po vygenerování nového odkazu se tak
   počítání připomínek vynuluje a stejný typ připomínky může přijít
-  znovu pro nový cyklus.
+  znovu pro nový cyklus. U "nebylo odesláno", "nepotvrzen nástup" a
+  "100 % hotovo, nezamčeno" je idempotence místo toho časové okno
+  (posledních 3 dny), ne vázaná na konkrétní cyklus odkazu.
 
 Důležité: na rozdíl od dřívějšího chování k zkušební době tento
 endpoint e-maily posílá přímo, ne přes e-mailovou frontu.
@@ -101,8 +137,8 @@ musí být `null`). Jakmile se odchod potvrdí jako skutečný
 nemají smysl. Je to záměrně opačná logika než u nástupů (tam se
 zkušební doba řeší až po potvrzení skutečného nástupu).
 
-Řeší dva samostatné typy připomínek, vždy nejvýš jednou za dané okno a
-daný odchod:
+Řeší čtyři samostatné typy připomínek (A a B nejvýš jednou za dané okno
+a daný odchod, C a D opakovaně po 3 dnech, dokud se nevyřeší):
 
 **A) Kontrola před odesláním pozvánek k podpisu** (typ úlohy
 `NOTICE_WARNING`, funkce `queueExitChecklistSetupReminders`) – hlídá,
@@ -175,19 +211,38 @@ v okamžicích **14, 7, 5, 3, 2, 1 a 0 dní** před plánovaným koncem:
 
 **C) Potvrzení, že plánovaný odchod skutečně proběhl** (typ úlohy
 `OFFBOARDING_DEPARTURE_CONFIRMATION`, funkce
-`queueOffboardingDepartureConfirmations`) – přesně **1 den po**
-plánovaném konci (`plannedEnd` padlo do včerejška), jednorázově:
+`queueOffboardingDepartureConfirmations`) – od **dne, kdy nastal**
+plánovaný konec (`plannedEnd` padlo na dnešek nebo dřív), a dál
+**opakovaně každé 3 dny**, dokud není vyřešeno:
 
 - dohledá plánované odchody (bez `actualEnd`, bez `cancelledAt`),
-  kterým právě včera uplynul plánovaný konec a nikdo v appce
-  nepotvrdil, jestli k odchodu skutečně došlo,
+  kterým už uplynul nebo právě dnes uplývá plánovaný konec a nikdo
+  v appce dosud nepotvrdil, jestli k odchodu skutečně došlo,
 - pošle HR (`HR_EMAILS`) jeden e-mail na zaměstnance s odkazem do
   přehledu Odchodů, kde je stejná situace zároveň vidět jako červený
   banner (s možností rovnou potvrdit nebo označit jako neuskutečněný,
   u více záznamů i hromadně),
-- jde o jednorázovou připomínku vázanou na přesné okno "včera" – žádné
-  další sledovací pole u odchodu pro to není potřeba, okno se samo
-  druhý den uzavře.
+- připomínka se **opakuje každé 3 dny**, dokud HR skutečný konec
+  nepotvrdí (`actualEnd` se vyplní) nebo odchod nezruší/nesmaže –
+  stejný princip jako u obdobné "nastoupil opravdu?" připomínky
+  u nástupů v kapitole 2.1, jen v opačném směru (konec místo začátku).
+
+**D) Upomínka na odemčený, ale hotový výstupní list** (typ úlohy
+`NOTICE_WARNING`, funkce `queueExitChecklistLockReminders`) – na rozdíl
+od A/B/C neběží v časovém okně vázaném na `plannedEnd`, ale podle stavu
+checklistu, a **opakuje se každé 3 dny**, dokud se nevyřeší:
+
+- dohledá odchody (bez `actualEnd`, bez `cancelledAt`), jejichž výstupní
+  list je **100 % kompletní a podepsaný** (`getExitChecklistCompletionState`),
+  ale v appce ještě **nebyl uzamčený** (`lockedAt` je prázdné),
+- pošle HR (`HR_EMAILS`) jeden souhrnný e-mail s výzvou, ať to zkontrolují
+  a uzamknou pro další úpravy,
+- připomínka se **opakuje každé 3 dny**, dokud HR výstupní list
+  neuzamkne (dřív šlo o upomínku prakticky každý den – sjednoceno se
+  stejnou 3denní periodou jako ostatní "je to hotové, zamkněte"
+  připomínka u nástupních dokumentů, viz kapitola 2.1),
+- zápis události `DEADLINE_REMINDER_SENT` do historie výstupního listu
+  (`reminderKind: "COMPLETED_NOT_LOCKED"`).
 
 Řádek podpisu zaměstnance na veřejném odkaze (`/odchody-public/[token]`)
 navíc smí podepsat jen účet přihlášený přes Google se stejným e-mailem,
@@ -237,6 +292,38 @@ Primárně je ale vhodné používat konkrétní endpointy:
 /api/cron/probation-notifications
 /api/cron/mail-worker
 ```
+
+### 2.5 Hlídání nových nástupů/odchodů bez vedoucího odboru
+
+Součást endpointů `probation-notifications` (nástupy) a
+`offboarding-notifications` (odchody), implementace v
+`@/lib/new-record-manager-watch.ts`. Při každém denním běhu projde
+nástupy/odchody založené **ode dne, kdy tato automatika poprvé skutečně
+proběhla** (hranice se spočítá jako začátek toho měsíce a trvale uloží do
+`SystemSettings` pod klíčem `newRecordManagerWatchSince` – starší záznamy
+založené před nasazením se tím automaticky nikdy nezahrnou, bez nutnosti
+cokoli v databázi zpětně přeznačovat).
+
+U každého takového záznamu (bez ohledu na to, jestli jde o plánovaný nebo
+už skutečný nástup/odchod, dokud nebyl smazán nebo zrušen):
+
+- **Chybí vedoucí odboru** (`supervisorEmail` prázdné) – pošle se e-mail
+  HR (`HR_EMAILS`), že u konkrétního záznamu chybí vedoucí; opakuje se
+  každý den, dokud vedoucí není doplněn (dedup podle dne, typu záznamu a
+  jeho id). Jede přes `MailQueue` typ `NOTICE_WARNING` s
+  `payload.noticeKind = "NEW_RECORD_MISSING_MANAGER"`.
+- **Vedoucí odboru je vyplněný** – pošle se jemu (jednorázově, nikdy
+  znovu pro stejný záznam) informační e-mail, že byl zaevidován nový
+  předpokládaný nástup/odchod, u kterého je uveden jako vedoucí, s
+  odkazem na detail záznamu v appce a instrukcí, že se má přihlásit
+  firemním Google účtem (@praha6.cz/@kitt6.cz) – většina vedoucích má
+  v appce roli READONLY a do záznamu se tak dostane; pokud ne, e-mail
+  odkazuje na administrátora appky a na kontakty Personálního oddělení.
+  Jede přes `MailQueue`, vlastní typ `NEW_RECORD_MANAGER_NOTICE`.
+
+Obě upozornění se posílají jen k informaci o nově zaevidovaném
+(předpokládaném) záznamu – nejde o potvrzení, že k nástupu/odchodu
+skutečně došlo.
 
 ---
 
@@ -1121,9 +1208,9 @@ Doporučené dokumentovat:
 
 ## 17. Rychlá odpověď na otázku „co to dělá?“
 
-Cron `probation-notifications` automaticky hlídá vypršení odkazů k vyplnění nástupních dokumentů a posílá upozornění zaměstnanci (3 dny předem), HR (v den vypršení) i HR na dokumenty, které ještě vůbec nebyly odeslány (3 dny před plánovaným nástupem). Automatika k zkušební době je v něm od verze 0.14.0 dočasně vypnutá – bude řešena přes jinou aplikaci.
+Cron `probation-notifications` automaticky hlídá vypršení odkazů k vyplnění nástupních dokumentů a posílá upozornění zaměstnanci (3 dny předem) i HR (v den vypršení). Navíc HR upozorní na dokumenty a žádost o pracovnělékařskou prohlídku, které ještě vůbec nebyly odeslány – 7 dní po založení záznamu nástupu, pak opakovaně každé 3 dny (obě upozornění se v jeden den spojí do jednoho e-mailu). Dál hlídá, jestli po plánovaném dni nástupu někdo potvrdil skutečný nástup, a jestli jsou nástupní dokumenty i žádost hotové na 100 % a HR to ještě neoznačila jako hotové/zamčené – obojí opakovaně po 3 dnech. Automatika k zkušební době je v něm od verze 0.14.0 odpojená a od verze 0.15.0 je celé vyhodnocení zkušební doby vypnuté i mimo cron – agendu přebírá Systemizace.
 
-Cron pro blížící se konec pracovního poměru automaticky hlídá plánované odchody (dosud bez potvrzeného skutečného konce). Dřív než se vůbec odešlou první pozvánky k podpisu zkontroluje, že HR má vyplněného vedoucího odboru a rozhodnutý střet zájmů (od 1 měsíce před koncem, u krátké výpovědní doby hned). Po odeslání pozvánek pak na škále 14/7/5/3/2/1/0 dní předem posílá cílené připomínky konkrétním nepodepsaným příjemcům (s poznámkou podle jejich role) a na stejné dny i souhrnný report pro HR, kdo ještě nepodepsal.
+Cron pro blížící se konec pracovního poměru automaticky hlídá plánované odchody (dosud bez potvrzeného skutečného konce). Dřív než se vůbec odešlou první pozvánky k podpisu zkontroluje, že HR má vyplněného vedoucího odboru a rozhodnutý střet zájmů (od 1 měsíce před koncem, u krátké výpovědní doby hned). Po odeslání pozvánek pak na škále 14/7/5/3/2/1/0 dní předem posílá cílené připomínky konkrétním nepodepsaným příjemcům (s poznámkou podle jejich role) a na stejné dny i souhrnný report pro HR, kdo ještě nepodepsal. Od plánovaného konce opakovaně po 3 dnech upozorňuje HR, pokud nikdo nepotvrdil, že k odchodu skutečně došlo, a stejně opakovaně po 3 dnech hlídá i opačný případ – hotový a podepsaný výstupní list, který v appce ještě není uzamčený.
 
 Mail worker následně bere připravené zprávy z e-mailové fronty a fyzicky je odesílá přes Resend.
 

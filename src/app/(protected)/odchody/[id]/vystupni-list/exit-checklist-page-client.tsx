@@ -16,20 +16,13 @@ import { useSession } from "next-auth/react"
 
 import type { ExitChecklistData } from "@/types/exit-checklist"
 
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
 import { formatDayCountCs, getDaysRemaining } from "@/lib/dates"
 import { getExitChecklistCompletionState } from "@/lib/exit-checklist-completion"
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Button, buttonVariants } from "@/components/ui/button"
+import { SavingButtonLabel } from "@/components/common/saving-button-label"
+import { UnsavedChangesDialog } from "@/components/common/unsaved-changes-dialog"
 import { ExitChecklistForm } from "@/components/forms/exit-checklist-form"
 
 type Props = {
@@ -52,7 +45,7 @@ function DeadlineBanner({ daysToEnd }: { daysToEnd: number }) {
       <div>
         <p className="font-medium">
           {daysToEnd >= 0
-            ? `Zaměstnanec brzy odejde – konec pracovního poměru za ${formatDayCountCs(daysToEnd === 0 ? 1 : daysToEnd)}.`
+            ? `Blíží se konec pracovního poměru – za ${formatDayCountCs(daysToEnd === 0 ? 1 : daysToEnd)}.`
             : `Pracovní poměr skončil před ${formatDayCountCs(Math.abs(daysToEnd))}.`}
         </p>
         <p className="mt-0.5 text-xs">
@@ -80,10 +73,12 @@ export function ExitChecklistPageClient({
   const [error, setError] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
   const [saved, setSaved] = useState(false)
-  const [showUnsavedDialog, setShowUnsavedDialog] = useState(false)
   const [saveTrigger, setSaveTrigger] = useState(0)
-  const pendingNavRef = useRef<string | null>(null)
+  const [formSaving, setFormSaving] = useState(false)
   const saveAndLeaveRef = useRef(false)
+
+  const { isDialogOpen, guardAction, closeDialog, proceed } =
+    useUnsavedChangesGuard(dirty)
 
   useEffect(() => {
     let cancelled = false
@@ -127,17 +122,6 @@ export function ExitChecklistPageClient({
     }
   }, [offboardingId])
 
-  useEffect(() => {
-    if (!dirty) return
-
-    function handleBeforeUnload(e: BeforeUnloadEvent) {
-      e.preventDefault()
-    }
-
-    window.addEventListener("beforeunload", handleBeforeUnload)
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload)
-  }, [dirty])
-
   const handleSaved = useCallback(
     (newData: ExitChecklistData) => {
       setData(newData)
@@ -147,34 +131,23 @@ export function ExitChecklistPageClient({
 
       if (saveAndLeaveRef.current) {
         saveAndLeaveRef.current = false
-        if (pendingNavRef.current) {
-          router.push(pendingNavRef.current)
-          pendingNavRef.current = null
-        }
+        proceed()
       }
     },
-    [router]
+    [proceed]
   )
 
   function handleBackClick(e: React.MouseEvent, href: string) {
-    if (dirty) {
-      e.preventDefault()
-      pendingNavRef.current = href
-      setShowUnsavedDialog(true)
-    }
+    e.preventDefault()
+    guardAction(() => router.push(href))
   }
 
-  function confirmLeave() {
-    setShowUnsavedDialog(false)
+  function discardAndLeave() {
     setDirty(false)
-    if (pendingNavRef.current) {
-      router.push(pendingNavRef.current)
-      pendingNavRef.current = null
-    }
+    proceed()
   }
 
   function saveAndLeave() {
-    setShowUnsavedDialog(false)
     saveAndLeaveRef.current = true
     setSaveTrigger((t) => t + 1)
   }
@@ -220,10 +193,18 @@ export function ExitChecklistPageClient({
                 size="sm"
                 className="gap-1 bg-[#00847C] text-white hover:bg-[#0B6D73]"
                 onClick={() => setSaveTrigger((t) => t + 1)}
-                disabled={!dirty}
+                disabled={!dirty || formSaving}
               >
-                <Save className="size-4" />
-                Uložit
+                <SavingButtonLabel
+                  saving={formSaving}
+                  savingText="Ukládám…"
+                  idleText={
+                    <>
+                      <Save className="size-4" />
+                      Uložit
+                    </>
+                  }
+                />
               </Button>
               <button
                 type="button"
@@ -275,6 +256,7 @@ export function ExitChecklistPageClient({
               mode="internal"
               initialData={data}
               onDirtyChange={setDirty}
+              onSavingChange={setFormSaving}
               onSaved={handleSaved}
               externalSaveTrigger={saveTrigger}
             />
@@ -291,10 +273,18 @@ export function ExitChecklistPageClient({
                   size="sm"
                   className="gap-1 bg-[#00847C] text-white hover:bg-[#0B6D73]"
                   onClick={() => setSaveTrigger((t) => t + 1)}
-                  disabled={!dirty}
+                  disabled={!dirty || formSaving}
                 >
-                  <Save className="size-4" />
-                  Uložit
+                  <SavingButtonLabel
+                    saving={formSaving}
+                    savingText="Ukládám…"
+                    idleText={
+                      <>
+                        <Save className="size-4" />
+                        Uložit
+                      </>
+                    }
+                  />
                 </Button>
               </div>
             )}
@@ -302,32 +292,13 @@ export function ExitChecklistPageClient({
         )}
       </div>
 
-      <AlertDialog open={showUnsavedDialog} onOpenChange={setShowUnsavedDialog}>
-        <AlertDialogContent className="max-w-md">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Neuložené změny</AlertDialogTitle>
-            <AlertDialogDescription>
-              Ve výstupním listu jsou neuložené změny. Pokud odejdete, přijdete
-              o ně.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Zůstat</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={confirmLeave}
-            >
-              Odejít bez uložení
-            </AlertDialogAction>
-            <AlertDialogAction
-              className="bg-[#00847C] text-white hover:bg-[#0B6D73]"
-              onClick={saveAndLeave}
-            >
-              Uložit a odejít
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <UnsavedChangesDialog
+        open={isDialogOpen}
+        onStay={closeDialog}
+        onDiscard={discardAndLeave}
+        onSaveAndLeave={saveAndLeave}
+        saving={formSaving}
+      />
     </div>
   )
 }

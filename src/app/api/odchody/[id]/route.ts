@@ -12,6 +12,10 @@ import {
   pickMostRelevantOnboarding,
 } from "@/lib/employment-linking"
 import {
+  buildManagerNotifyPromptForChanges,
+  buildManagerNotifyPromptForRemoval,
+} from "@/lib/new-record-manager-watch"
+import {
   getUserKey,
   getUserLabel,
   syncLinkedProbationAfterOffboardingDecision,
@@ -426,13 +430,20 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         }
       }
 
-      return updatedRecord
+      return { updatedRecord, changes }
+    })
+
+    const managerNotifyPrompt = await buildManagerNotifyPromptForChanges({
+      kind: "OFFBOARDING",
+      recordId: id,
+      changes: updated.changes,
     })
 
     return NextResponse.json({
       status: "success",
       message: "Záznam byl úspěšně aktualizován.",
-      data: await serializeOffboardingRecord(updated),
+      data: await serializeOffboardingRecord(updated.updatedRecord),
+      managerNotifyPrompt,
     })
   } catch (err) {
     if (err instanceof ZodError) {
@@ -640,6 +651,12 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     }
   })
 
+  const managerNotifyPrompt = await buildManagerNotifyPromptForRemoval({
+    kind: "OFFBOARDING",
+    recordId: before.id,
+    reason: "RECORD_DELETED",
+  })
+
   return NextResponse.json({
     status: "success",
     message: "Záznam byl úspěšně smazán.",
@@ -649,5 +666,6 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       deletedAt: now.toISOString(),
       deletedBy: userKey,
     },
+    managerNotifyPrompt,
   })
 }

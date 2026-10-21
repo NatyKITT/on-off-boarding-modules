@@ -34,6 +34,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { EmployeeCombobox } from "@/components/common/employee-combobox"
+import type { ManagerNotifyPrompt } from "@/components/common/manager-notify-dialog"
 import {
   buildPersonFullName,
   PersonLookupCombobox,
@@ -88,7 +89,11 @@ type Props = {
   prefillDate?: string
   editContext?: "planned" | "actual"
   excludePersonalNumbers?: string[]
-  onSuccess?: (newId?: number) => void | Promise<void>
+  onSuccess?: (
+    newId?: number,
+    managerNotifyPrompt?: ManagerNotifyPrompt
+  ) => void | Promise<void>
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 const undefIfEmpty = (v?: string | null) =>
@@ -201,6 +206,7 @@ export function OffboardingFormUnified({
   editContext,
   excludePersonalNumbers = [],
   onSuccess,
+  onDirtyChange,
 }: Props) {
   const isReadonly = useIsReadonly()
   const effectiveMode: Mode = useMemo(
@@ -362,6 +368,12 @@ export function OffboardingFormUnified({
   }, [id, effectiveMode, form])
 
   const isSubmitting = form.formState.isSubmitting
+  const isDirty = form.formState.isDirty
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty)
+  }, [isDirty, onDirtyChange])
+
   const watchPersonal = form.watch("personalNumber")
 
   useEffect(() => {
@@ -639,7 +651,8 @@ export function OffboardingFormUnified({
     }
 
     setSuccessName(`${values.name} ${values.surname}`)
-    await onSuccess?.(json?.data?.id)
+    form.reset(values)
+    await onSuccess?.(json?.data?.id, json?.managerNotifyPrompt ?? null)
     setOpenSuccess(true)
   }
 
@@ -754,7 +767,7 @@ export function OffboardingFormUnified({
 
       closeDeleteConfirm()
       setSuccessName(form.getValues("name") + " " + form.getValues("surname"))
-      await onSuccess?.()
+      await onSuccess?.(undefined, json?.managerNotifyPrompt ?? null)
       setOpenSuccess(true)
     } catch (err) {
       closeDeleteConfirm()

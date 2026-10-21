@@ -51,6 +51,7 @@ import {
 } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 import { AssignCompanyDataDialog } from "@/components/common/assign-company-data-dialog"
+import type { ManagerNotifyPrompt } from "@/components/common/manager-notify-dialog"
 import {
   buildPersonFullName,
   PersonLookupCombobox,
@@ -134,11 +135,15 @@ type Props = {
   defaultCreateMode?: Mode
   prefillDate?: string
   editContext?: "planned" | "actual"
-  onSuccess?: (newId?: number) => void
+  onSuccess?: (
+    newId?: number,
+    managerNotifyPrompt?: ManagerNotifyPrompt
+  ) => void
   personalNumberMeta?: PersonalNumberMeta
   validatePersonalNumber?: (
     personalNumber: string
   ) => Promise<PersonalNumberCheckResult>
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 type OnboardingPayload = Record<string, unknown> & {
@@ -555,6 +560,7 @@ export function OnboardingFormUnified({
   onSuccess,
   personalNumberMeta,
   validatePersonalNumber,
+  onDirtyChange,
 }: Props) {
   const isReadonly = useIsReadonly()
   const effectiveMode: Mode = useMemo(
@@ -815,6 +821,11 @@ export function OnboardingFormUnified({
   }, [id, effectiveMode, form])
 
   const isSubmitting = form.formState.isSubmitting
+  const isDirty = form.formState.isDirty
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty)
+  }, [isDirty, onDirtyChange])
 
   const watchPositionNum = form.watch("positionNum")
   const watchPositionName = form.watch("positionName")
@@ -1531,7 +1542,8 @@ export function OnboardingFormUnified({
         name: fullName,
       })
 
-      onSuccess?.(json?.data?.id)
+      form.reset(values)
+      onSuccess?.(json?.data?.id, json?.managerNotifyPrompt ?? null)
     } catch (err) {
       setErrorModal({
         open: true,

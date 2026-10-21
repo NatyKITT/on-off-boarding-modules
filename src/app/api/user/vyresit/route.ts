@@ -49,7 +49,7 @@ async function requireInternalReadAccess() {
   if (!session?.user) {
     return {
       error: NextResponse.json(
-        { status: "error", message: "Nejste přihlášen(a)." },
+        { status: "error", message: "Nejste přihlášeni." },
         { status: 401 }
       ),
     }

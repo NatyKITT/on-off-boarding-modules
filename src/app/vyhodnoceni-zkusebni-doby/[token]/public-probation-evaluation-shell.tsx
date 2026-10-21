@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { CheckCircle, Loader2, XCircle } from "lucide-react"
 
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
+
 import { Button } from "@/components/ui/button"
 import {
   ProbationEvaluationForm,
@@ -216,6 +218,8 @@ export function PublicProbationEvaluationShell({ token, employeeName }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [savedMessage, setSavedMessage] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
+  const [tajemnikDirty, setTajemnikDirty] = useState(false)
+  useUnsavedChangesGuard(dirty || tajemnikDirty)
   const [showLoginSuccess, setShowLoginSuccess] = useState(loginSuccess)
   const [sendingPdf, setSendingPdf] = useState(false)
   const [pdfSentMessage, setPdfSentMessage] = useState<string | null>(null)
@@ -326,21 +330,6 @@ export function PublicProbationEvaluationShell({ token, employeeName }: Props) {
 
     return () => window.clearTimeout(timeout)
   }, [showLoginSuccess])
-
-  useEffect(() => {
-    if (!dirty) return
-
-    function handleBeforeUnload(event: BeforeUnloadEvent) {
-      event.preventDefault()
-      event.returnValue = ""
-    }
-
-    window.addEventListener("beforeunload", handleBeforeUnload)
-
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload)
-    }
-  }, [dirty])
 
   async function handleSubmit(values: ProbationEvaluationFormValues) {
     if (submitting || locked || unavailable) return
@@ -637,6 +626,7 @@ export function PublicProbationEvaluationShell({ token, employeeName }: Props) {
             currentUserName={data.currentUser?.name ?? ""}
             currentUserEmail={data.currentUser?.email ?? ""}
             onSubmit={handleTajemnikSubmit}
+            onDirtyChange={setTajemnikDirty}
           />
         )}
 

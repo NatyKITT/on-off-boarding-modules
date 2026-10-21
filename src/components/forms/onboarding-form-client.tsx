@@ -4,6 +4,8 @@ import { useCallback } from "react"
 
 import type { Position } from "@/types/position"
 
+import type { ManagerNotifyPrompt } from "@/components/common/manager-notify-dialog"
+
 import {
   OnboardingFormUnified,
   type FormValues,
@@ -19,8 +21,12 @@ type Props = {
   defaultCreateMode?: "create-planned" | "create-actual" | "edit"
   prefillDate?: string
   editContext?: "planned" | "actual"
-  onSuccess?: (newId?: number) => void
+  onSuccess?: (
+    newId?: number,
+    managerNotifyPrompt?: ManagerNotifyPrompt
+  ) => void
   personalNumberMeta?: PersonalNumberMeta
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 export function OnboardingFormClient(props: Props) {

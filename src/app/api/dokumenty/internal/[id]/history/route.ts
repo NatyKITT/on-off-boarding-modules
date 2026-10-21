@@ -16,7 +16,7 @@ export async function GET(
 
   if (!session?.user) {
     return NextResponse.json(
-      { status: "error", message: "Nejste přihlášen(a)." },
+      { status: "error", message: "Nejste přihlášeni." },
       { status: 401 }
     )
   }

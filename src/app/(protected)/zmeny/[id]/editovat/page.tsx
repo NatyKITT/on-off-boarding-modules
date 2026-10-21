@@ -7,9 +7,11 @@ import { type Position } from "@/types/position"
 
 import { useIsReadonly } from "@/hooks/use-current-role"
 import { useToast } from "@/hooks/use-toast"
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { UnsavedChangesDialog } from "@/components/common/unsaved-changes-dialog"
 import { EmployeeChangeForm } from "@/components/forms/employee-change-form"
 
 type RawPosition = {
@@ -104,6 +106,9 @@ export default function EmployeeChangeEditPage({ params }: PageProps) {
   const [loadingPositions, setLoadingPositions] = React.useState(false)
   const [positions, setPositions] = React.useState<Position[]>([])
   const [row, setRow] = React.useState<Record<string, unknown> | null>(null)
+  const [dirty, setDirty] = React.useState(false)
+  const { isDialogOpen, guardAction, closeDialog, proceed } =
+    useUnsavedChangesGuard(dirty)
 
   const numericId = Number(params.id)
   const isValidId = Number.isFinite(numericId)
@@ -204,9 +209,11 @@ export default function EmployeeChangeEditPage({ params }: PageProps) {
         <Button
           variant="outline"
           onClick={() =>
-            isValidId
-              ? router.push(`/zmeny/${numericId}`)
-              : router.push("/zmeny")
+            guardAction(() =>
+              isValidId
+                ? router.push(`/zmeny/${numericId}`)
+                : router.push("/zmeny")
+            )
           }
         >
           Zpět na detail
@@ -229,6 +236,7 @@ export default function EmployeeChangeEditPage({ params }: PageProps) {
               id={numericId}
               mode="edit"
               initial={row}
+              onDirtyChange={setDirty}
               onSuccess={async () => {
                 toast({
                   title: "Uloženo",
@@ -243,6 +251,15 @@ export default function EmployeeChangeEditPage({ params }: PageProps) {
           )}
         </CardContent>
       </Card>
+
+      <UnsavedChangesDialog
+        open={isDialogOpen}
+        onStay={closeDialog}
+        onDiscard={() => {
+          setDirty(false)
+          proceed()
+        }}
+      />
     </div>
   )
 }

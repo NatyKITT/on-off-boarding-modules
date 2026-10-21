@@ -38,7 +38,7 @@ export async function POST(
 
   if (!user) {
     return NextResponse.json(
-      { status: "error", message: "Nejste přihlášen(a)." },
+      { status: "error", message: "Nejste přihlášeni." },
       { status: 401 }
     )
   }

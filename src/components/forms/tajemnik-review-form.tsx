@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import type { ProbationFormType } from "@prisma/client"
 import { Check, Undo2 } from "lucide-react"
 
@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Textarea } from "@/components/ui/textarea"
+import { SavingButtonLabel } from "@/components/common/saving-button-label"
 
 export type TajemnikReviewEmployeeMeta = {
   fullName?: string | null
@@ -62,6 +63,7 @@ type Props = {
   currentUserName: string
   currentUserEmail: string
   onSubmit: (values: TajemnikReviewSubmitValues) => void | Promise<void>
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 function fmtDateTime(value?: string | null) {
@@ -123,6 +125,7 @@ export function TajemnikReviewForm({
   currentUserName,
   currentUserEmail,
   onSubmit,
+  onDirtyChange,
 }: Props) {
   const [agreement, setAgreement] = useState<"yes" | "no" | "">("")
   const [comment, setComment] = useState("")
@@ -134,6 +137,10 @@ export function TajemnikReviewForm({
   const resolvedCurrentUserName = signatureName || currentUserName
 
   const isSigned = Boolean(signedAt)
+
+  useEffect(() => {
+    onDirtyChange?.(agreement !== "" || comment.trim() !== "" || isSigned)
+  }, [agreement, comment, isSigned, onDirtyChange])
 
   function sign() {
     if (!canSubmit) return
@@ -293,7 +300,7 @@ export function TajemnikReviewForm({
         <div className="space-y-3 rounded-md border-2 border-muted-foreground/25 bg-muted/20 p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Vyplněné vyhodnocení vedoucím odboru
+              Vyplněné vyhodnocení
             </div>
             <Badge variant="outline" className="gap-1 bg-white">
               <Check className="size-3" />
@@ -466,7 +473,11 @@ export function TajemnikReviewForm({
             onClick={() => void handleSubmit()}
             className="h-auto min-h-10 whitespace-normal bg-[#00847C] px-4 py-2.5 text-sm leading-snug text-white hover:bg-[#0B6D73]"
           >
-            {isSubmitting ? "Ukládám a odesílám…" : "Odeslat vyjádření"}
+            <SavingButtonLabel
+              saving={isSubmitting}
+              savingText="Ukládám a odesílám…"
+              idleText="Odeslat vyjádření"
+            />
           </Button>
         )}
       </CardContent>

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
+import { PROBATION_EVALUATION_ENABLED } from "@/lib/probation-evaluation-flag"
 import {
   buildFullName,
   isAllowedEmployeeEmail,
@@ -21,7 +22,17 @@ function InvalidLink() {
   )
 }
 
+function DisabledNotice() {
+  return (
+    <PublicLinkInvalid description="Vyhodnocení zkušební doby bylo přesunuto do Systemizace. Tento odkaz už není aktivní." />
+  )
+}
+
 export default async function PublicProbationEvaluationPage({ params }: Props) {
+  if (!PROBATION_EVALUATION_ENABLED) {
+    return <DisabledNotice />
+  }
+
   const token = params.token?.trim()
 
   const session = await auth()

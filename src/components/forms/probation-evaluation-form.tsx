@@ -12,6 +12,7 @@ import { z } from "zod"
 
 import { useSignatureName } from "@/hooks/use-signature-name"
 
+import { SavingButtonLabel } from "@/components/common/saving-button-label"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -1198,9 +1199,11 @@ export function ProbationEvaluationForm({
                     disabled={isSubmitting}
                     className="h-auto min-h-10 whitespace-normal bg-[#00847C] px-4 py-2.5 text-sm leading-snug text-white hover:bg-[#0B6D73] sm:min-w-[180px] sm:whitespace-nowrap"
                   >
-                    {isSubmitting && submittingMode === "revision"
-                      ? "Ukládám změny…"
-                      : "Uložit změny"}
+                    <SavingButtonLabel
+                      saving={isSubmitting && submittingMode === "revision"}
+                      savingText="Ukládám změny…"
+                      idleText="Uložit změny"
+                    />
                   </Button>
                 </div>
               )}
@@ -1221,9 +1224,11 @@ export function ProbationEvaluationForm({
                       onClick={() => void handleSaveDraft()}
                       className="h-auto min-h-10 whitespace-normal px-4 py-2.5 text-sm leading-snug sm:min-w-[190px] sm:whitespace-nowrap"
                     >
-                      {isSubmitting && submittingMode === "draft"
-                        ? "Ukládám změny…"
-                        : "Uložit rozpracované"}
+                      <SavingButtonLabel
+                        saving={isSubmitting && submittingMode === "draft"}
+                        savingText="Ukládám změny…"
+                        idleText="Uložit rozpracované"
+                      />
                     </Button>
 
                     <Button
@@ -1231,11 +1236,15 @@ export function ProbationEvaluationForm({
                       disabled={isSubmitting}
                       className="h-auto min-h-10 whitespace-normal bg-[#00847C] px-4 py-2.5 text-sm leading-snug text-white hover:bg-[#0B6D73] sm:min-w-[260px] sm:whitespace-nowrap"
                     >
-                      {isSubmitting && submittingMode === "final"
-                        ? "Ukládám a odesílám…"
-                        : mode === "public"
-                          ? "Uložit a odeslat"
-                          : "Uložit jako finální vyhodnocení"}
+                      <SavingButtonLabel
+                        saving={isSubmitting && submittingMode === "final"}
+                        savingText="Ukládám a odesílám…"
+                        idleText={
+                          mode === "public"
+                            ? "Uložit a odeslat"
+                            : "Uložit jako finální vyhodnocení"
+                        }
+                      />
                     </Button>
                   </div>
                 </div>

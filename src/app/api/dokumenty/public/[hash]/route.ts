@@ -11,6 +11,7 @@ import { buildEmployeeMeta } from "@/lib/employee-meta"
 import { logEmploymentDocumentEvent } from "@/lib/employment-document-events"
 import { detectIdentityMismatch } from "@/lib/employment-document-identity-check"
 import { buildEmploymentDocumentPdf } from "@/lib/employment-document-pdf"
+import { recomputeOnboardingReadiness } from "@/lib/onboarding-readiness"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -156,6 +157,10 @@ export async function PATCH(
     },
     select: { id: true },
   })
+
+  if (document.onboarding) {
+    await recomputeOnboardingReadiness(document.onboarding.id)
+  }
 
   const mismatchSummary =
     identityMismatches.length > 0
