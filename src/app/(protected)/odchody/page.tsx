@@ -1456,6 +1456,21 @@ export default function OffboardingPage() {
     [facetedDepartures]
   )
 
+  const bulkPlannedRecords = useMemo(
+    () =>
+      toBulkSelectableRecords(filteredPlanned, "plannedEnd", "plán. odchod"),
+    [filteredPlanned]
+  )
+  const bulkActualRecords = useMemo(
+    () => toBulkSelectableRecords(filteredActual, "actualEnd", "skut. odchod"),
+    [filteredActual]
+  )
+  const bulkCancelledRecords = useMemo(
+    () =>
+      toBulkSelectableRecords(filteredCancelled, "plannedEnd", "plán. odchod"),
+    [filteredCancelled]
+  )
+
   const isAnyNonStatusFilterActive =
     searchQuery.trim() !== "" ||
     departureDateFilter !== "" ||
@@ -4019,11 +4034,7 @@ export default function OffboardingPage() {
           </DialogHeader>
 
           <BulkSelectableRecordList
-            records={toBulkSelectableRecords(
-              filteredPlanned,
-              "plannedEnd",
-              "plán. odchod"
-            )}
+            records={bulkPlannedRecords}
             selected={bulkPlannedSelected}
             onToggle={(id) =>
               setBulkPlannedSelected((prev) =>
@@ -4132,11 +4143,7 @@ export default function OffboardingPage() {
           </DialogHeader>
 
           <BulkSelectableRecordList
-            records={toBulkSelectableRecords(
-              filteredActual,
-              "actualEnd",
-              "skut. odchod"
-            )}
+            records={bulkActualRecords}
             selected={bulkActualSelected}
             onToggle={(id) =>
               setBulkActualSelected((prev) =>
@@ -4242,11 +4249,7 @@ export default function OffboardingPage() {
           </DialogHeader>
 
           <BulkSelectableRecordList
-            records={toBulkSelectableRecords(
-              filteredCancelled,
-              "plannedEnd",
-              "plán. odchod"
-            )}
+            records={bulkCancelledRecords}
             selected={bulkCancelledSelected}
             onToggle={(id) =>
               setBulkCancelledSelected((prev) =>

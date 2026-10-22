@@ -12,9 +12,10 @@ import { ExitChecklistForm } from "@/components/forms/exit-checklist-form"
 
 type Props = {
   token: string
+  currentUserEmail: string
 }
 
-export function PublicExitChecklistShell({ token }: Props) {
+export function PublicExitChecklistShell({ token, currentUserEmail }: Props) {
   const searchParams = useSearchParams()
 
   const loginSuccess = searchParams.get("login") === "success"
@@ -149,6 +150,7 @@ export function PublicExitChecklistShell({ token }: Props) {
           <ExitChecklistForm
             mode="public"
             publicToken={token}
+            currentUserEmail={currentUserEmail}
             initialData={data}
             onDirtyChange={setDirty}
             externalSaveTrigger={saveTrigger}

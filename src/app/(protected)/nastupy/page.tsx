@@ -1269,6 +1269,26 @@ export default function OnboardingPage() {
     [facetedArrivals]
   )
 
+  const bulkPlannedRecords = useMemo(
+    () =>
+      toBulkSelectableRecords(filteredPlanned, "plannedStart", "plán. nástup"),
+    [filteredPlanned]
+  )
+  const bulkActualRecords = useMemo(
+    () =>
+      toBulkSelectableRecords(filteredActual, "actualStart", "skut. nástup"),
+    [filteredActual]
+  )
+  const bulkCancelledRecords = useMemo(
+    () =>
+      toBulkSelectableRecords(
+        filteredCancelled,
+        "plannedStart",
+        "plán. nástup"
+      ),
+    [filteredCancelled]
+  )
+
   const isAnyNonStatusFilterActive =
     searchQuery.trim() !== "" ||
     arrivalDateFilter !== "" ||
@@ -4343,11 +4363,7 @@ export default function OnboardingPage() {
           </DialogHeader>
 
           <BulkSelectableRecordList
-            records={toBulkSelectableRecords(
-              filteredPlanned,
-              "plannedStart",
-              "plán. nástup"
-            )}
+            records={bulkPlannedRecords}
             selected={bulkPlannedSelected}
             onToggle={(id) =>
               setBulkPlannedSelected((prev) =>
@@ -4456,11 +4472,7 @@ export default function OnboardingPage() {
           </DialogHeader>
 
           <BulkSelectableRecordList
-            records={toBulkSelectableRecords(
-              filteredActual,
-              "actualStart",
-              "skut. nástup"
-            )}
+            records={bulkActualRecords}
             selected={bulkActualSelected}
             onToggle={(id) =>
               setBulkActualSelected((prev) =>
@@ -4564,11 +4576,7 @@ export default function OnboardingPage() {
           </DialogHeader>
 
           <BulkSelectableRecordList
-            records={toBulkSelectableRecords(
-              filteredCancelled,
-              "plannedStart",
-              "plán. nástup"
-            )}
+            records={bulkCancelledRecords}
             selected={bulkCancelledSelected}
             onToggle={(id) =>
               setBulkCancelledSelected((prev) =>

@@ -46,11 +46,7 @@ import {
 } from "@/lib/exit-checklist"
 import { getExitChecklistCompletionState } from "@/lib/exit-checklist-completion"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
-import {
-  canAdminExitChecklist,
-  canReadExitChecklist,
-  canSignExitChecklist,
-} from "@/lib/rbac"
+import { canReadExitChecklist } from "@/lib/rbac"
 import { getSession } from "@/lib/session"
 
 export const runtime = "nodejs"
@@ -281,25 +277,6 @@ export async function GET(
 
   const data = mapToExitChecklistData(checklist.offboarding, checklist)
 
-  {
-    const currentUserEmail = normalizeEmail(user.email)
-    const matches = (data.signatureRecipients ?? []).filter(
-      (recipient) => normalizeEmail(recipient.email) === currentUserEmail
-    )
-    const hasActiveMatch = matches.some((recipient) => !recipient.revokedAt)
-
-    if (matches.length > 0 && !hasActiveMatch) {
-      return NextResponse.json(
-        {
-          status: "error",
-          message:
-            "Nemáte přístup k podpisu tohoto výstupního listu. Pokud je něco v nepořádku, kontaktujte Personální oddělení.",
-        },
-        { status: 403 }
-      )
-    }
-  }
-
   return NextResponse.json({
     status: "success",
     data,
@@ -317,21 +294,6 @@ export async function PUT(
   if (!user?.email || !isPraha6OrKitt6(user.email)) {
     return NextResponse.json(
       { status: "error", message: "Nemáte oprávnění k této stránce." },
-      { status: 403 }
-    )
-  }
-
-  const role = user.role ?? "USER"
-  const canSign = canSignExitChecklist(role)
-  const canAdmin = canAdminExitChecklist(role)
-  const canEditContent = canAdmin || canSign
-
-  if (!canSign) {
-    return NextResponse.json(
-      {
-        status: "error",
-        message: "Nemáte oprávnění podepisovat výstupní list.",
-      },
       { status: 403 }
     )
   }
@@ -356,34 +318,35 @@ export async function PUT(
     )
   }
 
-  {
-    const headerForAccess = getJsonRecord(checklist.header)
-    const currentUserEmailForAccess = normalizeEmail(user.email)
-    const matches = (
-      Array.isArray(headerForAccess.signatureRecipients)
-        ? headerForAccess.signatureRecipients
-        : []
-    ).filter(
-      (recipient) =>
-        recipient &&
-        typeof recipient === "object" &&
-        normalizeEmail((recipient as { email?: string }).email) ===
-          currentUserEmailForAccess
-    )
-    const hasActiveMatch = matches.some(
-      (recipient) => !(recipient as { revokedAt?: string }).revokedAt
-    )
+  // Ve veřejné verzi se neřeší interní role (ADMIN/HR/IT) - o právu upravovat
+  // a podepisovat rozhoduje výhradně seznam pozvaných příjemců podpisu
+  // uložený u tohoto konkrétního výstupního listu.
+  const canAdmin = false
+  const normalizedCurrentUserEmail = normalizeEmail(user.email)
+  const headerForAccess = getJsonRecord(checklist.header)
+  const canSign = (
+    Array.isArray(headerForAccess.signatureRecipients)
+      ? headerForAccess.signatureRecipients
+      : []
+  ).some(
+    (recipient) =>
+      recipient &&
+      typeof recipient === "object" &&
+      normalizeEmail((recipient as { email?: string }).email) ===
+        normalizedCurrentUserEmail &&
+      !(recipient as { revokedAt?: string }).revokedAt
+  )
+  const canEditContent = canSign
 
-    if (matches.length > 0 && !hasActiveMatch) {
-      return NextResponse.json(
-        {
-          status: "error",
-          message:
-            "Nemáte přístup k podpisu tohoto výstupního listu. Pokud je něco v nepořádku, kontaktujte Personální oddělení.",
-        },
-        { status: 403 }
-      )
-    }
+  if (!canSign) {
+    return NextResponse.json(
+      {
+        status: "error",
+        message:
+          "Nemáte oprávnění podepisovat tento výstupní list. Pokud jste byl(a) pozván(a) k podpisu, kontaktujte Personální oddělení.",
+      },
+      { status: 403 }
+    )
   }
 
   const body = await req.json().catch(() => null)

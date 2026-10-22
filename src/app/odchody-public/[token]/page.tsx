@@ -37,5 +37,10 @@ export default async function PublicExitChecklistPage({ params }: Props) {
     )
   }
 
-  return <PublicExitChecklistShell token={params.token} />
+  return (
+    <PublicExitChecklistShell
+      token={params.token}
+      currentUserEmail={session.user.email ?? ""}
+    />
+  )
 }

@@ -96,6 +96,7 @@ type Props = {
   offboardingId?: number
   publicToken?: string
   mode?: "internal" | "public"
+  currentUserEmail?: string
   initialData: ExitChecklistData
   onDirtyChange?: (dirty: boolean) => void
   onSavingChange?: (saving: boolean) => void
@@ -605,6 +606,7 @@ export function ExitChecklistForm({
   offboardingId,
   publicToken,
   mode = "internal",
+  currentUserEmail: currentUserEmailProp,
   initialData,
   onDirtyChange,
   onSavingChange,
@@ -863,7 +865,7 @@ export function ExitChecklistForm({
   )
 
   const currentUserName = useSignatureName()
-  const currentUserEmail = session?.user?.email ?? ""
+  const currentUserEmail = currentUserEmailProp || session?.user?.email || ""
   const currentUserEmailNormalized = normalizeEmail(currentUserEmail)
 
   const isEmployeeVisitor =
@@ -2991,11 +2993,11 @@ export function ExitChecklistForm({
             <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
               <span>
-                Byli jste odebráni ze seznamu příjemců k podpisu tohoto
-                výstupního listu, takže ho aktuálně nemůžete podepsat. Výstupní
-                list si můžete prohlédnout, ale pro obnovení možnosti podepsat
-                požádejte Personální oddělení o opětovné přidání do seznamu
-                příjemců.
+                Nejste (nebo už nejste) v seznamu osob pozvaných k podpisu
+                tohoto výstupního listu, takže ho aktuálně nemůžete podepsat ani
+                upravovat. Výstupní list si můžete prohlédnout, ale pokud si
+                myslíte, že byste mezi podepisujícími být měl(a), požádejte
+                Personální oddělení o přidání do seznamu příjemců.
               </span>
             </div>
           )}
