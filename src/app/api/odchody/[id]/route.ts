@@ -12,10 +12,21 @@ import {
   pickMostRelevantOnboarding,
 } from "@/lib/employment-linking"
 import {
+  getOrCreateChecklist,
+  mapToExitChecklistData,
+} from "@/lib/exit-checklist"
+import { getExitChecklistCompletionState } from "@/lib/exit-checklist-completion"
+import {
+  lockExitChecklistAndNotify,
+  notifyExitChecklistSignersOffboardingRemoved,
+} from "@/lib/exit-checklist-signature-notify"
+import { cancelQueuedMailJobsForRecord } from "@/lib/mail-queue-cleanup"
+import {
   buildManagerNotifyPromptForChanges,
   buildManagerNotifyPromptForRemoval,
 } from "@/lib/new-record-manager-watch"
 import {
+  getAppBaseUrlFromRequest,
   getUserKey,
   getUserLabel,
   syncLinkedProbationAfterOffboardingDecision,
@@ -298,6 +309,35 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       )
     }
 
+    const wouldCompleteNow =
+      data.actualEnd !== undefined &&
+      before.actualEnd === null &&
+      data.actualEnd !== null
+    const confirmLockChecklist =
+      typeof (raw as Record<string, unknown>).confirmLockChecklist === "boolean"
+        ? ((raw as Record<string, unknown>).confirmLockChecklist as boolean)
+        : null
+
+    if (wouldCompleteNow && confirmLockChecklist === null) {
+      const checklistResult = await getOrCreateChecklist(id)
+
+      if (checklistResult && !checklistResult.checklist.lockedAt) {
+        const checklistData = mapToExitChecklistData(
+          checklistResult.off,
+          checklistResult.checklist
+        )
+
+        if (!getExitChecklistCompletionState(checklistData).isComplete) {
+          return NextResponse.json({
+            status: "confirm_required",
+            confirmKind: "lock_exit_checklist_on_actual",
+            message:
+              "Výstupní list ještě není kompletně podepsaný. Po uzamčení se už nikdo nedostane k podpisům, ale je to doporučené. Chcete ho zamknout?",
+          })
+        }
+      }
+    }
+
     const updated = await prisma.$transaction(async (tx) => {
       const updateData: UpdateData = {
         updatedAt: new Date(),
@@ -430,8 +470,34 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         }
       }
 
-      return { updatedRecord, changes }
+      return { updatedRecord, changes, completingNow }
     })
+
+    if (updated.completingNow) {
+      try {
+        await cancelQueuedMailJobsForRecord("OFFBOARDING", id)
+      } catch (error) {
+        console.error(
+          "[ODCHODY-PATCH] Čištění fronty e-mailů se nepodařilo:",
+          error
+        )
+      }
+
+      if (confirmLockChecklist === true) {
+        try {
+          await lockExitChecklistAndNotify({
+            offboardingId: id,
+            lockedById: userKey,
+            baseUrl: getAppBaseUrlFromRequest(request),
+          })
+        } catch (error) {
+          console.error(
+            "[ODCHODY-PATCH] Automatické uzamčení výstupního listu se nepodařilo:",
+            error
+          )
+        }
+      }
+    }
 
     const managerNotifyPrompt = await buildManagerNotifyPromptForChanges({
       kind: "OFFBOARDING",
@@ -506,11 +572,17 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     },
     select: {
       id: true,
+      titleBefore: true,
       name: true,
       surname: true,
+      titleAfter: true,
       actualEnd: true,
       plannedEnd: true,
       personalNumber: true,
+      positionName: true,
+      department: true,
+      unitName: true,
+      supervisorEmail: true,
       probationStopDecision: true,
       deletedAt: true,
     },
@@ -637,7 +709,13 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
               type: "employee_offboarding_deleted",
               employeeId: before.id,
               employeeName: `${before.name} ${before.surname}`,
+              employeePersonalNumber: before.personalNumber,
+              employeePosition: before.positionName,
+              employeeDepartment: before.department,
+              employeeUnitName: before.unitName,
               deletedBy: userKey,
+              actorName: userName,
+              actionAt: now.toISOString(),
               recipients: hrRecipients,
               subject: `Smazán záznam odchodu - ${before.name} ${before.surname}`,
             },
@@ -651,11 +729,35 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     }
   })
 
-  const managerNotifyPrompt = await buildManagerNotifyPromptForRemoval({
-    kind: "OFFBOARDING",
-    recordId: before.id,
-    reason: "RECORD_DELETED",
-  })
+  const managerNotifyPrompt =
+    before.actualEnd === null
+      ? await buildManagerNotifyPromptForRemoval({
+          kind: "OFFBOARDING",
+          recordId: before.id,
+          reason: "RECORD_DELETED",
+        })
+      : null
+
+  try {
+    await notifyExitChecklistSignersOffboardingRemoved(
+      before.id,
+      "RECORD_DELETED"
+    )
+  } catch (error) {
+    console.error(
+      "[ODCHODY-DELETE] Notifikace podepisujících se nepodařila:",
+      error
+    )
+  }
+
+  try {
+    await cancelQueuedMailJobsForRecord("OFFBOARDING", before.id)
+  } catch (error) {
+    console.error(
+      "[ODCHODY-DELETE] Čištění fronty e-mailů se nepodařilo:",
+      error
+    )
+  }
 
   return NextResponse.json({
     status: "success",

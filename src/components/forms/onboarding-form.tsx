@@ -9,6 +9,7 @@ import {
   Check,
   CheckCircle,
   GraduationCap,
+  Info,
   ListChecks,
   RefreshCcw,
   Search,
@@ -587,6 +588,13 @@ export function OnboardingFormUnified({
     open: boolean
     message: string
   }>({ open: false, message: "" })
+
+  const [lockChecklistConfirm, setLockChecklistConfirm] = useState<{
+    message: string
+    values: FormValues
+  } | null>(null)
+  const [lockChecklistConfirmBusy, setLockChecklistConfirmBusy] =
+    useState(false)
 
   const positionTriggerRef = useRef<HTMLButtonElement | null>(null)
   const [fallbackPositions, setFallbackPositions] = useState<Position[]>([])
@@ -1358,7 +1366,7 @@ export function OnboardingFormUnified({
     [validatePersonalNumber, form, initial?.personalNumber, id]
   )
 
-  async function onSubmit(values: FormValues) {
+  async function onSubmit(values: FormValues, confirmLockChecklist?: boolean) {
     try {
       let newlySkipped: string[] = []
 
@@ -1497,6 +1505,10 @@ export function OnboardingFormUnified({
         }
       }
 
+      if (confirmLockChecklist !== undefined) {
+        payload.confirmLockChecklist = confirmLockChecklist
+      }
+
       const url = id ? `/api/nastupy/${id}` : `/api/nastupy`
       const method = id ? "PATCH" : "POST"
 
@@ -1512,6 +1524,17 @@ export function OnboardingFormUnified({
 
       if (!res.ok) {
         throw new Error(json?.message ?? "Operace se nezdařila.")
+      }
+
+      if (
+        json?.status === "confirm_required" &&
+        json?.confirmKind === "lock_documents_on_actual"
+      ) {
+        setLockChecklistConfirm({
+          message: json.message ?? "Chcete nástupní dokumenty zamknout?",
+          values,
+        })
+        return
       }
 
       if (isActualMode && newlySkipped.length > 0) {
@@ -1559,12 +1582,31 @@ export function OnboardingFormUnified({
     setSuccessModal((prev) => ({ ...prev, open }))
   }
 
+  async function handleLockChecklistDecision(lock: boolean) {
+    if (!lockChecklistConfirm) return
+    setLockChecklistConfirmBusy(true)
+    try {
+      await onSubmit(lockChecklistConfirm.values, lock)
+      setLockChecklistConfirm(null)
+    } catch (err) {
+      setErrorModal({
+        open: true,
+        message:
+          err instanceof Error
+            ? err.message
+            : "Operace se nezdařila. Zkuste to znovu.",
+      })
+    } finally {
+      setLockChecklistConfirmBusy(false)
+    }
+  }
+
   return (
     <>
       <Form {...form}>
         <form
           noValidate
-          onSubmit={form.handleSubmit(onSubmit)}
+          onSubmit={form.handleSubmit((values) => onSubmit(values))}
           className="space-y-6"
           data-lenis-prevent=""
         >
@@ -1800,7 +1842,7 @@ export function OnboardingFormUnified({
                             <PopoverTrigger asChild>
                               <button
                                 type="button"
-                                className="inline-flex items-center gap-1 rounded-md border border-input bg-background px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
+                                className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300"
                               >
                                 <ListChecks className="size-3" />
                                 Nevyužitá osobní čísla
@@ -1816,6 +1858,11 @@ export function OnboardingFormUnified({
                               <p className="text-xs text-muted-foreground">
                                 Osobní čísla v mezeře řady, která nikdo
                                 nevyužíval ani nevyužívá.
+                              </p>
+                              <p className="mt-1.5 text-xs font-medium text-amber-700 dark:text-amber-400">
+                                Zkontrolujte, zda některé z nich nejde
+                                přednostně využít místo dalšího nového čísla v
+                                řadě.
                               </p>
 
                               <div className="mt-2 max-h-[min(40vh,220px)] overflow-y-auto pr-1">
@@ -1974,6 +2021,23 @@ export function OnboardingFormUnified({
                         )}
                       </div>
 
+                      <div className="mt-2 flex items-start gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:border-sky-800 dark:bg-sky-900/20 dark:text-sky-300">
+                        <Info className="mt-0.5 size-3.5 shrink-0" />
+                        <span>
+                          Dostupnost čísla je automaticky ověřená v EOS i v
+                          evidenci aplikace, pro jistotu ale doporučujeme i
+                          ruční kontrolu. Pokud se nové číslo přeskočí a
+                          nevyužije se, zůstane v mezeře a řada přeskočených
+                          čísel se tím dál prodlužuje – mrkněte proto nejdřív na
+                          tlačítko{" "}
+                          <span className="font-medium">
+                            „Nevyužitá osobní čísla“
+                          </span>{" "}
+                          výše, jestli některé z nich nelze využít dřív, než
+                          sáhnete po dalším novém čísle v řadě.
+                        </span>
+                      </div>
+
                       <FormMessage />
                     </FormItem>
                   )}
@@ -2033,6 +2097,7 @@ export function OnboardingFormUnified({
                       valueName={form.watch("supervisorName")}
                       valueEmail={form.watch("supervisorEmail")}
                       placeholder="Vyhledejte vedoucího odboru v EOS…"
+                      excludeActiveOffboardings={false}
                       onSelect={async (employee) => {
                         setSupervisorManuallyChanged(true)
 
@@ -2177,6 +2242,7 @@ export function OnboardingFormUnified({
                       valueName={form.watch("mentorName")}
                       valueEmail={form.watch("mentorEmail")}
                       placeholder="Vyhledejte mentora v EOS…"
+                      excludeActiveOffboardings={false}
                       onSelect={async (employee) => {
                         form.setValue(
                           "mentorName",
@@ -2841,6 +2907,38 @@ export function OnboardingFormUnified({
               onClick={() => setErrorModal((p) => ({ ...p, open: false }))}
             >
               Zkusit znovu
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(lockChecklistConfirm)}
+        onOpenChange={(open) => {
+          if (!open && !lockChecklistConfirmBusy) setLockChecklistConfirm(null)
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Uzamknout nástupní dokumenty?</DialogTitle>
+            <DialogDescription>
+              {lockChecklistConfirm?.message}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              disabled={lockChecklistConfirmBusy}
+              onClick={() => void handleLockChecklistDecision(false)}
+            >
+              Nechat otevřené
+            </Button>
+            <Button
+              disabled={lockChecklistConfirmBusy}
+              onClick={() => void handleLockChecklistDecision(true)}
+            >
+              {lockChecklistConfirmBusy ? "Ukládám…" : "Zamknout"}
             </Button>
           </div>
         </DialogContent>

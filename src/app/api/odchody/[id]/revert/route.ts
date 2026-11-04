@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
+import { getOrCreateChecklist } from "@/lib/exit-checklist"
+import { notifyExitChecklistSignersAvailableAgain } from "@/lib/exit-checklist-signature-notify"
+import { buildManagerNotifyPromptForRemoval } from "@/lib/new-record-manager-watch"
+import { getAppBaseUrlFromRequest } from "@/lib/probation-evaluation-request"
 import { canWriteOffboarding } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
@@ -12,7 +16,7 @@ interface Params {
   params: { id: string }
 }
 
-export async function POST(_: NextRequest, { params }: Params) {
+export async function POST(req: NextRequest, { params }: Params) {
   const session = await auth()
   if (!session?.user) {
     return NextResponse.json(
@@ -69,6 +73,25 @@ export async function POST(_: NextRequest, { params }: Params) {
       )
     }
 
+    const raw = await req.json().catch(() => ({}))
+    const confirmUnlockChecklist =
+      typeof (raw as Record<string, unknown>).confirmUnlockChecklist ===
+      "boolean"
+        ? ((raw as Record<string, unknown>).confirmUnlockChecklist as boolean)
+        : null
+
+    const checklistResult = await getOrCreateChecklist(id)
+    const checklistLocked = Boolean(checklistResult?.checklist.lockedAt)
+
+    if (checklistLocked && confirmUnlockChecklist === null) {
+      return NextResponse.json({
+        status: "confirm_required",
+        confirmKind: "unlock_exit_checklist_on_revert",
+        message:
+          "Výstupní list je uzamčený. Chcete ho po vrácení do plánovaných odemknout a poslat nepodepsaným informaci, že mohou znovu podepsat?",
+      })
+    }
+
     const updated = await prisma.$transaction(async (tx) => {
       const updatedRecord = await tx.employeeOffboarding.update({
         where: { id },
@@ -104,6 +127,31 @@ export async function POST(_: NextRequest, { params }: Params) {
       return updatedRecord
     })
 
+    const managerNotifyPrompt = await buildManagerNotifyPromptForRemoval({
+      kind: "OFFBOARDING",
+      recordId: id,
+      reason: "RECORD_RESTORED",
+    })
+
+    if (checklistLocked && confirmUnlockChecklist === true && checklistResult) {
+      try {
+        await prisma.exitChecklist.update({
+          where: { id: checklistResult.checklist.id },
+          data: { lockedAt: null, lockedById: null },
+        })
+
+        await notifyExitChecklistSignersAvailableAgain(
+          id,
+          getAppBaseUrlFromRequest(req)
+        )
+      } catch (error) {
+        console.error(
+          "[ODCHODY-REVERT] Odemčení výstupního listu se nepodařilo:",
+          error
+        )
+      }
+    }
+
     const responseData = {
       ...updated,
       plannedEnd: updated.plannedEnd?.toISOString() || null,
@@ -119,6 +167,7 @@ export async function POST(_: NextRequest, { params }: Params) {
       status: "success",
       data: responseData,
       message: "Odchod byl vrácen do plánovaných.",
+      managerNotifyPrompt,
     })
   } catch (err) {
     console.error("Chyba při vracení odchodu:", err)

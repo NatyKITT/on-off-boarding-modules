@@ -3,8 +3,6 @@ import { auth } from "@/auth"
 import { Prisma } from "@prisma/client"
 import { z, ZodError } from "zod"
 
-import { env } from "@/env.mjs"
-
 import { prisma } from "@/lib/db"
 import {
   ONBOARDING_TYPES,
@@ -135,17 +133,6 @@ type OnboardingRecord = Awaited<
 
 type LinkablePersonalNumber = {
   personalNumber: string | null
-}
-
-function parseEmailList(value?: string): string[] {
-  return (value ?? "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean)
-}
-
-function getHrNotificationRecipients(): string[] {
-  return parseEmailList(env.HR_NOTIFICATION_EMAILS)
 }
 
 function buildFullName(parts: Array<string | null | undefined>): string | null {
@@ -708,26 +695,6 @@ export async function POST(request: NextRequest) {
           },
         })
 
-        const hrRecipients = getHrNotificationRecipients()
-
-        if (hrRecipients.length > 0) {
-          await tx.mailQueue.create({
-            data: {
-              type: "SYSTEM_NOTIFICATION",
-              payload: {
-                type: "employee_created_actual",
-                employeeId: newEmployee.id,
-                employeeName: `${data.name} ${data.surname}`,
-                createdBy,
-                recipients: hrRecipients,
-                subject: `Vytvořen skutečný nástup - ${data.name} ${data.surname}`,
-              },
-              priority: 5,
-              createdBy,
-            },
-          })
-        }
-
         return newEmployee
       })
 
@@ -790,26 +757,6 @@ export async function POST(request: NextRequest) {
           }),
         },
       })
-
-      const hrRecipients = getHrNotificationRecipients()
-
-      if (hrRecipients.length > 0) {
-        await tx.mailQueue.create({
-          data: {
-            type: "SYSTEM_NOTIFICATION",
-            payload: {
-              type: "employee_created_planned",
-              employeeId: newEmployee.id,
-              employeeName: `${data.name} ${data.surname}`,
-              createdBy,
-              recipients: hrRecipients,
-              subject: `Vytvořen plánovaný nástup - ${data.name} ${data.surname}`,
-            },
-            priority: 5,
-            createdBy,
-          },
-        })
-      }
 
       return newEmployee
     })

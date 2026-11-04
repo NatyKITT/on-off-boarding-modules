@@ -184,6 +184,33 @@ export function resolveHandoverOption2Target(value: unknown): string {
   )
 }
 
+export function resolveHandoverOption2TargetDetails(value: unknown): {
+  positionNum: string
+  positionName: string
+  department: string
+} {
+  const h = getRecord(value)
+
+  const positionNum = sanitizeText(h.option2TargetPositionNum)
+  const rawName = sanitizeText(h.option2Target)
+  const positionName =
+    positionNum && rawName.startsWith(positionNum)
+      ? rawName
+          .slice(positionNum.length)
+          .replace(/^\s*[—–-]\s*/, "")
+          .trim()
+      : rawName
+
+  const department = [
+    sanitizeText(h.option2TargetDepartment),
+    sanitizeText(h.option2TargetUnitName),
+  ]
+    .filter(Boolean)
+    .join(" – ")
+
+  return { positionNum, positionName, department }
+}
+
 export function handoverSummaryLabel(value: unknown): string {
   const h = getRecord(value)
 
@@ -967,6 +994,36 @@ export function sanitizeResponsiblePersonForResponse(
   }
 }
 
+export type ExitChecklistUnresolvedItem = {
+  label: string
+  organization: string
+  note: string | null
+  signedByName: string | null
+  signedByEmail: string | null
+  signedAt: string | null
+  additionalNote: string | null
+  additionallyResolvedAt: string | null
+  additionallyResolvedByName: string | null
+}
+
+export function collectUnresolvedExitChecklistItems(
+  data: ExitChecklistData
+): ExitChecklistUnresolvedItem[] {
+  return data.items
+    .filter((item) => item.resolved === "NO")
+    .map((item) => ({
+      label: item.obligation,
+      organization: item.organization,
+      note: item.note,
+      signedByName: item.signedByName,
+      signedByEmail: item.signedByEmail,
+      signedAt: item.signedAt,
+      additionalNote: item.additionalNote,
+      additionallyResolvedAt: item.additionallyResolvedAt,
+      additionallyResolvedByName: item.additionallyResolvedByName,
+    }))
+}
+
 export function sanitizeResponsiblePersonForJson(
   value: unknown,
   fallback: ExitChecklistResponsiblePerson
@@ -1011,6 +1068,51 @@ export function mergeSignatureRecipients(
   return Array.from(byKey.values())
 }
 
+export function resolveExitChecklistPendingItems(args: {
+  isEmployee: boolean
+  isManager: boolean
+  isSectionB: boolean
+  isSectionC?: boolean
+  rowKeys: string[]
+  employeeSignedAt?: string | Date | null
+  managerSignedAt?: string | Date | null
+  issuerSignedAt?: string | Date | null
+  handoverManagerSignedAt?: string | Date | null
+  assetsComplete: boolean
+  items: Array<{
+    key: string
+    obligation: string
+    signedAt?: string | Date | null
+  }>
+}): string[] {
+  const result: string[] = []
+
+  if (args.isEmployee && !args.employeeSignedAt) {
+    result.push("Podpis zaměstnance v hlavičce formuláře")
+  }
+
+  if (args.isManager && !args.managerSignedAt) {
+    result.push("Podpis vedoucího odboru v hlavičce formuláře")
+  }
+
+  args.rowKeys.forEach((key) => {
+    const item = args.items.find((candidate) => candidate.key === key)
+    if (item && !item.signedAt) {
+      result.push(`Sekce A – ${item.obligation}`)
+    }
+  })
+
+  if ((args.isManager || args.isSectionC) && !args.handoverManagerSignedAt) {
+    result.push("Sekce C – vyplnění způsobu předání agendy a podpis")
+  }
+
+  if (args.isSectionB && (!args.assetsComplete || !args.issuerSignedAt)) {
+    result.push("Sekce B – vyplnění a podpis vyrovnání majetku")
+  }
+
+  return result
+}
+
 export function mapToExitChecklistData(
   off: EmployeeOffboarding,
   checklist: {
@@ -1024,8 +1126,23 @@ export function mapToExitChecklistData(
 ): ExitChecklistData {
   const header = buildHeaderFromOff(off)
 
+  const headerData = getRecord(checklist.header)
+
+  const itemAdditionalNotes = getRecord(
+    headerData.itemAdditionalNotes
+  ) as Record<
+    string,
+    {
+      note?: string | null
+      resolvedAt?: string | null
+      resolvedByName?: string | null
+      resolvedByEmail?: string | null
+    }
+  >
+
   const items: ExitChecklistItem[] = EXIT_CHECKLIST_ROWS.map((row) => {
     const dbItem = checklist.items.find((i) => i.key === row.key)
+    const additional = itemAdditionalNotes[row.key] ?? null
 
     let resolved: "YES" | "NO" | null = null
     if (dbItem?.resolution === ChecklistResolution.YES) resolved = "YES"
@@ -1040,6 +1157,12 @@ export function mapToExitChecklistData(
       signedAt: dbItem?.signedAt
         ? new Date(dbItem.signedAt).toISOString()
         : null,
+      additionalNote: sanitizeText(additional?.note) || null,
+      additionallyResolvedAt: sanitizeText(additional?.resolvedAt) || null,
+      additionallyResolvedByName:
+        sanitizeText(additional?.resolvedByName) || null,
+      additionallyResolvedByEmail:
+        sanitizeText(additional?.resolvedByEmail) || null,
     }
   })
 
@@ -1052,14 +1175,51 @@ export function mapToExitChecklistData(
     })
   )
 
-  const headerData = getRecord(checklist.header)
-
   const handover = sanitizeHandoverForResponse(headerData.handover)
   const signatures = sanitizeSignaturesForResponse(headerData.signatures)
   const completionMetadata = getCompletionMetadataForResponse(headerData)
   const signatureRecipients = sanitizeSignatureRecipientsForResponse(
     headerData.signatureRecipients
   )
+
+  const headerManagerEmailValue = sanitizeText(headerData.managerEmail) || null
+  const headerManagerNameValue = sanitizeText(headerData.managerName) || null
+  const headerManagerPositionValue =
+    sanitizeText(headerData.managerPosition) || null
+  const headerManagerDepartmentValue =
+    sanitizeText(headerData.managerDepartment) || null
+
+  // Dokud ještě nebyl odeslán seznam osob k podpisu (nic není "potvrzené"),
+  // vedoucí v hlavičce výstupního listu sleduje živě vedoucího na záznamu
+  // odchodu – stejně jako e-mail zaměstnance. Po odeslání pozvánek se dál
+  // řídí jen touto hlavičkou (edituje se výhradně v dialogu Osoby k podpisu).
+  const signatureListNotYetSent = !sanitizeNullableText(
+    headerData.signatureRecipientsSentAt
+  )
+
+  const managerEmailValue = signatureListNotYetSent
+    ? sanitizeText(off.supervisorEmail) || headerManagerEmailValue
+    : headerManagerEmailValue
+  const managerNameValue = signatureListNotYetSent
+    ? sanitizeText(off.supervisorName) || headerManagerNameValue
+    : headerManagerNameValue
+
+  const managerMatchesSupervisor =
+    Boolean(managerEmailValue) &&
+    managerEmailValue!.trim().toLowerCase() ===
+      (off.supervisorEmail ?? "").trim().toLowerCase()
+  const managerPositionValue = signatureListNotYetSent
+    ? sanitizeText(off.supervisorPosition) || headerManagerPositionValue
+    : headerManagerPositionValue ||
+      (managerMatchesSupervisor ? sanitizeText(off.supervisorPosition) : "") ||
+      null
+  const managerDepartmentValue = signatureListNotYetSent
+    ? sanitizeText(off.supervisorDepartment) || headerManagerDepartmentValue
+    : headerManagerDepartmentValue ||
+      (managerMatchesSupervisor
+        ? sanitizeText(off.supervisorDepartment)
+        : "") ||
+      null
 
   return {
     id: checklist.id,
@@ -1079,10 +1239,10 @@ export function mapToExitChecklistData(
     employmentEndDate: header.employmentEndDate,
     employeeEmail: off.userEmail ?? null,
 
-    managerEmail: sanitizeText(headerData.managerEmail) || null,
-    managerName: sanitizeText(headerData.managerName) || null,
-    managerPosition: sanitizeText(headerData.managerPosition) || null,
-    managerDepartment: sanitizeText(headerData.managerDepartment) || null,
+    managerEmail: managerEmailValue,
+    managerName: managerNameValue,
+    managerPosition: managerPositionValue,
+    managerDepartment: managerDepartmentValue,
     handoverManagerSignature:
       sanitizeSignatureValueForResponse(headerData.handoverManagerSignature) ??
       null,
@@ -1116,9 +1276,28 @@ export function mapToExitChecklistData(
       headerData.signatureRecipientsSentByEmail
     ),
 
+    signatureSetupConfirmedAt: sanitizeNullableText(
+      headerData.signatureSetupConfirmedAt
+    ),
+    signatureSetupConfirmedByName: sanitizeNullableText(
+      headerData.signatureSetupConfirmedByName
+    ),
+    signatureSetupConfirmedByEmail: sanitizeNullableText(
+      headerData.signatureSetupConfirmedByEmail
+    ),
+
     sectionBResponsible: sanitizeResponsiblePersonForResponse(
       headerData.sectionBResponsible,
       DEFAULT_SECTION_B_RESPONSIBLE
+    ),
+    sectionCResponsible: sanitizeResponsiblePersonForResponse(
+      headerData.sectionCResponsible,
+      {
+        name: managerNameValue || "Vedoucí odboru",
+        email: managerEmailValue || "",
+        position: managerPositionValue || undefined,
+        department: managerDepartmentValue || undefined,
+      }
     ),
     kitt6OptionContact: sanitizeKitt6ContactForResponse(
       headerData.kitt6OptionContact
@@ -1148,6 +1327,10 @@ export async function getOrCreateChecklist(offboardingId: number) {
     if (off.supervisorName || off.supervisorEmail) {
       if (off.supervisorName) header.managerName = off.supervisorName
       if (off.supervisorEmail) header.managerEmail = off.supervisorEmail
+      if (off.supervisorPosition)
+        header.managerPosition = off.supervisorPosition
+      if (off.supervisorDepartment)
+        header.managerDepartment = off.supervisorDepartment
     } else if (off.positionNum) {
       const resolved = await resolveSupervisorFromPositionNum(off.positionNum)
 
@@ -1162,6 +1345,10 @@ export async function getOrCreateChecklist(offboardingId: number) {
         if (managerName) header.managerName = managerName
         if (resolved.snapshot.email)
           header.managerEmail = resolved.snapshot.email
+        if (resolved.snapshot.position)
+          header.managerPosition = resolved.snapshot.position
+        if (resolved.snapshot.department)
+          header.managerDepartment = resolved.snapshot.department
       }
     }
 

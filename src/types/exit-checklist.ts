@@ -30,6 +30,10 @@ export interface ExitChecklistItem extends ExitChecklistRowDefinition {
   signedByName: string | null
   signedByEmail: string | null
   signedAt: string | null
+  additionalNote: string | null
+  additionallyResolvedAt: string | null
+  additionallyResolvedByName: string | null
+  additionallyResolvedByEmail: string | null
 }
 
 export interface ExitAssetItem {
@@ -164,7 +168,12 @@ export interface ExitChecklistData {
   signatureRecipientsSentByName?: string | null
   signatureRecipientsSentByEmail?: string | null
 
+  signatureSetupConfirmedAt?: string | null
+  signatureSetupConfirmedByName?: string | null
+  signatureSetupConfirmedByEmail?: string | null
+
   sectionBResponsible?: ExitChecklistResponsiblePerson | null
+  sectionCResponsible?: ExitChecklistResponsiblePerson | null
   kitt6OptionContact?: ExitChecklistResponsiblePerson | null
 }
 

@@ -99,6 +99,7 @@ import {
   ManagerNotifyDialog,
   type ManagerNotifyPrompt,
 } from "@/components/common/manager-notify-dialog"
+import { ManagerSendNoticeDialog } from "@/components/common/manager-send-notice-dialog"
 import { MonthFilter } from "@/components/common/month-filter"
 import {
   MultiSelectFilter,
@@ -925,6 +926,13 @@ export default function OnboardingPage() {
   const [openStart, setOpenStart] = useState(false)
   const [activeRow, setActiveRow] = useState<Arrival | null>(null)
   const [actualStartInput, setActualStartInput] = useState<string>("")
+
+  const [lockDocumentsDialog, setLockDocumentsDialog] = useState<{
+    open: boolean
+    message: string
+    loading: boolean
+    onConfirm: ((lock: boolean) => Promise<void>) | null
+  }>({ open: false, message: "", loading: false, onConfirm: null })
 
   const [revertDialog, setRevertDialog] = useState<{
     open: boolean
@@ -1788,15 +1796,17 @@ export default function OnboardingPage() {
     setOpenStart(true)
   }
 
-  async function confirmStartWithInput() {
+  async function confirmStartWithInput(confirmLockChecklist?: boolean) {
     if (!activeRow || !actualStartInput) return
 
+    const row = activeRow
+
     try {
-      const extensions = activeRow.probationExtensions ?? []
+      const extensions = row.probationExtensions ?? []
       const hasExtensionCalculation = extensions.length > 0
 
       const nextProbationEnd = computeProbationEndForStart(
-        activeRow,
+        row,
         actualStartInput
       )
 
@@ -1807,15 +1817,14 @@ export default function OnboardingPage() {
         hasCustomDates: boolean
         probationExtensions: ProbationExtension[]
         probationExtensionSummary?: string | null
+        confirmLockChecklist?: boolean
       } = {
         actualStart: actualStartInput,
         status: "COMPLETED",
-        hasCustomDates: Boolean(
-          activeRow.hasCustomDates || hasExtensionCalculation
-        ),
+        hasCustomDates: Boolean(row.hasCustomDates || hasExtensionCalculation),
         probationExtensions: extensions,
         probationExtensionSummary: hasExtensionCalculation
-          ? (activeRow.probationExtensionSummary ?? null)
+          ? (row.probationExtensionSummary ?? null)
           : null,
       }
 
@@ -1823,18 +1832,45 @@ export default function OnboardingPage() {
         payload.probationEnd = nextProbationEnd
       }
 
-      const res = await fetch(`/api/nastupy/${activeRow.id}`, {
+      if (confirmLockChecklist !== undefined) {
+        payload.confirmLockChecklist = confirmLockChecklist
+      }
+
+      const res = await fetch(`/api/nastupy/${row.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       })
 
+      const json = await res.json().catch(() => null)
+
       if (!res.ok) {
-        const json = await res.json().catch(() => null)
         throw new Error(json?.message ?? "Potvrzení se nezdařilo")
       }
 
-      const name = `${activeRow.name} ${activeRow.surname}`
+      if (
+        json?.status === "confirm_required" &&
+        json?.confirmKind === "lock_documents_on_actual"
+      ) {
+        setLockDocumentsDialog({
+          open: true,
+          message: json.message ?? "Chcete nástupní dokumenty zamknout?",
+          loading: false,
+          onConfirm: async (lock) => {
+            setLockDocumentsDialog((prev) => ({ ...prev, loading: true }))
+            await confirmStartWithInput(lock)
+            setLockDocumentsDialog({
+              open: false,
+              message: "",
+              loading: false,
+              onConfirm: null,
+            })
+          },
+        })
+        return
+      }
+
+      const name = `${row.name} ${row.surname}`
 
       setOpenStart(false)
       setActiveRow(null)
@@ -1854,7 +1890,7 @@ export default function OnboardingPage() {
     }
   }
 
-  async function handleRevert() {
+  async function handleRevert(confirmUnlockChecklist?: boolean) {
     const arrival = revertDialog.arrival
     if (!arrival) return
 
@@ -1863,11 +1899,39 @@ export default function OnboardingPage() {
     try {
       const response = await fetch(`/api/nastupy/${arrival.id}/revert`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          confirmUnlockChecklist !== undefined ? { confirmUnlockChecklist } : {}
+        ),
       })
 
+      const json = await response.json().catch(() => null)
+
       if (!response.ok) {
-        const errorData = await response.json().catch(() => null)
-        throw new Error(errorData?.message ?? "Vrácení se nezdařilo")
+        throw new Error(json?.message ?? "Vrácení se nezdařilo")
+      }
+
+      if (
+        json?.status === "confirm_required" &&
+        json?.confirmKind === "unlock_documents_on_revert"
+      ) {
+        setRevertDialog((prev) => ({ ...prev, loading: false }))
+        setLockDocumentsDialog({
+          open: true,
+          message: json.message ?? "Chcete nástupní dokumenty odemknout?",
+          loading: false,
+          onConfirm: async (unlock) => {
+            setLockDocumentsDialog((prev) => ({ ...prev, loading: true }))
+            await handleRevert(unlock)
+            setLockDocumentsDialog({
+              open: false,
+              message: "",
+              loading: false,
+              onConfirm: null,
+            })
+          },
+        })
+        return
       }
 
       setRevertDialog({ open: false, arrival: null, loading: false })
@@ -1875,6 +1939,9 @@ export default function OnboardingPage() {
         "Nástup vrácen",
         `Záznam "${arrival.name} ${arrival.surname}" byl vrácen do plánovaných.`
       )
+      if (json?.managerNotifyPrompt) {
+        setManagerNotifyPrompt(json.managerNotifyPrompt)
+      }
       await reload()
     } catch (error) {
       console.error("Error reverting arrival:", error)
@@ -1988,9 +2055,10 @@ export default function OnboardingPage() {
         }
       )
 
+      const json = await response.json().catch(() => null)
+
       if (!response.ok) {
-        const errorData = await response.json().catch(() => null)
-        throw new Error(errorData?.message ?? "Obnovení se nezdařilo")
+        throw new Error(json?.message ?? "Obnovení se nezdařilo")
       }
 
       setRestoreCancelledDialog({
@@ -2005,6 +2073,9 @@ export default function OnboardingPage() {
         "Nástup obnoven",
         `Záznam "${arrival.name} ${arrival.surname}" byl obnoven do ${wasActual ? "skutečných" : "plánovaných"}.`
       )
+      if (json?.managerNotifyPrompt) {
+        setManagerNotifyPrompt(json.managerNotifyPrompt)
+      }
       await reload()
     } catch (error) {
       console.error("Error restoring cancelled arrival:", error)
@@ -2016,8 +2087,31 @@ export default function OnboardingPage() {
     }
   }
 
+  function askLockDocuments(message: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      setLockDocumentsDialog({
+        open: true,
+        message,
+        loading: false,
+        onConfirm: async (lock) => {
+          setLockDocumentsDialog({
+            open: false,
+            message: "",
+            loading: false,
+            onConfirm: null,
+          })
+          resolve(lock)
+        },
+      })
+    })
+  }
+
   async function handleBulkStartArrivals(rows: Arrival[]) {
     if (isReadonly || rows.length === 0) return
+
+    const confirmLockChecklist = await askLockDocuments(
+      "U vybraných nástupů, u kterých ještě nejsou nástupní dokumenty kompletně hotové, chcete po potvrzení dokumenty zamknout? Po uzamčení se k formulářům/dotazníkům mimo aplikaci už nikdo nedostane, ale je to doporučené."
+    )
 
     setBulkPlannedLoading(true)
     const failed: string[] = []
@@ -2036,6 +2130,7 @@ export default function OnboardingPage() {
           hasCustomDates: boolean
           probationExtensions: ProbationExtension[]
           probationExtensionSummary?: string | null
+          confirmLockChecklist: boolean
         } = {
           actualStart: start,
           status: "COMPLETED",
@@ -2046,6 +2141,7 @@ export default function OnboardingPage() {
           probationExtensionSummary: hasExtensionCalculation
             ? (row.probationExtensionSummary ?? null)
             : null,
+          confirmLockChecklist,
         }
         if (nextProbationEnd) payload.probationEnd = nextProbationEnd
 
@@ -2440,6 +2536,15 @@ export default function OnboardingPage() {
               />
 
               {!isReadonly && (
+                <ManagerSendNoticeDialog
+                  kind="ONBOARDING"
+                  recordId={arrival.id}
+                  employeeName={fullName}
+                  hasManager={Boolean(arrival.supervisorEmail)}
+                />
+              )}
+
+              {!isReadonly && (
                 <Button
                   size="sm"
                   variant="default"
@@ -2779,6 +2884,15 @@ export default function OnboardingPage() {
             />
 
             {!isReadonly && (
+              <ManagerSendNoticeDialog
+                kind="ONBOARDING"
+                recordId={arrival.id}
+                employeeName={fullName}
+                hasManager={Boolean(arrival.supervisorEmail)}
+              />
+            )}
+
+            {!isReadonly && (
               <Button
                 size="sm"
                 variant="outline"
@@ -2897,7 +3011,10 @@ export default function OnboardingPage() {
               title="Smazané nástupy"
               triggerLabel="Smazané záznamy"
               successEvent="onboarding:deleted"
-              onRestore={() => void reload()}
+              onRestore={(prompt) => {
+                if (prompt) setManagerNotifyPrompt(prompt)
+                void reload()
+              }}
             />
           )}
         </div>
@@ -3172,7 +3289,10 @@ export default function OnboardingPage() {
               title="Smazané nástupy"
               triggerLabel="Smazané záznamy"
               successEvent="onboarding:deleted"
-              onRestore={() => void reload()}
+              onRestore={(prompt) => {
+                if (prompt) setManagerNotifyPrompt(prompt)
+                void reload()
+              }}
             />
           )}
         </div>
@@ -4029,6 +4149,50 @@ export default function OnboardingPage() {
       </Dialog>
 
       <Dialog
+        open={lockDocumentsDialog.open}
+        onOpenChange={(open) => {
+          if (!open) {
+            setLockDocumentsDialog({
+              open: false,
+              message: "",
+              loading: false,
+              onConfirm: null,
+            })
+          }
+        }}
+      >
+        <DialogContent
+          className="max-w-md"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle>Uzamknout nástupní dokumenty?</DialogTitle>
+            <DialogDescription>{lockDocumentsDialog.message}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => void lockDocumentsDialog.onConfirm?.(false)}
+              disabled={lockDocumentsDialog.loading}
+            >
+              Nechat otevřené
+            </Button>
+            <Button
+              variant="default"
+              onClick={() => void lockDocumentsDialog.onConfirm?.(true)}
+              disabled={lockDocumentsDialog.loading}
+              className="flex items-center gap-2"
+            >
+              {lockDocumentsDialog.loading && (
+                <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              )}
+              Zamknout
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
         open={revertDialog.open}
         onOpenChange={(open) => setRevertDialog((prev) => ({ ...prev, open }))}
       >
@@ -4083,7 +4247,7 @@ export default function OnboardingPage() {
             </Button>
             <Button
               variant="default"
-              onClick={handleRevert}
+              onClick={() => void handleRevert()}
               disabled={revertDialog.loading || isReadonly}
               className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700"
             >

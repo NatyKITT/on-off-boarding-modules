@@ -17,6 +17,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import type { ManagerNotifyPrompt } from "@/components/common/manager-notify-dialog"
 
 interface DeletedRecord {
   id: number
@@ -43,7 +44,7 @@ interface DeletedRecordsDialogProps {
   triggerLabel?: string
   successEvent?: string
   restoreButtonClassName?: string
-  onRestore?: () => void
+  onRestore?: (managerNotifyPrompt?: ManagerNotifyPrompt) => void
 }
 
 type PendingRestore = {
@@ -262,7 +263,7 @@ export function DeletedRecordsDialog({
       setDeleted((prev) => prev.filter((r) => r.id !== record.id))
       setPendingRestore(null)
 
-      onRestore?.()
+      onRestore?.(json?.managerNotifyPrompt ?? undefined)
 
       if (successEvent) {
         window.dispatchEvent(new Event(successEvent))

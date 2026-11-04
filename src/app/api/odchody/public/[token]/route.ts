@@ -22,6 +22,7 @@ import {
 import {
   assetLabel,
   buildHeaderFromOff,
+  collectUnresolvedExitChecklistItems,
   computeHandoverSupersededNotifications,
   ExitChecklistTransactionError,
   getBaselineRecord,
@@ -43,6 +44,7 @@ import {
   trackSignatureChange,
   tryFetchExitChecklistPdfBuffer,
   withSerializableRetry,
+  type ExitChecklistUnresolvedItem,
 } from "@/lib/exit-checklist"
 import { getExitChecklistCompletionState } from "@/lib/exit-checklist-completion"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
@@ -385,11 +387,7 @@ export async function PUT(
     handoverKitt6Cancellation: { email: string; target: string | null } | null
     handoverRecipientCancellations: { email: string; name: string }[]
     resolutionChanges: string[]
-    unresolvedItems: {
-      label: string
-      organization: string
-      note: string | null
-    }[]
+    unresolvedItems: ExitChecklistUnresolvedItem[]
     unresolvedChanged: boolean
     assetsAddedLabels: string[]
     assetsUpdatedLabels: string[]
@@ -568,11 +566,7 @@ export async function PUT(
       const handoverChanged = previousHandoverSummary !== nextHandoverSummary
 
       const resolutionChanges: string[] = []
-      const unresolvedItems: {
-        label: string
-        organization: string
-        note: string | null
-      }[] = []
+      const unresolvedItems: ExitChecklistUnresolvedItem[] = []
       let unresolvedChanged = false
 
       for (let index = 0; index < EXIT_CHECKLIST_ROWS.length; index++) {
@@ -598,19 +592,19 @@ export async function PUT(
             ? toResolution(incoming.resolved)
             : (existing?.resolution ?? ChecklistResolution.NOT_APPLICABLE)
 
-        const signedByName = isInactiveLawInfo
+        const signedByNameCandidate = isInactiveLawInfo
           ? null
           : incoming && canTouchRow
             ? sanitizeText(incoming.signedByName) || null
             : (existing?.signedByName ?? null)
 
-        const signedByEmail = isInactiveLawInfo
+        const signedByEmailCandidate = isInactiveLawInfo
           ? null
           : incoming && canTouchRow
             ? sanitizeText(incoming.signedByEmail) || null
             : (existing?.signedByEmail ?? null)
 
-        const signedAt = isInactiveLawInfo
+        const signedAtCandidate = isInactiveLawInfo
           ? null
           : incoming && canTouchRow
             ? incoming.signedAt
@@ -623,6 +617,17 @@ export async function PUT(
           : incoming && canTouchRow
             ? sanitizeText(incoming.note) || null
             : (existing?.note ?? null)
+
+        const blockedForMissingNote =
+          resolution === ChecklistResolution.NO && !note
+
+        const signedAt = blockedForMissingNote ? null : signedAtCandidate
+        const signedByName = blockedForMissingNote
+          ? null
+          : signedByNameCandidate
+        const signedByEmail = blockedForMissingNote
+          ? null
+          : signedByEmailCandidate
 
         if (
           existing &&
@@ -639,6 +644,12 @@ export async function PUT(
             label: rowDef.obligation,
             organization: rowDef.organization,
             note,
+            signedByName,
+            signedByEmail,
+            signedAt: signedAt ? signedAt.toISOString() : null,
+            additionalNote: null,
+            additionallyResolvedAt: null,
+            additionallyResolvedByName: null,
           })
 
           if (
@@ -990,7 +1001,6 @@ export async function PUT(
             employeePosition: header.positionName ?? "",
             employeeDepartment: handoverEmployeeDepartment,
             employmentEndDate: handoverEmploymentEndDate,
-            targetPosition: handoverKitt6Cancellation.target || "neuvedeno",
             managerName,
             managerPosition,
             managerDepartment,
@@ -1139,15 +1149,32 @@ export async function PUT(
             offboardingId: checklist.offboardingId,
           })
 
+          const completionUnresolvedItems =
+            collectUnresolvedExitChecklistItems(data)
+
           const employeeEmail =
             updatedChecklist.offboarding.userEmail?.trim() || null
           let employeeNotified = false
+
+          const completionEmployeePosition =
+            updatedChecklist.offboarding.positionName ?? ""
+          const completionEmployeeDepartment = [data.department, data.unitName]
+            .filter(Boolean)
+            .join(" – ")
+          const completionEmploymentEndDate =
+            updatedChecklist.offboarding.actualEnd ??
+            updatedChecklist.offboarding.plannedEnd ??
+            data.employmentEndDate
 
           if (employeeEmail) {
             try {
               await sendExitChecklistCompletedToEmployeeEmail({
                 to: employeeEmail,
                 employeeName: data.employeeName,
+                employeePosition: completionEmployeePosition,
+                employeeDepartment: completionEmployeeDepartment,
+                employmentEndDate: completionEmploymentEndDate,
+                unresolvedItems: completionUnresolvedItems,
               })
               employeeNotified = true
             } catch (employeeEmailError) {
@@ -1161,14 +1188,9 @@ export async function PUT(
           await sendExitChecklistCompletedEmail({
             to: recipients,
             employeeName: data.employeeName,
-            employeePosition: updatedChecklist.offboarding.positionName ?? "",
-            employeeDepartment: [data.department, data.unitName]
-              .filter(Boolean)
-              .join(" – "),
-            employmentEndDate:
-              updatedChecklist.offboarding.actualEnd ??
-              updatedChecklist.offboarding.plannedEnd ??
-              data.employmentEndDate,
+            employeePosition: completionEmployeePosition,
+            employeeDepartment: completionEmployeeDepartment,
+            employmentEndDate: completionEmploymentEndDate,
             completedByName: user.name ?? user.email ?? null,
             checklistUrl: `${baseUrl}/odchody/${checklist.offboardingId}/vystupni-list`,
             pdfBuffer,
@@ -1176,6 +1198,7 @@ export async function PUT(
               ? `Vystupni-list-${sanitizeExitChecklistFilename(data.employeeName || String(checklist.offboardingId))}.pdf`
               : null,
             employeeNotified,
+            unresolvedItems: completionUnresolvedItems,
           })
 
           const completedAt = new Date().toISOString()

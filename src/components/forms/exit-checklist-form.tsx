@@ -78,6 +78,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Textarea } from "@/components/ui/textarea"
 import type { EmployeeItem } from "@/components/common/employee-combobox"
 import { EosPersonPickerDialog } from "@/components/common/eos-person-picker-dialog"
 import {
@@ -181,6 +182,10 @@ function mergeItemsWithConfig(
       signedByName: found?.signedByName ?? null,
       signedByEmail: found?.signedByEmail ?? null,
       signedAt: found?.signedAt ?? null,
+      additionalNote: found?.additionalNote ?? null,
+      additionallyResolvedAt: found?.additionallyResolvedAt ?? null,
+      additionallyResolvedByName: found?.additionallyResolvedByName ?? null,
+      additionallyResolvedByEmail: found?.additionallyResolvedByEmail ?? null,
     }
   })
 }
@@ -459,6 +464,7 @@ function TableActionCell({
   showSignButton,
   showRevokeButton,
   isOwnRow,
+  signDisabled,
   onSign,
   onSignBehalf,
   onRevoke,
@@ -466,10 +472,15 @@ function TableActionCell({
   showSignButton: boolean
   showRevokeButton: boolean
   isOwnRow?: boolean
+  signDisabled?: boolean
   onSign: () => void
   onSignBehalf: () => void
   onRevoke: () => void
 }) {
+  const signDisabledReason = signDisabled
+    ? "Nejprve vyplňte povinnou poznámku k odpovědi Ne."
+    : undefined
+
   return (
     <div className="grid h-[68px] w-full grid-rows-2 gap-1">
       {showSignButton ? (
@@ -479,6 +490,8 @@ function TableActionCell({
             size="sm"
             variant="outline"
             className="h-8 w-full justify-start gap-1 px-1.5 text-xs"
+            disabled={signDisabled}
+            title={signDisabledReason}
             onClick={onSign}
           >
             <Check className="size-3 shrink-0" />
@@ -494,6 +507,8 @@ function TableActionCell({
                 ? "border-emerald-300 bg-emerald-50 text-emerald-800"
                 : "text-muted-foreground"
             }`}
+            disabled={signDisabled}
+            title={signDisabledReason}
             onClick={onSignBehalf}
           >
             <Check className="size-3 shrink-0" />
@@ -522,6 +537,134 @@ function TableActionCell({
           <div className="h-8 w-full" aria-hidden="true" />
         </>
       )}
+    </div>
+  )
+}
+
+function AdditionalNoteBlock({
+  item,
+  isInternalMode,
+  offboardingId,
+  publicToken,
+  currentUserName,
+  currentUserEmail,
+  onSaved,
+}: {
+  item: ExitChecklistItem
+  isInternalMode: boolean
+  offboardingId: number | null
+  publicToken: string | null
+  currentUserName: string
+  currentUserEmail: string
+  onSaved: (patch: Partial<ExitChecklistItem>) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(item.additionalNote ?? "")
+  const [saving, setSaving] = useState(false)
+
+  async function save(nextValue: string) {
+    setSaving(true)
+    try {
+      const url =
+        isInternalMode && offboardingId
+          ? `/api/odchody/${offboardingId}/exit-checklist/item-additional-note`
+          : `/api/odchody/public/${publicToken}/item-additional-note`
+
+      const res = await fetch(url, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: item.key, note: nextValue }),
+      })
+
+      if (!res.ok) throw new Error("save failed")
+
+      const now = new Date().toISOString()
+      onSaved({
+        additionalNote: nextValue || null,
+        additionallyResolvedAt: nextValue ? now : null,
+        additionallyResolvedByName: nextValue
+          ? currentUserName || currentUserEmail
+          : null,
+        additionallyResolvedByEmail: nextValue ? currentUserEmail : null,
+      })
+      setEditing(false)
+    } catch {
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!editing) {
+    if (item.additionalNote) {
+      return (
+        <div className="mt-2 rounded-md border border-orange-200 bg-orange-50 px-2 py-1 text-[10px] text-orange-800">
+          <span className="font-medium">Dodatečně vyřízeno:</span>{" "}
+          {item.additionalNote}
+          {item.additionallyResolvedByName
+            ? ` (${item.additionallyResolvedByName}${
+                item.additionallyResolvedAt
+                  ? `, ${format(new Date(item.additionallyResolvedAt), "d.M.yyyy HH:mm")}`
+                  : ""
+              })`
+            : ""}
+          <button
+            type="button"
+            className="ml-2 underline"
+            onClick={() => {
+              setValue(item.additionalNote ?? "")
+              setEditing(true)
+            }}
+          >
+            upravit
+          </button>
+        </div>
+      )
+    }
+
+    return (
+      <button
+        type="button"
+        className="mt-2 text-[10px] text-orange-700 underline"
+        onClick={() => setEditing(true)}
+      >
+        + Dodatečně vyřízeno
+      </button>
+    )
+  }
+
+  return (
+    <div className="mt-2 flex flex-col gap-1">
+      <Textarea
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="Co a kdy bylo dodatečně vyřízeno…"
+        rows={2}
+        className="min-h-[40px] bg-background text-[10px] leading-4"
+      />
+      <div className="flex gap-1">
+        <Button
+          type="button"
+          size="sm"
+          className="h-6 px-2 text-[10px]"
+          disabled={saving}
+          onClick={() => void save(value)}
+        >
+          Uložit
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-6 px-2 text-[10px]"
+          disabled={saving}
+          onClick={() => {
+            setEditing(false)
+            setValue(item.additionalNote ?? "")
+          }}
+        >
+          Zrušit
+        </Button>
+      </div>
     </div>
   )
 }
@@ -764,6 +907,9 @@ export function ExitChecklistForm({
   const [sectionBResponsible, setSectionBResponsible] = useState(
     initialData.sectionBResponsible ?? null
   )
+  const [sectionCResponsible, setSectionCResponsible] = useState(
+    initialData.sectionCResponsible ?? null
+  )
   const [kitt6OptionContact, setKitt6OptionContact] = useState(
     initialData.kitt6OptionContact ?? null
   )
@@ -813,6 +959,7 @@ export function ExitChecklistForm({
   const [pendingSaveAction, setPendingSaveAction] = useState<
     (() => void) | null
   >(null)
+  const [pendingSaveIsLock, setPendingSaveIsLock] = useState(false)
 
   function handlePdfPersonSelected(employee: EmployeeItem) {
     setPdfRecipientName(
@@ -902,6 +1049,10 @@ export function ExitChecklistForm({
     !isInternalMode &&
     (isManagerVisitor || isVisitorOrSubstituteFor(sectionBResponsible?.email))
 
+  const isSectionCResponsibleVisitor =
+    !isInternalMode &&
+    (isManagerVisitor || isVisitorOrSubstituteFor(sectionCResponsible?.email))
+
   const assetsSignedByOther =
     Boolean(signatures.issuer.signedAt) &&
     normalizeEmail(signatures.issuer.signedByEmail) !==
@@ -919,7 +1070,7 @@ export function ExitChecklistForm({
     isLocked ||
     isEmployeeVisitor ||
     (handoverSignedByOther && !canOverrideOthersSignature) ||
-    (!isInternalMode && !isManagerVisitor)
+    (!isInternalMode && !isSectionCResponsibleVisitor)
 
   function markAssetsHrEdit() {
     if (isInternalMode && isAdmin && assetsSignedByOther) {
@@ -1097,6 +1248,7 @@ export function ExitChecklistForm({
     setManagerPosition(initialData.managerPosition ?? "")
     setManagerDepartment(initialData.managerDepartment ?? "")
     setSectionBResponsible(initialData.sectionBResponsible ?? null)
+    setSectionCResponsible(initialData.sectionCResponsible ?? null)
     setKitt6OptionContact(initialData.kitt6OptionContact ?? null)
     markClean()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1332,6 +1484,29 @@ export function ExitChecklistForm({
     markDirty()
   }
 
+  function applyItemAdditionalNotePatch(
+    key: ExitChecklistItem["key"],
+    patch: Partial<ExitChecklistItem>
+  ) {
+    setItems((prev) =>
+      prev.map((item) => (item.key === key ? { ...item, ...patch } : item))
+    )
+  }
+
+  function blockedForMissingNoNote(
+    target: ExitChecklistItem | undefined
+  ): boolean {
+    if (target?.resolved !== "NO") return false
+    if (target.note?.trim()) return false
+
+    showFeedback(
+      "error",
+      "Chybí povinná poznámka",
+      "U odpovědi „Ne“ je nutné nejdřív vyplnit poznámku, než agendu podepíšete."
+    )
+    return true
+  }
+
   function signRow(key: ExitChecklistItem["key"]) {
     if (isLocked || !currentUserEmail || signingDisabledKeys.includes(key)) {
       return
@@ -1348,6 +1523,7 @@ export function ExitChecklistForm({
 
     const target = items.find((item) => item.key === key)
     if (!target || target.signedAt) return
+    if (blockedForMissingNoNote(target)) return
 
     const now = new Date().toISOString()
 
@@ -1356,7 +1532,7 @@ export function ExitChecklistForm({
         item.key === key
           ? {
               ...item,
-              resolved: "YES",
+              resolved: item.resolved ?? "YES",
               signedByName: currentUserName || currentUserEmail,
               signedByEmail: currentUserEmail,
               signedAt: now,
@@ -1384,6 +1560,7 @@ export function ExitChecklistForm({
 
     const behalfTarget = items.find((item) => item.key === key)
     if (!behalfTarget || behalfTarget.signedAt) return
+    if (blockedForMissingNoNote(behalfTarget)) return
 
     const now = new Date().toISOString()
 
@@ -1392,7 +1569,7 @@ export function ExitChecklistForm({
         item.key === key
           ? {
               ...item,
-              resolved: "YES",
+              resolved: item.resolved ?? "YES",
               signedByName: `${currentUserName || currentUserEmail} — v zastoupení`,
               signedByEmail: currentUserEmail,
               signedAt: now,
@@ -2384,6 +2561,60 @@ export function ExitChecklistForm({
       !signingDisabledKeys.includes(item.key)
   ).length
 
+  const remainingOwnRowObligations = items
+    .filter(
+      (item) =>
+        ownRowKeys.has(item.key) &&
+        !item.signedAt &&
+        !signingDisabledKeys.includes(item.key)
+    )
+    .map((item) => item.obligation)
+
+  const pendingObligationsForVisitor = useMemo(() => {
+    if (isInternalMode) return { employee: [], manager: [], sectionB: [] }
+
+    const employee: string[] = []
+    if (isEmployeeVisitor && !signatures.employee.signedAt) {
+      employee.push("Podpis zaměstnance v hlavičce formuláře")
+    }
+
+    const manager: string[] = []
+    if (isManagerVisitor) {
+      if (!signatures.manager.signedAt) {
+        manager.push("Podpis vedoucího odboru v hlavičce formuláře")
+      }
+      remainingOwnRowObligations.forEach((obligation) =>
+        manager.push(`Sekce A – ${obligation}`)
+      )
+      if (!handoverManagerSignature.signedAt) {
+        manager.push("Sekce C – vyplnění způsobu předání agendy a podpis")
+      }
+    }
+
+    const sectionB: string[] = []
+    if (isSectionBResponsibleVisitor) {
+      if (!assetsComplete || !signatures.issuer.signedAt) {
+        sectionB.push("Sekce B – vyplnění a podpis vyrovnání majetku")
+      }
+      if (!isManagerVisitor) {
+        remainingOwnRowObligations.forEach((obligation) =>
+          sectionB.push(`Sekce A – ${obligation}`)
+        )
+      }
+    }
+
+    return { employee, manager, sectionB }
+  }, [
+    isInternalMode,
+    isEmployeeVisitor,
+    isManagerVisitor,
+    isSectionBResponsibleVisitor,
+    signatures,
+    handoverManagerSignature,
+    assetsComplete,
+    remainingOwnRowObligations,
+  ])
+
   function buildSaveSummary(): { sendLines: string[]; missingLines: string[] } {
     const sendLines: string[] = []
 
@@ -2450,6 +2681,12 @@ export function ExitChecklistForm({
 
     const missingLines: string[] = []
 
+    if (pendingSaveIsLock && completion.percent < 100) {
+      missingLines.push(
+        `Výstupní list ještě není 100% hotový (chybí: ${completion.missingSections.join(", ")}) – ne všichni podepisující ještě podepsali. I tak ho lze uzamknout, ale dál už nikdo nebude moct nic podepsat. Personální oddělení navíc dostane e-mail s upozorněním, aby to zkontrolovalo.`
+      )
+    }
+
     if (!isInternalMode && remainingOwnRowsCount > 0) {
       missingLines.push(
         `Ještě máte ${remainingOwnRowsCount} ${remainingOwnRowsCount === 1 ? "nepodepsanou položku" : "nepodepsané položky"} ve výstupním listu – dokud je nepodepíšete, budou vám dál chodit automatické připomínky.`
@@ -2486,7 +2723,8 @@ export function ExitChecklistForm({
     return { sendLines, missingLines }
   }
 
-  function requestSave(action: () => void) {
+  function requestSave(action: () => void, isLock = false) {
+    setPendingSaveIsLock(isLock)
     setPendingSaveAction(() => action)
   }
 
@@ -2568,6 +2806,11 @@ export function ExitChecklistForm({
     }
     return Array.from(emails)
   }, [items, signatures, handoverManagerSignature])
+
+  const signedRowKeys = useMemo(
+    () => items.filter((item) => item.signedAt).map((item) => item.key),
+    [items]
+  )
 
   const isLockedBadge = isLocked ? (
     <Badge
@@ -2750,8 +2993,14 @@ export function ExitChecklistForm({
                   managerPosition={managerPosition || null}
                   managerDepartment={managerDepartment || null}
                   signedEmails={signedEmails}
+                  signedRowKeys={signedRowKeys}
+                  employeeSigned={Boolean(signatures.employee.signedAt)}
+                  managerHeaderSigned={Boolean(signatures.manager.signedAt)}
+                  sectionBSigned={Boolean(signatures.issuer.signedAt)}
+                  sectionCSigned={Boolean(handoverManagerSignature.signedAt)}
                   isLocked={isLocked}
                   sectionBResponsible={sectionBResponsible}
+                  sectionCResponsible={sectionCResponsible}
                   kitt6OptionContact={kitt6OptionContact}
                   onManagerChange={(value) => {
                     setManagerName(value.name)
@@ -2760,6 +3009,7 @@ export function ExitChecklistForm({
                     setManagerDepartment(value.department ?? "")
                   }}
                   onSectionBResponsibleChange={setSectionBResponsible}
+                  onSectionCResponsibleChange={setSectionCResponsible}
                   onKitt6ContactChange={setKitt6OptionContact}
                   onConflictOfInterestChange={setConflictOfInterest}
                 />
@@ -2833,13 +3083,14 @@ export function ExitChecklistForm({
                       className="gap-1 bg-background"
                       onClick={() =>
                         requestSave(
-                          () => void handleSave(true, { requestClose: true })
+                          () => void handleSave(true, { requestClose: true }),
+                          true
                         )
                       }
-                      disabled={saving || completion.percent < 100}
+                      disabled={saving}
                       title={
                         completion.percent < 100
-                          ? "Nejdřív dokončete všechny sekce (viz Nedokončeno výše)"
+                          ? "Výstupní list ještě není 100% hotový - před uzamčením se zobrazí upozornění"
                           : undefined
                       }
                     >
@@ -2947,45 +3198,73 @@ export function ExitChecklistForm({
         </CardHeader>
 
         <CardContent className="space-y-6 text-sm">
-          {!isInternalMode && isEmployeeVisitor && (
-            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-              <span>
-                Než bude moct být vyrovnání závazků elektronicky podepsáno,
-                musíte fyzicky vrátit zapůjčený majetek, předat agendu a
-                vyrovnat případné závazky. Podepsat můžete pouze svoje pole
-                (Podpis zaměstnance) – ostatní pole a sekce vyplňují a
-                podepisují ostatní zúčastnění.
-              </span>
-            </div>
-          )}
+          {!isInternalMode &&
+            isEmployeeVisitor &&
+            pendingObligationsForVisitor.employee.length > 0 && (
+              <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                <div>
+                  <p>
+                    Než bude moct být vyrovnání závazků elektronicky podepsáno,
+                    musíte fyzicky vrátit zapůjčený majetek, předat agendu a
+                    vyrovnat případné závazky. Podepsat můžete pouze svoje pole
+                    (Podpis zaměstnance) – ostatní pole a sekce vyplňují a
+                    podepisují ostatní zúčastnění.
+                  </p>
+                  <p className="mt-2 font-medium">Ještě zbývá podepsat:</p>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                    {pendingObligationsForVisitor.employee.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
 
-          {!isInternalMode && isManagerVisitor && (
-            <div className="flex items-start gap-2 rounded-md border border-indigo-200 bg-indigo-100 px-3 py-2 text-sm text-indigo-900">
-              <Info className="mt-0.5 size-4 shrink-0" />
-              <span>
-                Jste vedoucí odboru u tohoto výstupního listu, nebo jste v
-                zastoupení. Zkontrolujte prosím všechny sekce
-                {!includeHandoverAgenda
-                  ? ", v sekci C vyberte způsob předání agendy"
-                  : ""}{" "}
-                a podepište ji – bez vyplnění a podpisu zůstane výstupní list
-                nekompletní.
-              </span>
-            </div>
-          )}
+          {!isInternalMode &&
+            isManagerVisitor &&
+            pendingObligationsForVisitor.manager.length > 0 && (
+              <div className="flex items-start gap-2 rounded-md border border-indigo-200 bg-indigo-100 px-3 py-2 text-sm text-indigo-900">
+                <Info className="mt-0.5 size-4 shrink-0" />
+                <div>
+                  <p>
+                    Jste vedoucí odboru u tohoto výstupního listu, nebo jste v
+                    zastoupení. Zkontrolujte prosím všechny sekce
+                    {!includeHandoverAgenda
+                      ? ", v sekci C vyberte způsob předání agendy"
+                      : ""}{" "}
+                    a podepište ji – bez vyplnění a podpisu zůstane výstupní
+                    list nekompletní.
+                  </p>
+                  <p className="mt-2 font-medium">Ještě zbývá podepsat:</p>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                    {pendingObligationsForVisitor.manager.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
 
           {!isInternalMode &&
             isSectionBResponsibleVisitor &&
-            !assetsComplete && (
+            pendingObligationsForVisitor.sectionB.length > 0 && (
               <div className="flex items-start gap-2 rounded-md border border-indigo-200 bg-indigo-100 px-3 py-2 text-sm text-indigo-900">
                 <Info className="mt-0.5 size-4 shrink-0" />
-                <span>
-                  Jste odpovědná osoba za sekci B (vyrovnání majetku), nebo ji
-                  zastupujete. Prosím zkontrolujte a podepište vyrovnání
-                  majetku, dokud nebude vyplněné, bude výstupní list zůstávat
-                  nekompletní.
-                </span>
+                <div>
+                  <p>
+                    Jste odpovědná osoba za sekci B (vyrovnání majetku), nebo ji
+                    zastupujete. Prosím zkontrolujte a podepište vyrovnání
+                    majetku, dokud nebude vyplněné, bude výstupní list zůstávat
+                    nekompletní.
+                  </p>
+                  <p className="mt-2 font-medium">Ještě zbývá podepsat:</p>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                    {pendingObligationsForVisitor.sectionB.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
               </div>
             )}
 
@@ -2999,6 +3278,49 @@ export function ExitChecklistForm({
                 myslíte, že byste mezi podepisujícími být měl(a), požádejte
                 Personální oddělení o přidání do seznamu příjemců.
               </span>
+            </div>
+          )}
+
+          {items.some((item) => item.resolved === "NO") && (
+            <div className="space-y-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-900">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                <span className="font-medium">
+                  Nesplněná agenda (odpověď „Ne“)
+                </span>
+              </div>
+              <ul className="space-y-1.5 pl-6 text-xs">
+                {items
+                  .filter((item) => item.resolved === "NO")
+                  .map((item) => (
+                    <li key={item.key}>
+                      <span className="font-medium">{item.obligation}</span>{" "}
+                      <span className="text-red-700">
+                        ({item.organization})
+                      </span>
+                      {item.signedAt ? (
+                        <span className="text-red-700">
+                          {" "}
+                          · {item.signedByName} ·{" "}
+                          {format(new Date(item.signedAt), "d.M.yyyy HH:mm")}
+                        </span>
+                      ) : (
+                        <span className="text-red-700"> · nepodepsáno</span>
+                      )}
+                      {item.note && (
+                        <div className="mt-0.5 text-red-800">{item.note}</div>
+                      )}
+                      {item.additionalNote && (
+                        <div className="mt-1 rounded-md border border-orange-200 bg-orange-50 px-2 py-1 text-orange-800">
+                          <span className="font-medium">
+                            Dodatečně vyřízeno:
+                          </span>{" "}
+                          {item.additionalNote}
+                        </div>
+                      )}
+                    </li>
+                  ))}
+              </ul>
             </div>
           )}
 
@@ -3102,6 +3424,7 @@ export function ExitChecklistForm({
                     valueName={managerName || undefined}
                     valueEmail={managerEmail || undefined}
                     placeholder="Vyhledejte vedoucího v eOSu…"
+                    excludeActiveOffboardings={false}
                     onSelect={(employee) => {
                       setManagerName(buildPersonFullName(employee))
                       setManagerEmail(employee.email ?? "")
@@ -3344,19 +3667,25 @@ export function ExitChecklistForm({
                 !isSigningDisabled &&
                 !isSigned &&
                 !isEmployeeVisitor
+              const noteMissingForNo =
+                item.resolved === "NO" && !item.note?.trim()
 
               return (
                 <div
                   key={item.key}
                   className={`space-y-2 px-4 py-3 ${
                     isLawInfoGreyed ? "opacity-50" : ""
-                  } ${isOwnRow ? "bg-emerald-50/40" : ""}`}
+                  } ${
+                    item.resolved === "NO"
+                      ? item.additionalNote
+                        ? "bg-orange-50/70"
+                        : "bg-red-50/70"
+                      : isOwnRow
+                        ? "bg-emerald-50/40"
+                        : ""
+                  }`}
                 >
-                  <div className="flex flex-wrap items-start gap-2 text-xs">
-                    {renderOrganization(
-                      item.organization,
-                      item.key === "handoverProtocol" ? managerName : null
-                    )}
+                  <div className="flex flex-col items-start gap-1 text-xs">
                     {isOwnRow && (
                       <Badge
                         variant="outline"
@@ -3364,6 +3693,10 @@ export function ExitChecklistForm({
                       >
                         Vaše agenda
                       </Badge>
+                    )}
+                    {renderOrganization(
+                      item.organization,
+                      item.key === "handoverProtocol" ? managerName : null
                     )}
                   </div>
 
@@ -3415,6 +3748,12 @@ export function ExitChecklistForm({
                             size="sm"
                             variant="outline"
                             className="h-7 gap-1 whitespace-nowrap px-2 text-xs"
+                            disabled={noteMissingForNo}
+                            title={
+                              noteMissingForNo
+                                ? "Nejprve vyplňte povinnou poznámku k odpovědi Ne."
+                                : undefined
+                            }
                             onClick={() => requestSignRow(item.key, false)}
                           >
                             <Check className="size-3 shrink-0" /> Podepsat
@@ -3429,6 +3768,12 @@ export function ExitChecklistForm({
                                 ? "border-emerald-300 bg-emerald-50 text-emerald-800"
                                 : "text-muted-foreground"
                             }`}
+                            disabled={noteMissingForNo}
+                            title={
+                              noteMissingForNo
+                                ? "Nejprve vyplňte povinnou poznámku k odpovědi Ne."
+                                : undefined
+                            }
                             onClick={() => requestSignRow(item.key, true)}
                           >
                             <Check className="size-3 shrink-0" /> Podepsat
@@ -3452,12 +3797,36 @@ export function ExitChecklistForm({
                   </div>
 
                   {resolutionEditable && item.resolved !== null && (
-                    <Input
-                      value={item.note ?? ""}
-                      onChange={(e) => updateItemNote(item.key, e.target.value)}
-                      placeholder="poznámka"
-                      className="h-7 bg-background py-1 text-[11px] leading-4"
-                    />
+                    <div>
+                      <Textarea
+                        value={item.note ?? ""}
+                        onChange={(e) =>
+                          updateItemNote(item.key, e.target.value)
+                        }
+                        placeholder={
+                          item.resolved === "NO"
+                            ? "Poznámka (povinná u odpovědi Ne)"
+                            : "poznámka"
+                        }
+                        rows={1}
+                        ref={(el) => {
+                          if (el) {
+                            el.style.height = "auto"
+                            el.style.height = `${el.scrollHeight}px`
+                          }
+                        }}
+                        className={`min-h-[28px] resize-none overflow-hidden bg-background py-1 text-[11px] leading-4 ${
+                          noteMissingForNo
+                            ? "border-red-400 focus-visible:ring-red-400"
+                            : ""
+                        }`}
+                      />
+                      {noteMissingForNo && (
+                        <p className="mt-1 text-[10px] text-red-600">
+                          Poznámka je povinná, než agendu podepíšete.
+                        </p>
+                      )}
+                    </div>
                   )}
 
                   {!resolutionEditable && item.note && (
@@ -3476,6 +3845,20 @@ export function ExitChecklistForm({
                         · Elektronicky podepsáno · {signedAtDate}
                       </span>
                     </div>
+                  )}
+
+                  {item.resolved === "NO" && item.signedAt && (
+                    <AdditionalNoteBlock
+                      item={item}
+                      isInternalMode={isInternalMode}
+                      offboardingId={resolvedOffboardingId}
+                      publicToken={publicToken ?? null}
+                      currentUserName={currentUserName}
+                      currentUserEmail={currentUserEmail}
+                      onSaved={(patch) =>
+                        applyItemAdditionalNotePatch(item.key, patch)
+                      }
+                    />
                   )}
                 </div>
               )
@@ -3528,21 +3911,25 @@ export function ExitChecklistForm({
                     !isSigningDisabled &&
                     !isSigned &&
                     !isEmployeeVisitor
+                  const noteMissingForNo =
+                    item.resolved === "NO" && !item.note?.trim()
 
                   return (
                     <TableRow
                       key={item.key}
                       className={`${isLawInfoGreyed ? "opacity-50" : ""} ${
-                        isOwnRow ? "bg-emerald-50/40" : ""
+                        item.resolved === "NO"
+                          ? item.additionalNote
+                            ? "bg-orange-50/70"
+                            : "bg-red-50/70"
+                          : isOwnRow
+                            ? "bg-emerald-50/40"
+                            : ""
                       }`}
                       style={{ height: "92px" }}
                     >
                       <TableCell className="w-[24%] align-middle text-sm">
-                        <div className="flex items-center gap-1.5">
-                          {renderOrganization(
-                            item.organization,
-                            item.key === "handoverProtocol" ? managerName : null
-                          )}
+                        <div className="flex flex-col items-start gap-1">
                           {isOwnRow && (
                             <Badge
                               variant="outline"
@@ -3550,6 +3937,10 @@ export function ExitChecklistForm({
                             >
                               Vaše agenda
                             </Badge>
+                          )}
+                          {renderOrganization(
+                            item.organization,
+                            item.key === "handoverProtocol" ? managerName : null
                           )}
                         </div>
                       </TableCell>
@@ -3595,20 +3986,56 @@ export function ExitChecklistForm({
                         )}
 
                         {resolutionEditable && item.resolved !== null && (
-                          <Input
-                            value={item.note ?? ""}
-                            onChange={(e) =>
-                              updateItemNote(item.key, e.target.value)
-                            }
-                            placeholder="poznámka"
-                            className="mt-2 h-6 bg-background px-2 py-0.5 text-[10px] leading-4"
-                          />
+                          <div className="mt-2">
+                            <Textarea
+                              value={item.note ?? ""}
+                              onChange={(e) =>
+                                updateItemNote(item.key, e.target.value)
+                              }
+                              placeholder={
+                                item.resolved === "NO"
+                                  ? "Poznámka (povinná u odpovědi Ne)"
+                                  : "poznámka"
+                              }
+                              rows={1}
+                              ref={(el) => {
+                                if (el) {
+                                  el.style.height = "auto"
+                                  el.style.height = `${el.scrollHeight}px`
+                                }
+                              }}
+                              className={`min-h-[24px] resize-none overflow-hidden bg-background px-2 py-0.5 text-[10px] leading-4 ${
+                                noteMissingForNo
+                                  ? "border-red-400 focus-visible:ring-red-400"
+                                  : ""
+                              }`}
+                            />
+                            {noteMissingForNo && (
+                              <p className="mt-1 text-[9px] text-red-600">
+                                Poznámka je povinná, než agendu podepíšete.
+                              </p>
+                            )}
+                          </div>
                         )}
 
                         {!resolutionEditable && item.note && (
                           <p className="mt-2 text-[10px] text-muted-foreground">
                             {item.note}
                           </p>
+                        )}
+
+                        {item.resolved === "NO" && item.signedAt && (
+                          <AdditionalNoteBlock
+                            item={item}
+                            isInternalMode={isInternalMode}
+                            offboardingId={resolvedOffboardingId}
+                            publicToken={publicToken ?? null}
+                            currentUserName={currentUserName}
+                            currentUserEmail={currentUserEmail}
+                            onSaved={(patch) =>
+                              applyItemAdditionalNotePatch(item.key, patch)
+                            }
+                          />
                         )}
                       </TableCell>
                       <TableCell className="w-1/5 pl-2 align-middle">
@@ -3624,6 +4051,7 @@ export function ExitChecklistForm({
                           showSignButton={showSignButton}
                           showRevokeButton={showRevokeButton}
                           isOwnRow={isOwnRow}
+                          signDisabled={noteMissingForNo}
                           onSign={() => requestSignRow(item.key, false)}
                           onSignBehalf={() => requestSignRow(item.key, true)}
                           onRevoke={() => revokeSignature(item.key)}
@@ -4153,6 +4581,7 @@ export function ExitChecklistForm({
                         <PersonLookupCombobox
                           variant="button"
                           placeholder="Vyhledat odpovědnou osobu v eOSu…"
+                          excludeActiveOffboardings={false}
                           onSelect={(employee) => {
                             const id = employee.id
                             const email = normalizeEmail(employee.email)
@@ -4674,7 +5103,9 @@ export function ExitChecklistForm({
           <div className="p-6 sm:px-8 sm:py-7">
             <AlertDialogHeader className="space-y-3 text-left">
               <AlertDialogTitle className="text-xl font-semibold">
-                Uložit výstupní list?
+                {pendingSaveIsLock
+                  ? "Uzamknout výstupní list?"
+                  : "Uložit výstupní list?"}
               </AlertDialogTitle>
 
               <AlertDialogDescription asChild>
@@ -4742,9 +5173,11 @@ export function ExitChecklistForm({
                   action?.()
                 }}
               >
-                {buildSaveSummary().sendLines.length > 0
-                  ? "Uložit a odeslat"
-                  : "Uložit"}
+                {pendingSaveIsLock
+                  ? "Uzamknout"
+                  : buildSaveSummary().sendLines.length > 0
+                    ? "Uložit a odeslat"
+                    : "Uložit"}
               </Button>
             </AlertDialogFooter>
           </div>

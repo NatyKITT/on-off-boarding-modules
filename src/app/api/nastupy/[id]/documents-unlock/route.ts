@@ -2,8 +2,15 @@ import { NextResponse, type NextRequest } from "next/server"
 import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
+import {
+  getHrRecipientsFromEnv,
+  sendEmploymentDocumentsUnlockedEmail,
+  sendEmploymentDocumentsUnlockedHrEmail,
+} from "@/lib/email"
+import { ONBOARDING_TYPES, typeLabel } from "@/lib/employment-documents"
 import { recomputeOnboardingReadiness } from "@/lib/onboarding-readiness"
 import { canManageEmploymentDocuments } from "@/lib/rbac"
+import { absoluteUrl } from "@/lib/url"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -14,7 +21,7 @@ function getNumericId(value: string): number | null {
 }
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const session = await auth()
@@ -40,7 +47,18 @@ export async function POST(
 
   const existing = await prisma.employeeOnboarding.findFirst({
     where: { id: onboardingId, deletedAt: null },
-    select: { id: true, documentsReadinessStatus: true },
+    select: {
+      id: true,
+      documentsReadinessStatus: true,
+      titleBefore: true,
+      name: true,
+      surname: true,
+      titleAfter: true,
+      userEmail: true,
+      positionName: true,
+      department: true,
+      unitName: true,
+    },
   })
 
   if (!existing) {
@@ -59,6 +77,17 @@ export async function POST(
 
   const unlockedBy = session.user.name ?? session.user.email ?? "unknown"
   const userId = (session.user as { id?: string }).id
+  const now = new Date()
+
+  const lockedDraftDocuments = await prisma.employmentDocument.findMany({
+    where: {
+      onboardingId,
+      type: { in: ONBOARDING_TYPES },
+      status: "DRAFT",
+      isLocked: true,
+    },
+    select: { id: true, type: true, accessHash: true, expiresAt: true },
+  })
 
   await prisma.$transaction(async (tx) => {
     await tx.employeeOnboarding.update({
@@ -69,6 +98,15 @@ export async function POST(
         documentsLockedBy: null,
       },
     })
+
+    if (lockedDraftDocuments.length > 0) {
+      await tx.employmentDocument.updateMany({
+        where: {
+          id: { in: lockedDraftDocuments.map((document) => document.id) },
+        },
+        data: { isLocked: false },
+      })
+    }
 
     if (userId) {
       await tx.onboardingChangeLog.create({
@@ -85,6 +123,64 @@ export async function POST(
   })
 
   await recomputeOnboardingReadiness(onboardingId)
+
+  const unlockedDocumentLinks = lockedDraftDocuments
+    .filter(
+      (document) =>
+        document.accessHash && (!document.expiresAt || document.expiresAt > now)
+    )
+    .map((document) => ({
+      label: typeLabel(document.type),
+      url: absoluteUrl(`/dokumenty/${document.accessHash}`, req),
+    }))
+
+  const employeeName = [
+    existing.titleBefore,
+    existing.name,
+    existing.surname,
+    existing.titleAfter,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .trim()
+
+  if (existing.userEmail) {
+    try {
+      await sendEmploymentDocumentsUnlockedEmail({
+        to: existing.userEmail,
+        employeeName,
+        employeePosition: existing.positionName,
+        employeeDepartment: existing.department,
+        employeeUnitName: existing.unitName,
+        documents: unlockedDocumentLinks,
+      })
+    } catch (error) {
+      console.error(
+        "[DOCUMENTS-UNLOCK] E-mail zaměstnanci se nepodařilo odeslat:",
+        error
+      )
+    }
+  }
+
+  const hrRecipients = getHrRecipientsFromEnv()
+
+  if (hrRecipients.length > 0) {
+    try {
+      await sendEmploymentDocumentsUnlockedHrEmail({
+        to: hrRecipients,
+        employeeName,
+        employeePosition: existing.positionName,
+        employeeDepartment: existing.department,
+        employeeUnitName: existing.unitName,
+        documents: unlockedDocumentLinks,
+      })
+    } catch (error) {
+      console.error(
+        "[DOCUMENTS-UNLOCK] E-mail pro HR se nepodařilo odeslat:",
+        error
+      )
+    }
+  }
 
   return NextResponse.json({ ok: true })
 }

@@ -209,6 +209,17 @@ v okamžicích **14, 7, 5, 3, 2, 1 a 0 dní** před plánovaným koncem:
   souhrnnou upomínku pro HR, žádné duplicitní e-maily se tedy
   neposílají.
 
+`resolveSignatureRecipientStatus` nově umí i roli odpovědné osoby za
+sekci C – vrací konkrétní nevyřízenou agendu (`pendingItems`), ne jen
+obecnou nálepku, stejně jako u ostatních rolí; `resolveBehalfOriginalInfo`
+navíc správně dohledá jméno, funkci a odbor zastupované osoby přímo
+podle `substituteForKey`, místo dřívějšího hrubého rozparsování
+textového popisku. Cron navíc nově vynechává zrušené (`cancelledAt`) a
+uzamčené odchody. Pokud HR u některého odchodu po kontrole z bodu A
+pozvánky stále neodeslala, přidala appka nový typ připomínky „pozvánky
+ještě nebyly odeslány" (dřív jen jednorázové upozornění na chybějící
+nastavení) a e-maily nově vedou přímo na konkrétní výstupní list.
+
 **C) Potvrzení, že plánovaný odchod skutečně proběhl** (typ úlohy
 `OFFBOARDING_DEPARTURE_CONFIRMATION`, funkce
 `queueOffboardingDepartureConfirmations`) – od **dne, kdy nastal**
@@ -806,6 +817,20 @@ Oba typy vytváří `offboarding-notifications` a zpracovává je stejný
 
 Finální PDF vyplněného formuláře se neposílá přes běžnou frontu. Viz další kapitola.
 
+**Zrušení naplánovaných úloh při stornu/zamčení záznamu.** Při potvrzení
+skutečného nástupu/odchodu (s případným zamčením nedokončených
+dokumentů/výstupního listu) i při zrušení (stornu) záznamu appka nově
+zároveň zruší (`status: CANCELLED`) všechny dosud nerozeslané
+připomínkové úlohy v `MailQueue` pro ten konkrétní záznam
+(`cancelQueuedMailJobsForRecord`), aby po dokončení/zrušení nechodily
+upomínky k něčemu, co už neplatí.
+
+Opravena i chyba, kdy se úlohy typu `SYSTEM_NOTIFICATION` (např.
+informace HR o smazání/obnovení záznamu) do fronty zařazovaly, ale
+mail worker pro ně neměl zpracovávací větev – tiše se nikdy
+neodeslaly. Po nasazení této verze je vhodné `MailQueue` zkontrolovat,
+jestli tam nezůstaly starší zaseknuté úlohy tohoto typu.
+
 ---
 
 ## 11. Finální vyhodnocení zkušební doby a PDF pro HR
@@ -931,6 +956,25 @@ z interní aplikace, nebo z veřejného odkazu):
 5. zapíše `completedNotificationSentAt` a související metadata do
    hlavičky výstupního listu, aby se e-maily neposlaly opakovaně.
 
+Pokud byla u sekce A alespoň jedna položka podepsaná s odpovědí „Ne"
+(`collectUnresolvedExitChecklistItems`), oba e-maily (bod 3 i 4) nově
+obsahují stejný červený přehled nesplněné agendy jako banner v appce –
+agenda, kdo a kdy podepsal, poznámka, a pokud existuje i „dodatečně
+vyřízeno" poznámka (oranžově). E-mail zaměstnanci navíc žádá o
+zkontrolování, jestli to bylo skutečně vyřízeno, s upozorněním na
+možný dopad na předání zápočtového listu. Nesplněná agenda se do
+dokončení (bodu 1) počítá stejně jako splněná – jen se takto navíc
+zvýrazní. Samostatně, nezávisle na dokončení, appka hned při každém
+uložení položky s odpovědí „Ne" a poznámkou posílá HR i okamžitý
+e-mail (`sendExitChecklistUnresolvedItemsEmail`) – to se nezměnilo.
+
+„Dodatečně vyřízeno" – doplňující poznámku k už podepsané položce
+s odpovědí „Ne" (`PATCH .../exit-checklist/item-additional-note`,
+interně i veřejně) appka uloží přímo do `ExitChecklist.header` (klíč
+`itemAdditionalNotes`), bez nutnosti znovu odemykat celý výstupní
+list; žádný e-mail se tím sám o sobě nespouští, jen se poznámka
+promítne do přehledů výše popsaných.
+
 ---
 
 ### 11.6 Skupina osob k podpisu výstupního listu
@@ -1002,6 +1046,26 @@ s rolí HR, IT, READONLY nebo ADMIN, bez ohledu na členství ve skupině.
 Ať už se skupina upraví kterýmkoli z těchto tří míst, příští běh cronu
 vždy reaguje na aktuální uložený stav, ne na historii dřívějších
 odeslání.
+
+**Stejná osoba na více rolích/agend najednou.** Pokud se e-mail, který
+je ve skupině už aktivní v jedné roli, přiřadí i do další role/agendy
+(např. v okně „Osoby k podpisu" nebo úpravou e-mailu existující karty
+na e-mail, který už ve skupině je), appka agendu sloučí do jednoho
+záznamu (sjednotí `rowKeys`) místo aby ji přepsala nebo uložení
+zablokovala. Pokud se naopak už pozvané osobě jen **část** její agendy
+odebere nebo přidá, aniž by přišla o celou roli, appka pošle
+samostatný e-mail s přehledem, co se přesně přidalo/odebralo a co jí
+zůstává (`sendSignatureAgendaChangedEmail`) – ne plný e-mail o zrušení
+přístupu, který se posílá jen při odebrání úplně veškeré agendy dané
+osoby.
+
+**Sekce C – odpovědná osoba je nezávislé pole.** `sectionCResponsible`
+se dřív vždy automaticky rovnalo vedoucímu odboru; nově je to
+samostatné pole, které jde v okně „Osoby k podpisu" nastavit nezávisle
+(výchozí hodnota zůstává vedoucí odboru, dá se ale změnit). Změna
+vedoucího odboru v tomto okně se navíc propíše přímo do záznamu
+odchodu (`EmployeeOffboarding.supervisorEmail/Name/Position/
+Department`), ne jen do hlavičky výstupního listu.
 
 ---
 

@@ -12,10 +12,15 @@ import {
   normalizePersonalNumber,
   pickMostRelevantOffboarding,
 } from "@/lib/employment-linking"
+import { cancelQueuedMailJobsForRecord } from "@/lib/mail-queue-cleanup"
 import {
   buildManagerNotifyPromptForChanges,
   buildManagerNotifyPromptForRemoval,
 } from "@/lib/new-record-manager-watch"
+import {
+  lockOnboardingDocumentsForced,
+  notifyEmploymentDocumentsRemoved,
+} from "@/lib/onboarding-documents-lock"
 import { canReadOnboarding, canWriteOnboarding } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
@@ -481,6 +486,28 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       )
     }
 
+    const wouldCompleteNow =
+      data.actualStart !== undefined &&
+      before.actualStart === null &&
+      data.actualStart !== null
+    const confirmLockChecklist =
+      typeof (raw as Record<string, unknown>).confirmLockChecklist === "boolean"
+        ? ((raw as Record<string, unknown>).confirmLockChecklist as boolean)
+        : null
+
+    if (
+      wouldCompleteNow &&
+      confirmLockChecklist === null &&
+      before.documentsReadinessStatus === "IN_PROGRESS"
+    ) {
+      return NextResponse.json({
+        status: "confirm_required",
+        confirmKind: "lock_documents_on_actual",
+        message:
+          "Nástupní dokumenty ještě nejsou kompletně hotové. Po uzamčení se k formulářům/dotazníkům mimo aplikaci už nikdo nedostane, ale je to doporučené. Chcete je zamknout?",
+      })
+    }
+
     const updated = await prisma.$transaction(async (tx) => {
       const updateData: UpdateData = {
         updatedAt: new Date(),
@@ -590,8 +617,33 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         })
       }
 
-      return { updatedRecord, changes }
+      return { updatedRecord, changes, completingNow }
     })
+
+    if (updated.completingNow) {
+      try {
+        await cancelQueuedMailJobsForRecord("ONBOARDING", id)
+      } catch (error) {
+        console.error(
+          "[NASTUPY-PATCH] Čištění fronty e-mailů se nepodařilo:",
+          error
+        )
+      }
+
+      if (confirmLockChecklist === true) {
+        try {
+          await lockOnboardingDocumentsForced({
+            onboardingId: id,
+            lockedById: userKey,
+          })
+        } catch (error) {
+          console.error(
+            "[NASTUPY-PATCH] Automatické uzamčení nástupních dokumentů se nepodařilo:",
+            error
+          )
+        }
+      }
+    }
 
     const managerNotifyPrompt = await buildManagerNotifyPromptForChanges({
       kind: "ONBOARDING",
@@ -661,9 +713,17 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
     },
     select: {
       id: true,
+      titleBefore: true,
       name: true,
       surname: true,
+      titleAfter: true,
       actualStart: true,
+      plannedStart: true,
+      personalNumber: true,
+      positionName: true,
+      department: true,
+      unitName: true,
+      supervisorEmail: true,
       deletedAt: true,
     },
   })
@@ -686,6 +746,10 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
     (session.user as { id?: string; email?: string }).id ??
     session.user.email ??
     "unknown"
+  const userName =
+    (session.user as { name?: string | null }).name?.trim() ||
+    session.user.email ||
+    userKey
 
   const now = new Date()
   const hrRecipients = getHrNotificationRecipients()
@@ -720,7 +784,13 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
               type: "employee_onboarding_deleted",
               employeeId: before.id,
               employeeName: `${before.name} ${before.surname}`,
+              employeePersonalNumber: before.personalNumber,
+              employeePosition: before.positionName,
+              employeeDepartment: before.department,
+              employeeUnitName: before.unitName,
               deletedBy: userKey,
+              actorName: userName,
+              actionAt: now.toISOString(),
               recipients: hrRecipients,
               subject: `Smazán záznam nástupu - ${before.name} ${before.surname}`,
             },
@@ -734,11 +804,32 @@ export async function DELETE(_: NextRequest, { params }: RouteParams) {
     }
   })
 
-  const managerNotifyPrompt = await buildManagerNotifyPromptForRemoval({
-    kind: "ONBOARDING",
-    recordId: before.id,
-    reason: "RECORD_DELETED",
-  })
+  const managerNotifyPrompt =
+    before.actualStart === null
+      ? await buildManagerNotifyPromptForRemoval({
+          kind: "ONBOARDING",
+          recordId: before.id,
+          reason: "RECORD_DELETED",
+        })
+      : null
+
+  try {
+    await cancelQueuedMailJobsForRecord("ONBOARDING", before.id)
+  } catch (error) {
+    console.error(
+      "[NASTUPY-DELETE] Čištění fronty e-mailů se nepodařilo:",
+      error
+    )
+  }
+
+  try {
+    await notifyEmploymentDocumentsRemoved(before.id, "RECORD_DELETED")
+  } catch (error) {
+    console.error(
+      "[NASTUPY-DELETE] Oznámení o nástupních dokumentech se nepodařilo:",
+      error
+    )
+  }
 
   return NextResponse.json({
     status: "success",

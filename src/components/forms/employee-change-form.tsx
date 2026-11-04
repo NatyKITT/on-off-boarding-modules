@@ -1257,6 +1257,7 @@ export function EmployeeChangeForm({
                       valueName={form.watch("supervisorName")}
                       valueEmail={form.watch("supervisorEmail")}
                       placeholder="Vyhledejte vedoucího odboru v EOS…"
+                      excludeActiveOffboardings={false}
                       onSelect={(employee) => {
                         setSupervisorManuallyChanged(true)
                         form.setValue(

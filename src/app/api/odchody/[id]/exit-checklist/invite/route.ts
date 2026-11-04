@@ -3,6 +3,10 @@ import { auth } from "@/auth"
 import { Prisma } from "@prisma/client"
 
 import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
+import {
+  EXIT_CHECKLIST_SIGNATORIES,
+  LAW_SIGNATORY,
+} from "@/config/exit-checklist-signatories"
 
 import { prisma } from "@/lib/db"
 import {
@@ -14,6 +18,7 @@ import {
 import {
   getOrCreateChecklist,
   mergeSignatureRecipients,
+  resolveExitChecklistPendingItems,
 } from "@/lib/exit-checklist"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
 import {
@@ -103,6 +108,43 @@ export async function POST(
         (key): key is string => typeof key === "string" && key.trim() !== ""
       )
     : []
+  const substituteName = cleanText(
+    (body as Record<string, unknown>).substituteName
+  )
+  const substituteEmail =
+    cleanText(
+      (body as Record<string, unknown>).substituteEmail
+    ).toLowerCase() || null
+  const substitutePosition =
+    cleanText((body as Record<string, unknown>).substitutePosition) || null
+  const substituteDepartment =
+    cleanText((body as Record<string, unknown>).substituteDepartment) || null
+
+  const alsoActingOnBehalfOfRaw = (body as Record<string, unknown>)
+    .alsoActingOnBehalfOf
+  const alsoActingOnBehalfOf =
+    alsoActingOnBehalfOfRaw &&
+    typeof alsoActingOnBehalfOfRaw === "object" &&
+    !Array.isArray(alsoActingOnBehalfOfRaw)
+      ? (alsoActingOnBehalfOfRaw as Record<string, unknown>)
+      : null
+  const alsoActingOnBehalfOfName = alsoActingOnBehalfOf
+    ? cleanText(alsoActingOnBehalfOf.behalfOfName)
+    : ""
+  const alsoActingOnBehalfOfEmail =
+    cleanText(alsoActingOnBehalfOf?.behalfOfEmail).toLowerCase() || null
+  const alsoActingOnBehalfOfPosition =
+    cleanText(alsoActingOnBehalfOf?.behalfOfPosition) || null
+  const alsoActingOnBehalfOfDepartment =
+    cleanText(alsoActingOnBehalfOf?.behalfOfDepartment) || null
+  const alsoActingOnBehalfOfRowKeysRaw = alsoActingOnBehalfOf?.behalfOfRowKeys
+  const alsoActingOnBehalfOfRowKeys = Array.isArray(
+    alsoActingOnBehalfOfRowKeysRaw
+  )
+    ? alsoActingOnBehalfOfRowKeysRaw.filter(
+        (key): key is string => typeof key === "string" && key.trim() !== ""
+      )
+    : []
 
   if (!inviteeEmail) {
     return NextResponse.json(
@@ -143,7 +185,9 @@ export async function POST(
       actualEnd: true,
       plannedEnd: true,
       userEmail: true,
-      exitChecklist: true,
+      exitChecklist: {
+        include: { items: true, assets: true },
+      },
     },
   })
 
@@ -202,6 +246,26 @@ export async function POST(
   const sectionBResponsibleHeader = getHeaderObject(header.sectionBResponsible)
   const sectionBEmail = cleanText(sectionBResponsibleHeader.email).toLowerCase()
 
+  function resolveKnownSignatoryRowKeys(email: string): string[] {
+    const knownSignatory =
+      EXIT_CHECKLIST_SIGNATORIES.find((signatory) =>
+        signatory.emails.some(
+          (signatoryEmail) => signatoryEmail.toLowerCase() === email
+        )
+      ) ??
+      (LAW_SIGNATORY.emails.some(
+        (signatoryEmail) => signatoryEmail.toLowerCase() === email
+      )
+        ? LAW_SIGNATORY
+        : null)
+
+    if (!knownSignatory) return []
+
+    return knownSignatory.rowKeys.filter(
+      (key) => key !== "lawInfo" || Boolean(header.conflictOfInterest)
+    )
+  }
+
   function resolveRoleNote(email: string | null): string | null {
     if (!email) return null
     if (email === managerEmail) return EXIT_CHECKLIST_MANAGER_ROLE_NOTE
@@ -209,11 +273,39 @@ export async function POST(
     return null
   }
 
+  const headerSignatures = getHeaderObject(header.signatures)
+  const headerHandoverManagerSignature = getHeaderObject(
+    header.handoverManagerSignature
+  )
+  const commonPendingArgs = {
+    employeeSignedAt: cleanText(
+      getHeaderObject(headerSignatures.employee).signedAt
+    ),
+    managerSignedAt: cleanText(
+      getHeaderObject(headerSignatures.manager).signedAt
+    ),
+    issuerSignedAt: cleanText(
+      getHeaderObject(headerSignatures.issuer).signedAt
+    ),
+    handoverManagerSignedAt: cleanText(headerHandoverManagerSignature.signedAt),
+    assetsComplete:
+      Boolean(header.noAssets) || (checklist.assets?.length ?? 0) > 0,
+    items: EXIT_CHECKLIST_ROWS.map((row) => ({
+      key: row.key,
+      obligation: row.obligation,
+      signedAt: checklist.items.find((item) => item.key === row.key)?.signedAt,
+    })),
+  }
+
   try {
     if (isBehalf) {
-      const behalfObligations = EXIT_CHECKLIST_ROWS.filter((row) =>
-        behalfOfRowKeys.includes(row.key)
-      ).map((row) => row.obligation)
+      const behalfObligations = resolveExitChecklistPendingItems({
+        isEmployee: false,
+        isManager: false,
+        isSectionB: false,
+        rowKeys: behalfOfRowKeys,
+        ...commonPendingArgs,
+      })
 
       await sendBehalfSignatureEmail({
         to: inviteeEmail,
@@ -248,10 +340,40 @@ export async function POST(
         employmentEndDate,
         signUrl,
         roleNote: resolveRoleNote(inviteeEmail),
+        pendingItems: resolveExitChecklistPendingItems({
+          isEmployee: false,
+          isManager: inviteeEmail === managerEmail,
+          isSectionB: inviteeEmail === sectionBEmail,
+          rowKeys: resolveKnownSignatoryRowKeys(inviteeEmail),
+          ...commonPendingArgs,
+        }),
         headerSubtitle:
           inviteeEmail === managerEmail
             ? EXIT_CHECKLIST_MANAGER_HEADER_SUBTITLE
             : null,
+        substituteInfo: substituteName
+          ? {
+              name: substituteName,
+              email: substituteEmail,
+              position: substitutePosition,
+              department: substituteDepartment,
+            }
+          : null,
+        alsoActingOnBehalfOf: alsoActingOnBehalfOfName
+          ? {
+              name: alsoActingOnBehalfOfName,
+              email: alsoActingOnBehalfOfEmail,
+              position: alsoActingOnBehalfOfPosition,
+              department: alsoActingOnBehalfOfDepartment,
+              obligations: resolveExitChecklistPendingItems({
+                isEmployee: false,
+                isManager: false,
+                isSectionB: false,
+                rowKeys: alsoActingOnBehalfOfRowKeys,
+                ...commonPendingArgs,
+              }),
+            }
+          : null,
       })
     }
 

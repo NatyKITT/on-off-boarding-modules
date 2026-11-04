@@ -2,16 +2,57 @@ import { NextResponse, type NextRequest } from "next/server"
 import { ChecklistResolution, Prisma } from "@prisma/client"
 import { z, ZodError } from "zod"
 
+import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
+
 import { prisma } from "@/lib/db"
 import {
+  sendBehalfSignatureEmail,
   sendSignatureAccessRestoredEmail,
   sendSignatureAccessRevokedEmail,
+  sendSignatureAgendaChangedEmail,
+  sendSignatureSubstituteNoticeEmail,
 } from "@/lib/email"
-import { mergeSignatureRecipients } from "@/lib/exit-checklist"
+import {
+  getOrCreateChecklist,
+  mapToExitChecklistData,
+  mergeSignatureRecipients,
+} from "@/lib/exit-checklist"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
 import { recipientIdentityKey } from "@/lib/exit-checklist-recipient-key"
+import { resolveSignatureRecipientStatus } from "@/lib/offboarding-cron-jobs"
 import { canAdminExitChecklist } from "@/lib/rbac"
 import { getSession } from "@/lib/session"
+
+type RecipientLike = {
+  name: string
+  email: string
+  position?: string
+  department?: string
+  behalfLabel?: string
+  substituteForKey?: string
+}
+
+function resolveBehalfOriginalEmail(
+  data: Awaited<ReturnType<typeof mapToExitChecklistData>>,
+  recipient: RecipientLike
+): string | null {
+  if (!recipient.behalfLabel || !recipient.substituteForKey) return null
+
+  if (data.managerEmail) {
+    const managerKey = recipientIdentityKey({
+      email: data.managerEmail,
+      behalfLabel: undefined,
+    })
+    if (recipient.substituteForKey === managerKey) return data.managerEmail
+  }
+
+  const original = data.signatureRecipients?.find(
+    (candidate) =>
+      recipientIdentityKey(candidate) === recipient.substituteForKey
+  )
+
+  return original?.email ?? null
+}
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -36,6 +77,7 @@ const bodySchema = z.object({
     .min(1)
     .max(50),
   mode: z.enum(["merge", "replace"]).optional().default("replace"),
+  confirmSetup: z.boolean().optional(),
 })
 
 function getHeaderObject(value: unknown): Record<string, unknown> {
@@ -101,7 +143,7 @@ export async function POST(
 
   try {
     const rawBody = await req.json().catch(() => null)
-    const { recipients, mode } = bodySchema.parse(rawBody)
+    const { recipients, mode, confirmSetup } = bodySchema.parse(rawBody)
 
     const offboarding = await prisma.employeeOffboarding.findFirst({
       where: { id: offboardingId, deletedAt: null },
@@ -163,12 +205,15 @@ export async function POST(
       )
     }
 
-    const existingByKey = new Map<string, { revokedAt?: string }>()
+    const existingByKey = new Map<
+      string,
+      { revokedAt?: string; rowKeys?: string[] }
+    >()
     existingRecipients.forEach((recipient) => {
       if (recipient && typeof recipient === "object") {
         existingByKey.set(
           recipientIdentityKey(recipient as { email: string }),
-          recipient as { revokedAt?: string }
+          recipient as { revokedAt?: string; rowKeys?: string[] }
         )
       }
     })
@@ -183,6 +228,34 @@ export async function POST(
       const before = existingByKey.get(key)
       return !recipient.revokedAt && Boolean(before?.revokedAt)
     })
+
+    const rowLabelByKey = new Map<string, string>(
+      EXIT_CHECKLIST_ROWS.map((row) => [row.key, row.obligation])
+    )
+    const labelsForRowKeys = (keys: string[]): string[] =>
+      keys.map((key) => rowLabelByKey.get(key) ?? key)
+
+    const agendaChanges = uniqueRecipients
+      .filter((recipient) => !recipient.revokedAt && recipient.invitedAt)
+      .map((recipient) => {
+        const key = recipientIdentityKey(recipient)
+        const before = existingByKey.get(key)
+        if (!before || before.revokedAt) return null
+
+        const oldKeys = new Set(before.rowKeys ?? [])
+        const newKeys = new Set(recipient.rowKeys ?? [])
+        const added = [...newKeys].filter((k) => !oldKeys.has(k))
+        const removed = [...oldKeys].filter((k) => !newKeys.has(k))
+        if (added.length === 0 && removed.length === 0) return null
+
+        return {
+          recipient,
+          addedLabels: labelsForRowKeys(added),
+          removedLabels: labelsForRowKeys(removed),
+          remainingLabels: labelsForRowKeys([...newKeys]),
+        }
+      })
+      .filter((change): change is NonNullable<typeof change> => change !== null)
 
     const stillActiveEmails = new Set(
       uniqueRecipients
@@ -254,6 +327,13 @@ export async function POST(
       signatureRecipientsSentAt: new Date().toISOString(),
       signatureRecipientsSentByName: user.name ?? user.email ?? null,
       signatureRecipientsSentByEmail: user.email ?? null,
+      ...(confirmSetup && !header.signatureSetupConfirmedAt
+        ? {
+            signatureSetupConfirmedAt: new Date().toISOString(),
+            signatureSetupConfirmedByName: user.name ?? user.email ?? null,
+            signatureSetupConfirmedByEmail: user.email ?? null,
+          }
+        : {}),
       ...(headerSignatureCleared
         ? {
             signatures: nextSignatures as unknown as Prisma.InputJsonValue,
@@ -305,19 +385,48 @@ export async function POST(
       ? `${getAppBaseUrl(req)}/odchody-public/${offboarding.exitChecklist.publicToken}`
       : null
 
+    const checklistResult = await getOrCreateChecklist(offboardingId)
+    const data = checklistResult
+      ? mapToExitChecklistData(checklistResult.off, checklistResult.checklist)
+      : null
+
     for (const recipient of newlyRevoked) {
       try {
-        await sendSignatureAccessRevokedEmail({
-          to: recipient.email,
-          employeeName,
-          employeePosition: offboarding.positionName,
-          employeeDepartment: offboarding.department,
-          employmentEndDate,
-          behalfLabel: recipient.behalfLabel ?? null,
-          stillHasOtherAccess: stillActiveEmails.has(
-            normalizeEmail(recipient.email)
-          ),
-        })
+        const { roleNote, pendingItems } = data
+          ? resolveSignatureRecipientStatus(
+              data,
+              checklistResult?.off.userEmail ?? null,
+              recipient
+            )
+          : { roleNote: null, pendingItems: [] }
+
+        if (recipient.behalfLabel) {
+          await sendBehalfSignatureEmail({
+            to: recipient.email,
+            behalfOfName: recipient.behalfLabel,
+            behalfOfRole: "",
+            roleNote,
+            employeeName,
+            employeePosition: offboarding.positionName ?? "",
+            employeeDepartment: offboarding.department ?? "",
+            employmentEndDate: employmentEndDate ?? "",
+            signUrl: signUrl ?? "",
+            obligations: pendingItems,
+            removed: true,
+          })
+        } else {
+          await sendSignatureAccessRevokedEmail({
+            to: recipient.email,
+            employeeName,
+            employeePosition: offboarding.positionName,
+            employeeDepartment: offboarding.department,
+            employmentEndDate,
+            stillHasOtherAccess: stillActiveEmails.has(
+              normalizeEmail(recipient.email)
+            ),
+            pendingItems,
+          })
+        }
       } catch (error) {
         console.error(
           "[SIGNATURE-RECIPIENTS] E-mail o odebrání se nepodařilo odeslat:",
@@ -329,17 +438,103 @@ export async function POST(
     if (signUrl) {
       for (const recipient of newlyRestored) {
         try {
-          await sendSignatureAccessRestoredEmail({
-            to: recipient.email,
+          const { roleNote, pendingItems } = data
+            ? resolveSignatureRecipientStatus(
+                data,
+                checklistResult?.off.userEmail ?? null,
+                recipient
+              )
+            : { roleNote: null, pendingItems: [] }
+
+          if (recipient.behalfLabel) {
+            await sendBehalfSignatureEmail({
+              to: recipient.email,
+              behalfOfName: recipient.behalfLabel,
+              behalfOfRole: "",
+              roleNote,
+              employeeName,
+              employeePosition: offboarding.positionName ?? "",
+              employeeDepartment: offboarding.department ?? "",
+              employmentEndDate: employmentEndDate ?? "",
+              signUrl,
+              obligations: pendingItems,
+              removed: false,
+            })
+          } else {
+            await sendSignatureAccessRestoredEmail({
+              to: recipient.email,
+              employeeName,
+              employeePosition: offboarding.positionName,
+              employeeDepartment: offboarding.department,
+              employmentEndDate,
+              signUrl,
+              pendingItems,
+            })
+          }
+        } catch (error) {
+          console.error(
+            "[SIGNATURE-RECIPIENTS] E-mail o návratu se nepodařilo odeslat:",
+            error
+          )
+        }
+      }
+    }
+
+    for (const change of agendaChanges) {
+      try {
+        await sendSignatureAgendaChangedEmail({
+          to: change.recipient.email,
+          employeeName,
+          employeePosition: offboarding.positionName,
+          employeeDepartment: offboarding.department,
+          employmentEndDate,
+          addedLabels: change.addedLabels,
+          removedLabels: change.removedLabels,
+          remainingLabels: change.remainingLabels,
+          signUrl,
+        })
+      } catch (error) {
+        console.error(
+          "[SIGNATURE-RECIPIENTS] E-mail o změně agendy se nepodařilo odeslat:",
+          error
+        )
+      }
+    }
+
+    // Pokud byl odebraný/vrácený příjemce někomu zástupcem (behalfLabel),
+    // informujeme o tom i původní osobu, za kterou zastupoval.
+    if (signUrl && data && checklistResult) {
+      for (const recipient of [...newlyRevoked, ...newlyRestored]) {
+        if (!recipient.behalfLabel) continue
+
+        const originalEmail = resolveBehalfOriginalEmail(data, recipient)
+        if (!originalEmail) continue
+
+        const removed = newlyRevoked.includes(recipient)
+        const { roleNote, pendingItems } = resolveSignatureRecipientStatus(
+          data,
+          checklistResult.off.userEmail,
+          recipient
+        )
+
+        try {
+          await sendSignatureSubstituteNoticeEmail({
+            to: originalEmail,
             employeeName,
             employeePosition: offboarding.positionName,
             employeeDepartment: offboarding.department,
             employmentEndDate,
             signUrl,
+            substituteName: recipient.name,
+            substitutePosition: recipient.position,
+            substituteDepartment: recipient.department,
+            roleNote,
+            pendingItems,
+            removed,
           })
         } catch (error) {
           console.error(
-            "[SIGNATURE-RECIPIENTS] E-mail o návratu se nepodařilo odeslat:",
+            "[SIGNATURE-RECIPIENTS] E-mail původní osobě o zástupu se nepodařilo odeslat:",
             error
           )
         }
@@ -360,6 +555,11 @@ export async function POST(
     if (signatureClearedEmails.size > 0) {
       notifyParts.push(
         `podpis zrušen u: ${Array.from(signatureClearedEmails).join(", ")}`
+      )
+    }
+    if (agendaChanges.length > 0) {
+      notifyParts.push(
+        `agenda upravena a informováno: ${agendaChanges.map((c) => c.recipient.email).join(", ")}`
       )
     }
 

@@ -90,6 +90,7 @@ import {
   ManagerNotifyDialog,
   type ManagerNotifyPrompt,
 } from "@/components/common/manager-notify-dialog"
+import { ManagerSendNoticeDialog } from "@/components/common/manager-send-notice-dialog"
 import { MonthFilter } from "@/components/common/month-filter"
 import {
   MultiSelectFilter,
@@ -803,6 +804,16 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
               }
             />
 
+            {!isReadonly && (
+              <ManagerSendNoticeDialog
+                kind="OFFBOARDING"
+                recordId={departure.id}
+                employeeName={fullName}
+                hasManager={Boolean(departure.supervisorEmail)}
+                disabled={!canManage}
+              />
+            )}
+
             {!isReadonly && onRestore && (
               <Button
                 size="sm"
@@ -1068,6 +1079,16 @@ const DepartureTableRow: React.FC<DepartureTableRowProps> = ({
           />
 
           {!isReadonly && (
+            <ManagerSendNoticeDialog
+              kind="OFFBOARDING"
+              recordId={departure.id}
+              employeeName={fullName}
+              hasManager={Boolean(departure.supervisorEmail)}
+              disabled={!canManage}
+            />
+          )}
+
+          {!isReadonly && (
             <Button
               size="sm"
               variant="outline"
@@ -1171,6 +1192,13 @@ export default function OffboardingPage() {
     loading: boolean
     targetType: "planned" | "actual" | null
   }>({ open: false, departure: null, loading: false, targetType: null })
+
+  const [lockChecklistDialog, setLockChecklistDialog] = useState<{
+    open: boolean
+    message: string
+    loading: boolean
+    onConfirm: ((lock: boolean) => Promise<void>) | null
+  }>({ open: false, message: "", loading: false, onConfirm: null })
 
   const [managerNotifyPrompt, setManagerNotifyPrompt] =
     useState<ManagerNotifyPrompt>(null)
@@ -1925,30 +1953,58 @@ export default function OffboardingPage() {
     setOpenActual(true)
   }
 
-  async function confirmDepartureWithInput() {
+  async function confirmDepartureWithInput(confirmLockChecklist?: boolean) {
     if (!activeRow || !actualEndInput || !canManageOffboarding) return
+
+    const row = activeRow
 
     try {
       const actualDate = new Date(actualEndInput)
       const noticePeriodEnd = new Date(actualDate)
       noticePeriodEnd.setMonth(noticePeriodEnd.getMonth() + 2)
 
-      const res = await fetch(`/api/odchody/${activeRow.id}`, {
+      const res = await fetch(`/api/odchody/${row.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           actualEnd: actualEndInput,
           noticePeriodEnd: format(noticePeriodEnd, "yyyy-MM-dd"),
           status: "COMPLETED",
+          ...(confirmLockChecklist !== undefined
+            ? { confirmLockChecklist }
+            : {}),
         }),
       })
 
+      const json = await res.json().catch(() => null)
+
       if (!res.ok) {
-        const j = await res.json().catch(() => null)
         showError(
           "Chyba při potvrzování",
-          j?.message ?? "Potvrzení se nezdařilo."
+          json?.message ?? "Potvrzení se nezdařilo."
         )
+        return
+      }
+
+      if (
+        json?.status === "confirm_required" &&
+        json?.confirmKind === "lock_exit_checklist_on_actual"
+      ) {
+        setLockChecklistDialog({
+          open: true,
+          message: json.message ?? "Chcete výstupní list zamknout?",
+          loading: false,
+          onConfirm: async (lock) => {
+            setLockChecklistDialog((prev) => ({ ...prev, loading: true }))
+            await confirmDepartureWithInput(lock)
+            setLockChecklistDialog({
+              open: false,
+              message: "",
+              loading: false,
+              onConfirm: null,
+            })
+          },
+        })
         return
       }
 
@@ -1958,7 +2014,7 @@ export default function OffboardingPage() {
 
       showSuccess(
         "Odchod potvrzen",
-        `Skutečný odchod pro ${activeRow.name} ${activeRow.surname} byl úspěšně zaznamenán.`
+        `Skutečný odchod pro ${row.name} ${row.surname} byl úspěšně zaznamenán.`
       )
 
       await reload()
@@ -1971,7 +2027,7 @@ export default function OffboardingPage() {
     }
   }
 
-  async function handleRevert() {
+  async function handleRevert(confirmUnlockChecklist?: boolean) {
     const departure = revertDialog.departure
     if (!departure || !canManageOffboarding) return
 
@@ -1980,11 +2036,39 @@ export default function OffboardingPage() {
     try {
       const response = await fetch(`/api/odchody/${departure.id}/revert`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          confirmUnlockChecklist !== undefined ? { confirmUnlockChecklist } : {}
+        ),
       })
 
+      const json = await response.json().catch(() => null)
+
       if (!response.ok) {
-        const errorData = await response.json().catch(() => null)
-        throw new Error(errorData?.message ?? "Vrácení se nezdařilo")
+        throw new Error(json?.message ?? "Vrácení se nezdařilo")
+      }
+
+      if (
+        json?.status === "confirm_required" &&
+        json?.confirmKind === "unlock_exit_checklist_on_revert"
+      ) {
+        setRevertDialog((prev) => ({ ...prev, loading: false }))
+        setLockChecklistDialog({
+          open: true,
+          message: json.message ?? "Chcete výstupní list odemknout?",
+          loading: false,
+          onConfirm: async (unlock) => {
+            setLockChecklistDialog((prev) => ({ ...prev, loading: true }))
+            await handleRevert(unlock)
+            setLockChecklistDialog({
+              open: false,
+              message: "",
+              loading: false,
+              onConfirm: null,
+            })
+          },
+        })
+        return
       }
 
       setRevertDialog({ open: false, departure: null, loading: false })
@@ -1992,6 +2076,9 @@ export default function OffboardingPage() {
         "Odchod vrácen",
         `Záznam "${departure.name} ${departure.surname}" byl vrácen do plánovaných.`
       )
+      if (json?.managerNotifyPrompt) {
+        setManagerNotifyPrompt(json.managerNotifyPrompt)
+      }
       await reload()
     } catch (error) {
       console.error("Error reverting departure:", error)
@@ -2048,8 +2135,31 @@ export default function OffboardingPage() {
     }
   }
 
+  function askLockChecklist(message: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      setLockChecklistDialog({
+        open: true,
+        message,
+        loading: false,
+        onConfirm: async (lock) => {
+          setLockChecklistDialog({
+            open: false,
+            message: "",
+            loading: false,
+            onConfirm: null,
+          })
+          resolve(lock)
+        },
+      })
+    })
+  }
+
   async function handleBulkConfirmDepartures(rows: Departure[]) {
     if (!canManageOffboarding || rows.length === 0) return
+
+    const confirmLockChecklist = await askLockChecklist(
+      "U vybraných odchodů, u kterých ještě není výstupní list kompletně podepsaný, chcete po potvrzení výstupní list zamknout? Po uzamčení se už nikdo nedostane k podpisům, ale je to doporučené."
+    )
 
     setBulkConfirmLoading(true)
     const failed: string[] = []
@@ -2067,6 +2177,7 @@ export default function OffboardingPage() {
             actualEnd: row.plannedEnd.slice(0, 10),
             noticePeriodEnd: format(noticePeriodEnd, "yyyy-MM-dd"),
             status: "COMPLETED",
+            confirmLockChecklist,
           }),
         })
 
@@ -2329,9 +2440,10 @@ export default function OffboardingPage() {
         }
       )
 
+      const json = await response.json().catch(() => null)
+
       if (!response.ok) {
-        const errorData = await response.json().catch(() => null)
-        throw new Error(errorData?.message ?? "Obnovení se nezdařilo")
+        throw new Error(json?.message ?? "Obnovení se nezdařilo")
       }
 
       setRestoreCancelledDialog({
@@ -2346,6 +2458,9 @@ export default function OffboardingPage() {
         "Odchod obnoven",
         `Záznam "${departure.name} ${departure.surname}" byl obnoven do ${wasActual ? "skutečných" : "plánovaných"}.`
       )
+      if (json?.managerNotifyPrompt) {
+        setManagerNotifyPrompt(json.managerNotifyPrompt)
+      }
       await reload()
     } catch (error) {
       console.error("Error restoring cancelled departure:", error)
@@ -2534,7 +2649,10 @@ export default function OffboardingPage() {
                 title="Smazané odchody"
                 triggerLabel="Smazané záznamy"
                 successEvent="offboarding:deleted"
-                onRestore={() => void reload()}
+                onRestore={(prompt) => {
+                  if (prompt) setManagerNotifyPrompt(prompt)
+                  void reload()
+                }}
               />
             </div>
           )}
@@ -2825,7 +2943,10 @@ export default function OffboardingPage() {
                 title="Smazané odchody"
                 triggerLabel="Smazané záznamy"
                 successEvent="offboarding:deleted"
-                onRestore={() => void reload()}
+                onRestore={(prompt) => {
+                  if (prompt) setManagerNotifyPrompt(prompt)
+                  void reload()
+                }}
               />
             </div>
           )}
@@ -3777,7 +3898,7 @@ export default function OffboardingPage() {
             </Button>
             <Button
               variant="default"
-              onClick={handleRevert}
+              onClick={() => void handleRevert()}
               disabled={revertDialog.loading}
               className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700"
             >
@@ -3907,6 +4028,50 @@ export default function OffboardingPage() {
                 <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
               )}
               Přesunout do neuskutečněných
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={lockChecklistDialog.open}
+        onOpenChange={(open) => {
+          if (!open) {
+            setLockChecklistDialog({
+              open: false,
+              message: "",
+              loading: false,
+              onConfirm: null,
+            })
+          }
+        }}
+      >
+        <DialogContent
+          className="max-w-md"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle>Uzamknout výstupní list?</DialogTitle>
+            <DialogDescription>{lockChecklistDialog.message}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => void lockChecklistDialog.onConfirm?.(false)}
+              disabled={lockChecklistDialog.loading}
+            >
+              Nechat otevřené
+            </Button>
+            <Button
+              variant="default"
+              onClick={() => void lockChecklistDialog.onConfirm?.(true)}
+              disabled={lockChecklistDialog.loading}
+              className="flex items-center gap-2"
+            >
+              {lockChecklistDialog.loading && (
+                <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              )}
+              Zamknout
             </Button>
           </DialogFooter>
         </DialogContent>

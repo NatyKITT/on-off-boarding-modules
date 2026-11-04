@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
+import { notifyExitChecklistSignersOffboardingRemoved } from "@/lib/exit-checklist-signature-notify"
+import { cancelQueuedMailJobsForRecord } from "@/lib/mail-queue-cleanup"
 import { buildManagerNotifyPromptForRemoval } from "@/lib/new-record-manager-watch"
 import { canWriteOffboarding } from "@/lib/rbac"
 
@@ -136,11 +138,35 @@ export async function POST(request: NextRequest, { params }: Params) {
       return updatedRecord
     })
 
-    const managerNotifyPrompt = await buildManagerNotifyPromptForRemoval({
-      kind: "OFFBOARDING",
-      recordId: updated.id,
-      reason: "RECORD_CANCELLED",
-    })
+    const managerNotifyPrompt =
+      before.actualEnd === null
+        ? await buildManagerNotifyPromptForRemoval({
+            kind: "OFFBOARDING",
+            recordId: updated.id,
+            reason: "RECORD_CANCELLED",
+          })
+        : null
+
+    try {
+      await notifyExitChecklistSignersOffboardingRemoved(
+        updated.id,
+        "RECORD_CANCELLED"
+      )
+    } catch (error) {
+      console.error(
+        "[ODCHODY-CANCEL] Notifikace podepisujících se nepodařila:",
+        error
+      )
+    }
+
+    try {
+      await cancelQueuedMailJobsForRecord("OFFBOARDING", updated.id)
+    } catch (error) {
+      console.error(
+        "[ODCHODY-CANCEL] Čištění fronty e-mailů se nepodařilo:",
+        error
+      )
+    }
 
     return NextResponse.json({
       status: "success",

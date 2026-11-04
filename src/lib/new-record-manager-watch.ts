@@ -16,6 +16,7 @@ export type NewRecordUpdateReason =
   | "MANAGER_REMOVED"
   | "RECORD_CANCELLED"
   | "RECORD_DELETED"
+  | "RECORD_RESTORED"
 
 const ACTIVE_MAIL_STATUSES: MailJobStatus[] = ["QUEUED", "PROCESSING", "SENT"]
 const WATCH_SINCE_KEY = "newRecordManagerWatchSince"
@@ -149,6 +150,34 @@ export async function findLatestManagerNoticePayload(
   return null
 }
 
+export async function findLatestManagerNoticeInfo(
+  kind: NewRecordKind,
+  recordId: number
+): Promise<{ sentAt: string; sentBy: string | null } | null> {
+  const jobs = await prisma.mailQueue.findMany({
+    where: {
+      type: "NEW_RECORD_MANAGER_NOTICE",
+      status: { in: ACTIVE_MAIL_STATUSES },
+    },
+    select: { payload: true, createdAt: true, sentAt: true },
+    orderBy: { id: "desc" },
+    take: 1000,
+  })
+
+  for (const job of jobs) {
+    const payload = getPayloadRecord(job.payload)
+
+    if (payload.kind === kind && asNumber(payload.recordId) === recordId) {
+      return {
+        sentAt: (job.sentAt ?? job.createdAt).toISOString(),
+        sentBy: asString(payload.createdByName) ?? asString(payload.createdBy),
+      }
+    }
+  }
+
+  return null
+}
+
 export async function queueManagerChangeNotice(args: {
   kind: NewRecordKind
   recordId: number
@@ -251,6 +280,7 @@ export type ManagerNotifyPromptReason =
   | "MANAGER_CHANGED"
   | "RECORD_CANCELLED"
   | "RECORD_DELETED"
+  | "RECORD_RESTORED"
 
 export type ManagerNotifyPrompt = {
   kind: NewRecordKind
@@ -294,7 +324,7 @@ export async function buildManagerNotifyPromptForChanges(args: {
 export async function buildManagerNotifyPromptForRemoval(args: {
   kind: NewRecordKind
   recordId: number
-  reason: "RECORD_CANCELLED" | "RECORD_DELETED"
+  reason: "RECORD_CANCELLED" | "RECORD_DELETED" | "RECORD_RESTORED"
 }): Promise<ManagerNotifyPrompt | null> {
   const previousNotice = await findLatestManagerNoticePayload(
     args.kind,
@@ -338,7 +368,11 @@ export async function performManagerChangeNotification(args: {
 
   const previousManagerEmail = asString(previousNotice.to)
 
-  if (args.reason === "RECORD_CANCELLED" || args.reason === "RECORD_DELETED") {
+  if (
+    args.reason === "RECORD_CANCELLED" ||
+    args.reason === "RECORD_DELETED" ||
+    args.reason === "RECORD_RESTORED"
+  ) {
     if (!previousManagerEmail) {
       return {
         queued: 0,

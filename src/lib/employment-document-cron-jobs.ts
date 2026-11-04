@@ -192,7 +192,7 @@ export async function ensureEmploymentDocumentReminders(req: Request) {
       isLocked: false,
       sentAt: { not: null },
       expiresAt: { not: null },
-      onboarding: { deletedAt: null },
+      onboarding: { deletedAt: null, cancelledAt: null },
     },
     select: {
       id: true,
@@ -416,6 +416,7 @@ export async function ensureEmploymentDocumentReminders(req: Request) {
           label: typeLabel(document.type),
           url: `${baseUrl}/dokumenty/${document.accessHash}`,
         })),
+        onboardingLink: `${baseUrl}/nastupy/${onboardingId}`,
       })
 
       for (const document of toNotify) {
@@ -489,6 +490,7 @@ export async function ensureEmploymentDocumentReminders(req: Request) {
         })),
         plannedStart: onboarding.plannedStart,
         medicalExamNotSent: notifyMedicalExam,
+        onboardingLink: `${baseUrl}/nastupy/${onboardingId}`,
       })
 
       for (const document of toNotifyDocuments) {

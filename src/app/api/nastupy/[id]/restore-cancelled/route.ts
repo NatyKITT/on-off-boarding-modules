@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
+import { buildManagerNotifyPromptForRemoval } from "@/lib/new-record-manager-watch"
+import { notifyEmploymentDocumentsAvailableAgain } from "@/lib/onboarding-documents-lock"
+import { getAppBaseUrlFromRequest } from "@/lib/probation-evaluation-request"
 import { canWriteOnboarding } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
@@ -10,7 +13,7 @@ interface Params {
   params: { id: string }
 }
 
-export async function POST(_: NextRequest, { params }: Params) {
+export async function POST(req: NextRequest, { params }: Params) {
   const session = await auth()
 
   if (!session?.user) {
@@ -92,6 +95,27 @@ export async function POST(_: NextRequest, { params }: Params) {
       return updatedRecord
     })
 
+    const managerNotifyPrompt =
+      before.actualStart === null
+        ? await buildManagerNotifyPromptForRemoval({
+            kind: "ONBOARDING",
+            recordId: id,
+            reason: "RECORD_RESTORED",
+          })
+        : null
+
+    try {
+      await notifyEmploymentDocumentsAvailableAgain(
+        id,
+        getAppBaseUrlFromRequest(req)
+      )
+    } catch (error) {
+      console.error(
+        "[NASTUPY-RESTORE-CANCELLED] Oznámení o nástupních dokumentech se nepodařilo:",
+        error
+      )
+    }
+
     return NextResponse.json({
       status: "success",
       message: "Nástup byl obnoven.",
@@ -99,6 +123,7 @@ export async function POST(_: NextRequest, { params }: Params) {
         id: updated.id,
         status: updated.status,
       },
+      managerNotifyPrompt,
     })
   } catch (error) {
     console.error("Error restoring onboarding:", error)

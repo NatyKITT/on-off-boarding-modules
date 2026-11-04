@@ -1,9 +1,17 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { Prisma } from "@prisma/client"
 
+import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
+
 import { prisma } from "@/lib/db"
-import { sendSignatureSubstituteNoticeEmail } from "@/lib/email"
-import { mergeSignatureRecipients } from "@/lib/exit-checklist"
+import {
+  sendBehalfSignatureEmail,
+  sendSignatureSubstituteNoticeEmail,
+} from "@/lib/email"
+import {
+  mergeSignatureRecipients,
+  resolveExitChecklistPendingItems,
+} from "@/lib/exit-checklist"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
 import { recipientIdentityKey } from "@/lib/exit-checklist-recipient-key"
 import {
@@ -123,8 +131,15 @@ export async function POST(
         department: true,
         actualEnd: true,
         plannedEnd: true,
+        userEmail: true,
         exitChecklist: {
-          select: { id: true, header: true, publicToken: true },
+          select: {
+            id: true,
+            header: true,
+            publicToken: true,
+            items: true,
+            assets: true,
+          },
         },
       },
     })
@@ -175,6 +190,78 @@ export async function POST(
       ? `${getAppBaseUrl(req)}/odchody-public/${offboardingForRemoval.exitChecklist.publicToken}`
       : null
 
+    const removalRecipients = Array.isArray(removalHeader.signatureRecipients)
+      ? removalHeader.signatureRecipients
+      : []
+    const removalOriginalKey = recipientIdentityKey({
+      email: originalEmail,
+      behalfLabel: originalBehalfLabel || undefined,
+    })
+    const removalOriginalRecipient = removalRecipients.find(
+      (recipient) =>
+        recipient &&
+        typeof recipient === "object" &&
+        recipientIdentityKey(recipient as { email: string }) ===
+          removalOriginalKey
+    ) as { rowKeys?: string[] } | undefined
+    const removalSubstituteKey = recipientIdentityKey({
+      email: substituteEmail,
+      behalfLabel: substituteBehalfLabel || undefined,
+    })
+    const removalSubstituteRecipient = removalRecipients.find(
+      (recipient) =>
+        recipient &&
+        typeof recipient === "object" &&
+        recipientIdentityKey(recipient as { email: string }) ===
+          removalSubstituteKey
+    ) as { rowKeys?: string[] } | undefined
+
+    const removalHeaderSignatures = getHeaderObject(removalHeader.signatures)
+    const removalHandoverManagerSignature = getHeaderObject(
+      removalHeader.handoverManagerSignature
+    )
+    const removalCommonPendingArgs = {
+      employeeSignedAt: cleanText(
+        getHeaderObject(removalHeaderSignatures.employee).signedAt
+      ),
+      managerSignedAt: cleanText(
+        getHeaderObject(removalHeaderSignatures.manager).signedAt
+      ),
+      issuerSignedAt: cleanText(
+        getHeaderObject(removalHeaderSignatures.issuer).signedAt
+      ),
+      handoverManagerSignedAt: cleanText(
+        removalHandoverManagerSignature.signedAt
+      ),
+      assetsComplete:
+        Boolean(removalHeader.noAssets) ||
+        offboardingForRemoval.exitChecklist.assets.length > 0,
+      items: EXIT_CHECKLIST_ROWS.map((row) => ({
+        key: row.key,
+        obligation: row.obligation,
+        signedAt: offboardingForRemoval.exitChecklist!.items.find(
+          (item) => item.key === row.key
+        )?.signedAt,
+      })),
+    }
+
+    const removalOriginalPendingItems = resolveExitChecklistPendingItems({
+      isEmployee:
+        originalEmail === (offboardingForRemoval.userEmail ?? "").toLowerCase(),
+      isManager: originalEmail === removalManagerEmail,
+      isSectionB: originalEmail === removalSectionBEmail,
+      rowKeys: removalOriginalRecipient?.rowKeys ?? [],
+      ...removalCommonPendingArgs,
+    })
+
+    const removalSubstituteObligations = resolveExitChecklistPendingItems({
+      isEmployee: false,
+      isManager: false,
+      isSectionB: false,
+      rowKeys: removalSubstituteRecipient?.rowKeys ?? [],
+      ...removalCommonPendingArgs,
+    })
+
     if (removalSignUrl) {
       try {
         await sendSignatureSubstituteNoticeEmail({
@@ -188,11 +275,36 @@ export async function POST(
           substitutePosition: substitutePositionDirect || undefined,
           substituteDepartment: substituteDepartmentDirect || undefined,
           roleNote: removalRoleNote,
+          pendingItems: removalOriginalPendingItems,
           removed: true,
         })
       } catch (error) {
         console.error(
-          "[SIGNATURE-SUBSTITUTE] E-mail o zrušení se nepodařilo odeslat:",
+          "[SIGNATURE-SUBSTITUTE] E-mail o zrušení se nepodařilo odeslat originálu:",
+          error
+        )
+      }
+
+      try {
+        await sendBehalfSignatureEmail({
+          to: substituteEmail,
+          behalfOfName: originalName || originalEmail,
+          behalfOfRole: "",
+          roleNote:
+            removalRoleNote === EXIT_CHECKLIST_MANAGER_ROLE_NOTE
+              ? EXIT_CHECKLIST_MANAGER_ROLE_NOTE
+              : null,
+          employeeName: removalEmployeeName,
+          employeePosition: offboardingForRemoval.positionName ?? "",
+          employeeDepartment: offboardingForRemoval.department ?? "",
+          employmentEndDate: removalEmploymentEndDate ?? "",
+          signUrl: removalSignUrl,
+          obligations: removalSubstituteObligations,
+          removed: true,
+        })
+      } catch (error) {
+        console.error(
+          "[SIGNATURE-SUBSTITUTE] E-mail o zrušení se nepodařilo odeslat zástupci:",
           error
         )
       }

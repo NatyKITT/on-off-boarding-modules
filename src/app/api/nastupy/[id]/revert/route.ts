@@ -2,7 +2,15 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
+import {
+  getHrRecipientsFromEnv,
+  sendEmploymentDocumentsUnlockedEmail,
+  sendEmploymentDocumentsUnlockedHrEmail,
+} from "@/lib/email"
+import { ONBOARDING_TYPES, typeLabel } from "@/lib/employment-documents"
+import { buildManagerNotifyPromptForRemoval } from "@/lib/new-record-manager-watch"
 import { canWriteOnboarding } from "@/lib/rbac"
+import { absoluteUrl } from "@/lib/url"
 
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
@@ -12,7 +20,7 @@ interface Params {
   params: { id: string }
 }
 
-export async function POST(_: NextRequest, { params }: Params) {
+export async function POST(req: NextRequest, { params }: Params) {
   const session = await auth()
   if (!session?.user) {
     return NextResponse.json(
@@ -69,6 +77,24 @@ export async function POST(_: NextRequest, { params }: Params) {
       )
     }
 
+    const raw = await req.json().catch(() => ({}))
+    const confirmUnlockChecklist =
+      typeof (raw as Record<string, unknown>).confirmUnlockChecklist ===
+      "boolean"
+        ? ((raw as Record<string, unknown>).confirmUnlockChecklist as boolean)
+        : null
+
+    const documentsLocked = before.documentsReadinessStatus === "LOCKED"
+
+    if (documentsLocked && confirmUnlockChecklist === null) {
+      return NextResponse.json({
+        status: "confirm_required",
+        confirmKind: "unlock_documents_on_revert",
+        message:
+          "Nástupní dokumenty jsou uzamčené. Chcete je po vrácení do plánovaných odemknout a poslat nevyplněné dotazníky znovu k vyplnění?",
+      })
+    }
+
     const updated = await prisma.$transaction(async (tx) => {
       const updatedRecord = await tx.employeeOnboarding.update({
         where: { id },
@@ -104,6 +130,98 @@ export async function POST(_: NextRequest, { params }: Params) {
       return updatedRecord
     })
 
+    const managerNotifyPrompt = await buildManagerNotifyPromptForRemoval({
+      kind: "ONBOARDING",
+      recordId: id,
+      reason: "RECORD_RESTORED",
+    })
+
+    if (documentsLocked && confirmUnlockChecklist === true) {
+      try {
+        const lockedDraftDocuments = await prisma.employmentDocument.findMany({
+          where: {
+            onboardingId: id,
+            type: { in: ONBOARDING_TYPES },
+            status: "DRAFT",
+            isLocked: true,
+          },
+          select: { id: true, type: true, accessHash: true, expiresAt: true },
+        })
+
+        const now = new Date()
+
+        await prisma.$transaction(async (tx) => {
+          await tx.employeeOnboarding.update({
+            where: { id },
+            data: {
+              documentsReadinessStatus: "READY",
+              documentsLockedAt: null,
+              documentsLockedBy: null,
+            },
+          })
+
+          if (lockedDraftDocuments.length > 0) {
+            await tx.employmentDocument.updateMany({
+              where: {
+                id: { in: lockedDraftDocuments.map((document) => document.id) },
+              },
+              data: { isLocked: false },
+            })
+          }
+        })
+
+        const employeeName = [
+          before.titleBefore,
+          before.name,
+          before.surname,
+          before.titleAfter,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .trim()
+
+        const unlockedDocumentLinks = lockedDraftDocuments
+          .filter(
+            (document) =>
+              document.accessHash &&
+              (!document.expiresAt || document.expiresAt > now)
+          )
+          .map((document) => ({
+            label: typeLabel(document.type),
+            url: absoluteUrl(`/dokumenty/${document.accessHash}`, req),
+          }))
+
+        if (before.userEmail) {
+          await sendEmploymentDocumentsUnlockedEmail({
+            to: before.userEmail,
+            employeeName,
+            employeePosition: before.positionName,
+            employeeDepartment: before.department,
+            employeeUnitName: before.unitName,
+            documents: unlockedDocumentLinks,
+          })
+        }
+
+        const hrRecipients = getHrRecipientsFromEnv()
+
+        if (hrRecipients.length > 0) {
+          await sendEmploymentDocumentsUnlockedHrEmail({
+            to: hrRecipients,
+            employeeName,
+            employeePosition: before.positionName,
+            employeeDepartment: before.department,
+            employeeUnitName: before.unitName,
+            documents: unlockedDocumentLinks,
+          })
+        }
+      } catch (error) {
+        console.error(
+          "[NASTUPY-REVERT] Odemčení nástupních dokumentů se nepodařilo:",
+          error
+        )
+      }
+    }
+
     const responseData = {
       ...updated,
       plannedStart: updated.plannedStart?.toISOString() || null,
@@ -117,6 +235,7 @@ export async function POST(_: NextRequest, { params }: Params) {
       status: "success",
       data: responseData,
       message: "Nástup byl vrácen do plánovaných.",
+      managerNotifyPrompt,
     })
   } catch (err) {
     console.error("Chyba při vracení nástupu:", err)

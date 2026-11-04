@@ -6,6 +6,7 @@ import { sendHandoverKitt6Email } from "@/lib/email"
 import {
   isPraha6OrKitt6,
   resolveHandoverOption2Target,
+  resolveHandoverOption2TargetDetails,
   sanitizeKitt6ContactForResponse,
 } from "@/lib/exit-checklist"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
@@ -181,6 +182,8 @@ export async function POST(
     ? new Date(endDate).toLocaleDateString("cs-CZ")
     : null
 
+  const targetDetails = resolveHandoverOption2TargetDetails(handover)
+
   try {
     await sendHandoverKitt6Email({
       to: kitt6Contact.email,
@@ -190,7 +193,9 @@ export async function POST(
         .filter(Boolean)
         .join(" – "),
       employmentEndDate,
-      targetPosition,
+      targetPositionNum: targetDetails.positionNum,
+      targetPositionName: targetDetails.positionName,
+      targetDepartment: targetDetails.department,
       managerName,
       managerPosition,
       managerDepartment,

@@ -32,5 +32,8 @@ export const EXIT_CHECKLIST_MANAGER_HEADER_SUBTITLE =
 export const EXIT_CHECKLIST_SECTION_B_ROLE_NOTE =
   "Prosíme o vyplnění a podpis sekce B (Majetek)."
 
+export const EXIT_CHECKLIST_SECTION_C_ROLE_NOTE =
+  "Prosíme o vyplnění a podpis sekce C (Předávaná agenda)."
+
 export const EXIT_CHECKLIST_EMPLOYEE_ROLE_NOTE =
   "Výstupní list ještě nemáte podepsaný – prosíme sledujte průběh a fyzicky vyřiďte a odevzdejte vše včas."

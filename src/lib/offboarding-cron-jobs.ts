@@ -12,15 +12,16 @@ import { prisma } from "@/lib/db"
 import {
   getOrCreateChecklist,
   mapToExitChecklistData,
+  resolveExitChecklistPendingItems,
 } from "@/lib/exit-checklist"
 import { getExitChecklistCompletionState } from "@/lib/exit-checklist-completion"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
 import { recipientIdentityKey } from "@/lib/exit-checklist-recipient-key"
 import {
   EXIT_CHECKLIST_EMPLOYEE_ROLE_NOTE,
-  EXIT_CHECKLIST_MANAGER_HEADER_SUBTITLE,
   EXIT_CHECKLIST_MANAGER_ROLE_NOTE,
   EXIT_CHECKLIST_SECTION_B_ROLE_NOTE,
+  EXIT_CHECKLIST_SECTION_C_ROLE_NOTE,
 } from "@/lib/exit-checklist-role-notes"
 import {
   buildFullName,
@@ -62,6 +63,62 @@ function asString(value: unknown): string | null {
   const trimmed = value.trim()
 
   return trimmed.length ? trimmed : null
+}
+
+export function resolveBehalfOriginalInfo(
+  data: ExitChecklistData,
+  recipient: {
+    behalfLabel?: string
+    substituteForKey?: string
+  }
+): {
+  name: string
+  position: string | null
+  department: string | null
+} | null {
+  if (!recipient.behalfLabel) return null
+
+  if (recipient.substituteForKey && data.managerEmail) {
+    const managerKey = recipientIdentityKey({
+      email: data.managerEmail,
+      behalfLabel: undefined,
+    })
+
+    if (recipient.substituteForKey === managerKey) {
+      return {
+        name: data.managerName || recipient.behalfLabel,
+        position: data.managerPosition || "Vedoucí odboru",
+        department: data.managerDepartment ?? null,
+      }
+    }
+  }
+
+  if (recipient.substituteForKey) {
+    const original = data.signatureRecipients?.find(
+      (candidate) =>
+        recipientIdentityKey(candidate) === recipient.substituteForKey
+    )
+
+    if (original) {
+      return {
+        name: original.name,
+        position: original.position ?? null,
+        department: original.department ?? null,
+      }
+    }
+  }
+
+  const parts = recipient.behalfLabel.split("—").map((part) => part.trim())
+
+  if (parts.length === 2) {
+    return { name: parts[1], position: null, department: parts[0] }
+  }
+
+  return {
+    name: recipient.behalfLabel,
+    position: null,
+    department: null,
+  }
 }
 
 function dayCountLabelCs(days: number): string {
@@ -244,10 +301,10 @@ function isShortNoticeOffboarding(off: {
 
 async function queueExitChecklistSetupReminders(args: {
   today: Date
+  baseUrl: string
   hrRecipients: string[]
   notifications: string[]
 }) {
-  const reminderKind = "SETUP_MISSING"
   const reminderDate = args.today.toISOString().slice(0, 10)
 
   if (args.hrRecipients.length === 0) {
@@ -283,6 +340,9 @@ async function queueExitChecklistSetupReminders(args: {
     if (!result) continue
 
     const { off, checklist } = result
+
+    if (checklist.lockedAt) continue
+
     const data: ExitChecklistData = mapToExitChecklistData(off, checklist)
 
     if (Boolean(data.signatureRecipientsSentAt)) continue
@@ -293,7 +353,8 @@ async function queueExitChecklistSetupReminders(args: {
       missing.push("Stav střetu zájmů nebyl rozhodnut.")
     }
 
-    if (missing.length === 0) continue
+    const reminderKind =
+      missing.length > 0 ? "SETUP_MISSING" : "INVITES_NOT_SENT"
 
     const alreadyQueued = await existsOffboardingReminderJob({
       offboardingId: off.id,
@@ -315,6 +376,15 @@ async function queueExitChecklistSetupReminders(args: {
       )
     )
 
+    const subject =
+      missing.length > 0
+        ? `Chybí nastavení před odesláním pozvánek k podpisu – ${employeeName}`
+        : `Ještě nebyly odeslány pozvánky k podpisu výstupního listu – ${employeeName}`
+    const intro =
+      missing.length > 0
+        ? `než bude možné odeslat pozvánky k podpisu výstupního listu, je potřeba doplnit: ${missing.join(" ")}`
+        : `vedoucí odboru i stav střetu zájmů jsou u níže uvedeného zaměstnance vyplněné, ale pozvánky k podpisu výstupního listu ještě nebyly odeslány. Prosíme o kontrolu a odeslání.`
+
     const job = await prisma.mailQueue.create({
       data: {
         type: "NOTICE_WARNING",
@@ -328,8 +398,9 @@ async function queueExitChecklistSetupReminders(args: {
           employeeUnitName: off.unitName,
           employmentEndDate: effectiveEnd?.toISOString() ?? null,
           daysBeforeEnd,
-          subject: `Chybí nastavení před odesláním pozvánek k podpisu – ${employeeName}`,
-          intro: `Než bude možné odeslat pozvánky k podpisu výstupního listu, je potřeba doplnit: ${missing.join(" ")}`,
+          checklistLink: `${args.baseUrl}/odchody/${off.id}/vystupni-list`,
+          subject,
+          intro,
           reminderKind,
           reminderDate,
           createdBy: "system-cron",
@@ -346,7 +417,10 @@ async function queueExitChecklistSetupReminders(args: {
       action: "DEADLINE_REMINDER_SENT",
       by: "system-cron",
       byName: "Systémový cron",
-      message: `Chybí nastavení před odesláním pozvánek: ${missing.join(" ")}`,
+      message:
+        missing.length > 0
+          ? `Chybí nastavení před odesláním pozvánek: ${missing.join(" ")}`
+          : "Pozvánky k podpisu výstupního listu ještě nebyly odeslány.",
       meta: {
         reminderKind,
         mailQueueId: job.id,
@@ -405,7 +479,7 @@ function managerHasSigned(data: ExitChecklistData): boolean {
   )
 }
 
-function resolveSignatureRecipientStatus(
+export function resolveSignatureRecipientStatus(
   data: ExitChecklistData,
   employeeEmail: string | null,
   recipient: {
@@ -414,8 +488,22 @@ function resolveSignatureRecipientStatus(
     rowKeys?: string[]
     substituteForKey?: string
   }
-): { hasSigned: boolean; label: string; roleNote: string | null } {
+): {
+  hasSigned: boolean
+  label: string
+  roleNote: string | null
+  pendingItems: string[]
+} {
   const email = recipient.email.trim().toLowerCase()
+
+  const commonPendingArgs = {
+    employeeSignedAt: data.signatures?.employee?.signedAt,
+    managerSignedAt: data.signatures?.manager?.signedAt,
+    issuerSignedAt: data.signatures?.issuer?.signedAt,
+    handoverManagerSignedAt: data.handoverManagerSignature?.signedAt,
+    assetsComplete: Boolean(data.noAssets) || data.assets.length > 0,
+    items: data.items,
+  }
 
   if (recipient.substituteForKey && data.managerEmail) {
     const managerKey = recipientIdentityKey({
@@ -427,6 +515,13 @@ function resolveSignatureRecipientStatus(
         hasSigned: managerHasSigned(data),
         label: "vedoucí (zastoupení)",
         roleNote: EXIT_CHECKLIST_MANAGER_ROLE_NOTE,
+        pendingItems: resolveExitChecklistPendingItems({
+          isEmployee: false,
+          isManager: true,
+          isSectionB: false,
+          rowKeys: recipient.rowKeys ?? [],
+          ...commonPendingArgs,
+        }),
       }
     }
   }
@@ -438,6 +533,13 @@ function resolveSignatureRecipientStatus(
       ),
       label: recipient.name,
       roleNote: null,
+      pendingItems: resolveExitChecklistPendingItems({
+        isEmployee: false,
+        isManager: false,
+        isSectionB: false,
+        rowKeys: recipient.rowKeys,
+        ...commonPendingArgs,
+      }),
     }
   }
 
@@ -446,6 +548,13 @@ function resolveSignatureRecipientStatus(
       hasSigned: Boolean(data.signatures?.employee?.signedAt),
       label: "zaměstnanec",
       roleNote: EXIT_CHECKLIST_EMPLOYEE_ROLE_NOTE,
+      pendingItems: resolveExitChecklistPendingItems({
+        isEmployee: true,
+        isManager: false,
+        isSectionB: false,
+        rowKeys: [],
+        ...commonPendingArgs,
+      }),
     }
   }
 
@@ -454,6 +563,13 @@ function resolveSignatureRecipientStatus(
       hasSigned: managerHasSigned(data),
       label: "vedoucí",
       roleNote: EXIT_CHECKLIST_MANAGER_ROLE_NOTE,
+      pendingItems: resolveExitChecklistPendingItems({
+        isEmployee: false,
+        isManager: true,
+        isSectionB: false,
+        rowKeys: recipient.rowKeys ?? [],
+        ...commonPendingArgs,
+      }),
     }
   }
 
@@ -465,6 +581,32 @@ function resolveSignatureRecipientStatus(
       hasSigned: Boolean(data.signatures?.issuer?.signedAt),
       label: "odpovědná osoba za sekci B",
       roleNote: EXIT_CHECKLIST_SECTION_B_ROLE_NOTE,
+      pendingItems: resolveExitChecklistPendingItems({
+        isEmployee: false,
+        isManager: false,
+        isSectionB: true,
+        rowKeys: recipient.rowKeys ?? [],
+        ...commonPendingArgs,
+      }),
+    }
+  }
+
+  if (
+    data.sectionCResponsible?.email &&
+    email === data.sectionCResponsible.email.trim().toLowerCase()
+  ) {
+    return {
+      hasSigned: Boolean(data.handoverManagerSignature?.signedAt),
+      label: "odpovědná osoba za sekci C",
+      roleNote: EXIT_CHECKLIST_SECTION_C_ROLE_NOTE,
+      pendingItems: resolveExitChecklistPendingItems({
+        isEmployee: false,
+        isManager: false,
+        isSectionB: false,
+        isSectionC: true,
+        rowKeys: recipient.rowKeys ?? [],
+        ...commonPendingArgs,
+      }),
     }
   }
 
@@ -491,10 +633,22 @@ function resolveSignatureRecipientStatus(
       ),
       label: knownSignatory.name,
       roleNote: null,
+      pendingItems: resolveExitChecklistPendingItems({
+        isEmployee: false,
+        isManager: false,
+        isSectionB: false,
+        rowKeys: relevantRowKeys,
+        ...commonPendingArgs,
+      }),
     }
   }
 
-  return { hasSigned: false, label: recipient.name, roleNote: null }
+  return {
+    hasSigned: false,
+    label: recipient.name,
+    roleNote: null,
+    pendingItems: [],
+  }
 }
 
 async function queueExitChecklistSignatureReminders(args: {
@@ -507,6 +661,7 @@ async function queueExitChecklistSignatureReminders(args: {
   const candidates = await prisma.employeeOffboarding.findMany({
     where: {
       deletedAt: null,
+      cancelledAt: null,
       actualEnd: null,
       plannedEnd: args.effectiveEndFilter,
     },
@@ -523,6 +678,7 @@ async function queueExitChecklistSignatureReminders(args: {
     const { off, checklist } = result
 
     if (!checklist.publicToken) continue
+    if (checklist.lockedAt) continue
 
     const data: ExitChecklistData = mapToExitChecklistData(off, checklist)
 
@@ -532,22 +688,37 @@ async function queueExitChecklistSignatureReminders(args: {
     const employeeName = buildFullName(off)
     const effectiveEnd = off.actualEnd ?? off.plannedEnd
     const signUrl = `${args.baseUrl}/odchody-public/${checklist.publicToken}`
-    const pendingSigners: string[] = []
+    const pendingSigners: Array<{
+      name: string
+      position: string | null
+      department: string | null
+      behalfLabel: string | null
+      pendingItems: string[]
+    }> = []
 
     for (const recipient of data.signatureRecipients) {
       const email = recipient.email.trim().toLowerCase()
 
       if (!email || recipient.revokedAt) continue
 
-      const { hasSigned, label, roleNote } = resolveSignatureRecipientStatus(
-        data,
-        off.userEmail,
-        recipient
-      )
+      const { hasSigned, label, roleNote, pendingItems } =
+        resolveSignatureRecipientStatus(data, off.userEmail, recipient)
 
       if (hasSigned) continue
 
-      pendingSigners.push(`${recipient.name} (${recipient.email})`)
+      const behalfOriginal = resolveBehalfOriginalInfo(data, recipient)
+
+      pendingSigners.push({
+        name: recipient.name,
+        position: recipient.position ?? null,
+        department: recipient.department ?? null,
+        behalfLabel: behalfOriginal?.name ?? recipient.behalfLabel ?? null,
+        pendingItems,
+      })
+
+      const isManager = label === "vedoucí" || label === "vedoucí (zastoupení)"
+      const isEmployee =
+        Boolean(off.userEmail) && email === off.userEmail?.trim().toLowerCase()
 
       const alreadyQueued = await existsOffboardingSignatureReminderJob({
         offboardingId: off.id,
@@ -576,15 +747,13 @@ async function queueExitChecklistSignatureReminders(args: {
             signUrl,
             reminderRole: label,
             roleNote,
-            headerSubtitle:
-              label === "vedoucí" || label === "vedoucí (zastoupení)"
-                ? EXIT_CHECKLIST_MANAGER_HEADER_SUBTITLE
-                : null,
+            pendingItems,
             isBehalf: Boolean(recipient.behalfLabel),
-            behalfLabel: recipient.behalfLabel ?? null,
-            isEmployee:
-              Boolean(off.userEmail) &&
-              email === off.userEmail?.trim().toLowerCase(),
+            behalfName: behalfOriginal?.name ?? recipient.behalfLabel ?? null,
+            behalfPosition: behalfOriginal?.position ?? null,
+            behalfDepartment: behalfOriginal?.department ?? null,
+            isEmployee,
+            isManager,
             daysBeforeEnd: args.daysBeforeEnd,
             createdBy: "system-cron",
             createdByName: "Systémový cron",
@@ -637,8 +806,9 @@ async function queueExitChecklistSignatureReminders(args: {
               employeeUnitName: off.unitName,
               employmentEndDate: effectiveEnd?.toISOString() ?? null,
               checklistLink: `${args.baseUrl}/odchody/${off.id}/vystupni-list`,
-              subject: `Kdo ještě nepodepsal výstupní list (${dayCountLabelCs(args.daysBeforeEnd)}) – ${employeeName}`,
-              intro: `Do konce pracovního poměru zbývá ${dayCountLabelCs(args.daysBeforeEnd)} a výstupní list zatím není kompletně podepsaný.`,
+              bannerTitle: `Připomínka k nepodepsané agendě (zbývá: ${dayCountLabelCs(args.daysBeforeEnd)})`,
+              subject: `Připomínka k nepodepsané agendě výstupního listu (zbývá: ${dayCountLabelCs(args.daysBeforeEnd)}) – ${employeeName}`,
+              intro: `do konce pracovního poměru daného zaměstnance zbývá ${dayCountLabelCs(args.daysBeforeEnd)} a výstupní list není kompletně podepsaný:`,
               pendingSigners,
               reminderKind: reportKind,
               daysBeforeEnd: args.daysBeforeEnd,
@@ -668,6 +838,7 @@ async function queueExitChecklistSignatureReminders(args: {
 
 async function queueExitChecklistLockReminders(args: {
   today: Date
+  baseUrl: string
   hrRecipients: string[]
   notifications: string[]
 }) {
@@ -728,9 +899,10 @@ async function queueExitChecklistLockReminders(args: {
           employeeDepartment: off.department,
           employeeUnitName: off.unitName,
           employmentEndDate: effectiveEnd?.toISOString() ?? null,
+          checklistLink: `${args.baseUrl}/odchody/${off.id}/vystupni-list`,
           subject: `Výstupní list je hotový, ale stále není uzamčený – ${employeeName}`,
           intro:
-            "Výstupní list je kompletně vyplněný a podepsaný, ale v aplikaci stále není uzamčený pro další úpravy. Prosíme, zkontrolujte ho a uzamkněte jako definitivně dokončený.",
+            "výstupní list je kompletně vyplněný a podepsaný, ale v aplikaci stále není uzamčený pro další úpravy. Prosíme, zkontrolujte ho a uzamkněte jako definitivně dokončený.",
           reminderKind,
           reminderDate,
           createdBy: "system-cron",
@@ -783,12 +955,14 @@ export async function ensureOffboardingCronJobs(req: NextRequest) {
 
   const setupReminders = await queueExitChecklistSetupReminders({
     today,
+    baseUrl,
     hrRecipients,
     notifications,
   })
 
   const lockReminders = await queueExitChecklistLockReminders({
     today,
+    baseUrl,
     hrRecipients,
     notifications,
   })

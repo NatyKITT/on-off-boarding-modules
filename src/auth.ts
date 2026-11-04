@@ -27,6 +27,45 @@ const HR_EMAILS = parseEmails(process.env.HR_EMAILS)
 const IT_EMAILS = parseEmails(process.env.IT_EMAILS)
 const READONLY_EMAILS = parseEmails(process.env.READONLY_EMAILS)
 
+const TAJEMNIK_OVERRIDE_SETTING_KEY = "tajemnik_override"
+
+async function isConfiguredAsSupervisorOrTajemnik(
+  email: string
+): Promise<boolean> {
+  const [onboarding, offboarding, change, probation, tajemnikSetting] =
+    await Promise.all([
+      prisma.employeeOnboarding.findFirst({
+        where: { supervisorEmail: email },
+        select: { id: true },
+      }),
+      prisma.employeeOffboarding.findFirst({
+        where: { supervisorEmail: email },
+        select: { id: true },
+      }),
+      prisma.employeeChange.findFirst({
+        where: { supervisorEmail: email },
+        select: { id: true },
+      }),
+      prisma.probationEvaluationRequest.findFirst({
+        where: { supervisorEmail: email },
+        select: { id: true },
+      }),
+      prisma.systemSettings.findUnique({
+        where: { key: TAJEMNIK_OVERRIDE_SETTING_KEY },
+        select: { value: true },
+      }),
+    ])
+
+  if (onboarding || offboarding || change || probation) return true
+
+  const tajemnikValue = tajemnikSetting?.value as {
+    email?: string | null
+  } | null
+  const tajemnikEmail = tajemnikValue?.email?.trim().toLowerCase()
+
+  return Boolean(tajemnikEmail && tajemnikEmail === email)
+}
+
 function getDomain(email: string | null | undefined): string {
   if (!email) return ""
   return email.split("@")[1]?.toLowerCase() ?? ""
@@ -49,11 +88,15 @@ function getEnvRoleForEmail(email: string): Role | null {
   return null
 }
 
-function getDefaultRoleForEmail(email: string): Role {
+async function getDefaultRoleForEmail(email: string): Promise<Role> {
   const domain = getDomain(email)
 
   if (domain === "kitt6.cz") {
     return "IT"
+  }
+
+  if (await isConfiguredAsSupervisorOrTajemnik(email)) {
+    return "READONLY"
   }
 
   return "USER"
@@ -66,11 +109,11 @@ function canEmailSignIn(email: string | null | undefined): boolean {
   return ALLOWED_DOMAINS.has(domain)
 }
 
-function resolveRoleForUser(params: {
+async function resolveRoleForUser(params: {
   email: string
   dbRole?: Role | null
   dbCanAccessApp?: boolean | null
-}): Role {
+}): Promise<Role> {
   const envRole = getEnvRoleForEmail(params.email)
 
   if (envRole) {
@@ -79,10 +122,6 @@ function resolveRoleForUser(params: {
 
   if (params.dbRole && isInternalRole(params.dbRole)) {
     return params.dbRole
-  }
-
-  if (params.dbRole === "USER") {
-    return "USER"
   }
 
   return getDefaultRoleForEmail(params.email)
@@ -140,7 +179,7 @@ async function syncUserAccess(
 
   if (!dbUser) return null
 
-  const nextRole = resolveRoleForUser({
+  const nextRole = await resolveRoleForUser({
     email: normalizedEmail,
     dbRole: dbUser.role,
     dbCanAccessApp: dbUser.canAccessApp,

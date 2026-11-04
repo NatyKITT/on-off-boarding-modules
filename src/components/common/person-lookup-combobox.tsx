@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { ChevronDown, User, X } from "lucide-react"
+import { AlertTriangle, ChevronDown, User, X } from "lucide-react"
 
 import { useIncrementalReveal } from "@/hooks/use-incremental-reveal"
 import { cn } from "@/lib/utils"
@@ -37,6 +37,8 @@ export type PersonLookupItem = {
   unitName?: string
   label?: string
   userName?: string | null
+  hasActiveOffboarding?: boolean
+  activeOffboardingStatus?: "planned" | "actual"
 }
 
 type Props = {
@@ -47,6 +49,7 @@ type Props = {
   onSelect: (employee: PersonLookupItem) => void | Promise<void>
   className?: string
   variant?: "input" | "button"
+  excludeActiveOffboardings?: boolean
 }
 
 const focusRing =
@@ -100,6 +103,7 @@ export function PersonLookupCombobox({
   onSelect,
   className,
   variant = "input",
+  excludeActiveOffboardings = true,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
@@ -119,6 +123,9 @@ export function PersonLookupCombobox({
         const url = new URL("/api/zamestnanci/hledat", window.location.origin)
         url.searchParams.set("listAll", "true")
         url.searchParams.set("limit", "500")
+        if (!excludeActiveOffboardings) {
+          url.searchParams.set("excludeActiveOffboardings", "false")
+        }
 
         const res = await fetch(url.toString(), {
           cache: "no-store",
@@ -146,7 +153,7 @@ export function PersonLookupCombobox({
     })()
 
     return () => controller.abort()
-  }, [open, allEmployees.length])
+  }, [open, allEmployees.length, excludeActiveOffboardings])
 
   useEffect(() => {
     if (!open) setQuery("")
@@ -238,6 +245,17 @@ export function PersonLookupCombobox({
                   {buildPersonFullName(e)}
                 </span>
               </div>
+
+              {e.hasActiveOffboarding && (
+                <div className="mt-1 flex items-center gap-1.5 rounded-md bg-red-50 px-1.5 py-1 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                  <AlertTriangle className="size-3.5 shrink-0" />
+                  Tento člověk už má v aplikaci evidovaný odchod (
+                  {e.activeOffboardingStatus === "actual"
+                    ? "již skutečný"
+                    : "zatím plánovaný"}
+                  ).
+                </div>
+              )}
 
               <div className="mt-1 space-y-1 text-sm text-muted-foreground">
                 {e.positionName ? (

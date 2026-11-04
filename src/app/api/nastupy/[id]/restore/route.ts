@@ -7,7 +7,12 @@ import {
   normalizePersonalNumber,
   pickMostRelevantOffboarding,
 } from "@/lib/employment-linking"
-import { syncLinkedProbationAfterOffboardingDecision } from "@/lib/probation-evaluation-request"
+import { buildManagerNotifyPromptForRemoval } from "@/lib/new-record-manager-watch"
+import { notifyEmploymentDocumentsAvailableAgain } from "@/lib/onboarding-documents-lock"
+import {
+  getAppBaseUrlFromRequest,
+  syncLinkedProbationAfterOffboardingDecision,
+} from "@/lib/probation-evaluation-request"
 import { canWriteOnboarding } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
@@ -132,10 +137,18 @@ export async function POST(
       where: { id },
       select: {
         id: true,
+        titleBefore: true,
         name: true,
         surname: true,
+        titleAfter: true,
         personalNumber: true,
         probationEnd: true,
+        actualStart: true,
+        plannedStart: true,
+        positionName: true,
+        department: true,
+        unitName: true,
+        supervisorEmail: true,
         deletedAt: true,
         deletedBy: true,
         deleteReason: true,
@@ -278,12 +291,19 @@ export async function POST(
               kind: "employee_restored",
               employeeId: id,
               employeeName: `${employee.name} ${employee.surname}`,
+              employeePersonalNumber: employee.personalNumber,
+              employeePosition: employee.positionName,
+              employeeDepartment: employee.department,
+              employeeUnitName: employee.unitName,
               restoredBy: createdBy,
+              actorName,
+              actionAt: restoredAt.toISOString(),
               restoredAt: restoredAt.toISOString(),
               originalDeletedBy: employee.deletedBy,
               originalDeleteReason: employee.deleteReason,
               recipients: hrRecipients,
               subject: `Obnoven záznam zaměstnance - ${employee.name} ${employee.surname}`,
+              recordLink: `${getAppBaseUrlFromRequest(req)}/nastupy/${id}`,
             },
             priority: 3,
             createdBy,
@@ -291,6 +311,27 @@ export async function POST(
         })
       }
     })
+
+    const managerNotifyPrompt =
+      employee.actualStart === null
+        ? await buildManagerNotifyPromptForRemoval({
+            kind: "ONBOARDING",
+            recordId: id,
+            reason: "RECORD_RESTORED",
+          })
+        : null
+
+    try {
+      await notifyEmploymentDocumentsAvailableAgain(
+        id,
+        getAppBaseUrlFromRequest(req)
+      )
+    } catch (error) {
+      console.error(
+        "[NASTUPY-RESTORE] Oznámení o nástupních dokumentech se nepodařilo:",
+        error
+      )
+    }
 
     return NextResponse.json({
       status: "success",
@@ -301,6 +342,7 @@ export async function POST(
         restoredAt: restoredAt.toISOString(),
         restoredBy: createdBy,
       },
+      managerNotifyPrompt,
     })
   } catch (error) {
     console.error("Chyba při obnovování záznamu:", error)

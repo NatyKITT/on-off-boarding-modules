@@ -20,6 +20,7 @@ export type ManagerNotifyPromptReason =
   | "MANAGER_CHANGED"
   | "RECORD_CANCELLED"
   | "RECORD_DELETED"
+  | "RECORD_RESTORED"
 
 export type ManagerNotifyPrompt = {
   kind: "ONBOARDING" | "OFFBOARDING"
@@ -56,6 +57,11 @@ const REASON_TEXT: Record<
     title: "Informovat vedoucího odboru o smazání?",
     description:
       "Tento záznam byl smazán. Vedoucímu odboru u něj už dříve byl odeslán informační e-mail – chcete odeslat i informaci o smazání?",
+  },
+  RECORD_RESTORED: {
+    title: "Informovat vedoucího odboru o obnovení?",
+    description:
+      "Tento záznam byl obnoven. Vedoucímu odboru u něj už dříve byl odeslán informační e-mail – chcete odeslat i informaci o obnovení?",
   },
 }
 

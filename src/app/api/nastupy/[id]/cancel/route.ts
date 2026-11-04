@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 
 import { prisma } from "@/lib/db"
+import { cancelQueuedMailJobsForRecord } from "@/lib/mail-queue-cleanup"
 import { buildManagerNotifyPromptForRemoval } from "@/lib/new-record-manager-watch"
+import { notifyEmploymentDocumentsRemoved } from "@/lib/onboarding-documents-lock"
 import { canWriteOnboarding } from "@/lib/rbac"
 
 export const dynamic = "force-dynamic"
@@ -141,11 +143,32 @@ export async function POST(request: NextRequest, { params }: Params) {
       return updatedRecord
     })
 
-    const managerNotifyPrompt = await buildManagerNotifyPromptForRemoval({
-      kind: "ONBOARDING",
-      recordId: updated.id,
-      reason: "RECORD_CANCELLED",
-    })
+    const managerNotifyPrompt =
+      before.actualStart === null
+        ? await buildManagerNotifyPromptForRemoval({
+            kind: "ONBOARDING",
+            recordId: updated.id,
+            reason: "RECORD_CANCELLED",
+          })
+        : null
+
+    try {
+      await cancelQueuedMailJobsForRecord("ONBOARDING", updated.id)
+    } catch (error) {
+      console.error(
+        "[NASTUPY-CANCEL] Čištění fronty e-mailů se nepodařilo:",
+        error
+      )
+    }
+
+    try {
+      await notifyEmploymentDocumentsRemoved(updated.id, "RECORD_CANCELLED")
+    } catch (error) {
+      console.error(
+        "[NASTUPY-CANCEL] Oznámení o nástupních dokumentech se nepodařilo:",
+        error
+      )
+    }
 
     return NextResponse.json({
       status: "success",

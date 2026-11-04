@@ -4,7 +4,7 @@ import { Prisma } from "@prisma/client"
 import { LAW_SIGNATORY } from "@/config/exit-checklist-signatories"
 
 import { prisma } from "@/lib/db"
-import { sendExitChecklistSignatoryRemovedEmail } from "@/lib/email"
+import { sendExitChecklistSignatureNoLongerNeededEmail } from "@/lib/email"
 import { mergeSignatureRecipients } from "@/lib/exit-checklist"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
 import { recipientIdentityKey } from "@/lib/exit-checklist-recipient-key"
@@ -144,12 +144,13 @@ export async function POST(
     : null
 
   try {
-    await sendExitChecklistSignatoryRemovedEmail({
+    await sendExitChecklistSignatureNoLongerNeededEmail({
       to: lawEmail,
       employeeName,
       employeePosition: offboarding.positionName,
       employeeDepartment: offboarding.department,
       employmentEndDate,
+      reason: "CONFLICT_RESOLVED",
     })
   } catch (error) {
     console.error("[LAW-SIGNATORY-REMOVE] E-mail se nepodařilo odeslat:", error)

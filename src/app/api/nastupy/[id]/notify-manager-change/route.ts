@@ -22,6 +22,7 @@ const bodySchema = z.object({
     "MANAGER_CHANGED",
     "RECORD_CANCELLED",
     "RECORD_DELETED",
+    "RECORD_RESTORED",
   ]),
 })
 

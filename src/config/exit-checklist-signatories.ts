@@ -6,7 +6,7 @@ export type ExitChecklistSignatory = {
 
 export const EXIT_CHECKLIST_SIGNATORIES: ExitChecklistSignatory[] = [
   {
-    name: "Marek Tolde (SNEO, a.s.)",
+    name: "Marek Tolde (SNEO a.s.)",
     emails: ["mtolde@praha6.cz"],
     rowKeys: ["sneoChip", "sneoRemote"],
   },

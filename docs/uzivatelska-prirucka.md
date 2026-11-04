@@ -141,6 +141,19 @@ k podpisu).
 - **USER** – do vnitřní aplikace se vůbec nedostane; pracuje výhradně
   s jednorázovými veřejnými odkazy, které dostane e-mailem (kapitola 6).
 
+**Automatické přiřazení READONLY vedoucím a tajemníkovi.** Praha6.cz/
+kitt6.cz e-mail, který ještě nemá roli nastavenou v `ENV` ani ručně
+v administraci, dostane při každém přihlášení **automaticky READONLY**
+místo USER, pokud se objevuje jako vedoucí (`supervisorEmail`) u
+alespoň jednoho nástupu, odchodu, zaměstnanecké změny nebo vyhodnocení
+zkušební doby, nebo je aktuálně nastaven jako tajemník
+(`tajemnik_override` v administraci). Přepočítává se znovu při každém
+přihlášení, takže nově přiřazený vedoucí dostane READONLY automaticky,
+jakmile se u nějakého záznamu objeví. Netýká se to přístupu k
+veřejnému výstupnímu listu – ten se vždy řídí jen příslušností k
+seznamu osob k podpisu daného odchodu (kapitola 5.3), ne rolí v
+appce.
+
 ## 4. Přehled adres (URL)
 
 ### Přihlášení
@@ -373,6 +386,27 @@ Z detailu nástupu se dále řídí:
   prohlídku – odemknout ho zpátky k úpravám může jen HR nebo
   administrátor appky tlačítkem „Odemknout" na stejném místě.
 
+**Potvrzení skutečného nástupu, i když nástupní dokumenty ještě
+nejsou hotové.** Pokud při potvrzení skutečného nástupu dokumenty
+nejsou 100 % hotové, appka se zeptá, jestli je i tak zamknout
+(zamykání od teď nevyžaduje stoprocentní hotovost, platí i pro ruční
+zamykání v okně Dokumenty tlačítkem „Zamknout"). Po potvrzení appka
+zamkne, zapíše do historie a pošle e-mail zaměstnanci i Personálnímu
+oddělení se seznamem, co bylo zamčeno. Pokud se naopak skutečný nástup
+vrátí zpět mezi plánované a dokumenty byly zamčené, appka symetricky
+nabídne odemčení a zaměstnanci znovu pošle funkční odkazy na dosud
+nevyplněné dokumenty. Zrušení (storno) nástupu navíc zároveň zruší
+všechny dosud nerozeslané připomínkové e-maily čekající ve frontě pro
+ten záznam a informuje zaměstnance/Personální oddělení, že rozepsané
+dokumenty už nejsou potřeba.
+
+**Manuální odeslání informace vedoucímu.** U každého nástupu je
+v přehledu nové tlačítko (ikonka obálky), kterým HR může kdykoli
+ručně poslat nebo znovu poslat vedoucímu odboru úvodní informační
+e-mail o záznamu (stejný, jaký jinak chodí automaticky při založení
+nového nástupu s vyplněným vedoucím) – appka u tlačítka ukáže, jestli
+a kdy už byl odeslán.
+
 Pokud se k danému osobnímu číslu později objeví i odpovídající
 odchod, aplikace záznamy **automaticky propojí** – u nástupu se pak
 zobrazí informace o odchodu a případně se zastaví sledování zkušební
@@ -386,10 +420,20 @@ založit záznam s plánovaným datem konce, později potvrdit **skutečný**
 konec pracovního poměru. Vedoucí odboru se dohledává automaticky podle
 čísla funkce a lze ho ručně přepsat nebo znovu dohledat tlačítkem
 „Obnovit dle pozice" – poslední zadaná hodnota se vždy uloží a použije
-i ve výstupním listu. Dohledaný vedoucí je vidět přímo v detailu
-odchodu, ne jen po otevření výstupního listu. Automatické dohledání se
-ale nemusí vždy podařit (např. neobsazená pozice nebo chybějící údaj
+i ve výstupním listu, včetně funkce a odboru vedoucího (appka je teď
+při vytvoření výstupního listu správně přebírá spolu se jménem a
+e-mailem). Dohledaný vedoucí je vidět přímo v detailu odchodu, ne jen
+po otevření výstupního listu. Automatické dohledání se ale nemusí
+vždy podařit (např. neobsazená pozice nebo chybějící údaj
 v systemizaci) – v takovém případě je potřeba vedoucího doplnit ručně.
+Dokud ještě nebyl u výstupního listu odeslán seznam osob k podpisu,
+vedoucí v hlavičce výstupního listu dál sleduje živě vedoucího na
+záznamu odchodu – jakmile ho tady změníte (i jen jméno/příjmení), uvidíte
+to i ve výstupním listu a v okně „Osoby k podpisu". Po odeslání
+pozvánek k podpisu se to otočí – vedoucí se dál řídí jen tím, co je
+uložené v okně „Osoby k podpisu" (viz níže), ne tímto formulářem.
+Pokud appka při zadávání osobního čísla ručně rozpozná, že daná osoba
+už má evidovaný odchod, upozorní na to červeně přímo ve výběru.
 
 Při zakládání odchodu jde zaškrtnout **„Vyplnit vlastní data"**, pokud
 zaměstnanec zatím není v EOS nebo se má zadat ručně. I v tomto režimu
@@ -447,6 +491,20 @@ Z detailu odchodu se dále řídí:
   vedoucí), jeho podpis se do vyhodnocení „je vše podepsáno" nijak
   nepočítá – takový člověk dostane e-mail a připomínky, ale dokument se
   může uzavřít, i kdyby on sám nic nepodepsal.
+
+  **Potvrzení skutečného odchodu, i když výstupní list ještě není
+  hotový.** Pokud při potvrzení skutečného odchodu výstupní list není
+  100 % podepsaný, appka se zeptá, jestli ho i tak zamknout. Po
+  potvrzení zamkne, zapíše do historie a pošle e-mail zaměstnanci i
+  Personálnímu oddělení se seznamem, co bylo zamčeno. Při vrácení
+  skutečného odchodu zpět mezi plánované appka symetricky nabídne
+  odemčení, pokud byl výstupní list zamčený. Zrušení (storno) odchodu
+  navíc zruší všechny dosud nerozeslané připomínkové e-maily čekající
+  ve frontě pro ten záznam a informuje zaměstnance/Personální
+  oddělení, že rozepsané podpisy už nejsou potřeba.
+
+  Stejné tlačítko pro manuální odeslání informace vedoucímu jako
+  u nástupů (kapitola 5.2) je i u každého odchodu v přehledu.
 
 **Kdo smí výstupní list podepsat:** ve veřejné verzi (přes odkaz,
 mimo appku) je to přesně skupina lidí uložená v seznamu osob k podpisu
@@ -544,6 +602,28 @@ podle role v appce):
   změnit. V interní appce to navíc smí ADMIN/HR/IT (přepsat/zrušit cizí
   podpis), ve veřejné verzi vždy jen ten, kdo podepsal.
 
+**Odpověď „Ne" v sekci A vyžaduje poznámku.** Bez vyplněné poznámky
+nejde takový řádek podepsat (ani v zastoupení) – appka tlačítko
+„Podepsat" needitovatelné s vysvětlujícím tooltipem. Poznámka je
+rostoucí textové pole, které roste podle délky textu; řádek s „Ne" se
+zvýrazní jemně červeně (oranžově, pokud k ní existuje i dodatečná
+poznámka, viz níže). Nahoře ve výstupním listu (interně i veřejně) se
+navíc zobrazí červený přehled všech aktuálně nesplněných položek – kdo
+a kdy to podepsal a s jakou poznámkou. Při 100% dokončení se tento
+přehled posílá i v obou závěrečných e-mailech (Personálnímu oddělení i
+odcházejícímu zaměstnanci); e-mail zaměstnanci navíc žádá o
+zkontrolování, že to bylo skutečně vyřízeno, s upozorněním na možný
+dopad na předání zápočtového listu. Nesplněná agenda se do 100 %
+dokončení počítá stejně jako splněná (appka jen upozorní, nic
+neblokuje).
+
+**„Dodatečně vyřízeno"** – k už podepsané položce s odpovědí „Ne" (i
+po úplném dokončení a zamčení výstupního listu, v appce i ve veřejné
+verzi) jde doplnit poznámku, že to bylo nakonec vyřízeno/odevzdáno/
+vyřešeno jinak jinou cestou, bez nutnosti znovu odemykat celý
+dokument. Uloží se hned, samostatným tlačítkem u dané položky, a
+zobrazí se oranžově jako odlišení od původní červené poznámky u „Ne".
+
 Automatické připomínky k podpisu sledují u každého člověka všechny
 řádky, které má na starosti – pokud má někdo na starosti víc řádků
 (někteří funkční signatáři mají i 3), chodí mu připomínka, dokud nejsou
@@ -561,18 +641,25 @@ všechny tři: při kliknutí na „Uložit" ve veřejné verzi potvrzovací okn
 **Předání agendy (sekce C) – kdo a kdy dostane e-mail:** vedoucí odboru
 v sekci C vybere jeden ze tří způsobů předání agendy a svůj výběr
 podepíše (propojeno s podpisem v hlavičce výše). Teprve po podpisu a
-**uložení** appka automaticky odešle informační e-mail (s tabulkou
-zaměstnance/odchodu a jménem a pozicí vedoucího, který volbu zvolil):
-na kontakt KITT6 (volba „OI-KITT6 předá na jiné funkční místo") nebo
-každé vybrané odpovědné osobě samostatně (volba „zůstává na
-neobsazeném funkčním místě", odpovědná osoba(y) za dokumenty). Pokud
-se vedoucí později vrátí, volbu změní (jiný způsob, jiné cílové místo
-u KITT6, jiný seznam odpovědných osob) a znovu podepíše a uloží,
-appka automaticky pošle e-mail i těm, komu už dřív info odešla, že
-jejich dřívější role v předání agendy byla zrušena a byl potvrzen
-jiný způsob – žádné další kroky z jejich strany už nejsou potřeba.
-Podpis sekce C je nezávislý na sekci B (majetek) – jde o různé osoby
-a různé věci, takže vyplnění/podpis jedné sekce neblokuje druhou.
+**uložení** appka automaticky odešle informační e-mail: na kontakt
+KITT6 (volba „OI-KITT6 předá na jiné funkční místo") nebo každé
+vybrané odpovědné osobě samostatně (volba „zůstává na neobsazeném
+funkčním místě", odpovědná osoba(y) za dokumenty). Oba e-maily mají
+nejdřív krátkou uvozující větu a tabulku s údaji o zaměstnanci a
+vedoucím odboru (jméno, funkce a odbor toho, kdo volbu zvolil a
+podepsal), až pak vysvětlující text. U volby KITT6 je cílové funkční
+místo (číslo, název, odbor) samostatná tabulka až za vysvětlujícím
+textem; appka formuluje, že „předání zajistí KITT6" (ne že by cílové
+místo bylo nějak u KITT6). Pokud se vedoucí později vrátí, volbu změní
+(jiný způsob, jiné cílové místo u KITT6, jiný seznam odpovědných osob)
+a znovu podepíše a uloží, appka automaticky pošle e-mail i těm, komu
+už dřív info odešla, že jejich dřívější role v předání agendy byla
+zrušena a byl potvrzen jiný způsob – žádné další kroky z jejich strany
+už nejsou potřeba. Podpis sekce C je nezávislý na sekci B (majetek) –
+jde o různé osoby a různé věci, takže vyplnění/podpis jedné sekce
+neblokuje druhou. Odpovědná osoba za sekci C je nezávislé pole (jde
+nastavit v okně „Osoby k podpisu" – výchozí hodnota zůstává vedoucí
+odboru, ale dá se změnit).
 
 Podpis **„Za Odbor služeb potvrzuje správnost Výpisu"** v sekci B je
 needitovatelné (disabled) tlačítko, dokud není vyplněn alespoň jeden
@@ -594,7 +681,35 @@ připomínky. Tlačítko „Zpět k úpravě" okno jen zavře beze změny,
 Vedle „Odeslat všem k podpisu" je samostatné tlačítko **„Osoby
 k podpisu"**, které zobrazí aktuální uložený seznam bez nutnosti nic
 znovu odesílat – u každého je vidět, kdy dostal pozvánku, a pokud
-podepisuje v zastoupení, tak i za koho. Odsud jde:
+podepisuje v zastoupení, tak i za koho. Karty jsou uspořádané podle
+agendy, řadí se pod sebe (ne vedle sebe) a mají jednotnou výšku a
+šířku (polovina řádku). Sekce B a sekce C mají vlastní barevné
+odlišení celého řádku; **sekce C je rozdělená na dvě části** – nahoře
+karta odpovědné osoby za předání agendy, dole za dělicí čárou karta
+kontaktu KITT6 (pro případ volby „KITT6 předá na jiné funkční místo").
+Odpovědná osoba za sekci C je nezávislá na vedoucím odboru (výchozí
+hodnota ale zůstává vedoucí, dá se změnit).
+
+Karta **odcházejícího zaměstnance** se tu dá upravit stejným způsobem
+jako karta vedoucího, sekce B nebo sekce C – tlačítkem „Upravit" se
+odemkne needitovatelná karta, lze změnit jen e-mail (jméno zůstává
+needitovatelné). Dokud okno neuložíte tlačítkem „Odeslat a uložit",
+je změna vidět jen na kartě; po uložení se propíše přímo do záznamu
+odchodu. Stejně funguje i karta vedoucího – pokud při uložení jeho
+karty nevyplníte funkci a odbor, appka se je pokusí sama dohledat
+v EOS podle e-mailu.
+
+**Zaškrtávací pole u karet se zobrazují jen na vyžádání** – tlačítky
+**„Vybrat ručně"** (zobrazí prázdné checkboxy u všech karet, zaškrtne
+se jen to, co vyberete), **„Vybrat neodeslané"** (zaškrtne jen dosud
+nepotvrzené karty) a **„Vybrat vše"** (zaškrtne úplně všechny; pokud
+je už tak jako tak vše vybráno, tlačítko se změní na „Zrušit výběr").
+Druhé kliknutí na aktivní tlačítko výběr zase zruší. Checkboxy se
+navíc automaticky objeví, kdykoli v okně přibude neuložená změna (nová
+nebo upravená osoba, odebrání, rozhodnutí o střetu zájmů), aby bylo
+hned vidět, co se při uložení skutečně odešle.
+
+Odsud jde:
 
 - kohokoli **odebrat** (zrušit) – po potvrzení mu přestanou chodit
   automatické připomínky k podpisu tohoto výstupního listu a ve veřejné
@@ -608,27 +723,48 @@ podepisuje v zastoupení, tak i za koho. Odsud jde:
   ale **nová pozvánka se mu neposílá**.
 - **přidat nového příjemce** (ručně, nebo tlačítkem „Vybrat ze
   zaměstnanců") – tomu se rovnou odešle nová pozvánka k podpisu a
-  přidá se do seznamu. Zaškrtávátkem **„Přidat jako zastupujícího za"**
-  jde rovnou vybrat, za kterou zodpovědnou osobu/odbor bude
-  podepisovat – dostane pak ten odlišný e-mail s pozvánkou pro
-  zastoupení. Pokud zastupovaná osoba ještě v seznamu není, přidá se
-  automaticky i ona (jako běžný přímý příjemce) – dostane tak dvojí
-  info: vlastní pozvánku i informaci, že ji/ho nyní někdo zastupuje
-  (jméno, pozice a odbor zástupce, a že zastupovaná osoba může i tak
-  dál podepsat sama).
+  přidá se do seznamu. Pokud e-mail, který zadáváte (nebo na který
+  přepíšete e-mail u existující karty), už v seznamu je u jiné agendy,
+  appka agendu k té osobě **přiřadí navíc** místo aby uložení
+  zablokovala – jedna osoba tak může mít na starosti libovolný počet
+  různých agend/rolí najednou.
+- **tlačítko „Zastoupit"** u karty otevře formulář přímo pod ní (ne
+  jako samostatný blok dole) – jde zaškrtnout i u ještě nepotvrzené
+  (šedé, návrhové) karty, která se tím automaticky potvrdí zároveň se
+  zástupcem. Zaškrtávátkem **„Přidat jako zastupujícího za"** jde
+  rovnou vybrat, za kterou zodpovědnou osobu/odbor bude podepisovat –
+  dostane pak ten odlišný e-mail s pozvánkou pro zastoupení. Pokud
+  zastupovaná osoba ještě v seznamu není, přidá se automaticky i ona
+  (jako běžný přímý příjemce) – dostane tak dvojí info: vlastní
+  pozvánku i informaci, že ji/ho nyní někdo zastupuje (jméno, pozice a
+  odbor zástupce, a že zastupovaná osoba může i tak dál podepsat
+  sama).
 - **zrušit zastoupení** u konkrétního zástupce – ten ztratí právo
   podepisovat v zastoupení (zbytek jeho případných rolí se nemění) a
   zastupovaná osoba dostane e-mail se stejnou tabulkou, že její
   zastoupení bylo zrušeno a může si vybavit podpis sama.
+- Úprava jména/e-mailu u karty (tlačítko „Upravit") se vždy jen
+  zaškrtne/vybere a čeká na potvrzení hlavním tlačítkem – ani u osoby,
+  která už má odeslanou pozvánku, se nic neuloží okamžitě.
 
-Rozhodnutí o střetu zájmů („Ano"/„Ne") je úplně nahoře v tomto okně.
-Nijak se neodesílá hned při kliknutí – teprve hlavní tlačítko
-**„Uložit"** dole v okně uloží a případně i odešle/zruší pozvánku
-Právnímu odboru (podle volby) společně s ostatními změnami v okně
-(přidání/odebrání příjemců, úprava odpovědných osob za sekci B, C a
-kontaktu KITT6). Uložení v tomto okně je **samostatné** – není potřeba
-nic znovu ukládat v hlavním formuláři výstupního listu, aby se změny
-propsaly a e-maily odeslaly.
+Pokud se už pozvané osobě přidá nebo odebere jen **část** její agendy
+(ne celá role), appka pošle e-mail s přehledem, co přesně se jí
+přidalo/odebralo a co jí zůstává – ne plný e-mail o zrušení přístupu,
+který se posílá jen při odebrání úplně veškeré agendy dané osoby.
+
+**Rozhodnutí o střetu zájmů („Ano"/„Ne") je úplně nahoře v tomto okně
+a je povinné** – bez něj appka neumožní kliknout na hlavní tlačítko
+(zobrazí vysvětlující hlášku). Dokud není rozhodnuto, pole je žluté;
+jakmile se rozhodne, zezelená – lze to ale kdykoli změnit i po
+uložení. Nijak se neodesílá hned při kliknutí – teprve hlavní tlačítko
+**„Odeslat a uložit"** dole v okně uloží a případně i odešle/zruší
+pozvánku Právnímu odboru (podle volby) společně s ostatními změnami
+v okně (přidání/odebrání příjemců, úprava odpovědných osob za sekci B,
+C a kontaktu KITT6). Samostatné tlačítko **„Odeslat znovu všem"**
+(s potvrzovacím oknem) jen znovu rozešle pozvánky již potvrzeným lidem,
+nezávisle na tom, co je právě zaškrtnuté. Uložení v tomto okně je
+**samostatné** – není potřeba nic znovu ukládat v hlavním formuláři
+výstupního listu, aby se změny propsaly a e-maily odeslaly.
 
 **Automatické upomínky na blížící se konec pracovního poměru** – dokud
 je odchod jen **plánovaný** (skutečný konec ještě není potvrzený):

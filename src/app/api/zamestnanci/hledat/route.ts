@@ -56,33 +56,56 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ data: [] })
     }
 
-    const excludeFromDB = excludeActiveOffboardings
-      ? (
-          await prisma.employeeOffboarding.findMany({
-            where: {
-              deletedAt: null,
-            },
-            select: {
-              personalNumber: true,
-            },
-          })
-        )
-          .map((offboarding) => offboarding.personalNumber)
-          .filter(Boolean)
-      : []
+    const activeOffboardings = await prisma.employeeOffboarding.findMany({
+      where: {
+        deletedAt: null,
+        cancelledAt: null,
+      },
+      select: {
+        personalNumber: true,
+        actualEnd: true,
+      },
+    })
 
-    const allExcluded = [
-      ...new Set([...(excludeFromDB as string[]), ...manualExclude]),
-    ]
+    const activeOffboardingStatusByNumber = new Map<
+      string,
+      "planned" | "actual"
+    >()
+
+    for (const offboarding of activeOffboardings) {
+      if (!offboarding.personalNumber) continue
+      activeOffboardingStatusByNumber.set(
+        offboarding.personalNumber,
+        offboarding.actualEnd ? "actual" : "planned"
+      )
+    }
+
+    const hardExcluded = new Set([
+      ...manualExclude,
+      ...(excludeActiveOffboardings
+        ? activeOffboardingStatusByNumber.keys()
+        : []),
+    ])
 
     const employees = await getEmployees(listAll ? "" : q)
 
-    const filteredEmployees =
-      allExcluded.length > 0
-        ? employees.filter(
-            (employee) => !allExcluded.includes(employee.personalNumber)
-          )
-        : employees
+    const filteredEmployees = employees
+      .filter((employee) => !hardExcluded.has(employee.personalNumber))
+      .map((employee) => {
+        if (excludeActiveOffboardings) return employee
+
+        const status = activeOffboardingStatusByNumber.get(
+          employee.personalNumber
+        )
+
+        return status
+          ? {
+              ...employee,
+              hasActiveOffboarding: true,
+              activeOffboardingStatus: status,
+            }
+          : employee
+      })
 
     return NextResponse.json({
       data: filteredEmployees.slice(0, limit),

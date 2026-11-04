@@ -4,7 +4,14 @@ import * as React from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { addMonths, format, subMonths } from "date-fns"
-import { AlertCircle, Calendar, RefreshCcw, Trash2, User } from "lucide-react"
+import {
+  AlertCircle,
+  AlertTriangle,
+  Calendar,
+  RefreshCcw,
+  Trash2,
+  User,
+} from "lucide-react"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 
@@ -228,6 +235,9 @@ export function OffboardingFormUnified({
     Boolean(isEdit || initial?.personalNumber?.trim())
   )
   const [manualData, setManualData] = useState<boolean>(false)
+  const [manualDataDuplicateWarning, setManualDataDuplicateWarning] = useState<
+    string | null
+  >(null)
   const [supervisorManuallyChanged, setSupervisorManuallyChanged] =
     useState(false)
   const [isSupervisorLoading, setIsSupervisorLoading] = useState(false)
@@ -252,6 +262,12 @@ export function OffboardingFormUnified({
     values: FormValues
   } | null>(null)
   const [probationConfirmBusy, setProbationConfirmBusy] = useState(false)
+  const [lockChecklistConfirm, setLockChecklistConfirm] = useState<{
+    message: string
+    values: FormValues
+  } | null>(null)
+  const [lockChecklistConfirmBusy, setLockChecklistConfirmBusy] =
+    useState(false)
   const firstDateRef = useRef<HTMLInputElement | null>(null)
 
   const defaults: FormValues = useMemo(() => {
@@ -566,7 +582,8 @@ export function OffboardingFormUnified({
 
   async function submitOffboarding(
     values: FormValues,
-    probationStopDecision?: "STOP" | "KEEP"
+    probationStopDecision?: "STOP" | "KEEP",
+    confirmLockChecklist?: boolean
   ) {
     let noticeMonths = 2
     if (values.noticeFiled && (values.plannedEnd || values.actualEnd)) {
@@ -631,6 +648,7 @@ export function OffboardingFormUnified({
         : undefined,
 
       ...(probationStopDecision ? { probationStopDecision } : {}),
+      ...(confirmLockChecklist !== undefined ? { confirmLockChecklist } : {}),
     }
 
     const url = id ? `/api/odchody/${id}` : `/api/odchody`
@@ -647,6 +665,17 @@ export function OffboardingFormUnified({
 
     if (json?.status === "confirm_required" && json?.linkedOnboarding) {
       setProbationConfirm({ linkedOnboarding: json.linkedOnboarding, values })
+      return
+    }
+
+    if (
+      json?.status === "confirm_required" &&
+      json?.confirmKind === "lock_exit_checklist_on_actual"
+    ) {
+      setLockChecklistConfirm({
+        message: json.message ?? "Chcete výstupní list zamknout?",
+        values,
+      })
       return
     }
 
@@ -676,6 +705,20 @@ export function OffboardingFormUnified({
       setOpenError(true)
     } finally {
       setProbationConfirmBusy(false)
+    }
+  }
+
+  async function handleLockChecklistDecision(lock: boolean) {
+    if (!lockChecklistConfirm) return
+    setLockChecklistConfirmBusy(true)
+    try {
+      await submitOffboarding(lockChecklistConfirm.values, undefined, lock)
+      setLockChecklistConfirm(null)
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Operace se nezdařila.")
+      setOpenError(true)
+    } finally {
+      setLockChecklistConfirmBusy(false)
     }
   }
 
@@ -880,6 +923,7 @@ export function OffboardingFormUnified({
                 onCheckedChange={(v) => {
                   const b = Boolean(v)
                   setManualData(b)
+                  setManualDataDuplicateWarning(null)
                   if (b) form.clearErrors("personalNumber")
                   void form.trigger()
                 }}
@@ -928,6 +972,7 @@ export function OffboardingFormUnified({
                   </p>
                   <PersonLookupCombobox
                     placeholder="Vyhledejte osobu v EOS…"
+                    excludeActiveOffboardings={false}
                     onSelect={(employee) => {
                       form.setValue("titleBefore", employee.titleBefore ?? "", {
                         shouldDirty: true,
@@ -951,9 +996,20 @@ export function OffboardingFormUnified({
                           { shouldDirty: true }
                         )
                       }
+                      setManualDataDuplicateWarning(
+                        employee.hasActiveOffboarding
+                          ? `${buildPersonFullName(employee)} už má v aplikaci evidovaný odchod (osobní číslo ${employee.personalNumber}, ${employee.activeOffboardingStatus === "actual" ? "již skutečný" : "zatím plánovaný"}). Zkontrolujte, zda nejde o duplicitu, než budete pokračovat.`
+                          : null
+                      )
                       void form.trigger()
                     }}
                   />
+                  {manualDataDuplicateWarning && (
+                    <div className="mt-2 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+                      <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                      {manualDataDuplicateWarning}
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -1106,6 +1162,7 @@ export function OffboardingFormUnified({
                     valueName={form.watch("supervisorName")}
                     valueEmail={form.watch("supervisorEmail")}
                     placeholder="Vyhledejte vedoucího odboru v EOS…"
+                    excludeActiveOffboardings={false}
                     onSelect={async (employee) => {
                       setSupervisorManuallyChanged(true)
 
@@ -1539,6 +1596,41 @@ export function OffboardingFormUnified({
                 onClick={() => void handleProbationDecision("STOP")}
               >
                 {probationConfirmBusy ? "Ukládám…" : "Zastavit hodnocení"}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog
+          open={Boolean(lockChecklistConfirm)}
+          onOpenChange={(open) => {
+            if (!open && !lockChecklistConfirmBusy)
+              setLockChecklistConfirm(null)
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Uzamknout výstupní list?</AlertDialogTitle>
+            </AlertDialogHeader>
+            <div className="space-y-2 text-sm text-muted-foreground">
+              <p>{lockChecklistConfirm?.message}</p>
+            </div>
+            <AlertDialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={lockChecklistConfirmBusy || isReadonly}
+                onClick={() => void handleLockChecklistDecision(false)}
+              >
+                Nechat otevřené
+              </Button>
+              <Button
+                type="button"
+                className="bg-[#00847C] text-white hover:bg-[#0B6D73]"
+                disabled={lockChecklistConfirmBusy || isReadonly}
+                onClick={() => void handleLockChecklistDecision(true)}
+              >
+                {lockChecklistConfirmBusy ? "Ukládám…" : "Zamknout"}
               </Button>
             </AlertDialogFooter>
           </AlertDialogContent>

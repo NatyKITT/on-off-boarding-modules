@@ -83,7 +83,7 @@ export async function getPersonalNumberMeta(): Promise<PersonalNumberMeta> {
     lastSpecialNumber: special.number,
     lastSpecialAssignedTo: special.name,
     skippedNumbers: Array.from(skippedNumbers).sort(
-      (a, b) => Number(a) - Number(b)
+      (a, b) => Number(b) - Number(a)
     ),
   }
 }

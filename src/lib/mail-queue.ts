@@ -13,7 +13,9 @@ import {
   sendNewRecordMissingManagerEmail,
   sendOffboardingDepartureConfirmationEmail,
   sendQueuedProbationEmail,
+  sendSystemNotificationEmail,
   type ProbationMailQueuePayload,
+  type SystemNotificationAction,
 } from "@/lib/email"
 import { addProbationEvent } from "@/lib/probation-evaluation-request"
 
@@ -73,6 +75,35 @@ function asDisplayStrArr(value: unknown): string[] {
     .filter(Boolean)
 }
 
+function asPendingSignerArr(value: unknown): {
+  name: string
+  position?: string | null
+  department?: string | null
+  behalfLabel?: string | null
+  pendingItems?: string[] | null
+}[] {
+  if (!Array.isArray(value)) return []
+
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") return null
+
+      const record = item as Record<string, unknown>
+      const name = asStr(record.name)
+
+      if (!name) return null
+
+      return {
+        name,
+        position: asStr(record.position),
+        department: asStr(record.department),
+        behalfLabel: asStr(record.behalfLabel),
+        pendingItems: asDisplayStrArr(record.pendingItems),
+      }
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null)
+}
+
 function asNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value
@@ -90,6 +121,46 @@ function getRecipients(payload: QueuePayload): string[] {
   return Array.from(
     new Set([...asStrArr(payload.recipients), ...asStrArr(payload.to)])
   )
+}
+
+const SYSTEM_NOTIFICATION_ACTIONS = new Set<SystemNotificationAction>([
+  "employee_onboarding_deleted",
+  "employee_offboarding_deleted",
+  "employee_restored",
+])
+
+function toSystemNotificationPayload(payload: QueuePayload) {
+  const rawAction = asStr(payload.type) ?? asStr(payload.kind)
+  const action = SYSTEM_NOTIFICATION_ACTIONS.has(
+    rawAction as SystemNotificationAction
+  )
+    ? (rawAction as SystemNotificationAction)
+    : "employee_onboarding_deleted"
+
+  return {
+    to: getRecipients(payload),
+    subject: asStr(payload.subject) ?? "Systémové oznámení",
+    action,
+    employeeName: asStr(payload.employeeName) ?? "",
+    employeePersonalNumber: asStr(payload.employeePersonalNumber),
+    employeePosition: asStr(payload.employeePosition),
+    employeeDepartment: asStr(payload.employeeDepartment),
+    employeeUnitName: asStr(payload.employeeUnitName),
+    actorName:
+      asStr(payload.actorName) ??
+      asStr(payload.createdBy) ??
+      asStr(payload.deletedBy) ??
+      asStr(payload.restoredBy),
+    actionAt:
+      asStr(payload.actionAt) ??
+      asStr(payload.restoredAt) ??
+      asStr(payload.deletedAt) ??
+      asStr(payload.createdAt),
+    restoredAt: asStr(payload.restoredAt),
+    originalDeletedBy: asStr(payload.originalDeletedBy),
+    originalDeleteReason: asStr(payload.originalDeleteReason),
+    recordLink: asStr(payload.recordLink),
+  }
 }
 
 function toProbationPayload(payload: QueuePayload): ProbationMailQueuePayload {
@@ -134,8 +205,9 @@ function toExitChecklistReminderPayload(payload: QueuePayload) {
     daysBeforeEnd: asNumber(payload.daysBeforeEnd) ?? 0,
     checklistLink: asStr(payload.checklistLink),
     subject: asStr(payload.subject),
+    bannerTitle: asStr(payload.bannerTitle),
     intro: asStr(payload.intro),
-    pendingSigners: asDisplayStrArr(payload.pendingSigners),
+    pendingSigners: asPendingSignerArr(payload.pendingSigners),
   }
 }
 
@@ -190,11 +262,13 @@ function toNewRecordManagerUpdateReason(
   | "FIELDS_CHANGED"
   | "MANAGER_REMOVED"
   | "RECORD_CANCELLED"
-  | "RECORD_DELETED" {
+  | "RECORD_DELETED"
+  | "RECORD_RESTORED" {
   if (
     value === "MANAGER_REMOVED" ||
     value === "RECORD_CANCELLED" ||
-    value === "RECORD_DELETED"
+    value === "RECORD_DELETED" ||
+    value === "RECORD_RESTORED"
   ) {
     return value
   }
@@ -228,8 +302,12 @@ function toExitSignatureReminderPayload(payload: QueuePayload) {
     daysBeforeEnd: asNumber(payload.daysBeforeEnd) ?? 0,
     signUrl: asStr(payload.signUrl) ?? "",
     roleNote: asStr(payload.roleNote),
-    behalfLabel: asStr(payload.behalfLabel),
-    headerSubtitle: asStr(payload.headerSubtitle),
+    pendingItems: asDisplayStrArr(payload.pendingItems),
+    behalfName: asStr(payload.behalfName),
+    behalfPosition: asStr(payload.behalfPosition),
+    behalfDepartment: asStr(payload.behalfDepartment),
+    isEmployee: Boolean(payload.isEmployee),
+    isManager: Boolean(payload.isManager),
   }
 }
 
@@ -469,6 +547,11 @@ async function processJob(job: MailQueue) {
     await sendExitChecklistSignatureReminderEmail(
       toExitSignatureReminderPayload(payload)
     )
+    return
+  }
+
+  if (job.type === "SYSTEM_NOTIFICATION") {
+    await sendSystemNotificationEmail(toSystemNotificationPayload(payload))
     return
   }
 

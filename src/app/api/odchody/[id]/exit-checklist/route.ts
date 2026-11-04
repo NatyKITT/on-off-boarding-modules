@@ -18,6 +18,7 @@ import {
   getHrRecipientsFromEnv,
   sendExitChecklistCompletedEmail,
   sendExitChecklistCompletedToEmployeeEmail,
+  sendExitChecklistLockedIncompleteHrEmail,
   sendExitChecklistUnresolvedItemsEmail,
   sendHandoverKitt6Email,
   sendHandoverRecipientEmail,
@@ -25,6 +26,7 @@ import {
 import {
   assetLabel,
   buildHeaderFromOff,
+  collectUnresolvedExitChecklistItems,
   computeHandoverSupersededNotifications,
   ExitChecklistTransactionError,
   getBaselineRecord,
@@ -45,9 +47,19 @@ import {
   trackSignatureChange,
   tryFetchExitChecklistPdfBuffer,
   withSerializableRetry,
+  type ExitChecklistUnresolvedItem,
 } from "@/lib/exit-checklist"
 import { getExitChecklistCompletionState } from "@/lib/exit-checklist-completion"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
+import {
+  notifyExitChecklistSignersAvailableAgain,
+  notifyExitChecklistSignersOffboardingRemoved,
+} from "@/lib/exit-checklist-signature-notify"
+import { cancelExitChecklistSignatureJobsForOffboarding } from "@/lib/mail-queue-cleanup"
+import {
+  resolveBehalfOriginalInfo,
+  resolveSignatureRecipientStatus,
+} from "@/lib/offboarding-cron-jobs"
 import {
   canAccessInternalApp,
   canAdminExitChecklist,
@@ -456,12 +468,27 @@ export async function PUT(
       })
 
       const data = mapToExitChecklistData(off, unlockedChecklist)
+      const completion = getExitChecklistCompletionState(data)
+
+      if (!completion.isComplete) {
+        try {
+          await notifyExitChecklistSignersAvailableAgain(
+            offboardingId,
+            getAppBaseUrl()
+          )
+        } catch (error) {
+          console.error(
+            "[EXIT-CHECKLIST PUT] Notifikace o odemčení se nepodařila:",
+            error
+          )
+        }
+      }
 
       return NextResponse.json({
         status: "success",
         message: "Výstupní list byl odemknut pro úpravy.",
         data,
-        completion: getExitChecklistCompletionState(data),
+        completion,
       })
     }
 
@@ -500,11 +527,7 @@ export async function PUT(
       handoverKitt6Cancellation: { email: string; target: string | null } | null
       handoverRecipientCancellations: { email: string; name: string }[]
       resolutionChanges: string[]
-      unresolvedItems: {
-        label: string
-        organization: string
-        note: string | null
-      }[]
+      unresolvedItems: ExitChecklistUnresolvedItem[]
       unresolvedChanged: boolean
       assetsAddedLabels: string[]
       assetsUpdatedLabels: string[]
@@ -749,11 +772,7 @@ export async function PUT(
       }
 
       const resolutionChanges: string[] = []
-      const unresolvedItems: {
-        label: string
-        organization: string
-        note: string | null
-      }[] = []
+      const unresolvedItems: ExitChecklistUnresolvedItem[] = []
       let unresolvedChanged = false
 
       for (let index = 0; index < EXIT_CHECKLIST_ROWS.length; index++) {
@@ -779,19 +798,19 @@ export async function PUT(
             ? toResolution(incoming.resolved)
             : (existing?.resolution ?? ChecklistResolution.NOT_APPLICABLE)
 
-        const signedByName = isInactiveLawInfo
+        const signedByNameCandidate = isInactiveLawInfo
           ? null
           : incoming && canTouchRow
             ? sanitizeText(incoming.signedByName) || null
             : (existing?.signedByName ?? null)
 
-        const signedByEmail = isInactiveLawInfo
+        const signedByEmailCandidate = isInactiveLawInfo
           ? null
           : incoming && canTouchRow
             ? sanitizeText(incoming.signedByEmail) || null
             : (existing?.signedByEmail ?? null)
 
-        const signedAt = isInactiveLawInfo
+        const signedAtCandidate = isInactiveLawInfo
           ? null
           : incoming && canTouchRow
             ? incoming.signedAt
@@ -804,6 +823,17 @@ export async function PUT(
           : incoming && canTouchRow
             ? sanitizeText(incoming.note) || null
             : (existing?.note ?? null)
+
+        const blockedForMissingNote =
+          resolution === ChecklistResolution.NO && !note
+
+        const signedAt = blockedForMissingNote ? null : signedAtCandidate
+        const signedByName = blockedForMissingNote
+          ? null
+          : signedByNameCandidate
+        const signedByEmail = blockedForMissingNote
+          ? null
+          : signedByEmailCandidate
 
         if (
           existing &&
@@ -820,6 +850,12 @@ export async function PUT(
             label: rowDef.obligation,
             organization: rowDef.organization,
             note,
+            signedByName,
+            signedByEmail,
+            signedAt: signedAt ? signedAt.toISOString() : null,
+            additionalNote: null,
+            additionallyResolvedAt: null,
+            additionallyResolvedByName: null,
           })
 
           if (
@@ -1056,7 +1092,6 @@ export async function PUT(
             employeePosition: header.positionName ?? "",
             employeeDepartment: handoverEmployeeDepartment,
             employmentEndDate: handoverEmploymentEndDate,
-            targetPosition: handoverKitt6Cancellation.target || "neuvedeno",
             managerName,
             managerPosition,
             managerDepartment,
@@ -1099,6 +1134,11 @@ export async function PUT(
       byEmail: user.email ?? null,
     }
 
+    let data = mapToExitChecklistData(
+      updatedChecklist.offboarding,
+      updatedChecklist
+    )
+
     if (lock && !checklist.lockedAt) {
       await logExitChecklistEvent({
         checklistId: checklist.id,
@@ -1106,6 +1146,77 @@ export async function PUT(
         ...actorInfo,
         message: "Výstupní list byl uzamčen.",
       })
+
+      try {
+        await cancelExitChecklistSignatureJobsForOffboarding(offboardingId)
+      } catch (error) {
+        console.error(
+          "[EXIT-CHECKLIST PUT] Čištění fronty připomínek k podpisu se nepodařilo:",
+          error
+        )
+      }
+
+      try {
+        await notifyExitChecklistSignersOffboardingRemoved(
+          offboardingId,
+          "LOCKED"
+        )
+      } catch (error) {
+        console.error(
+          "[EXIT-CHECKLIST PUT] Notifikace podepisujících o uzamčení se nepodařila:",
+          error
+        )
+      }
+
+      try {
+        const hrRecipients = getHrRecipientsFromEnv()
+        const pendingSigners = (data.signatureRecipients ?? [])
+          .filter((recipient) => recipient.email && !recipient.revokedAt)
+          .map((recipient) => {
+            const { hasSigned, pendingItems } = resolveSignatureRecipientStatus(
+              data,
+              updatedChecklist.offboarding.userEmail,
+              recipient
+            )
+            const behalfOriginal = resolveBehalfOriginalInfo(data, recipient)
+
+            return {
+              hasSigned,
+              name: recipient.name,
+              position: recipient.position ?? null,
+              department: recipient.department ?? null,
+              behalfLabel:
+                behalfOriginal?.name ?? recipient.behalfLabel ?? null,
+              pendingItems,
+            }
+          })
+          .filter((recipient) => !recipient.hasSigned)
+
+        if (hrRecipients.length > 0 && pendingSigners.length > 0) {
+          const baseUrl = getAppBaseUrl()
+
+          await sendExitChecklistLockedIncompleteHrEmail({
+            to: hrRecipients,
+            employeeName: data.employeeName,
+            employeePersonalNumber: updatedChecklist.offboarding.personalNumber,
+            employeePosition: updatedChecklist.offboarding.positionName,
+            employeeDepartment: updatedChecklist.offboarding.department,
+            employeeUnitName: updatedChecklist.offboarding.unitName,
+            employmentEndDate:
+              updatedChecklist.offboarding.actualEnd ??
+              updatedChecklist.offboarding.plannedEnd,
+            checklistLink: baseUrl
+              ? `${baseUrl}/odchody/${offboardingId}/vystupni-list`
+              : null,
+            pendingSigners,
+          })
+        }
+      } catch (error) {
+        console.error(
+          "[EXIT-CHECKLIST PUT] Oznámení HR o nekompletním podpisu se nepodařilo:",
+          error
+        )
+      }
     } else {
       const headerChanges: string[] = []
 
@@ -1191,10 +1302,6 @@ export async function PUT(
       })
     }
 
-    let data = mapToExitChecklistData(
-      updatedChecklist.offboarding,
-      updatedChecklist
-    )
     const completion = getExitChecklistCompletionState(data)
 
     const alreadyNotified = Boolean(
@@ -1213,15 +1320,32 @@ export async function PUT(
             offboardingId,
           })
 
+          const completionUnresolvedItems =
+            collectUnresolvedExitChecklistItems(data)
+
           const employeeEmail =
             updatedChecklist.offboarding.userEmail?.trim() || null
           let employeeNotified = false
+
+          const completionEmployeePosition =
+            updatedChecklist.offboarding.positionName ?? ""
+          const completionEmployeeDepartment = [data.department, data.unitName]
+            .filter(Boolean)
+            .join(" – ")
+          const completionEmploymentEndDate =
+            updatedChecklist.offboarding.actualEnd ??
+            updatedChecklist.offboarding.plannedEnd ??
+            data.employmentEndDate
 
           if (employeeEmail) {
             try {
               await sendExitChecklistCompletedToEmployeeEmail({
                 to: employeeEmail,
                 employeeName: data.employeeName,
+                employeePosition: completionEmployeePosition,
+                employeeDepartment: completionEmployeeDepartment,
+                employmentEndDate: completionEmploymentEndDate,
+                unresolvedItems: completionUnresolvedItems,
               })
               employeeNotified = true
             } catch (employeeEmailError) {
@@ -1235,20 +1359,16 @@ export async function PUT(
           await sendExitChecklistCompletedEmail({
             to: recipients,
             employeeName: data.employeeName,
-            employeePosition: updatedChecklist.offboarding.positionName ?? "",
-            employeeDepartment: [data.department, data.unitName]
-              .filter(Boolean)
-              .join(" – "),
-            employmentEndDate:
-              updatedChecklist.offboarding.actualEnd ??
-              updatedChecklist.offboarding.plannedEnd ??
-              data.employmentEndDate,
+            employeePosition: completionEmployeePosition,
+            employeeDepartment: completionEmployeeDepartment,
+            employmentEndDate: completionEmploymentEndDate,
             completedByName: user.name ?? user.email ?? null,
             checklistUrl: `${baseUrl}/odchody/${offboardingId}/vystupni-list`,
             pdfBuffer,
             pdfFilename: pdfBuffer
               ? `Vystupni-list-${sanitizeExitChecklistFilename(data.employeeName || String(offboardingId))}.pdf`
               : null,
+            unresolvedItems: completionUnresolvedItems,
             employeeNotified,
           })
 

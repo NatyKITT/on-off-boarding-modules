@@ -4,7 +4,11 @@ import { EmploymentDocumentType } from "@prisma/client"
 import { z } from "zod"
 
 import { prisma } from "@/lib/db"
-import { logEmailHistory, sendEmploymentDocumentLinkEmail } from "@/lib/email"
+import {
+  logEmailHistory,
+  sendEmploymentDocumentLinkEmail,
+  sendMedicalExamRequestEmail,
+} from "@/lib/email"
 import { buildEmployeeMeta } from "@/lib/employee-meta"
 import { logEmploymentDocumentEvent } from "@/lib/employment-document-events"
 import { recomputeOnboardingReadiness } from "@/lib/onboarding-readiness"
@@ -267,34 +271,62 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const { subject, html } = await sendEmploymentDocumentLinkEmail({
-    to: email,
-    employeeName,
-    employeePersonalNumber: onboarding.personalNumber,
-    employeePosition: meta.position,
-    employeeDepartment: meta.department,
-    employeeUnitName: meta.unitName,
-    documents: mapped.map((document) => ({
-      label: document.label,
-      url: document.url,
-      type: document.type,
-    })),
-    medicalExam: medicalExamAttachment,
-  })
-
   const sentBy = session.user.name ?? session.user.email ?? "unknown"
   const sentAt = new Date()
+  const createdBy = session.user.id ?? session.user.email ?? "unknown"
 
-  await Promise.all([
-    logEmailHistory({
+  if (mapped.length) {
+    const { subject, html } = await sendEmploymentDocumentLinkEmail({
+      to: email,
+      employeeName,
+      employeePersonalNumber: onboarding.personalNumber,
+      employeePosition: meta.position,
+      employeeDepartment: meta.department,
+      employeeUnitName: meta.unitName,
+      documents: mapped.map((document) => ({
+        label: document.label,
+        url: document.url,
+        type: document.type,
+      })),
+    })
+
+    await logEmailHistory({
       onboardingEmployeeId: onboardingId,
       emailType: "MANUAL_EMAIL",
       recipients: [email],
       subject,
       content: html,
       status: "SENT",
-      createdBy: session.user.id ?? session.user.email ?? "unknown",
-    }),
+      createdBy,
+    })
+  }
+
+  if (medicalExamAttachment) {
+    const { subject, html } = await sendMedicalExamRequestEmail({
+      to: email,
+      employeeName,
+      employeePersonalNumber: onboarding.personalNumber,
+      employeePosition: meta.position,
+      employeeDepartment: meta.department,
+      employeeUnitName: meta.unitName,
+      variant: medicalExamAttachment.variant,
+      appointmentAt: medicalExamAttachment.appointmentAt,
+      selfArranged: medicalExamAttachment.selfArranged,
+      attachment: medicalExamAttachment.attachment,
+    })
+
+    await logEmailHistory({
+      onboardingEmployeeId: onboardingId,
+      emailType: "MANUAL_EMAIL",
+      recipients: [email],
+      subject,
+      content: html,
+      status: "SENT",
+      createdBy,
+    })
+  }
+
+  await Promise.all([
     mapped.length
       ? prisma.employmentDocument.updateMany({
           where: { id: { in: mapped.map((document) => document.id) } },

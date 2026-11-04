@@ -12,6 +12,7 @@ import { logEmploymentDocumentEvent } from "@/lib/employment-document-events"
 import { detectIdentityMismatch } from "@/lib/employment-document-identity-check"
 import { buildEmploymentDocumentPdf } from "@/lib/employment-document-pdf"
 import { recomputeOnboardingReadiness } from "@/lib/onboarding-readiness"
+import { getAppBaseUrlFromRequest } from "@/lib/probation-evaluation-request"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -220,6 +221,9 @@ export async function PATCH(
           identityMismatches.length > 0 ? identityMismatches : undefined,
         pdfBuffer: hrPdfBuffer,
         pdfFilename: hrPdfBuffer ? `${employeeName}-${typeText}.pdf` : null,
+        onboardingLink: document.onboarding
+          ? `${getAppBaseUrlFromRequest(req)}/nastupy/${document.onboarding.id}`
+          : null,
       })
 
       await logEmailHistory({
