@@ -28,7 +28,10 @@ import {
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard"
 import { buildBehalfOptions } from "@/lib/exit-checklist-behalf-options"
 import { exitChecklistEventActionLabel } from "@/lib/exit-checklist-event-labels"
-import { recipientIdentityKey } from "@/lib/exit-checklist-recipient-key"
+import {
+  entryIdentityKey,
+  generateRecipientId,
+} from "@/lib/exit-checklist-recipient-key"
 import { joinNameWithTitles } from "@/lib/format-name"
 
 import {
@@ -65,6 +68,7 @@ import { UnsavedChangesDialog } from "@/components/common/unsaved-changes-dialog
 import { DocumentHistoryDialog } from "@/components/history/document-history-dialog"
 
 type Recipient = {
+  id?: string
   name: string
   email: string
   rowKeys?: string[]
@@ -115,6 +119,44 @@ type Props = {
   onSectionCResponsibleChange?: (value: ResponsiblePerson) => void
   onKitt6ContactChange?: (value: ResponsiblePerson) => void
   onConflictOfInterestChange?: (value: boolean) => void
+}
+
+function ensureRecipientIds(list: Recipient[]): Recipient[] {
+  return list.map((r) => (r.id ? r : { ...r, id: generateRecipientId() }))
+}
+
+// Stejný e-mail může pokrývat víc karet (různé role/zástupy) – pozvánka se
+// má odeslat JEDNOU na e-mail, se sečtenou agendou ze všech jeho karet, ne
+// jedna pozvánka po kartě. Karta bez `behalfLabel` (přímá role) je vždy
+// primární; ostatní karty se stejným e-mailem (zástupné role) se k ní
+// přibalí jako "alsoActingOnBehalfOf". Pokud žádná přímá karta neexistuje,
+// primární je první zástupná karta a zbytek jde jako doplňkové zástupy.
+function groupRecipientsForInviteSend<T extends Recipient>(
+  list: T[]
+): { primary: T; extras: T[] }[] {
+  const byEmail = new Map<string, T[]>()
+  for (const r of list) {
+    const key = r.email.trim().toLowerCase()
+    const arr = byEmail.get(key) ?? []
+    arr.push(r)
+    byEmail.set(key, arr)
+  }
+  const groups: { primary: T; extras: T[] }[] = []
+  for (const entries of byEmail.values()) {
+    const direct = entries.find((entry) => !entry.behalfLabel)
+    if (direct) {
+      groups.push({
+        primary: direct,
+        extras: entries.filter(
+          (entry) => entry !== direct && Boolean(entry.behalfLabel)
+        ),
+      })
+    } else {
+      const [primary, ...extras] = entries
+      groups.push({ primary, extras })
+    }
+  }
+  return groups
 }
 
 function buildInitialRecipients(
@@ -185,13 +227,30 @@ function buildInitialRecipients(
     })
   }
 
-  const seenEmails = new Set<string>()
-  return base.filter((r) => {
+  // Stejný e-mail může patřit dvěma různým rolím najednou (typicky vedoucí
+  // odboru, který je zároveň statickým signatářem za svůj odbor) – sloučit
+  // jejich rowKeys (sečíst), ne tiše zahodit tu druhou roli, jinak by jeden
+  // z řádků agendy zůstal bez přiřazené osoby.
+  const byEmail = new Map<string, Recipient>()
+  for (const r of base) {
     const key = r.email.trim().toLowerCase()
-    if (!key || seenEmails.has(key)) return false
-    seenEmails.add(key)
-    return true
-  })
+    if (!key) continue
+    const existing = byEmail.get(key)
+    if (!existing) {
+      byEmail.set(key, { ...r })
+      continue
+    }
+    const combinedRowKeys = Array.from(
+      new Set([...(existing.rowKeys ?? []), ...(r.rowKeys ?? [])])
+    )
+    byEmail.set(key, {
+      ...existing,
+      rowKeys: combinedRowKeys.length > 0 ? combinedRowKeys : undefined,
+      position: existing.position ?? r.position,
+      department: existing.department ?? r.department,
+    })
+  }
+  return Array.from(byEmail.values())
 }
 
 function isValidEmail(email: string) {
@@ -400,7 +459,7 @@ export function SignatureRecipientsDialog({
 
   const allRecipientsSelected =
     activeRecipients.length > 0 &&
-    activeRecipients.every((r) => selectedKeys.has(recipientIdentityKey(r)))
+    activeRecipients.every((r) => selectedKeys.has(entryIdentityKey(r)))
 
   const substitutesByOriginalKey = new Map<string, Recipient>()
   activeRecipients.forEach((r) => {
@@ -408,10 +467,10 @@ export function SignatureRecipientsDialog({
   })
 
   const toInviteNew = activeRecipients.filter(
-    (r) => selectedKeys.has(recipientIdentityKey(r)) && !r.invitedAt
+    (r) => selectedKeys.has(entryIdentityKey(r)) && !r.invitedAt
   )
   const toRevoke = activeRecipients.filter(
-    (r) => !selectedKeys.has(recipientIdentityKey(r)) && r.invitedAt
+    (r) => !selectedKeys.has(entryIdentityKey(r)) && r.invitedAt
   )
   const pendingNewInvites = toInviteNew.length
   const pendingRemovals = toRevoke.length
@@ -560,12 +619,14 @@ export function SignatureRecipientsDialog({
             )
           : merged
 
-        setRecipients(mergedWithManagerInfo)
+        const mergedWithIds = ensureRecipientIds(mergedWithManagerInfo)
+
+        setRecipients(mergedWithIds)
         setSelectedKeys(
           new Set(
-            mergedWithManagerInfo
+            mergedWithIds
               .filter((r) => !r.revokedAt)
-              .map((r) => recipientIdentityKey(r))
+              .map((r) => entryIdentityKey(r))
           )
         )
         setHasExistingList(true)
@@ -582,8 +643,11 @@ export function SignatureRecipientsDialog({
           managerPosition,
           managerDepartment
         )
-        setRecipients(fallback)
-        setSelectedKeys(new Set(fallback.map((r) => recipientIdentityKey(r))))
+        const fallbackWithIds = ensureRecipientIds(fallback)
+        setRecipients(fallbackWithIds)
+        setSelectedKeys(
+          new Set(fallbackWithIds.map((r) => entryIdentityKey(r)))
+        )
         setHasExistingList(false)
         setLastSentAt(null)
         setLastSentByName(null)
@@ -799,6 +863,38 @@ export function SignatureRecipientsDialog({
           }
         })
       )
+
+      // Karta vedoucího odboru má vlastní draft pole (resp*), oddělené od
+      // pole `recipients` výše – bez téhle druhé enrichace by u ní funkce a
+      // odbor zůstaly prázdné, i když je appka pro ostatní karty doplní.
+      if (!respManagerPosition || !respManagerDepartment) {
+        const foldedManagerName = foldText(respManagerName)
+        const managerNameMatch = foldedManagerName
+          ? (
+              employeesByCoreName.find((entry) =>
+                foldedManagerName.includes(entry.coreName)
+              ) ??
+              employeesByCoreName.find(
+                (entry) =>
+                  entry.coreNameTokens.length > 0 &&
+                  entry.coreNameTokens.every((token) =>
+                    foldedManagerName.includes(token)
+                  )
+              )
+            )?.employee
+          : undefined
+        const managerMatch =
+          managerNameMatch ?? byEmail.get(respManagerEmail.trim().toLowerCase())
+
+        if (managerMatch) {
+          if (!respManagerPosition && managerMatch.positionName) {
+            setRespManagerPosition(managerMatch.positionName)
+          }
+          if (!respManagerDepartment && managerMatch.department) {
+            setRespManagerDepartment(managerMatch.department)
+          }
+        }
+      }
     } catch {}
   }
 
@@ -874,7 +970,7 @@ export function SignatureRecipientsDialog({
       // Role byla už dřív potvrzena a odeslána – jde o přímou výměnu osoby:
       // starý držitel role (pokud nemá jinou agendu) ztratí přístup po uložení,
       // nový dostane pozvánku.
-      const previousKey = recipientIdentityKey(previousEntry)
+      const previousKey = entryIdentityKey(previousEntry)
       const hasOtherRole = (previousEntry.rowKeys ?? []).length > 0
 
       if (!alreadyActive) {
@@ -895,7 +991,7 @@ export function SignatureRecipientsDialog({
         setSelectedKeys((prev) => {
           const next = new Set(prev)
           if (!hasOtherRole) next.delete(previousKey)
-          next.add(recipientIdentityKey(newRecipient))
+          next.add(entryIdentityKey(newRecipient))
           return next
         })
       } else if (!hasOtherRole) {
@@ -941,7 +1037,7 @@ export function SignatureRecipientsDialog({
 
     if (previousEntry && !previousEntry.invitedAt) {
       // Role ještě nebyla nikdy odeslána – jde jen o úpravu rozpracovaného návrhu.
-      const previousKey = recipientIdentityKey(previousEntry)
+      const previousKey = entryIdentityKey(previousEntry)
       const updated: Recipient = {
         ...previousEntry,
         name: args.nextName.trim() || email,
@@ -950,13 +1046,13 @@ export function SignatureRecipientsDialog({
         department: args.nextDepartment.trim() || undefined,
       }
       setRecipients((prev) =>
-        prev.map((r) => (recipientIdentityKey(r) === previousKey ? updated : r))
+        prev.map((r) => (entryIdentityKey(r) === previousKey ? updated : r))
       )
       setSelectedKeys((prev) => {
         if (!prev.has(previousKey)) return prev
         const next = new Set(prev)
         next.delete(previousKey)
-        next.add(recipientIdentityKey(updated))
+        next.add(entryIdentityKey(updated))
         return next
       })
       setInfoTone("success")
@@ -978,9 +1074,7 @@ export function SignatureRecipientsDialog({
       ...(args.fallbackRowKeys.length ? { rowKeys: args.fallbackRowKeys } : {}),
     }
     setRecipients((prev) => [...prev, newRecipient])
-    setSelectedKeys((prev) =>
-      new Set(prev).add(recipientIdentityKey(newRecipient))
-    )
+    setSelectedKeys((prev) => new Set(prev).add(entryIdentityKey(newRecipient)))
     setInfoTone("success")
     setInfo(
       `Přidání do návrhu seznamu: ${newRecipient.name} jako ${args.roleLabel}.`
@@ -1174,7 +1268,7 @@ export function SignatureRecipientsDialog({
 
   function finishRemoval(person: Recipient) {
     if (person.invitedAt) {
-      const key = recipientIdentityKey(person)
+      const key = entryIdentityKey(person)
       setSelectedKeys((prev) => {
         const next = new Set(prev)
         next.delete(key)
@@ -1201,7 +1295,7 @@ export function SignatureRecipientsDialog({
   }
 
   function requestRemovePending(target: Recipient) {
-    const key = recipientIdentityKey(target)
+    const key = entryIdentityKey(target)
     const linkedSubstitute = substitutesByOriginalKey.get(key)
     if (linkedSubstitute) {
       setSubstituteRemovalConfirm({
@@ -1220,13 +1314,11 @@ export function SignatureRecipientsDialog({
 
   function toggleSelected(key: string) {
     if (removalLocked) {
-      const target = activeRecipients.find(
-        (r) => recipientIdentityKey(r) === key
-      )
+      const target = activeRecipients.find((r) => entryIdentityKey(r) === key)
       if (target?.invitedAt && selectedKeys.has(key)) return
     }
 
-    const target = activeRecipients.find((r) => recipientIdentityKey(r) === key)
+    const target = activeRecipients.find((r) => entryIdentityKey(r) === key)
     if (target?.invitedAt && selectedKeys.has(key)) {
       const linkedSubstitute = substitutesByOriginalKey.get(key)
       if (linkedSubstitute) {
@@ -1270,22 +1362,20 @@ export function SignatureRecipientsDialog({
     setSelectedKeys((prev) => {
       const next = new Set(prev)
       activeRecipients.forEach((r) => {
-        if (!r.invitedAt) next.add(recipientIdentityKey(r))
+        if (!r.invitedAt) next.add(entryIdentityKey(r))
       })
       return next
     })
   }
 
   function selectAllIncludingConfirmed() {
-    setSelectedKeys(
-      new Set(activeRecipients.map((r) => recipientIdentityKey(r)))
-    )
+    setSelectedKeys(new Set(activeRecipients.map((r) => entryIdentityKey(r))))
   }
 
   function removePendingRecipient(target: Recipient) {
-    const targetKey = recipientIdentityKey(target)
+    const targetKey = entryIdentityKey(target)
     setRecipients((prev) =>
-      prev.filter((r) => recipientIdentityKey(r) !== targetKey)
+      prev.filter((r) => entryIdentityKey(r) !== targetKey)
     )
     setSelectedKeys((prev) => {
       const next = new Set(prev)
@@ -1298,7 +1388,7 @@ export function SignatureRecipientsDialog({
   }
 
   function startEdit(target: Recipient) {
-    setEditingKey(recipientIdentityKey(target))
+    setEditingKey(entryIdentityKey(target))
     setEditName(target.name)
     setEditEmail(target.email)
     setEditError(null)
@@ -1322,70 +1412,20 @@ export function SignatureRecipientsDialog({
       return
     }
 
-    const targetKey = recipientIdentityKey(target)
-    const candidateKey = recipientIdentityKey({
-      email,
-      behalfLabel: target.behalfLabel,
-    })
+    // Karta má vlastní stabilní identitu (id), nezávislou na e-mailu – i
+    // kdyby nový e-mail odpovídal jiné kartě, tahle karta i ta druhá si
+    // zachovají svoje vlastní jméno a agendu. Shoda e-mailu se řeší jen při
+    // odesílání pozvánky (jedna pozvánka na e-mail, se sečtenou agendou).
+    const targetKey = entryIdentityKey(target)
 
-    const collidesWith =
-      candidateKey !== targetKey
-        ? recipients.find((r) => recipientIdentityKey(r) === candidateKey)
-        : undefined
-
-    if (collidesWith) {
-      setRecipients((prev) =>
-        prev
-          .map((r) => {
-            if (recipientIdentityKey(r) === candidateKey) {
-              return {
-                ...r,
-                revokedAt: undefined,
-                rowKeys: Array.from(
-                  new Set([...(r.rowKeys ?? []), ...(target.rowKeys ?? [])])
-                ),
-              }
-            }
-            if (r.substituteForKey === targetKey) {
-              return { ...r, substituteForKey: candidateKey }
-            }
-            return r
-          })
-          .filter((r) => recipientIdentityKey(r) !== targetKey)
-      )
-      setSelectionMode((prev) => (prev === "none" ? "manual" : prev))
-      setSelectedKeys((prev) => {
-        const updated = new Set(prev)
-        updated.delete(targetKey)
-        updated.add(candidateKey)
-        return updated
-      })
-      setInfoTone("success")
-      setInfo(
-        `${collidesWith.name || email} už v seznamu je u jiné agendy – nyní má přiřazenou i agendu „${target.name}“.`
-      )
-      setEditingKey(null)
-      return
-    }
-
-    const next = recipients.map((r) => {
-      if (recipientIdentityKey(r) === targetKey) {
-        return { ...r, name: name || email, email }
-      }
-      if (r.substituteForKey === targetKey) {
-        return { ...r, substituteForKey: candidateKey }
-      }
-      return r
-    })
+    const next = recipients.map((r) =>
+      entryIdentityKey(r) === targetKey
+        ? { ...r, name: name || email, email }
+        : r
+    )
 
     setRecipients(next)
     setSelectionMode((prev) => (prev === "none" ? "manual" : prev))
-    setSelectedKeys((prev) => {
-      const updated = new Set(prev)
-      updated.delete(targetKey)
-      updated.add(candidateKey)
-      return updated
-    })
     setEditingKey(null)
   }
 
@@ -1395,10 +1435,8 @@ export function SignatureRecipientsDialog({
     setDraftConflictOfInterest(value)
 
     const lawEmail = (LAW_SIGNATORY.emails[0] ?? "").toLowerCase()
-    const lawKey = recipientIdentityKey({ email: lawEmail })
-    const existingLaw = recipients.find(
-      (r) => recipientIdentityKey(r) === lawKey
-    )
+    const lawKey = entryIdentityKey({ email: lawEmail })
+    const existingLaw = recipients.find((r) => entryIdentityKey(r) === lawKey)
 
     if (value) {
       if (!existingLaw) {
@@ -1421,7 +1459,7 @@ export function SignatureRecipientsDialog({
       }
     } else if (existingLaw && !existingLaw.invitedAt) {
       setRecipients((prev) =>
-        prev.filter((r) => recipientIdentityKey(r) !== lawKey)
+        prev.filter((r) => entryIdentityKey(r) !== lawKey)
       )
       setSelectedKeys((prev) => {
         const next = new Set(prev)
@@ -1499,7 +1537,9 @@ export function SignatureRecipientsDialog({
     setError(null)
     const failed: string[] = []
 
-    for (const target of targets) {
+    const resendGroups = groupRecipientsForInviteSend(targets)
+
+    for (const { primary: target, extras } of resendGroups) {
       try {
         const res = await fetch(
           `/api/odchody/${offboardingId}/exit-checklist/invite`,
@@ -1509,11 +1549,21 @@ export function SignatureRecipientsDialog({
             body: JSON.stringify({
               inviteeEmail: target.email,
               inviteeName: target.name,
+              ...(target.id ? { recipientId: target.id } : {}),
               ...(target.behalfLabel
                 ? {
                     isBehalf: true,
                     behalfOfDisplayLabel: target.behalfLabel,
                     behalfOfRowKeys: target.rowKeys ?? [],
+                  }
+                : { rowKeys: target.rowKeys ?? [] }),
+              ...(extras.length > 0
+                ? {
+                    alsoActingOnBehalfOf: extras.map((extra) => ({
+                      id: extra.id ?? null,
+                      behalfOfDisplayLabel: extra.behalfLabel ?? null,
+                      behalfOfRowKeys: extra.rowKeys ?? [],
+                    })),
                   }
                 : {}),
             }),
@@ -1522,6 +1572,7 @@ export function SignatureRecipientsDialog({
         if (!res.ok && res.status !== 207) throw new Error()
       } catch {
         failed.push(target.email)
+        extras.forEach((extra) => failed.push(extra.email))
       }
     }
 
@@ -1541,12 +1592,10 @@ export function SignatureRecipientsDialog({
   }
 
   function cancelSubstitute(substitute: Recipient) {
-    const key = recipientIdentityKey(substitute)
+    const key = entryIdentityKey(substitute)
 
     if (!substitute.invitedAt) {
-      setRecipients((prev) =>
-        prev.filter((r) => recipientIdentityKey(r) !== key)
-      )
+      setRecipients((prev) => prev.filter((r) => entryIdentityKey(r) !== key))
       setSelectedKeys((prev) => {
         if (!prev.has(key)) return prev
         const next = new Set(prev)
@@ -1592,21 +1641,31 @@ export function SignatureRecipientsDialog({
     const behalfLabel = agendaLabel
       ? `${substituteTarget.name} — ${agendaLabel}`
       : substituteTarget.name
-    const candidateKey = recipientIdentityKey({ email, behalfLabel })
+    const candidateKey = entryIdentityKey({ email, behalfLabel })
     const existingMatch = recipients.find(
-      (r) => recipientIdentityKey(r) === candidateKey
+      (r) => entryIdentityKey(r) === candidateKey
     )
     if (existingMatch && !existingMatch.revokedAt) {
       setSubstituteError("Tento náhradník už je v seznamu.")
       return
     }
 
-    const targetKey = recipientIdentityKey(substituteTarget)
+    const targetKey = entryIdentityKey(substituteTarget)
+    const targetEmailNormalized = substituteTarget.email.trim().toLowerCase()
     const targetExists = recipients.some(
-      (r) => recipientIdentityKey(r) === targetKey && !r.revokedAt
+      (r) =>
+        !r.revokedAt &&
+        (entryIdentityKey(r) === targetKey ||
+          // Role karta (vedoucí/sekce B/sekce C) používá svůj vlastní
+          // `roleKey`, ne id skutečné karty – ověřit i shodu podle e-mailu,
+          // ať se nevytvoří druhá "duchová" karta téže osoby navíc.
+          (!r.behalfLabel &&
+            !r.substituteForKey &&
+            r.email.trim().toLowerCase() === targetEmailNormalized))
     )
 
     const newRecipient: Recipient = {
+      id: generateRecipientId(),
       name: name || email,
       email,
       ...(position ? { position } : {}),
@@ -1619,13 +1678,14 @@ export function SignatureRecipientsDialog({
     setRecipients((prev) => {
       const next = existingMatch
         ? prev.map((r) =>
-            recipientIdentityKey(r) === candidateKey ? newRecipient : r
+            entryIdentityKey(r) === candidateKey ? newRecipient : r
           )
         : [...prev, newRecipient]
 
       if (targetExists) return next
 
       const originalRecipient: Recipient = {
+        id: generateRecipientId(),
         name: substituteTarget.name,
         email: substituteTarget.email,
         ...(substituteTarget.position
@@ -1655,8 +1715,13 @@ export function SignatureRecipientsDialog({
     setSubstituteError(null)
   }
 
-  function requestReplace(target: Recipient) {
-    const key = recipientIdentityKey(target)
+  function requestReplace(target: Recipient, roleKey?: string) {
+    // Role karty (vedoucí/sekce B/sekce C) mají zástup evidovaný pod svým
+    // vlastním `roleKey`, ne pod id skutečné karty – bez téhle výjimky by
+    // appka nepoznala, že zástup u role existuje, a výměnu by povolila.
+    const key = roleKey
+      ? entryIdentityKey({ id: roleKey, email: target.email })
+      : entryIdentityKey(target)
     if (substitutesByOriginalKey.get(key)) {
       setError(
         "Nejprve zrušte zastoupení u této role, pak teprve osobu vyměňte."
@@ -1703,12 +1768,12 @@ export function SignatureRecipientsDialog({
       }
     }
 
-    const candidateKey = recipientIdentityKey({ email, behalfLabel: undefined })
+    const candidateKey = entryIdentityKey({ email, behalfLabel: undefined })
     const existingMatch = recipients.find(
-      (r) => recipientIdentityKey(r) === candidateKey
+      (r) => entryIdentityKey(r) === candidateKey
     )
 
-    const targetKey = recipientIdentityKey(replaceTarget)
+    const targetKey = entryIdentityKey(replaceTarget)
     const targetName = replaceTarget.name
     const addedRowKeys = replaceTarget.rowKeys?.length
       ? replaceTarget.rowKeys
@@ -1724,7 +1789,7 @@ export function SignatureRecipientsDialog({
       }
       setRecipients((prev) =>
         prev.map((r) =>
-          recipientIdentityKey(r) === candidateKey ? revivedRecipient : r
+          entryIdentityKey(r) === candidateKey ? revivedRecipient : r
         )
       )
       setSelectedKeys((prev) => {
@@ -1747,7 +1812,7 @@ export function SignatureRecipientsDialog({
     if (existingMatch && !existingMatch.behalfLabel) {
       setRecipients((prev) =>
         prev.map((r) =>
-          recipientIdentityKey(r) === candidateKey
+          entryIdentityKey(r) === candidateKey
             ? {
                 ...r,
                 rowKeys: Array.from(
@@ -1846,30 +1911,46 @@ export function SignatureRecipientsDialog({
       department?: string
     }
   ) {
-    const candidateKey = recipientIdentityKey({
-      email: contact.email,
-      behalfLabel: undefined,
-    })
+    // Karta se váže na KONKRÉTNÍ řádek agendy (row), ne na e-mail – i když
+    // má stejný e-mail jako jiná karta, zůstávají nezávislé. Pokud už tento
+    // řádek svůj záznam má (znovu-potvrzení), upravíme ten; jinak vznikne
+    // nová, vlastní karta.
+    const existingForRow = row.recipients[0]
+
+    if (existingForRow) {
+      const updatedKey = entryIdentityKey(existingForRow)
+      setRecipients((prev) =>
+        prev.map((r) =>
+          entryIdentityKey(r) === updatedKey
+            ? {
+                ...r,
+                name: contact.name,
+                email: contact.email,
+                position: contact.position ?? r.position,
+                department: contact.department ?? r.department,
+                revokedAt: undefined,
+              }
+            : r
+        )
+      )
+      setSelectedKeys((prev) => new Set(prev).add(updatedKey))
+      setInfoTone("success")
+      setInfo(
+        `Potvrzen výchozí návrh: ${contact.name} – pozvánka se pošle až po potvrzení seznamu.`
+      )
+      return
+    }
+
     const newRecipient: Recipient = {
+      id: generateRecipientId(),
       name: contact.name,
       email: contact.email,
       ...(contact.position ? { position: contact.position } : {}),
       ...(contact.department ? { department: contact.department } : {}),
       ...(row.rowKeys?.length ? { rowKeys: row.rowKeys } : {}),
     }
-    const existingMatch = recipients.find(
-      (r) => recipientIdentityKey(r) === candidateKey
-    )
-    if (existingMatch) {
-      setRecipients((prev) =>
-        prev.map((r) =>
-          recipientIdentityKey(r) === candidateKey ? newRecipient : r
-        )
-      )
-    } else {
-      setRecipients((prev) => [...prev, newRecipient])
-    }
-    setSelectedKeys((prev) => new Set(prev).add(candidateKey))
+    setRecipients((prev) => [...prev, newRecipient])
+    setSelectedKeys((prev) => new Set(prev).add(entryIdentityKey(newRecipient)))
     setInfoTone("success")
     setInfo(
       `Potvrzen výchozí návrh: ${contact.name} – pozvánka se pošle až po potvrzení seznamu.`
@@ -1901,74 +1982,37 @@ export function SignatureRecipientsDialog({
       }
     }
 
-    const candidateKey = recipientIdentityKey({ email, behalfLabel: undefined })
-    const existingMatch = recipients.find(
-      (r) => recipientIdentityKey(r) === candidateKey
+    // Karta se váže na konkrétní řádek agendy, ne na e-mail – vždy vznikne
+    // nová, vlastní karta, i kdyby měla stejný e-mail jako jiná karta.
+    // Jediná skutečná kolize je, pokud je ten e-mail už použit jako
+    // zastupující/zastupovaný – v tom případě je potřeba to vyřešit tam.
+    const hasActiveBehalfCollision = recipients.some(
+      (r) =>
+        !r.revokedAt &&
+        r.email.trim().toLowerCase() === email &&
+        (r.behalfLabel || r.substituteForKey)
     )
-    if (
-      existingMatch &&
-      !existingMatch.revokedAt &&
-      existingMatch.behalfLabel
-    ) {
+    if (hasActiveBehalfCollision) {
       setAddPersonError(
         "Tento e-mail už je v seznamu jako zastupující/zastupovaný – nejprve vyřešte jeho zastoupení."
       )
       return
     }
 
-    if (existingMatch?.revokedAt) {
-      const revivedRecipient: Recipient = {
-        name: name || email,
-        email,
-        ...(position ? { position } : {}),
-        ...(department ? { department } : {}),
-        ...(addPersonRowKeys.length ? { rowKeys: addPersonRowKeys } : {}),
-      }
-      setRecipients((prev) =>
-        prev.map((r) =>
-          recipientIdentityKey(r) === candidateKey ? revivedRecipient : r
-        )
-      )
-      setSelectedKeys((prev) => new Set(prev).add(candidateKey))
-      setInfoTone("success")
-      setInfo(
-        `Znovu přidáno: ${name || email} – jako nová osoba, pozvánka se pošle až po potvrzení seznamu.`
-      )
-    } else if (existingMatch) {
-      setRecipients((prev) =>
-        prev.map((r) =>
-          recipientIdentityKey(r) === candidateKey
-            ? {
-                ...r,
-                rowKeys: Array.from(
-                  new Set([...(r.rowKeys ?? []), ...addPersonRowKeys])
-                ),
-              }
-            : r
-        )
-      )
-      setSelectedKeys((prev) => new Set(prev).add(candidateKey))
-      setInfoTone("success")
-      setInfo(
-        `${name || email} už v seznamu je u jiné agendy – nyní má přiřazenou i tuto agendu navíc.`
-      )
-    } else {
-      setRecipients((prev) => [
-        ...prev,
-        {
-          name: name || email,
-          email,
-          ...(position ? { position } : {}),
-          ...(department ? { department } : {}),
-          ...(addPersonRowKeys.length ? { rowKeys: addPersonRowKeys } : {}),
-        },
-      ])
-      setSelectedKeys((prev) => new Set(prev).add(candidateKey))
-      setInfoTone("success")
-      setInfo(
-        `Přidání do návrhu seznamu: ${name || email} – zaškrtnuto k odeslání, pozvánka se pošle až po potvrzení seznamu.`
-      )
+    const newRecipient: Recipient = {
+      id: generateRecipientId(),
+      name: name || email,
+      email,
+      ...(position ? { position } : {}),
+      ...(department ? { department } : {}),
+      ...(addPersonRowKeys.length ? { rowKeys: addPersonRowKeys } : {}),
     }
+    setRecipients((prev) => [...prev, newRecipient])
+    setSelectedKeys((prev) => new Set(prev).add(entryIdentityKey(newRecipient)))
+    setInfoTone("success")
+    setInfo(
+      `Přidání do návrhu seznamu: ${name || email} – zaškrtnuto k odeslání, pozvánka se pošle až po potvrzení seznamu.`
+    )
     setAddPersonRowKey(null)
     setAddPersonName("")
     setAddPersonEmail("")
@@ -2062,39 +2106,16 @@ export function SignatureRecipientsDialog({
       }
       const mergedOriginalKeys = new Set<string>()
 
-      const dualRoleBehalfByDirectKey = new Map<
-        string,
-        (typeof toInviteNew)[number]
-      >()
-      const skipSeparateSendKeys = new Set<string>()
-      {
-        const byEmail = new Map<string, (typeof toInviteNew)[number][]>()
-        for (const r of toInviteNew) {
-          const normalized = r.email.trim().toLowerCase()
-          const arr = byEmail.get(normalized) ?? []
-          arr.push(r)
-          byEmail.set(normalized, arr)
-        }
-        for (const entries of byEmail.values()) {
-          if (entries.length < 2) continue
-          const direct = entries.find((entry) => !entry.behalfLabel)
-          const behalfEntries = entries.filter((entry) => entry.behalfLabel)
-          if (!direct || behalfEntries.length !== 1) continue
-          const behalf = behalfEntries[0]
-          dualRoleBehalfByDirectKey.set(recipientIdentityKey(direct), behalf)
-          skipSeparateSendKeys.add(recipientIdentityKey(behalf))
-        }
-      }
+      const inviteGroups = groupRecipientsForInviteSend(toInviteNew)
 
-      for (const r of toInviteNew) {
-        const key = recipientIdentityKey(r)
-        if (skipSeparateSendKeys.has(key)) continue
+      for (const { primary: r, extras } of inviteGroups) {
+        const key = entryIdentityKey(r)
 
         try {
           const original = r.substituteForKey
             ? recipients.find(
                 (candidate) =>
-                  recipientIdentityKey(candidate) === r.substituteForKey
+                  entryIdentityKey(candidate) === r.substituteForKey
               )
             : undefined
 
@@ -2102,15 +2123,22 @@ export function SignatureRecipientsDialog({
             ? substituteForOriginalKey.get(key)
             : undefined
 
-          const alsoActingOnBehalfOf = dualRoleBehalfByDirectKey.get(key)
-          const alsoActingOnBehalfOfOriginal =
-            alsoActingOnBehalfOf?.substituteForKey
+          const alsoActingOnBehalfOf = extras.map((extra) => {
+            const extraOriginal = extra.substituteForKey
               ? recipients.find(
                   (candidate) =>
-                    recipientIdentityKey(candidate) ===
-                    alsoActingOnBehalfOf.substituteForKey
+                    entryIdentityKey(candidate) === extra.substituteForKey
                 )
               : undefined
+            return {
+              id: extra.id ?? null,
+              behalfOfName: extraOriginal?.name ?? extra.behalfLabel ?? null,
+              behalfOfEmail: extraOriginal?.email ?? null,
+              behalfOfPosition: extraOriginal?.position ?? null,
+              behalfOfDepartment: extraOriginal?.department ?? null,
+              behalfOfRowKeys: extra.rowKeys ?? [],
+            }
+          })
 
           const res = await fetch(
             `/api/odchody/${offboardingId}/exit-checklist/invite`,
@@ -2120,6 +2148,7 @@ export function SignatureRecipientsDialog({
               body: JSON.stringify({
                 inviteeEmail: r.email,
                 inviteeName: r.name,
+                ...(r.id ? { recipientId: r.id } : {}),
                 ...(r.behalfLabel
                   ? {
                       isBehalf: true,
@@ -2130,7 +2159,7 @@ export function SignatureRecipientsDialog({
                       behalfOfDepartment: original?.department ?? null,
                       behalfOfEmail: original?.email ?? null,
                     }
-                  : {}),
+                  : { rowKeys: r.rowKeys ?? [] }),
                 ...(pendingSubstitute
                   ? {
                       substituteName: pendingSubstitute.name,
@@ -2140,22 +2169,8 @@ export function SignatureRecipientsDialog({
                         pendingSubstitute.department ?? null,
                     }
                   : {}),
-                ...(alsoActingOnBehalfOf
-                  ? {
-                      alsoActingOnBehalfOf: {
-                        behalfOfName:
-                          alsoActingOnBehalfOfOriginal?.name ??
-                          alsoActingOnBehalfOf.behalfLabel ??
-                          null,
-                        behalfOfEmail:
-                          alsoActingOnBehalfOfOriginal?.email ?? null,
-                        behalfOfPosition:
-                          alsoActingOnBehalfOfOriginal?.position ?? null,
-                        behalfOfDepartment:
-                          alsoActingOnBehalfOfOriginal?.department ?? null,
-                        behalfOfRowKeys: alsoActingOnBehalfOf.rowKeys ?? [],
-                      },
-                    }
+                ...(alsoActingOnBehalfOf.length > 0
+                  ? { alsoActingOnBehalfOf }
                   : {}),
               }),
             }
@@ -2170,10 +2185,8 @@ export function SignatureRecipientsDialog({
           if (pendingSubstitute) {
             mergedOriginalKeys.add(key)
           }
-          if (alsoActingOnBehalfOf) {
-            resultByKey.set(recipientIdentityKey(alsoActingOnBehalfOf), {
-              status: "fulfilled",
-            })
+          for (const extra of extras) {
+            resultByKey.set(entryIdentityKey(extra), { status: "fulfilled" })
           }
         } catch (err) {
           resultByKey.set(key, {
@@ -2181,27 +2194,22 @@ export function SignatureRecipientsDialog({
             error:
               err instanceof Error ? err : new Error("Chyba při odesílání."),
           })
-          if (dualRoleBehalfByDirectKey.has(key)) {
-            resultByKey.set(
-              recipientIdentityKey(dualRoleBehalfByDirectKey.get(key)!),
-              {
-                status: "rejected",
-                error: new Error("Chyba při odesílání."),
-              }
-            )
+          for (const extra of extras) {
+            resultByKey.set(entryIdentityKey(extra), {
+              status: "rejected",
+              error: new Error("Chyba při odesílání."),
+            })
           }
         }
       }
 
       const sentAt = new Date().toISOString()
       const nextSendErrors = new Map<string, string>()
-      const revokeKeys = new Set(toRevoke.map((r) => recipientIdentityKey(r)))
-      const inviteKeys = new Set(
-        toInviteNew.map((r) => recipientIdentityKey(r))
-      )
+      const revokeKeys = new Set(toRevoke.map((r) => entryIdentityKey(r)))
+      const inviteKeys = new Set(toInviteNew.map((r) => entryIdentityKey(r)))
 
       const updatedRecipients = recipients.map((r) => {
-        const key = recipientIdentityKey(r)
+        const key = entryIdentityKey(r)
 
         if (revokeKeys.has(key)) {
           return { ...r, revokedAt: sentAt }
@@ -2242,12 +2250,12 @@ export function SignatureRecipientsDialog({
           const newlySentSubstitutes = toInviteNew.filter(
             (r) =>
               r.substituteForKey &&
-              resultByKey.get(recipientIdentityKey(r))?.status === "fulfilled"
+              resultByKey.get(entryIdentityKey(r))?.status === "fulfilled"
           )
 
           for (const substitute of newlySentSubstitutes) {
             const original = recipients.find(
-              (r) => recipientIdentityKey(r) === substitute.substituteForKey
+              (r) => entryIdentityKey(r) === substitute.substituteForKey
             )
             if (!original) continue
             if (
@@ -2280,7 +2288,7 @@ export function SignatureRecipientsDialog({
           )
           for (const substitute of newlyRevokedSubstitutes) {
             const original = recipients.find(
-              (r) => recipientIdentityKey(r) === substitute.substituteForKey
+              (r) => entryIdentityKey(r) === substitute.substituteForKey
             )
             if (!original) continue
 
@@ -2522,13 +2530,20 @@ export function SignatureRecipientsDialog({
   ]
 
   const roleBoundKeys = new Set<string>()
-  if (managerRecipient)
-    roleBoundKeys.add(recipientIdentityKey(managerRecipient))
+  if (managerRecipient) roleBoundKeys.add(entryIdentityKey(managerRecipient))
   for (const row of predefinedAgendaRows) {
     for (const recipient of row.recipients) {
-      roleBoundKeys.add(recipientIdentityKey(recipient))
+      roleBoundKeys.add(entryIdentityKey(recipient))
     }
   }
+  // Role vedoucí/sekce B/sekce C mají i svou vlastní, na e-mailu nezávislou
+  // identitu (viz `roleKey` v `getCardRoleFields`) – zástup vytvořený na
+  // jedné z těchto karet se musí vždy vyloučit z "Přidaní mimo běžnou
+  // agendu" a zobrazit přímo pod tou kartou, i když dvě role mají dnes
+  // stejný e-mail (např. sekce C ve výchozím stavu = vedoucí odboru).
+  roleBoundKeys.add(entryIdentityKey({ id: "manager", email: "" }))
+  roleBoundKeys.add(entryIdentityKey({ id: "sectionB", email: "" }))
+  roleBoundKeys.add(entryIdentityKey({ id: "sectionC", email: "" }))
 
   const unassignedAgendaItems: string[] = []
   for (const row of predefinedAgendaRows) {
@@ -2547,7 +2562,7 @@ export function SignatureRecipientsDialog({
   }
 
   const otherActiveRecipients = activeRecipients.filter((r) => {
-    const key = recipientIdentityKey(r)
+    const key = entryIdentityKey(r)
     if (roleBoundKeys.has(key)) return false
     if (r.substituteForKey && roleBoundKeys.has(r.substituteForKey))
       return false
@@ -2568,7 +2583,7 @@ export function SignatureRecipientsDialog({
 
   function renderSubstituteFormFor(targetKey: string) {
     if (!substituteTarget) return null
-    if (recipientIdentityKey(substituteTarget) !== targetKey) return null
+    if (entryIdentityKey(substituteTarget) !== targetKey) return null
 
     return (
       <div className="space-y-2 rounded-md border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
@@ -2702,7 +2717,9 @@ export function SignatureRecipientsDialog({
       )
     }
 
-    const selectionKey = recipientIdentityKey({ email: respEmployeeEmail })
+    const selectionKey = entryIdentityKey(
+      employeeRecipient ?? { email: respEmployeeEmail }
+    )
     const selectionChecked = selectedKeys.has(selectionKey)
 
     return (
@@ -2785,6 +2802,11 @@ export function SignatureRecipientsDialog({
     onReset?: () => void
     resetTitle?: string
     emptyStateMessage?: string
+    // Stabilní identita ROLE (vedoucí/sekce B/sekce C), nezávislá na
+    // e-mailu – sekce C je dnes ve výchozím stavu vedoucí odboru, ale je to
+    // jiná role a zastoupení vytvořené na jedné kartě se nesmí objevit pod
+    // druhou jen proto, že mají stejný e-mail.
+    roleKey?: string
   }) {
     const isConfirmed = hasExistingList && !fields.dirty
     const cardStateClass = isConfirmed
@@ -2873,12 +2895,33 @@ export function SignatureRecipientsDialog({
       )
     }
 
+    // Karta role (vedoucí/sekce B/sekce C/KITT6) má svůj vlastní draft stav
+    // (resp*), oddělený od pole `recipients` – zaškrtávátko se ale řídí
+    // stejným `selectedKeys`, takže klíč musí odpovídat skutečnému záznamu
+    // v `recipients` (včetně jeho `id`), jinak se checkbox nikdy neshoduje.
+    const matchingRecipient = fields.offerSelection
+      ? activeRecipients.find(
+          (r) =>
+            !r.behalfLabel &&
+            !r.substituteForKey &&
+            r.email.trim().toLowerCase() === fields.email.trim().toLowerCase()
+        )
+      : undefined
     const selectionKey = fields.offerSelection
-      ? recipientIdentityKey({ email: fields.email })
+      ? entryIdentityKey(matchingRecipient ?? { email: fields.email })
       : null
     const selectionChecked = selectionKey
       ? selectedKeys.has(selectionKey)
       : false
+
+    // Klíč pro zastoupení téhle role – pokud má karta `roleKey` (vedoucí/
+    // sekce B/sekce C), použije se ten (nezávislý na e-mailu), jinak se
+    // spadne zpět na e-mail (karty bez roleKey, dnes jen KITT6, který
+    // zastoupení nenabízí).
+    const substituteOwnerKey = fields.roleKey
+      ? entryIdentityKey({ id: fields.roleKey, email: fields.email })
+      : entryIdentityKey({ email: fields.email })
+    const linkedSubstitute = substitutesByOriginalKey.get(substituteOwnerKey)
 
     return (
       <Fragment>
@@ -2949,7 +2992,7 @@ export function SignatureRecipientsDialog({
               <Pencil className="size-3" />
               Upravit
             </Button>
-            {fields.offerSubstitute && fields.email && (
+            {fields.offerSubstitute && fields.email && !linkedSubstitute && (
               <Button
                 type="button"
                 size="sm"
@@ -2957,6 +3000,7 @@ export function SignatureRecipientsDialog({
                 className="h-7 gap-1 border-purple-300 bg-background text-xs text-purple-800 hover:bg-purple-50"
                 onClick={() => {
                   setSubstituteTarget({
+                    ...(fields.roleKey ? { id: fields.roleKey } : {}),
                     name: fields.name || fields.email,
                     email: fields.email,
                     ...(fields.position ? { position: fields.position } : {}),
@@ -2986,8 +3030,39 @@ export function SignatureRecipientsDialog({
               </Button>
             )}
           </div>
+          {linkedSubstitute && (
+            <div className="mt-2 flex items-start justify-between gap-2 rounded-md border border-purple-200 bg-purple-50 p-2">
+              <div className="min-w-0 text-left">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-purple-700">
+                  Zástup{!linkedSubstitute.invitedAt ? " – nepotvrzeno" : ""}
+                </p>
+                <p className="whitespace-nowrap text-sm font-medium text-purple-900">
+                  {linkedSubstitute.name}
+                </p>
+                <p className="overflow-x-auto whitespace-nowrap font-mono text-xs text-purple-700">
+                  {linkedSubstitute.email}
+                </p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 shrink-0 gap-1 text-xs"
+                disabled={removalLocked && Boolean(linkedSubstitute.invitedAt)}
+                title={
+                  removalLocked && Boolean(linkedSubstitute.invitedAt)
+                    ? removalLockedReason
+                    : undefined
+                }
+                onClick={() => cancelSubstitute(linkedSubstitute)}
+              >
+                <Repeat className="size-3" />
+                Zrušit
+              </Button>
+            </div>
+          )}
         </div>
-        {renderSubstituteFormFor(recipientIdentityKey({ email: fields.email }))}
+        {renderSubstituteFormFor(substituteOwnerKey)}
       </Fragment>
     )
   }
@@ -3008,9 +3083,10 @@ export function SignatureRecipientsDialog({
           onEmailChange: setRespManagerEmail,
           offerSubstitute: true,
           offerSelection: true,
+          roleKey: "manager",
           dirty: managerCardDirty,
           onReset: managerRecipient
-            ? () => requestReplace(managerRecipient)
+            ? () => requestReplace(managerRecipient, "manager")
             : undefined,
           resetTitle: "Vyměnit osobu",
         }
@@ -3029,6 +3105,7 @@ export function SignatureRecipientsDialog({
             onEmailChange: setRespSectionBEmail,
             offerSubstitute: true,
             offerSelection: true,
+            roleKey: "sectionB",
             dirty: sectionBCardDirty,
             onReset: () => {
               setRespSectionBName(DEFAULT_SECTION_B_RESPONSIBLE.name)
@@ -3059,6 +3136,7 @@ export function SignatureRecipientsDialog({
             onEmailChange: setRespSectionCEmail,
             offerSubstitute: true,
             offerSelection: true,
+            roleKey: "sectionC",
             dirty: sectionCCardDirty,
             onReset: () => {
               setRespSectionCName(respManagerName)
@@ -3150,7 +3228,7 @@ export function SignatureRecipientsDialog({
     onRemoved?: () => void,
     representedLabel?: string
   ) {
-    const key = recipientIdentityKey(r)
+    const key = entryIdentityKey(r)
     const checked = selectedKeys.has(key)
     const sendError = sendErrors.get(key)
     const substitute = substitutesByOriginalKey.get(key)
@@ -3576,7 +3654,7 @@ export function SignatureRecipientsDialog({
 
         {defaultContact &&
           renderSubstituteFormFor(
-            recipientIdentityKey({ email: defaultContact.email })
+            entryIdentityKey({ email: defaultContact.email })
           )}
 
         {row.recipients.length === 0 && !isAdding && !defaultContact && (
@@ -3586,12 +3664,10 @@ export function SignatureRecipientsDialog({
         )}
 
         {row.recipients.map((r) => {
-          const substitute = substitutesByOriginalKey.get(
-            recipientIdentityKey(r)
-          )
+          const substitute = substitutesByOriginalKey.get(entryIdentityKey(r))
           return (
             <div
-              key={recipientIdentityKey(r)}
+              key={entryIdentityKey(r)}
               className="flex flex-col items-stretch gap-2"
             >
               {renderSingleAssignee(r, isEmployeeRow, () =>

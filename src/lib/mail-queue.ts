@@ -292,6 +292,36 @@ function toNewRecordManagerUpdatePayload(payload: QueuePayload) {
   }
 }
 
+function asBehalfEntryArr(
+  value: unknown
+): { name: string; position: string | null; department: string | null }[] {
+  if (!Array.isArray(value)) return []
+
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") return null
+
+      const record = item as Record<string, unknown>
+      const name = asStr(record.name)
+      if (!name) return null
+
+      return {
+        name,
+        position: asStr(record.position),
+        department: asStr(record.department),
+      }
+    })
+    .filter(
+      (
+        entry
+      ): entry is {
+        name: string
+        position: string | null
+        department: string | null
+      } => entry !== null
+    )
+}
+
 function toExitSignatureReminderPayload(payload: QueuePayload) {
   return {
     to: asStr(payload.to) ?? "",
@@ -306,6 +336,7 @@ function toExitSignatureReminderPayload(payload: QueuePayload) {
     behalfName: asStr(payload.behalfName),
     behalfPosition: asStr(payload.behalfPosition),
     behalfDepartment: asStr(payload.behalfDepartment),
+    behalfEntries: asBehalfEntryArr(payload.behalfEntries),
     isEmployee: Boolean(payload.isEmployee),
     isManager: Boolean(payload.isManager),
   }

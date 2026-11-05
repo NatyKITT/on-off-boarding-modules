@@ -439,7 +439,6 @@ async function queueExitChecklistSetupReminders(args: {
 async function existsOffboardingSignatureReminderJob(args: {
   offboardingId: number
   email: string
-  behalfLabel: string | null
   daysBeforeEnd: SignatureReminderDay
 }) {
   const jobs = await prisma.mailQueue.findMany({
@@ -458,9 +457,6 @@ async function existsOffboardingSignatureReminderJob(args: {
       return false
     }
     if (asNumber(payload.daysBeforeEnd) !== args.daysBeforeEnd) return false
-
-    const payloadBehalfLabel = asString(payload.behalfLabel)?.trim() || null
-    if (payloadBehalfLabel !== args.behalfLabel) return false
 
     return isSameOffboardingPayload({
       payload,
@@ -696,6 +692,21 @@ async function queueExitChecklistSignatureReminders(args: {
       pendingItems: string[]
     }> = []
 
+    type PendingEmailGroup = {
+      email: string
+      pendingItems: Set<string>
+      labels: Set<string>
+      roleNote: string | null
+      isManager: boolean
+      isEmployee: boolean
+      behalfEntries: Map<
+        string,
+        { name: string; position: string | null; department: string | null }
+      >
+    }
+
+    const pendingByEmail = new Map<string, PendingEmailGroup>()
+
     for (const recipient of data.signatureRecipients) {
       const email = recipient.email.trim().toLowerCase()
 
@@ -720,16 +731,58 @@ async function queueExitChecklistSignatureReminders(args: {
       const isEmployee =
         Boolean(off.userEmail) && email === off.userEmail?.trim().toLowerCase()
 
+      // Stejný e-mail může pokrývat víc agendových řádků (různé karty v
+      // "Seznam a správa osob") – připomínka se posílá JEDNOU na e-mail, se
+      // sečtenou agendou ze všech jeho karet, ne jedna po druhé.
+      let group = pendingByEmail.get(email)
+      if (!group) {
+        group = {
+          email,
+          pendingItems: new Set(),
+          labels: new Set(),
+          roleNote: null,
+          isManager: false,
+          isEmployee: false,
+          behalfEntries: new Map(),
+        }
+        pendingByEmail.set(email, group)
+      }
+
+      pendingItems.forEach((item) => group!.pendingItems.add(item))
+      group.labels.add(label)
+      if (!group.roleNote && roleNote) group.roleNote = roleNote
+      if (isManager) group.isManager = true
+      if (isEmployee) group.isEmployee = true
+      if (recipient.behalfLabel) {
+        // Stejný zástup může zastupovat víc různých lidí/rolí zároveň –
+        // každou unikátní zastupovanou osobu si evidujeme zvlášť, aby se
+        // v připomínce vypsaly všechny, ne jen poslední přepsaná.
+        const behalfPersonName =
+          behalfOriginal?.name ?? recipient.behalfLabel ?? null
+        if (behalfPersonName && !group.behalfEntries.has(behalfPersonName)) {
+          group.behalfEntries.set(behalfPersonName, {
+            name: behalfPersonName,
+            position: behalfOriginal?.position ?? null,
+            department: behalfOriginal?.department ?? null,
+          })
+        }
+      }
+    }
+
+    for (const group of pendingByEmail.values()) {
+      const combinedLabel = Array.from(group.labels).join(", ")
+      const behalfEntriesArray = Array.from(group.behalfEntries.values())
+      const firstBehalfEntry = behalfEntriesArray[0] ?? null
+
       const alreadyQueued = await existsOffboardingSignatureReminderJob({
         offboardingId: off.id,
-        email,
-        behalfLabel: recipient.behalfLabel ?? null,
+        email: group.email,
         daysBeforeEnd: args.daysBeforeEnd,
       })
 
       if (alreadyQueued) {
         args.notifications.push(
-          `sig_reminder_${args.daysBeforeEnd}d_already_active:${off.id}:${email}`
+          `sig_reminder_${args.daysBeforeEnd}d_already_active:${off.id}:${group.email}`
         )
         continue
       }
@@ -738,22 +791,23 @@ async function queueExitChecklistSignatureReminders(args: {
         data: {
           type: "EXIT_SIGNATURE_INVITE",
           payload: {
-            to: email,
+            to: group.email,
             offboardingId: off.id,
             employeeName,
             employeePosition: off.positionName,
             employeeDepartment: off.department,
             employmentEndDate: effectiveEnd?.toISOString() ?? null,
             signUrl,
-            reminderRole: label,
-            roleNote,
-            pendingItems,
-            isBehalf: Boolean(recipient.behalfLabel),
-            behalfName: behalfOriginal?.name ?? recipient.behalfLabel ?? null,
-            behalfPosition: behalfOriginal?.position ?? null,
-            behalfDepartment: behalfOriginal?.department ?? null,
-            isEmployee,
-            isManager,
+            reminderRole: combinedLabel,
+            roleNote: group.roleNote,
+            pendingItems: Array.from(group.pendingItems),
+            isBehalf: behalfEntriesArray.length > 0,
+            behalfName: firstBehalfEntry?.name ?? null,
+            behalfPosition: firstBehalfEntry?.position ?? null,
+            behalfDepartment: firstBehalfEntry?.department ?? null,
+            behalfEntries: behalfEntriesArray,
+            isEmployee: group.isEmployee,
+            isManager: group.isManager,
             daysBeforeEnd: args.daysBeforeEnd,
             createdBy: "system-cron",
             createdByName: "Systémový cron",
@@ -769,12 +823,12 @@ async function queueExitChecklistSignatureReminders(args: {
         action: "SIGNATURE_INVITE_SENT",
         by: "system-cron",
         byName: "Systémový cron",
-        message: `Automatická připomínka podpisu (${label}) – zbývá ${dayCountLabelCs(args.daysBeforeEnd)} do konce pracovního poměru.`,
+        message: `Automatická připomínka podpisu (${combinedLabel}) – zbývá ${dayCountLabelCs(args.daysBeforeEnd)} do konce pracovního poměru.`,
         meta: {
-          reminderRole: label,
+          reminderRole: combinedLabel,
           daysBeforeEnd: args.daysBeforeEnd,
           mailQueueId: job.id,
-          recipient: email,
+          recipient: group.email,
         },
       })
 

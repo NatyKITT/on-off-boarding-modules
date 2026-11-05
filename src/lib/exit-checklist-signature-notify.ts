@@ -1,3 +1,5 @@
+import { format } from "date-fns"
+
 import type { ExitChecklistData } from "@/types/exit-checklist"
 
 import { prisma } from "@/lib/db"
@@ -226,6 +228,24 @@ export async function lockExitChecklistAndNotify(args: {
       })
       .filter((recipient) => !recipient.hasSigned)
 
+    const unresolvedItems = data.items
+      .filter((item) => item.resolved === "NO")
+      .map((item) => {
+        const who = item.signedByName
+          ? `${item.signedByName}${
+              item.signedAt
+                ? ` · ${format(new Date(item.signedAt), "d.M.yyyy HH:mm")}`
+                : ""
+            }`
+          : "nepodepsáno"
+        const noteSuffix = item.note ? ` — poznámka: ${item.note}` : ""
+        const additionalNoteSuffix = item.additionalNote
+          ? ` — dodatečně vyřízeno: ${item.additionalNote}`
+          : ""
+
+        return `${item.obligation} (${item.organization}) · ${who}${noteSuffix}${additionalNoteSuffix}`
+      })
+
     if (hrRecipients.length > 0 && pendingSigners.length > 0) {
       const employeeName = [
         off.titleBefore,
@@ -249,6 +269,7 @@ export async function lockExitChecklistAndNotify(args: {
           ? `${args.baseUrl}/odchody/${args.offboardingId}/vystupni-list`
           : null,
         pendingSigners,
+        unresolvedItems,
       })
     }
   } catch (error) {

@@ -2092,13 +2092,15 @@ type SendSignatureInviteEmailParams = {
     position?: string | null
     department?: string | null
   } | null
-  alsoActingOnBehalfOf?: {
-    name: string
-    email?: string | null
-    position?: string | null
-    department?: string | null
-    obligations: string[]
-  } | null
+  alsoActingOnBehalfOf?:
+    | {
+        name: string
+        email?: string | null
+        position?: string | null
+        department?: string | null
+        obligations: string[]
+      }[]
+    | null
 }
 
 export async function sendSignatureInviteEmail({
@@ -2121,7 +2123,7 @@ export async function sendSignatureInviteEmail({
   const titleArgs = {
     roleLabel: headerSubtitle ? "Vedoucí odboru" : null,
     hasSubstituteInfo: Boolean(substituteInfo),
-    hasAlsoActingOnBehalfOf: Boolean(alsoActingOnBehalfOf),
+    hasAlsoActingOnBehalfOf: Boolean(alsoActingOnBehalfOf?.length),
   }
   const headerTitle = buildExitChecklistInviteTitle(titleArgs)
   const subject = buildExitChecklistInviteSubject({
@@ -2235,31 +2237,41 @@ export async function sendSignatureInviteEmail({
                   }
 
                   ${
-                    alsoActingOnBehalfOf
+                    alsoActingOnBehalfOf && alsoActingOnBehalfOf.length > 0
                       ? `
                   <p class="intro-text" style="margin:0 0 10px 0;color:#374151;">
-                    Byli jste zároveň pozváni k podpisu výstupního listu v zástupu za:
+                    ${
+                      alsoActingOnBehalfOf.length > 1
+                        ? "Byli jste zároveň pozváni k podpisu výstupního listu v zástupu za více osob/rolí:"
+                        : "Byli jste zároveň pozváni k podpisu výstupního listu v zástupu za:"
+                    }
                   </p>
+                  ${alsoActingOnBehalfOf
+                    .map(
+                      (entry) => `
                   ${renderBehalfPersonTableHtml({
                     nameLabel: "Zastupujete za",
-                    name: alsoActingOnBehalfOf.name,
-                    position: alsoActingOnBehalfOf.position,
-                    department: alsoActingOnBehalfOf.department,
+                    name: entry.name,
+                    position: entry.position,
+                    department: entry.department,
                   })}
                   ${
-                    alsoActingOnBehalfOf.obligations.length > 0
+                    entry.obligations.length > 0
                       ? renderInfoBubbleHtml({
                           bgLight,
                           title:
                             "Agenda, kterou máte v zastoupení ověřit a podepsat",
                           bodyHtml: `
                     <div style="font-size:13px;color:#374151;line-height:1.6;">
-                      ${alsoActingOnBehalfOf.obligations.map((item) => `• ${escapeHtml(item)}`).join("<br/>")}
+                      ${entry.obligations.map((item) => `• ${escapeHtml(item)}`).join("<br/>")}
                     </div>
                     `,
                         })
                       : ""
                   }
+                  `
+                    )
+                    .join("")}
                   ${renderBehalfNoteHtml()}
                   `
                       : ""
@@ -2339,19 +2351,23 @@ export async function sendSignatureInviteEmail({
         : roleNote
           ? [roleNote, ""]
           : []),
-    ...(alsoActingOnBehalfOf
+    ...(alsoActingOnBehalfOf && alsoActingOnBehalfOf.length > 0
       ? [
-          "Byli jste zároveň pozváni k podpisu výstupního listu v zástupu za:",
-          `Zastupujete za: ${alsoActingOnBehalfOf.name}`,
-          `Funkce: ${alsoActingOnBehalfOf.position || "—"}`,
-          `Odbor/oddělení: ${alsoActingOnBehalfOf.department || "—"}`,
-          ...(alsoActingOnBehalfOf.obligations.length > 0
-            ? [
-                "Agenda, kterou máte v zastoupení ověřit a podepsat:",
-                ...alsoActingOnBehalfOf.obligations.map((item) => `- ${item}`),
-              ]
-            : []),
-          "",
+          alsoActingOnBehalfOf.length > 1
+            ? "Byli jste zároveň pozváni k podpisu výstupního listu v zástupu za více osob/rolí:"
+            : "Byli jste zároveň pozváni k podpisu výstupního listu v zástupu za:",
+          ...alsoActingOnBehalfOf.flatMap((entry) => [
+            `Zastupujete za: ${entry.name}`,
+            `Funkce: ${entry.position || "—"}`,
+            `Odbor/oddělení: ${entry.department || "—"}`,
+            ...(entry.obligations.length > 0
+              ? [
+                  "Agenda, kterou máte v zastoupení ověřit a podepsat:",
+                  ...entry.obligations.map((item) => `- ${item}`),
+                ]
+              : []),
+            "",
+          ]),
           "Poznámka:",
           `Podpis pro tento zástup prosím proveďte výhradně přes tlačítko „Podepsat v zastoupení" v aplikaci, nejedná se o podpis vlastní agendy.`,
           "",
@@ -2405,6 +2421,9 @@ type SendExitChecklistSignatureReminderEmailParams = {
   behalfName?: string | null
   behalfPosition?: string | null
   behalfDepartment?: string | null
+  behalfEntries?:
+    | { name: string; position?: string | null; department?: string | null }[]
+    | null
   isEmployee?: boolean
   isManager?: boolean
 }
@@ -2422,6 +2441,7 @@ export async function sendExitChecklistSignatureReminderEmail({
   behalfName,
   behalfPosition,
   behalfDepartment,
+  behalfEntries,
   isEmployee,
   isManager,
 }: SendExitChecklistSignatureReminderEmailParams): Promise<void> {
@@ -2431,11 +2451,23 @@ export async function sendExitChecklistSignatureReminderEmail({
   const greeting = "Dobrý den,"
   const daysLabel =
     daysBeforeEnd <= 0 ? "dnes" : `za ${formatDayCountCs(daysBeforeEnd)}`
+  const entries =
+    behalfEntries && behalfEntries.length > 0
+      ? behalfEntries
+      : behalfName
+        ? [
+            {
+              name: behalfName,
+              position: behalfPosition,
+              department: behalfDepartment,
+            },
+          ]
+        : []
   const titleArgs = {
     daysBeforeEnd,
     isEmployee,
     isManager,
-    isBehalf: Boolean(behalfName),
+    isBehalf: entries.length > 0,
   }
   const headerTitle = buildExitChecklistReminderTitle(titleArgs)
   const subject = buildExitChecklistReminderSubject({
@@ -2491,7 +2523,7 @@ export async function sendExitChecklistSignatureReminderEmail({
                     ${
                       isEmployee
                         ? `stále čekáme na váš podpis vlastního výstupního listu. Pracovní poměr vám končí ${daysLabel === "dnes" ? "dnes" : daysLabel}:`
-                        : isManager && !behalfName
+                        : isManager && entries.length === 0
                           ? `stále čekáme na váš podpis jako vedoucího odboru u výstupního listu níže uvedeného zaměstnance. Jeho pracovní poměr končí ${daysLabel === "dnes" ? "dnes" : daysLabel}:`
                           : `stále čekáme na váš podpis výstupního listu níže uvedeného zaměstnance. Jeho pracovní poměr končí ${daysLabel === "dnes" ? "dnes" : daysLabel}:`
                     }
@@ -2520,21 +2552,27 @@ export async function sendExitChecklistSignatureReminderEmail({
                   }
 
                   ${
-                    behalfName
+                    entries.length > 0
                       ? `
                   <p style="margin:0 0 10px 0;font-size:14px;color:#374151;line-height:1.6;">
                     ${
-                      isManager
-                        ? "Podepisujete v zastoupení za vedoucího odboru:"
-                        : "Podepisujete v zastoupení za:"
+                      entries.length > 1
+                        ? "Podepisujete v zastoupení za více osob/rolí:"
+                        : isManager
+                          ? "Podepisujete v zastoupení za vedoucího odboru:"
+                          : "Podepisujete v zastoupení za:"
                     }
                   </p>
-                  ${renderBehalfPersonTableHtml({
-                    nameLabel: "Zastupujete za",
-                    name: behalfName,
-                    position: behalfPosition,
-                    department: behalfDepartment,
-                  })}
+                  ${entries
+                    .map((entry) =>
+                      renderBehalfPersonTableHtml({
+                        nameLabel: "Zastupujete za",
+                        name: entry.name,
+                        position: entry.position,
+                        department: entry.department,
+                      })
+                    )
+                    .join("")}
                   `
                       : ""
                   }
@@ -2571,7 +2609,7 @@ export async function sendExitChecklistSignatureReminderEmail({
                   `
                   }
 
-                  ${behalfName ? renderBehalfNoteHtml() : ""}
+                  ${entries.length > 0 ? renderBehalfNoteHtml() : ""}
 
                   ${renderLoginInfoBubbleHtml({ signUrl })}
                 </td>
@@ -2593,7 +2631,7 @@ export async function sendExitChecklistSignatureReminderEmail({
     "",
     isEmployee
       ? `Stále čekáme na váš podpis vlastního výstupního listu. Pracovní poměr vám končí ${daysLabel === "dnes" ? "dnes" : daysLabel}:`
-      : isManager && !behalfName
+      : isManager && entries.length === 0
         ? `Stále čekáme na váš podpis jako vedoucího odboru u výstupního listu níže uvedeného zaměstnance. Jeho pracovní poměr končí ${daysLabel === "dnes" ? "dnes" : daysLabel}:`
         : `Stále čekáme na váš podpis výstupního listu níže uvedeného zaměstnance. Jeho pracovní poměr končí ${daysLabel === "dnes" ? "dnes" : daysLabel}:`,
     "",
@@ -2608,14 +2646,18 @@ export async function sendExitChecklistSignatureReminderEmail({
           "",
         ]
       : []),
-    ...(behalfName
+    ...(entries.length > 0
       ? [
-          isManager
-            ? "Podepisujete v zastoupení za vedoucího odboru:"
-            : "Podepisujete v zastoupení za:",
-          `Zastupujete za: ${behalfName}`,
-          `Funkce: ${behalfPosition || "—"}`,
-          `Odbor/oddělení: ${behalfDepartment || "—"}`,
+          entries.length > 1
+            ? "Podepisujete v zastoupení za více osob/rolí:"
+            : isManager
+              ? "Podepisujete v zastoupení za vedoucího odboru:"
+              : "Podepisujete v zastoupení za:",
+          ...entries.flatMap((entry) => [
+            `Zastupujete za: ${entry.name}`,
+            `Funkce: ${entry.position || "—"}`,
+            `Odbor/oddělení: ${entry.department || "—"}`,
+          ]),
           "",
         ]
       : []),
@@ -2630,7 +2672,7 @@ export async function sendExitChecklistSignatureReminderEmail({
             roleNote ??
               `Ještě zbývá podepsat tento výstupní list – zkontrolujte, že má zaměstnanec vše fyzicky vyřízeno a odevzdáno, a podepište.`,
           ]),
-    ...(behalfName
+    ...(entries.length > 0
       ? [
           "Poznámka:",
           `Podpis pro tento zástup prosím proveďte výhradně přes tlačítko „Podepsat v zastoupení" v aplikaci, nejedná se o podpis vlastní agendy.`,
@@ -4229,11 +4271,13 @@ export async function sendExitChecklistLockedIncompleteHrEmail(args: {
   employmentEndDate?: string | Date | null
   checklistLink?: string | null
   pendingSigners?: ExitChecklistPendingSigner[] | null
+  unresolvedItems?: string[] | null
 }): Promise<void> {
   const recipients = normalizeEmailList(args.to)
   const pendingSigners = (args.pendingSigners ?? []).filter(
     (signer) => signer && signer.name
   )
+  const unresolvedItems = (args.unresolvedItems ?? []).filter(Boolean)
 
   if (!recipients.length) return
 
@@ -4306,6 +4350,16 @@ export async function sendExitChecklistLockedIncompleteHrEmail(args: {
                   ${pendingSigners.length > 0 ? renderPendingSignersHtml(pendingSigners) : ""}
 
                   ${
+                    unresolvedItems.length > 0
+                      ? renderAgendaItemsBoxHtml(
+                          "Nesplněná agenda (odpověď „Ne“):",
+                          unresolvedItems,
+                          bgLight
+                        )
+                      : ""
+                  }
+
+                  ${
                     checklistLink
                       ? wrapWithBottomSpacing(
                           `
@@ -4353,6 +4407,12 @@ export async function sendExitChecklistLockedIncompleteHrEmail(args: {
     "",
     ...renderPendingSignersText(pendingSigners),
     "",
+    ...(unresolvedItems.length > 0
+      ? agendaItemsTextLines(
+          "Nesplněná agenda (odpověď „Ne“):",
+          unresolvedItems
+        )
+      : []),
     checklistLink ? `Odkaz: ${checklistLink}` : "",
     "",
     ...renderHrContactsText(),
@@ -7606,7 +7666,8 @@ type SendExitChecklistCompletedToEmployeeEmailParams = {
   employeePosition?: string | null
   employeeDepartment?: string | null
   employmentEndDate?: string | Date | null
-  unresolvedItems?: ExitChecklistUnresolvedItem[]
+  pdfBuffer?: Buffer | null
+  pdfFilename?: string | null
 }
 
 export async function sendExitChecklistCompletedToEmployeeEmail({
@@ -7615,12 +7676,12 @@ export async function sendExitChecklistCompletedToEmployeeEmail({
   employeePosition,
   employeeDepartment,
   employmentEndDate,
-  unresolvedItems = [],
+  pdfBuffer,
+  pdfFilename,
 }: SendExitChecklistCompletedToEmployeeEmailParams): Promise<void> {
   const primary = "#00847C"
   const bgLight = "#E5F5F2"
   const subject = "Váš výstupní list je podepsán"
-  const hasUnresolved = unresolvedItems.length > 0
 
   const html = `
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
@@ -7675,25 +7736,6 @@ export async function sendExitChecklistCompletedToEmployeeEmail({
                     employeeDepartment,
                     employmentEndDate,
                   })}
-
-                  ${
-                    hasUnresolved
-                      ? `<table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 18px 0;">
-                      <tr>
-                        <td bgcolor="#FEE2E2" style="padding:12px 16px;border:1px solid #FCA5A5;border-radius:8px;font-size:13px;color:#7F1D1D;line-height:1.5;">
-                          U některých položek jste zvolili odpověď
-                          <strong>„Ne“</strong> – zkontrolujte prosím níže
-                          uvedené sekce, zda jsou skutečně vyřízené. Pokud ne,
-                          mohlo by to ovlivnit předání zápočtového listu;
-                          domluvte se na dalším postupu s Personálním
-                          oddělením.
-                        </td>
-                      </tr>
-                    </table>`
-                      : ""
-                  }
-
-                  ${renderExitChecklistUnresolvedAlertHtml(unresolvedItems)}
                 </td>
               </tr>
 
@@ -7715,17 +7757,27 @@ export async function sendExitChecklistCompletedToEmployeeEmail({
     `Odbor: ${employeeDepartment || "—"}`,
     `Datum odchodu: ${fmtDate(employmentEndDate)}`,
     "",
-    hasUnresolved
-      ? 'U některých položek jste zvolili odpověď "Ne" – zkontrolujte prosím níže uvedené sekce, zda jsou skutečně vyřízené. Pokud ne, mohlo by to ovlivnit předání zápočtového listu; domluvte se na dalším postupu s Personálním oddělením.'
-      : "",
-    "",
-    ...renderExitChecklistUnresolvedAlertText(unresolvedItems),
     ...renderHrContactsText(),
   ]
     .filter(Boolean)
     .join("\n")
 
-  await sendMail({ to: [to], subject, html, text })
+  await sendMail({
+    to: [to],
+    subject,
+    html,
+    text,
+    attachments:
+      pdfBuffer && pdfFilename
+        ? [
+            {
+              filename: pdfFilename,
+              content: pdfBuffer,
+              contentType: "application/pdf",
+            },
+          ]
+        : undefined,
+  })
 }
 
 type SendExitChecklistPdfEmailParams = {
@@ -7870,6 +7922,12 @@ type SendBehalfSignatureEmailParams = {
   signUrl: string
   obligations?: string[]
   removed?: boolean
+  additionalBehalfEntries?: {
+    name: string
+    position?: string | null
+    department?: string | null
+    obligations?: string[]
+  }[]
 }
 
 export async function sendBehalfSignatureEmail({
@@ -7887,6 +7945,7 @@ export async function sendBehalfSignatureEmail({
   signUrl,
   obligations,
   removed = false,
+  additionalBehalfEntries,
 }: SendBehalfSignatureEmailParams): Promise<void> {
   const primary = "#00847C"
   const bgLight = "#E5F5F2"
@@ -7963,7 +8022,10 @@ export async function sendBehalfSignatureEmail({
                     ? roleNote === EXIT_CHECKLIST_MANAGER_ROLE_NOTE
                       ? "Váš zástup za níže uvedeného vedoucího odboru byl zrušen:"
                       : "Váš zástup za níže uvedeného zaměstnance je zrušen:"
-                    : "Byli jste pozváni k podpisu v zástupu za:"
+                    : additionalBehalfEntries &&
+                        additionalBehalfEntries.length > 0
+                      ? "Byli jste pozváni k podpisu v zástupu za více osob/rolí:"
+                      : "Byli jste pozváni k podpisu v zástupu za:"
                 }
               </p>
 
@@ -7987,6 +8049,39 @@ export async function sendBehalfSignatureEmail({
                 </div>
                 `,
                     })
+                  : ""
+              }
+
+              ${
+                !removed &&
+                additionalBehalfEntries &&
+                additionalBehalfEntries.length > 0
+                  ? additionalBehalfEntries
+                      .map(
+                        (entry) => `
+              ${renderBehalfPersonTableHtml({
+                nameLabel: "Zastupujete za",
+                name: entry.name,
+                position: entry.position,
+                department: entry.department,
+              })}
+              ${
+                entry.obligations && entry.obligations.length > 0
+                  ? renderInfoBubbleHtml({
+                      bgLight,
+                      title:
+                        "Agenda, kterou máte v zastoupení ověřit a podepsat",
+                      bodyHtml: `
+                <div style="font-size:13px;color:#374151;line-height:1.6;">
+                  ${entry.obligations.map((item) => `• ${escapeHtml(item)}`).join("<br/>")}
+                </div>
+                `,
+                    })
+                  : ""
+              }
+              `
+                      )
+                      .join("")
                   : ""
               }
 
@@ -8059,7 +8154,9 @@ export async function sendBehalfSignatureEmail({
       ? roleNote === EXIT_CHECKLIST_MANAGER_ROLE_NOTE
         ? "Váš zástup za níže uvedeného vedoucího odboru byl zrušen:"
         : "Váš zástup za níže uvedeného zaměstnance je zrušen:"
-      : "Byli jste pozváni k podpisu v zástupu za:",
+      : additionalBehalfEntries && additionalBehalfEntries.length > 0
+        ? "Byli jste pozváni k podpisu v zástupu za více osob/rolí:"
+        : "Byli jste pozváni k podpisu v zástupu za:",
     `Zastupujete za: ${behalfDisplayName}`,
     `Funkce: ${behalfOfPosition || "—"}`,
     `Odbor/oddělení: ${behalfOfDepartment || "—"}`,
@@ -8071,6 +8168,22 @@ export async function sendBehalfSignatureEmail({
             : "Agenda, kterou máte v zastoupení ověřit a podepsat:",
           ...obligationsList.map((item) => `- ${item}`),
         ]
+      : []),
+    ...(!removed &&
+    additionalBehalfEntries &&
+    additionalBehalfEntries.length > 0
+      ? additionalBehalfEntries.flatMap((entry) => [
+          "",
+          `Zastupujete za: ${entry.name}`,
+          `Funkce: ${entry.position || "—"}`,
+          `Odbor/oddělení: ${entry.department || "—"}`,
+          ...(entry.obligations && entry.obligations.length > 0
+            ? [
+                "Agenda, kterou máte v zastoupení ověřit a podepsat:",
+                ...entry.obligations.map((item) => `- ${item}`),
+              ]
+            : []),
+        ])
       : []),
     "",
     ...(removed

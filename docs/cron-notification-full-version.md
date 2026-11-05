@@ -179,10 +179,22 @@ v okamžicích **14, 7, 5, 3, 2, 1 a 0 dní** před plánovaným koncem:
 - příjemci s `revokedAt` (odebraní/zrušení – viz kapitola 11.6) se
   **přeskakují úplně**, žádná připomínka jim nechodí, dokud nejsou
   vráceni zpět,
-- stejný e-mail může být ve skupině ve dvou nezávislých rolích zároveň
-  (přímo za sebe a k tomu v zastoupení za jinou osobu/odbor) – cron je
-  vyhodnocuje **odděleně** (podle dvojice e-mail + role v zastoupení),
-  takže vyřízení jedné role stejného člověka neovlivní tu druhou,
+- stejný e-mail může být ve skupině přiřazený k více různým agendovým
+  řádkům/rolím zároveň (přímo za sebe, ve více rolích, i k tomu
+  v zastoupení za jinou osobu/odbor) – cron teď (od verze 0.17.0)
+  u každého e-mailu **sečte nepodepsanou agendu ze všech jeho rolí do
+  jedné připomínky**, místo aby posílal samostatnou připomínku za
+  každou roli zvlášť. Co je u dané role už podepsané, se do součtu
+  nezahrne (`resolveExitChecklistPendingItems` filtruje po jednotlivých
+  položkách, ne jen podle role jako celku) – pokud člověk ještě
+  nepodepsal nic, přijde mu jeden e-mail se vším najednou; jakmile část
+  podepíše, další připomínka obsahuje jen to, co zbývá. Teprve když jsou
+  podepsané úplně všechny role daného e-mailu, přestane mu připomínka
+  chodit. Dřívější dedup "už byla odeslána připomínka" se posuzoval podle
+  dvojice e-mail + role v zastoupení, takže při dvou rolích se stejným
+  e-mailem (běžná role + ne jen zastoupení) mohlo dojít k tomu, že druhá
+  role žádnou vlastní připomínku nikdy nedostala – teď se posuzuje jen
+  podle e-mailu, což tuto mezeru odstraňuje,
 - u každého člověka ze skupiny zjistí, jestli má ještě co podepsat a
   jakou roli u toho zastává (`resolveSignatureRecipientStatus`):
   zastoupení za vedoucího se posuzuje úplně stejně jako vedoucí sám
@@ -808,12 +820,19 @@ Oba typy vytváří `offboarding-notifications` a zpracovává je stejný
 - `NOTICE_WARNING` – souhrnná připomínka pro HR. Payload obsahuje
   mimo jiné `recipients`, `employeeName`, `daysBeforeEnd`,
   `checklistLink`, `subject` a `intro`.
-- `EXIT_SIGNATURE_INVITE` – cílená připomínka konkrétnímu člověku
-  (zaměstnanci nebo vedoucímu), který ještě nepodepsal. Payload
-  obsahuje `to`, `employeeName`, `employeePosition`,
-  `employeeDepartment`, `employmentEndDate` a `signUrl` – zpracovává
-  se stejnou funkcí jako ruční pozvánka k podpisu
-  (`sendSignatureInviteEmail`), jen ho místo HR založí cron.
+- `EXIT_SIGNATURE_INVITE` – cílená připomínka na daný e-mail (ten
+  může zastupovat zaměstnance, vedoucího, zástupce i běžného
+  podepisujícího), který ještě nepodepsal vše, co mu bylo přiřazeno.
+  Payload obsahuje mimo jiné `to`, `employeeName`, `employeePosition`,
+  `employeeDepartment`, `employmentEndDate`, `signUrl`,
+  `daysBeforeEnd`, `reminderRole`, `roleNote`, `pendingItems`
+  (sečtená agenda ze všech rolí daného e-mailu, viz kapitola 2.2 bod B)
+  a `behalfEntries` (pole všech zastupovaných osob, pokud jde o
+  zástup) – zpracovává ho vlastní krátká šablona
+  `sendExitChecklistSignatureReminderEmail` (od verze 0.17.0), odlišná
+  od bohatší ruční pozvánky `sendSignatureInviteEmail`/
+  `sendBehalfSignatureEmail`, kterou založí HR tlačítkem "Odeslat
+  k podpisu" (viz kapitola 11.6).
 
 Finální PDF vyplněného formuláře se neposílá přes běžnou frontu. Viz další kapitola.
 
@@ -1007,6 +1026,21 @@ nemažou, jen do ní doplňují. U "v zastoupení" se navíc uloží konkrétní
 řádky výstupního listu (`rowKeys`), za které daný člověk podepisuje, a
 popisek, za koho podepisuje (`behalfLabel`).
 
+**Sečtení agendy podle e-mailu platí i pro úplně první pozvánku, ne jen
+pro cronové připomínky (od verze 0.17.0).** `POST .../exit-checklist/
+invite` si před odesláním e-mailu samo dohledá VŠECHNY aktivní karty se
+stejným e-mailem v `header.signatureRecipients` (i ty, co se do skupiny
+přidávají ve stejném odeslání) a sečte jejich agendu – stejný princip
+jako cron (kapitola 2.2 bod B). Pokud má e-mail přiřazenou přímou roli
+(ne zástup), je to "vlastní" agenda pozvánky (`sendSignatureInviteEmail`,
+`pendingItems`); každá zástupná role (`behalfLabel`) se počítá a
+zobrazuje zvlášť pod `alsoActingOnBehalfOf` (pole, ne jen jedna položka) –
+typicky situace "jeden zástup kryje víc různých lidí zároveň". Pokud e-mail
+nemá žádnou přímou roli, jen jednu nebo víc zástupných, odesílá se
+`sendBehalfSignatureEmail` s první z nich jako hlavní a zbytkem jako
+`additionalBehalfEntries`. V obou případech appka pošle jen JEDEN e-mail
+na daný e-mail za celé odeslání, ne jednu pozvánku po kartě/roli.
+
 **"Osoby k podpisu"** (`SignatureRecipientsDialog`,
 `/odchody/[id]/vystupni-list`, dřív "Příjemci k podpisu") – samostatné
 okno jen pro správu už uložené skupiny, mimo tok "odeslat všem znovu".
@@ -1026,12 +1060,26 @@ pozvánka se neposílá**. Odebrání kandidáta z výchozího návrhu, kterému
 ještě nikdy nic nebylo odesláno, se naopak z pole prostě smaže (nemá co
 zrušit).
 
-**Identita v poli je e-mail + role v zastoupení, ne jen e-mail.**
-Stejný člověk (stejný e-mail) může být ve skupině ve dvou nezávislých
-rolích zároveň – jednou přímo za sebe, jednou (nebo víckrát) v
-zastoupení za jinou osobu/odbor (`behalfLabel`). Přidání, odebrání,
-vrácení i cílené připomínky rozlišují každou roli zvlášť podle dvojice
-e-mail + `behalfLabel`, takže zásah do jedné role neovlivní tu druhou.
+**Identita karty v poli je od verze 0.17.0 vlastní `id`, ne e-mail.**
+Dřív appka rozlišovala karty jen podle dvojice e-mail + `behalfLabel` –
+pokud dvě různé karty (různé agendové řádky) skončily se stejným
+e-mailem, appka je při uložení/úpravě tiše sloučila do jednoho záznamu a
+ztratila se tak agenda/jméno jedné z nich. Teď má každá karta svoje
+vlastní, na e-mailu nezávislé `id` (přidělí se automaticky při vytvoření
+karty, starší karty bez `id` ho dostanou při nejbližším dalším uložení,
+`mergeSignatureRecipients`). Úprava jedné karty (včetně e-mailu) se podle
+tohoto `id` vztahuje jen na ni, ostatní karty zůstanou beze změny, i
+kdyby teď měly stejný e-mail. Odeslání/znovu-odeslání pozvánky posílá
+`id` karty na server, aby se našla a upravila přesně ta správná karta
+(zachová si svoje `rowKeys`/pozici/odbor).
+
+E-mail dál slouží jen k: (a) kontrole, kdo smí podepisovat / mít přístup
+(viz níže) – tam jde stále jen o e-mail bez ohledu na `id`, a (b) sečtení
+agendy do jedné pozvánky/připomínky (viz kapitola 2.2 bod B a výše) –
+obojí beze změny funguje přes e-mail, ne přes `id`. Role v zastoupení
+(`behalfLabel`) zůstává samostatná karta s vlastním `id` i nadále –
+zástup a originál jsou a budou dvě oddělené karty, přidání/odebrání/
+vrácení se jich dál dotýká nezávisle na sobě.
 
 **Přístup k podpisu (a ve veřejné verzi i k samotnému zobrazení) je
 vázaný na tuto skupinu.** Kdo je v ní aktivně (bez `revokedAt`), smí ve

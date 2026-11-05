@@ -22,7 +22,10 @@ import type {
 import { EXIT_CHECKLIST_ROWS } from "@/config/exit-checklist-rows"
 
 import { prisma } from "@/lib/db"
-import { recipientIdentityKey } from "@/lib/exit-checklist-recipient-key"
+import {
+  entryIdentityKey,
+  generateRecipientId,
+} from "@/lib/exit-checklist-recipient-key"
 import { resolveSupervisorFromPositionNum } from "@/lib/systemizace-superior"
 
 export type ChecklistWithRelations = Prisma.ExitChecklistGetPayload<{
@@ -941,6 +944,7 @@ export function sanitizeSignatureRecipientsForResponse(
       return Boolean(item) && typeof item === "object"
     })
     .map((item) => {
+      const id = sanitizeNullableText(item.id)
       const rowKeys = sanitizeRowKeys(item.rowKeys)
       const behalfLabel = sanitizeNullableText(item.behalfLabel)
       const invitedAt = sanitizeNullableText(item.invitedAt)
@@ -950,6 +954,7 @@ export function sanitizeSignatureRecipientsForResponse(
       const department = sanitizeNullableText(item.department)
 
       return {
+        ...(id ? { id } : {}),
         name: sanitizeText(item.name),
         email: normalizeEmail(item.email),
         ...(rowKeys ? { rowKeys } : {}),
@@ -1058,14 +1063,31 @@ export function mergeSignatureRecipients(
   const byKey = new Map<string, ExitChecklistSignatureRecipient>()
 
   for (const recipient of sanitizeSignatureRecipientsForResponse(existing)) {
-    byKey.set(recipientIdentityKey(recipient), recipient)
+    byKey.set(entryIdentityKey(recipient), recipient)
   }
 
   for (const recipient of sanitizeSignatureRecipientsForResponse(additions)) {
-    byKey.set(recipientIdentityKey(recipient), recipient)
+    const key = entryIdentityKey(recipient)
+    const previous = byKey.get(key)
+
+    byKey.set(
+      key,
+      previous
+        ? {
+            ...previous,
+            ...recipient,
+            id: recipient.id ?? previous.id,
+            rowKeys: recipient.rowKeys ?? previous.rowKeys,
+            position: recipient.position ?? previous.position,
+            department: recipient.department ?? previous.department,
+          }
+        : recipient
+    )
   }
 
-  return Array.from(byKey.values())
+  return Array.from(byKey.values()).map((recipient) =>
+    recipient.id ? recipient : { ...recipient, id: generateRecipientId() }
+  )
 }
 
 export function resolveExitChecklistPendingItems(args: {

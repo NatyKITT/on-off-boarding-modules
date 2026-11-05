@@ -4,6 +4,7 @@ import {
   Prisma,
   type ExitChecklistAsset as ExitChecklistAssetModel,
 } from "@prisma/client"
+import { format } from "date-fns"
 
 import type {
   ExitAssetItem,
@@ -1192,6 +1193,24 @@ export async function PUT(
           })
           .filter((recipient) => !recipient.hasSigned)
 
+        const unresolvedItems = data.items
+          .filter((item) => item.resolved === "NO")
+          .map((item) => {
+            const who = item.signedByName
+              ? `${item.signedByName}${
+                  item.signedAt
+                    ? ` · ${format(new Date(item.signedAt), "d.M.yyyy HH:mm")}`
+                    : ""
+                }`
+              : "nepodepsáno"
+            const noteSuffix = item.note ? ` — poznámka: ${item.note}` : ""
+            const additionalNoteSuffix = item.additionalNote
+              ? ` — dodatečně vyřízeno: ${item.additionalNote}`
+              : ""
+
+            return `${item.obligation} (${item.organization}) · ${who}${noteSuffix}${additionalNoteSuffix}`
+          })
+
         if (hrRecipients.length > 0 && pendingSigners.length > 0) {
           const baseUrl = getAppBaseUrl()
 
@@ -1209,6 +1228,7 @@ export async function PUT(
               ? `${baseUrl}/odchody/${offboardingId}/vystupni-list`
               : null,
             pendingSigners,
+            unresolvedItems,
           })
         }
       } catch (error) {
@@ -1337,6 +1357,10 @@ export async function PUT(
             updatedChecklist.offboarding.plannedEnd ??
             data.employmentEndDate
 
+          const completionPdfFilename = pdfBuffer
+            ? `Vystupni-list-${sanitizeExitChecklistFilename(data.employeeName || String(offboardingId))}.pdf`
+            : null
+
           if (employeeEmail) {
             try {
               await sendExitChecklistCompletedToEmployeeEmail({
@@ -1345,7 +1369,8 @@ export async function PUT(
                 employeePosition: completionEmployeePosition,
                 employeeDepartment: completionEmployeeDepartment,
                 employmentEndDate: completionEmploymentEndDate,
-                unresolvedItems: completionUnresolvedItems,
+                pdfBuffer,
+                pdfFilename: completionPdfFilename,
               })
               employeeNotified = true
             } catch (employeeEmailError) {
@@ -1365,9 +1390,7 @@ export async function PUT(
             completedByName: user.name ?? user.email ?? null,
             checklistUrl: `${baseUrl}/odchody/${offboardingId}/vystupni-list`,
             pdfBuffer,
-            pdfFilename: pdfBuffer
-              ? `Vystupni-list-${sanitizeExitChecklistFilename(data.employeeName || String(offboardingId))}.pdf`
-              : null,
+            pdfFilename: completionPdfFilename,
             unresolvedItems: completionUnresolvedItems,
             employeeNotified,
           })

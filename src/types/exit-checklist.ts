@@ -178,6 +178,7 @@ export interface ExitChecklistData {
 }
 
 export interface ExitChecklistSignatureRecipient {
+  id?: string
   name: string
   email: string
   rowKeys?: string[]

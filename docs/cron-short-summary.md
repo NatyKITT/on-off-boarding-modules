@@ -19,7 +19,7 @@ Základní tok:
 
 Oba kontrolní crony (`probation-notifications`, `offboarding-notifications`) běží jen jednou denně v 8:00 pražského času – viz kapitola 8.
 
-Při potvrzení skutečného nástupu/odchodu (se zamčením nedokončených dokumentů/výstupního listu) nebo při zrušení záznamu appka nově zároveň zruší všechny dosud nerozeslané připomínkové úlohy v `MailQueue` pro ten záznam, ať po dokončení/zrušení nechodí zbytečné upomínky. Opravena i chyba, kdy se e-maily typu `SYSTEM_NOTIFICATION` do fronty zařazovaly, ale mail worker je nikdy nezpracoval – po nasazení zkontrolovat, jestli ve frontě nezůstaly starší zaseknuté úlohy tohoto typu. Podrobnosti k výstupnímu listu (sekce A „Ne", dodatečně vyřízeno, sloučení agendy u stejné osoby, nová notifikace o dílčí změně agendy) jsou v `docs/cron-notification-full-version.md`, kapitoly 11.5–11.6.
+Při potvrzení skutečného nástupu/odchodu (se zamčením nedokončených dokumentů/výstupního listu) nebo při zrušení záznamu appka nově zároveň zruší všechny dosud nerozeslané připomínkové úlohy v `MailQueue` pro ten záznam, ať po dokončení/zrušení nechodí zbytečné upomínky. Opravena i chyba, kdy se e-maily typu `SYSTEM_NOTIFICATION` do fronty zařazovaly, ale mail worker je nikdy nezpracoval – po nasazení zkontrolovat, jestli ve frontě nezůstaly starší zaseknuté úlohy tohoto typu. Podrobnosti k výstupnímu listu (sekce A „Ne", dodatečně vyřízeno, nová notifikace o dílčí změně agendy, vlastní `id` karty příjemce místo identity podle e-mailu, cílené připomínky i úplně první pozvánka sečtené podle e-mailu – stejný princip pro obojí) jsou v `docs/cron-notification-full-version.md`, kapitoly 11.5–11.6.
 
 ## 2. Hlavní endpointy
 

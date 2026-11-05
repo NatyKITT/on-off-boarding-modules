@@ -9,7 +9,7 @@ import {
   sendBehalfSignatureEmail,
   sendSignatureAccessRestoredEmail,
   sendSignatureAccessRevokedEmail,
-  sendSignatureAgendaChangedEmail,
+  sendSignatureInviteEmail,
   sendSignatureSubstituteNoticeEmail,
 } from "@/lib/email"
 import {
@@ -480,24 +480,50 @@ export async function POST(
       }
     }
 
-    for (const change of agendaChanges) {
-      try {
-        await sendSignatureAgendaChangedEmail({
-          to: change.recipient.email,
-          employeeName,
-          employeePosition: offboarding.positionName,
-          employeeDepartment: offboarding.department,
-          employmentEndDate,
-          addedLabels: change.addedLabels,
-          removedLabels: change.removedLabels,
-          remainingLabels: change.remainingLabels,
-          signUrl,
-        })
-      } catch (error) {
-        console.error(
-          "[SIGNATURE-RECIPIENTS] E-mail o změně agendy se nepodařilo odeslat:",
-          error
-        )
+    if (signUrl) {
+      for (const change of agendaChanges) {
+        try {
+          const recipient = change.recipient
+          const { roleNote, pendingItems } = data
+            ? resolveSignatureRecipientStatus(
+                data,
+                checklistResult?.off.userEmail ?? null,
+                recipient
+              )
+            : { roleNote: null, pendingItems: [] }
+
+          if (recipient.behalfLabel) {
+            await sendBehalfSignatureEmail({
+              to: recipient.email,
+              behalfOfName: recipient.behalfLabel,
+              behalfOfRole: "",
+              roleNote,
+              employeeName,
+              employeePosition: offboarding.positionName ?? "",
+              employeeDepartment: offboarding.department ?? "",
+              employmentEndDate: employmentEndDate ?? "",
+              signUrl,
+              obligations: pendingItems,
+              removed: false,
+            })
+          } else {
+            await sendSignatureInviteEmail({
+              to: recipient.email,
+              employeeName,
+              employeePosition: offboarding.positionName,
+              employeeDepartment: offboarding.department,
+              employmentEndDate,
+              signUrl,
+              roleNote,
+              pendingItems,
+            })
+          }
+        } catch (error) {
+          console.error(
+            "[SIGNATURE-RECIPIENTS] E-mail o změně agendy se nepodařilo odeslat:",
+            error
+          )
+        }
       }
     }
 

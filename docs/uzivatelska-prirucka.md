@@ -552,12 +552,21 @@ READONLY nebo admin, bez ohledu na to, jestli jsou v seznamu.
    další lidi, takže automatizace i vyhodnocení „už podepsáno" počítají
    se všemi, komu bylo kdy odesláno, ať už kterýmkoli způsobem.
 
-Jedna a tatáž osoba (stejný e-mail) může být v seznamu ve dvou různých
-rolích zároveň – jednou přímo za sebe a případně ještě jednou (nebo
-víckrát) v zastoupení za jinou odpovědnou osobu/odbor. Aplikace tyto
-role eviduje a vyhodnocuje nezávisle na sobě – zrušení jedné role
-neovlivní tu druhou a za každé jiné zastoupení chodí samostatný e-mail,
-i když jde o stejnou osobu.
+Jedna a tatáž osoba (stejný e-mail) může být v seznamu u libovolného
+počtu různých agend/rolí zároveň – jednou přímo za sebe a případně ještě
+jednou (nebo víckrát) v zastoupení za jinou odpovědnou osobu/odbor.
+Každá taková karta (agendový řádek) je v appce vedená samostatně a
+nezávisle na ostatních – úprava jména nebo e-mailu u jedné karty se
+nikdy nepropíše na jinou kartu, i kdyby po úpravě měly stejný e-mail.
+E-mail slouží jen k tomu, aby appka po přihlášení poznala, jakou
+veškerou agendu má dotyčný na starosti (sečte ji ze všech jeho karet),
+a aby mu jak úplně první pozvánka k podpisu, tak i cílené cronové
+připomínky chodily jedna souhrnná (se vším přiřazeným/nepodepsaným
+najednou), ne jedna po druhé za každou kartu zvlášť. Platí to i v
+případě, kdy jeden zástup kryje víc různých lidí zároveň a sám nemá
+žádnou vlastní přímou roli. Zrušení jedné role/karty neovlivní ty
+ostatní a za každé jiné zastoupení chodí samostatný e-mail, i když jde
+o stejnou osobu.
 
 Odcházející zaměstnanec dostává na svůj podpis **jinou verzi e-mailu**
 než ostatní signatáři – informuje ho, že jeho odchod byl zaevidován a má
@@ -579,14 +588,17 @@ podle role v appce):
   informaci, kdo co podepsal, vidí stejně jako interní uživatelé.
 - **Vedoucí odboru** – smí podepsat svůj podpis v hlavičce, řádek
   „předávací protokol" v sekci A a vyplnit/podepsat sekci C (jsou to tři
-  samostatné podpisy, viz níže) a má přístup do sekce A i B jako kterýkoli
+  samostatné podpisy, viz níže) a má přístup do sekce A jako kterýkoli
   jiný podepisující, ale nesmí podepsat ani upravit řádek zaměstnance
-  v hlavičce.
+  v hlavičce. Řádek „předávací protokol" je vyhrazený výhradně jemu
+  (nebo jeho zástupu) – na rozdíl od ostatních řádků sekce A ho nesmí
+  podepsat (ani s upozorněním) nikdo jiný.
 - **Ostatní podepisující** (bez role vedoucí/zaměstnanec) – nesmí na
   hlavičkové podpisy zaměstnance ani vedoucího, ani na sekci C (tu smí
-  vyplnit a podepsat jen vedoucí); mají přístup jen do sekce A, případně
-  B (tu obvykle vyplňuje konfigurovaná odpovědná osoba za sekci B, ale
-  přístup mají všichni podepisující).
+  vyplnit a podepsat jen vedoucí nebo jeho zástup); mají přístup do
+  sekce A. Sekci B smí vyplnit a podepsat jen konfigurovaná odpovědná
+  osoba za sekci B, vedoucí odboru nebo jeho zástup – ostatní ji vidí,
+  ale needitovatelnou.
 - **Konkrétní funkční signatáři** (SNEO, spisová služba, mzdová
   účtárna, Personální oddělení, KITT6, Právní odbor...) i lidé přidaní
   „v zastoupení" za takovou osobu mají v sekci A přiřazený svůj
@@ -602,6 +614,19 @@ podle role v appce):
   změnit. V interní appce to navíc smí ADMIN/HR/IT (přepsat/zrušit cizí
   podpis), ve veřejné verzi vždy jen ten, kdo podepsal.
 
+**Zvýraznění vlastní agendy.** Vlastní řádky v sekci A (a vlastní pole
+v hlavičce – podpis vedoucího, podpis za sekci B) appka barevně
+odlišuje odznakem: zelený odznak **„Vaše agenda" / „Vaše pole"**, pokud
+je agenda přiřazená přímo, fialový odznak **„V zastoupení za {jméno}" /
+„Zástup – vaše pole"**, pokud ji vyřizujete jen jako zástup za někoho
+jiného. Pokud máte v sekci A přiřazeno víc než jeden řádek, nad tabulkou
+se zobrazí souhrnná lišta s počtem podepsaných/nepodepsaných a tlačítky
+**„Podepsat všechny své řádky"**, **„Podepsat všechny v zastoupení"**
+a **„Zrušit podpis všech"**, místo podepisování po jednom. Sloupec
+„Akce" v tabulce sekce A zůstává vždy celý viditelný i při horizontálním
+posunu tabulky (např. kvůli rozbalenému postrannímu panelu na menší
+obrazovce).
+
 **Odpověď „Ne" v sekci A vyžaduje poznámku.** Bez vyplněné poznámky
 nejde takový řádek podepsat (ani v zastoupení) – appka tlačítko
 „Podepsat" needitovatelné s vysvětlujícím tooltipem. Poznámka je
@@ -610,12 +635,14 @@ zvýrazní jemně červeně (oranžově, pokud k ní existuje i dodatečná
 poznámka, viz níže). Nahoře ve výstupním listu (interně i veřejně) se
 navíc zobrazí červený přehled všech aktuálně nesplněných položek – kdo
 a kdy to podepsal a s jakou poznámkou. Při 100% dokončení se tento
-přehled posílá i v obou závěrečných e-mailech (Personálnímu oddělení i
-odcházejícímu zaměstnanci); e-mail zaměstnanci navíc žádá o
-zkontrolování, že to bylo skutečně vyřízeno, s upozorněním na možný
-dopad na předání zápočtového listu. Nesplněná agenda se do 100 %
-dokončení počítá stejně jako splněná (appka jen upozorní, nic
-neblokuje).
+přehled posílá v závěrečném e-mailu Personálnímu oddělení (s přílohou
+PDF výstupního listu) i při pozdějším zamčení nekompletního listu.
+**Odcházející zaměstnanec v e-mailu o dokončení nesplněnou agendu ani
+zmínku o možném dopadu na zápočtový list nevidí** – jeho e-mail má
+vždy stejný, neutrální text (že je výstupní list podepsán a má se
+dostavit na Personální oddělení), nově s přiloženým PDF výstupního
+listu. Nesplněná agenda se do 100 % dokončení počítá stejně jako
+splněná (appka jen upozorní, nic neblokuje).
 
 **„Dodatečně vyřízeno"** – k už podepsané položce s odpovědí „Ne" (i
 po úplném dokončení a zamčení výstupního listu, v appce i ve veřejné
@@ -624,11 +651,15 @@ vyřešeno jinak jinou cestou, bez nutnosti znovu odemykat celý
 dokument. Uloží se hned, samostatným tlačítkem u dané položky, a
 zobrazí se oranžově jako odlišení od původní červené poznámky u „Ne".
 
-Automatické připomínky k podpisu sledují u každého člověka všechny
-řádky, které má na starosti – pokud má někdo na starosti víc řádků
-(někteří funkční signatáři mají i 3), chodí mu připomínka, dokud nejsou
-podepsané úplně všechny, ne jen jeden z nich; totéž platí pro
-zastupujícího, pokud zastupuje za takovou osobu.
+Jak úplně první pozvánka k podpisu, tak i automatické cronové
+připomínky sledují u každého e-mailu veškerou agendu ze všech jeho
+rolí/karet (i když je jich na daný e-mail přiřazeno víc, klidně pod
+různými jmény) a sečtou ji do **jedné** zprávy – ne jedné zprávy po
+druhé za každou roli. U připomínek platí navíc, že co už bylo
+podepsané, se do ní nezahrne; dokud není podepsané úplně všechno,
+připomínka chodí dál. Totéž platí pro zastupujícího, pokud zastupuje za
+takovou osobu – a to i tehdy, kdy jeden zástup kryje víc různých lidí
+zároveň.
 
 Vedoucí odboru podepisuje na **třech samostatných místech**: nahoře
 v hlavičce („Podpis vedoucího odboru"), u řádku „předávací protokol"
@@ -695,9 +726,9 @@ jako karta vedoucího, sekce B nebo sekce C – tlačítkem „Upravit" se
 odemkne needitovatelná karta, lze změnit jen e-mail (jméno zůstává
 needitovatelné). Dokud okno neuložíte tlačítkem „Odeslat a uložit",
 je změna vidět jen na kartě; po uložení se propíše přímo do záznamu
-odchodu. Stejně funguje i karta vedoucího – pokud při uložení jeho
-karty nevyplníte funkci a odbor, appka se je pokusí sama dohledat
-v EOS podle e-mailu.
+odchodu. Stejně funguje i karta vedoucího – pokud nemá vyplněnou
+funkci a odbor, appka se je pokusí sama dohledat v EOS podle jména
+nebo e-mailu, a to už při otevření okna, nejen při uložení jeho karty.
 
 **Zaškrtávací pole u karet se zobrazují jen na vyžádání** – tlačítky
 **„Vybrat ručně"** (zobrazí prázdné checkboxy u všech karet, zaškrtne
@@ -738,7 +769,10 @@ Odsud jde:
   (jako běžný přímý příjemce) – dostane tak dvojí info: vlastní
   pozvánku i informaci, že ji/ho nyní někdo zastupuje (jméno, pozice a
   odbor zástupce, a že zastupovaná osoba může i tak dál podepsat
-  sama).
+  sama). Zastoupení se vždy zobrazí přímo pod kartou, na které bylo
+  vytvořené – i když má vedoucí odboru, sekce B a sekce C zrovna
+  stejný e-mail (např. sekce C ve výchozím stavu = vedoucí odboru),
+  appka tyto role rozlišuje a zastoupení jedné se neobjeví u druhé.
 - **zrušit zastoupení** u konkrétního zástupce – ten ztratí právo
   podepisovat v zastoupení (zbytek jeho případných rolí se nemění) a
   zastupovaná osoba dostane e-mail se stejnou tabulkou, že její

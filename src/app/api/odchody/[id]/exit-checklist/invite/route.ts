@@ -52,6 +52,22 @@ function getAppBaseUrl(req: NextRequest) {
   ).replace(/\/$/, "")
 }
 
+function cleanStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter(
+        (key): key is string => typeof key === "string" && key.trim() !== ""
+      )
+    : []
+}
+
+type AggEntry = {
+  name: string
+  rowKeys: string[]
+  position: string | null
+  department: string | null
+  id?: string | null
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } }
@@ -88,6 +104,9 @@ export async function POST(
     (body as Record<string, unknown>).inviteeEmail
   ).toLowerCase()
   const inviteeName = cleanText((body as Record<string, unknown>).inviteeName)
+  const recipientId =
+    cleanText((body as Record<string, unknown>).recipientId) || null
+  const rowKeys = cleanStringArray((body as Record<string, unknown>).rowKeys)
   const isBehalf = (body as Record<string, unknown>).isBehalf === true
   const behalfOf = cleanText((body as Record<string, unknown>).behalfOf)
   const behalfOfName = cleanText((body as Record<string, unknown>).behalfOfName)
@@ -102,12 +121,9 @@ export async function POST(
   const behalfOfEmail =
     cleanText((body as Record<string, unknown>).behalfOfEmail).toLowerCase() ||
     null
-  const behalfOfRowKeysRaw = (body as Record<string, unknown>).behalfOfRowKeys
-  const behalfOfRowKeys = Array.isArray(behalfOfRowKeysRaw)
-    ? behalfOfRowKeysRaw.filter(
-        (key): key is string => typeof key === "string" && key.trim() !== ""
-      )
-    : []
+  const behalfOfRowKeys = cleanStringArray(
+    (body as Record<string, unknown>).behalfOfRowKeys
+  )
   const substituteName = cleanText(
     (body as Record<string, unknown>).substituteName
   )
@@ -122,29 +138,28 @@ export async function POST(
 
   const alsoActingOnBehalfOfRaw = (body as Record<string, unknown>)
     .alsoActingOnBehalfOf
-  const alsoActingOnBehalfOf =
-    alsoActingOnBehalfOfRaw &&
-    typeof alsoActingOnBehalfOfRaw === "object" &&
-    !Array.isArray(alsoActingOnBehalfOfRaw)
-      ? (alsoActingOnBehalfOfRaw as Record<string, unknown>)
-      : null
-  const alsoActingOnBehalfOfName = alsoActingOnBehalfOf
-    ? cleanText(alsoActingOnBehalfOf.behalfOfName)
-    : ""
-  const alsoActingOnBehalfOfEmail =
-    cleanText(alsoActingOnBehalfOf?.behalfOfEmail).toLowerCase() || null
-  const alsoActingOnBehalfOfPosition =
-    cleanText(alsoActingOnBehalfOf?.behalfOfPosition) || null
-  const alsoActingOnBehalfOfDepartment =
-    cleanText(alsoActingOnBehalfOf?.behalfOfDepartment) || null
-  const alsoActingOnBehalfOfRowKeysRaw = alsoActingOnBehalfOf?.behalfOfRowKeys
-  const alsoActingOnBehalfOfRowKeys = Array.isArray(
-    alsoActingOnBehalfOfRowKeysRaw
+  const alsoActingOnBehalfOfList = (
+    Array.isArray(alsoActingOnBehalfOfRaw)
+      ? alsoActingOnBehalfOfRaw
+      : alsoActingOnBehalfOfRaw &&
+          typeof alsoActingOnBehalfOfRaw === "object" &&
+          !Array.isArray(alsoActingOnBehalfOfRaw)
+        ? [alsoActingOnBehalfOfRaw]
+        : []
   )
-    ? alsoActingOnBehalfOfRowKeysRaw.filter(
-        (key): key is string => typeof key === "string" && key.trim() !== ""
-      )
-    : []
+    .filter(
+      (entry): entry is Record<string, unknown> =>
+        Boolean(entry) && typeof entry === "object"
+    )
+    .map((entry) => ({
+      id: cleanText(entry.id) || null,
+      behalfOfName: cleanText(entry.behalfOfName),
+      behalfOfDisplayLabel: cleanText(entry.behalfOfDisplayLabel),
+      behalfOfPosition: cleanText(entry.behalfOfPosition) || null,
+      behalfOfDepartment: cleanText(entry.behalfOfDepartment) || null,
+      behalfOfRowKeys: cleanStringArray(entry.behalfOfRowKeys),
+    }))
+    .filter((entry) => entry.behalfOfName || entry.behalfOfDisplayLabel)
 
   if (!inviteeEmail) {
     return NextResponse.json(
@@ -245,6 +260,8 @@ export async function POST(
   const managerEmail = cleanText(header.managerEmail).toLowerCase()
   const sectionBResponsibleHeader = getHeaderObject(header.sectionBResponsible)
   const sectionBEmail = cleanText(sectionBResponsibleHeader.email).toLowerCase()
+  const isManager = Boolean(managerEmail) && inviteeEmail === managerEmail
+  const isSectionB = Boolean(sectionBEmail) && inviteeEmail === sectionBEmail
 
   function resolveKnownSignatoryRowKeys(email: string): string[] {
     const knownSignatory =
@@ -297,32 +314,114 @@ export async function POST(
     })),
   }
 
-  try {
-    if (isBehalf) {
-      const behalfObligations = resolveExitChecklistPendingItems({
-        isEmployee: false,
-        isManager: false,
-        isSectionB: false,
-        rowKeys: behalfOfRowKeys,
-        ...commonPendingArgs,
-      })
+  // Sečtení agendy podle e-mailu: stejný e-mail může dnes (nebo po tomto
+  // volání) pokrývat víc karet v "Seznam a správa osob" – ať pod různými
+  // jmény, nebo ve víc zástupných rolích zároveň. Pozvánka se odesílá
+  // JEDNOU na daný e-mail, s agendou sečtenou ze všech jeho karet, ne jedna
+  // pozvánka po kartě. Stejný princip jako cronové připomínky
+  // (queueExitChecklistSignatureReminders v offboarding-cron-jobs.ts).
+  const existingRecipientsRaw = Array.isArray(header.signatureRecipients)
+    ? (header.signatureRecipients as Array<Record<string, unknown>>)
+    : []
 
-      await sendBehalfSignatureEmail({
-        to: inviteeEmail,
-        behalfOfName: behalfOfName || behalfOf || "zodpovědnou osobu",
-        behalfOfRole,
-        behalfOfDisplayLabel: behalfOfDisplayLabel || behalfOf || undefined,
-        behalfOfPosition,
-        behalfOfDepartment,
-        roleNote: resolveRoleNote(behalfOfEmail),
-        employeeName,
-        employeePosition: offboarding.positionName ?? "",
-        employeeDepartment: offboarding.department ?? "",
-        employmentEndDate,
-        signUrl,
-        obligations: behalfObligations,
-      })
-    } else if (isEmployeeInvite) {
+  const directCandidates: AggEntry[] = []
+  const behalfCandidates: AggEntry[] = []
+
+  if (isBehalf) {
+    behalfCandidates.push({
+      name:
+        behalfOfDisplayLabel || behalfOfName || behalfOf || "zodpovědnou osobu",
+      rowKeys: behalfOfRowKeys,
+      position: behalfOfPosition,
+      department: behalfOfDepartment,
+      id: recipientId,
+    })
+  } else {
+    directCandidates.push({
+      name: inviteeName || inviteeEmail,
+      rowKeys,
+      position: null,
+      department: null,
+      id: recipientId,
+    })
+  }
+  // Další zástupné vazby pro TENTO e-mail, nově přidávané ve stejném
+  // odeslání (ať je hlavní karta přímá, nebo sama zástupná) – typicky jeden
+  // zástup za víc různých lidí najednou.
+  for (const extra of alsoActingOnBehalfOfList) {
+    behalfCandidates.push({
+      name: extra.behalfOfDisplayLabel || extra.behalfOfName,
+      rowKeys: extra.behalfOfRowKeys,
+      position: extra.behalfOfPosition,
+      department: extra.behalfOfDepartment,
+      id: extra.id,
+    })
+  }
+
+  for (const existing of existingRecipientsRaw) {
+    const existingEmail = cleanText(existing.email).toLowerCase()
+    if (existingEmail !== inviteeEmail) continue
+    if (existing.revokedAt) continue
+    if (recipientId && existing.id === recipientId) continue
+
+    const entry: AggEntry = {
+      name: cleanText(existing.name) || existingEmail,
+      rowKeys: cleanStringArray(existing.rowKeys),
+      position: cleanText(existing.position) || null,
+      department: cleanText(existing.department) || null,
+    }
+
+    if (cleanText(existing.behalfLabel)) {
+      behalfCandidates.push(entry)
+    } else {
+      directCandidates.push(entry)
+    }
+  }
+
+  const hasDirect = directCandidates.length > 0
+  const directRowKeysFinal = Array.from(
+    new Set([
+      ...directCandidates.flatMap((entry) => entry.rowKeys),
+      ...resolveKnownSignatoryRowKeys(inviteeEmail),
+    ])
+  )
+
+  const behalfGroups = new Map<
+    string,
+    {
+      name: string
+      rowKeys: Set<string>
+      position: string | null
+      department: string | null
+    }
+  >()
+  for (const entry of behalfCandidates) {
+    const key = entry.name.trim().toLowerCase()
+    if (!key) continue
+    let group = behalfGroups.get(key)
+    if (!group) {
+      group = {
+        name: entry.name,
+        rowKeys: new Set(),
+        position: entry.position,
+        department: entry.department,
+      }
+      behalfGroups.set(key, group)
+    }
+    entry.rowKeys.forEach((rowKey) => group!.rowKeys.add(rowKey))
+    if (!group.position && entry.position) group.position = entry.position
+    if (!group.department && entry.department)
+      group.department = entry.department
+  }
+  const behalfEntries = Array.from(behalfGroups.values()).map((group) => ({
+    name: group.name,
+    rowKeys: Array.from(group.rowKeys),
+    position: group.position,
+    department: group.department,
+  }))
+
+  try {
+    if (isEmployeeInvite) {
       await sendEmployeeExitChecklistInviteEmail({
         to: inviteeEmail,
         employeeName,
@@ -331,7 +430,7 @@ export async function POST(
         employmentEndDate,
         signUrl,
       })
-    } else {
+    } else if (hasDirect) {
       await sendSignatureInviteEmail({
         to: inviteeEmail,
         employeeName,
@@ -342,15 +441,14 @@ export async function POST(
         roleNote: resolveRoleNote(inviteeEmail),
         pendingItems: resolveExitChecklistPendingItems({
           isEmployee: false,
-          isManager: inviteeEmail === managerEmail,
-          isSectionB: inviteeEmail === sectionBEmail,
-          rowKeys: resolveKnownSignatoryRowKeys(inviteeEmail),
+          isManager,
+          isSectionB,
+          rowKeys: directRowKeysFinal,
           ...commonPendingArgs,
         }),
-        headerSubtitle:
-          inviteeEmail === managerEmail
-            ? EXIT_CHECKLIST_MANAGER_HEADER_SUBTITLE
-            : null,
+        headerSubtitle: isManager
+          ? EXIT_CHECKLIST_MANAGER_HEADER_SUBTITLE
+          : null,
         substituteInfo: substituteName
           ? {
               name: substituteName,
@@ -359,21 +457,61 @@ export async function POST(
               department: substituteDepartment,
             }
           : null,
-        alsoActingOnBehalfOf: alsoActingOnBehalfOfName
-          ? {
-              name: alsoActingOnBehalfOfName,
-              email: alsoActingOnBehalfOfEmail,
-              position: alsoActingOnBehalfOfPosition,
-              department: alsoActingOnBehalfOfDepartment,
-              obligations: resolveExitChecklistPendingItems({
-                isEmployee: false,
-                isManager: false,
-                isSectionB: false,
-                rowKeys: alsoActingOnBehalfOfRowKeys,
-                ...commonPendingArgs,
-              }),
-            }
-          : null,
+        alsoActingOnBehalfOf:
+          behalfEntries.length > 0
+            ? behalfEntries.map((entry) => ({
+                name: entry.name,
+                email: null,
+                position: entry.position,
+                department: entry.department,
+                obligations: resolveExitChecklistPendingItems({
+                  isEmployee: false,
+                  isManager: false,
+                  isSectionB: false,
+                  rowKeys: entry.rowKeys,
+                  ...commonPendingArgs,
+                }),
+              }))
+            : null,
+      })
+    } else if (behalfEntries.length > 0) {
+      const [primaryBehalf, ...restBehalf] = behalfEntries
+
+      await sendBehalfSignatureEmail({
+        to: inviteeEmail,
+        behalfOfName: primaryBehalf.name,
+        behalfOfRole,
+        behalfOfDisplayLabel: primaryBehalf.name,
+        behalfOfPosition: primaryBehalf.position,
+        behalfOfDepartment: primaryBehalf.department,
+        roleNote: resolveRoleNote(behalfOfEmail),
+        employeeName,
+        employeePosition: offboarding.positionName ?? "",
+        employeeDepartment: offboarding.department ?? "",
+        employmentEndDate,
+        signUrl,
+        obligations: resolveExitChecklistPendingItems({
+          isEmployee: false,
+          isManager: false,
+          isSectionB: false,
+          rowKeys: primaryBehalf.rowKeys,
+          ...commonPendingArgs,
+        }),
+        additionalBehalfEntries:
+          restBehalf.length > 0
+            ? restBehalf.map((entry) => ({
+                name: entry.name,
+                position: entry.position,
+                department: entry.department,
+                obligations: resolveExitChecklistPendingItems({
+                  isEmployee: false,
+                  isManager: false,
+                  isSectionB: false,
+                  rowKeys: entry.rowKeys,
+                  ...commonPendingArgs,
+                }),
+              }))
+            : undefined,
       })
     }
 
@@ -391,6 +529,12 @@ export async function POST(
 
     const behalfLabel = behalfOfDisplayLabel || behalfOfName || behalfOf
     const nameSuffix = inviteeName ? ` (${inviteeName})` : ""
+    const combinedRolesSuffix =
+      alsoActingOnBehalfOfList.length > 0
+        ? ` (sečtená agenda, zároveň v zastoupení za ${alsoActingOnBehalfOfList
+            .map((entry) => entry.behalfOfDisplayLabel || entry.behalfOfName)
+            .join(", ")})`
+        : ""
 
     await prisma.$transaction(async (tx) => {
       const fresh = await tx.exitChecklist.findUnique({
@@ -404,21 +548,34 @@ export async function POST(
           ? (headerRaw as Record<string, unknown>)
           : {}
 
+      const nowIso = new Date().toISOString()
+      const additions: Array<Record<string, unknown>> = [
+        {
+          ...(recipientId ? { id: recipientId } : {}),
+          name: inviteeName || inviteeEmail,
+          email: inviteeEmail,
+          invitedAt: nowIso,
+          ...(isBehalf && behalfOfRowKeys.length
+            ? { rowKeys: behalfOfRowKeys }
+            : {}),
+          ...(!isBehalf && rowKeys.length ? { rowKeys } : {}),
+          ...(isBehalf && behalfLabel ? { behalfLabel } : {}),
+        },
+        ...alsoActingOnBehalfOfList.map((extra) => ({
+          ...(extra.id ? { id: extra.id } : {}),
+          name: extra.behalfOfName || extra.behalfOfDisplayLabel || "Zástup",
+          email: inviteeEmail,
+          invitedAt: nowIso,
+          rowKeys: extra.behalfOfRowKeys,
+          behalfLabel: extra.behalfOfDisplayLabel || extra.behalfOfName,
+        })),
+      ]
+
       const mergedRecipients = mergeSignatureRecipients(
         Array.isArray(header.signatureRecipients)
           ? header.signatureRecipients
           : [],
-        [
-          {
-            name: inviteeName || inviteeEmail,
-            email: inviteeEmail,
-            invitedAt: new Date().toISOString(),
-            ...(isBehalf && behalfOfRowKeys.length
-              ? { rowKeys: behalfOfRowKeys }
-              : {}),
-            ...(isBehalf && behalfLabel ? { behalfLabel } : {}),
-          },
-        ]
+        additions
       )
 
       await tx.exitChecklist.update({
@@ -445,7 +602,7 @@ export async function POST(
       byEmail: session.user.email ?? null,
       message: isBehalf
         ? `Pozvánka k podpisu v zastoupení za „${behalfLabel}" byla odeslána na adresu ${inviteeEmail}${nameSuffix}. Přidáno do seznamu příjemců k podpisu.`
-        : `Pozvánka k podpisu byla odeslána na adresu ${inviteeEmail}${nameSuffix}. Přidáno do seznamu příjemců k podpisu.`,
+        : `Pozvánka k podpisu byla odeslána na adresu ${inviteeEmail}${nameSuffix}${combinedRolesSuffix}. Přidáno do seznamu příjemců k podpisu.`,
     })
   } catch (error) {
     console.error(

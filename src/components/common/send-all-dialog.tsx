@@ -22,7 +22,10 @@ import {
   buildBehalfOptions,
   formatObligations,
 } from "@/lib/exit-checklist-behalf-options"
-import { recipientIdentityKey } from "@/lib/exit-checklist-recipient-key"
+import {
+  entryIdentityKey,
+  generateRecipientId,
+} from "@/lib/exit-checklist-recipient-key"
 import { joinNameWithTitles } from "@/lib/format-name"
 
 import { Badge } from "@/components/ui/badge"
@@ -48,6 +51,7 @@ import type { EmployeeItem } from "@/components/common/employee-combobox"
 import { EosPersonPickerDialog } from "@/components/common/eos-person-picker-dialog"
 
 type Recipient = {
+  id?: string
   name: string
   email: string
   status: "pending" | "sent" | "error"
@@ -127,12 +131,48 @@ function buildInitialRecipients(
   }
 
   const seenEmails = new Set<string>()
-  return base.filter((r) => {
+  return base
+    .filter((r) => {
+      const key = r.email.trim().toLowerCase()
+      if (!key || seenEmails.has(key)) return false
+      seenEmails.add(key)
+      return true
+    })
+    .map((r) => ({ ...r, id: generateRecipientId() }))
+}
+
+// Stejný e-mail může pokrývat víc karet (různé role/zástupy) – pozvánka se
+// má odeslat JEDNOU na e-mail, se sečtenou agendou ze všech jeho karet, ne
+// jedna pozvánka po kartě. Karta bez `behalfLabel` (přímá role) je vždy
+// primární; ostatní karty se stejným e-mailem (zástupné role) se k ní
+// přibalí jako "alsoActingOnBehalfOf". Pokud žádná přímá karta neexistuje,
+// primární je první zástupná karta a zbytek jde jako doplňkové zástupy.
+function groupRecipientsForInviteSend<T extends Recipient>(
+  list: T[]
+): { primary: T; extras: T[] }[] {
+  const byEmail = new Map<string, T[]>()
+  for (const r of list) {
     const key = r.email.trim().toLowerCase()
-    if (!key || seenEmails.has(key)) return false
-    seenEmails.add(key)
-    return true
-  })
+    const arr = byEmail.get(key) ?? []
+    arr.push(r)
+    byEmail.set(key, arr)
+  }
+  const groups: { primary: T; extras: T[] }[] = []
+  for (const entries of byEmail.values()) {
+    const direct = entries.find((entry) => !entry.behalfLabel)
+    if (direct) {
+      groups.push({
+        primary: direct,
+        extras: entries.filter(
+          (entry) => entry !== direct && Boolean(entry.behalfLabel)
+        ),
+      })
+    } else {
+      const [primary, ...extras] = entries
+      groups.push({ primary, extras })
+    }
+  }
+  return groups
 }
 
 function formatDateTime(value?: string) {
@@ -222,6 +262,7 @@ export function SendAllDialog({
       const data = json?.data as
         | {
             signatureRecipients?: Array<{
+              id?: string
               name: string
               email: string
               rowKeys?: string[]
@@ -241,6 +282,7 @@ export function SendAllDialog({
       const loaded =
         existing.length > 0
           ? existing.map((r) => ({
+              id: r.id || generateRecipientId(),
               name: r.name,
               email: r.email,
               status: "pending" as const,
@@ -256,7 +298,7 @@ export function SendAllDialog({
         new Set(
           loaded
             .filter((r) => !r.invitedAt && !r.revokedAt)
-            .map((r) => recipientIdentityKey(r))
+            .map((r) => entryIdentityKey(r))
         )
       )
 
@@ -267,7 +309,7 @@ export function SendAllDialog({
     } catch {
       const loaded = fallback()
       setRecipients(loaded)
-      setSelectedKeys(new Set(loaded.map((r) => recipientIdentityKey(r))))
+      setSelectedKeys(new Set(loaded.map((r) => entryIdentityKey(r))))
     } finally {
       setLoadingExisting(false)
     }
@@ -290,12 +332,12 @@ export function SendAllDialog({
       setAddError("Zadejte platný e-mail.")
       return
     }
-    const candidateKey = recipientIdentityKey({
+    const candidateKey = entryIdentityKey({
       email: cleanEmail,
       behalfLabel: behalf?.displayLabel,
     })
     const existingMatch = recipients.find(
-      (r) => recipientIdentityKey(r) === candidateKey
+      (r) => entryIdentityKey(r) === candidateKey
     )
     if (existingMatch?.revokedAt) {
       setAddError(
@@ -366,9 +408,7 @@ export function SendAllDialog({
   }
 
   function selectAll() {
-    setSelectedKeys(
-      new Set(visibleRecipients.map((r) => recipientIdentityKey(r)))
-    )
+    setSelectedKeys(new Set(visibleRecipients.map((r) => entryIdentityKey(r))))
   }
 
   function selectNone() {
@@ -376,12 +416,12 @@ export function SendAllDialog({
   }
 
   async function removeRecipient(target: Recipient) {
-    const targetKey = recipientIdentityKey(target)
+    const targetKey = entryIdentityKey(target)
     if (removingKey) return
 
     if (!target.invitedAt) {
       setRecipients((prev) =>
-        prev.filter((r) => recipientIdentityKey(r) !== targetKey)
+        prev.filter((r) => entryIdentityKey(r) !== targetKey)
       )
       setSelectedKeys((prev) => {
         const next = new Set(prev)
@@ -401,7 +441,7 @@ export function SendAllDialog({
     }
 
     const next = recipients.map((r) =>
-      recipientIdentityKey(r) === targetKey
+      entryIdentityKey(r) === targetKey
         ? { ...r, revokedAt: new Date().toISOString() }
         : r
     )
@@ -451,7 +491,7 @@ export function SendAllDialog({
     setSaveError(null)
 
     const toInvite = recipients.filter(
-      (r) => selectedKeys.has(recipientIdentityKey(r)) && !r.revokedAt
+      (r) => selectedKeys.has(entryIdentityKey(r)) && !r.revokedAt
     )
 
     const resultByKey = new Map<
@@ -459,7 +499,9 @@ export function SendAllDialog({
       { status: "fulfilled" } | { status: "rejected"; error: Error }
     >()
 
-    for (const r of toInvite) {
+    const inviteGroups = groupRecipientsForInviteSend(toInvite)
+
+    for (const { primary: r, extras } of inviteGroups) {
       try {
         const res = await fetch(
           `/api/odchody/${offboardingId}/exit-checklist/invite`,
@@ -469,11 +511,21 @@ export function SendAllDialog({
             body: JSON.stringify({
               inviteeEmail: r.email,
               inviteeName: r.name,
+              ...(r.id ? { recipientId: r.id } : {}),
               ...(r.behalfLabel
                 ? {
                     isBehalf: true,
                     behalfOfDisplayLabel: r.behalfLabel,
                     behalfOfRowKeys: r.rowKeys ?? [],
+                  }
+                : { rowKeys: r.rowKeys ?? [] }),
+              ...(extras.length > 0
+                ? {
+                    alsoActingOnBehalfOf: extras.map((extra) => ({
+                      id: extra.id ?? null,
+                      behalfOfDisplayLabel: extra.behalfLabel ?? null,
+                      behalfOfRowKeys: extra.rowKeys ?? [],
+                    })),
                   }
                 : {}),
             }),
@@ -485,19 +537,27 @@ export function SendAllDialog({
         if (!res.ok && res.status !== 207) {
           throw new Error(json.error ?? "Nepodařilo se odeslat.")
         }
-        resultByKey.set(recipientIdentityKey(r), { status: "fulfilled" })
+        resultByKey.set(entryIdentityKey(r), { status: "fulfilled" })
+        for (const extra of extras) {
+          resultByKey.set(entryIdentityKey(extra), { status: "fulfilled" })
+        }
       } catch (err) {
-        resultByKey.set(recipientIdentityKey(r), {
-          status: "rejected",
-          error: err instanceof Error ? err : new Error("Chyba při odesílání."),
-        })
+        const error =
+          err instanceof Error ? err : new Error("Chyba při odesílání.")
+        resultByKey.set(entryIdentityKey(r), { status: "rejected", error })
+        for (const extra of extras) {
+          resultByKey.set(entryIdentityKey(extra), {
+            status: "rejected",
+            error: new Error("Chyba při odesílání."),
+          })
+        }
       }
     }
 
     const sentAt = new Date().toISOString()
 
     const updatedRecipients = recipients.map((r) => {
-      const key = recipientIdentityKey(r)
+      const key = entryIdentityKey(r)
       if (!selectedKeys.has(key)) return r
 
       const result = resultByKey.get(key)
@@ -678,7 +738,7 @@ export function SendAllDialog({
                   </p>
                 )}
                 {visibleRecipients.map((r) => {
-                  const key = recipientIdentityKey(r)
+                  const key = entryIdentityKey(r)
                   const parenMatch = r.name.match(/^(.+?)\s*\((.+)\)$/)
                   const displayName = parenMatch ? parenMatch[1].trim() : r.name
                   const displayDesc = parenMatch ? parenMatch[2].trim() : null

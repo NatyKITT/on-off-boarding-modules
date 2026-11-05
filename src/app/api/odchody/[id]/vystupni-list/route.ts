@@ -8,17 +8,25 @@ import { PDFDocument, rgb, type PDFFont, type PDFPage } from "pdf-lib"
 
 import type {
   ExitChecklistData,
+  ExitChecklistItem,
   ExitChecklistSignatureValue,
   HandoverAgendaData,
 } from "@/types/exit-checklist"
+import {
+  EXIT_CHECKLIST_SIGNATORIES,
+  LAW_SIGNATORY,
+} from "@/config/exit-checklist-signatories"
 
 import { prisma } from "@/lib/db"
 import {
   getOrCreateChecklist,
   isPraha6OrKitt6,
   mapToExitChecklistData,
+  sanitizeExitChecklistFilename,
 } from "@/lib/exit-checklist"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
+import { isActiveSignatureRecipient } from "@/lib/exit-checklist-recipient-key"
+import { resolveRowSignatoryOverrideName } from "@/lib/exit-checklist-row-signatory"
 import {
   canAccessInternalApp,
   canAdminExitChecklist,
@@ -38,20 +46,16 @@ const PAGE_WIDTH = 595.28
 const cv = (yFromTop: number) => PAGE_HEIGHT - yFromTop
 const nfc = (value?: string | null) => (value ?? "").normalize("NFC")
 
-const SECTION_LEFT = 54
+const SECTION_LEFT = 47
 const SECTION_RIGHT = 543
 const SECTION_WIDTH = SECTION_RIGHT - SECTION_LEFT
 
-const ASSET_TABLE_LEFT = 54
+const ASSET_TABLE_LEFT = 47
 const ASSET_TABLE_RIGHT = 543
 const ASSET_TABLE_SPLIT = 322
 const ASSET_TABLE_HEADER_HEIGHT = 18
 const ASSET_TABLE_ROW_HEIGHT = 18
 const DRAW_ASSET_TABLE_HEADER_TEXT = true
-
-const TABLE_RESOLUTION_CENTER_X = 387
-const TABLE_SIGNATURE_X = 419
-const TABLE_SIGNATURE_MAX_WIDTH = 112
 
 const HEADER_VALUE_X = 292
 const HEADER_VALUE_MAX_WIDTH = 244
@@ -64,10 +68,10 @@ const SIGNATURE_DATE_SIZE = 8.2
 const SIGNATURE_NOTE_SIZE = 5.2
 const SIGNATURE_LINE_HEIGHT = 10.2
 
-const TABLE_SIGNATURE_NAME_SIZE = 9
-const TABLE_SIGNATURE_DATE_SIZE = 7.8
-const TABLE_SIGNATURE_NOTE_SIZE = 4.9
-const TABLE_SIGNATURE_LINE_HEIGHT = 7.9
+const TABLE_SIGNATURE_NAME_SIZE = 8.5
+const TABLE_SIGNATURE_DATE_SIZE = 7.5
+const TABLE_SIGNATURE_NOTE_SIZE = 4.7
+const TABLE_SIGNATURE_LINE_HEIGHT = 7.6
 
 const SIGNATURE_NOTE_TEXT =
   "Elektronicky podepsáno v aplikaci On-Off-Boarding ÚMČ Praha 6."
@@ -132,7 +136,7 @@ function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
 }
 
 function cleanText(value?: string | null): string {
-  return (value ?? "").replace(/\s+/g, " ").trim()
+  return (value ?? "").replace(/[^\S ]+/g, " ").trim()
 }
 
 function formatCzDate(iso?: string | null): string {
@@ -195,16 +199,24 @@ function drawTextFitted(
   page.drawText(normalized, { x, y, size, font })
 }
 
-function drawCenteredText(
+function drawCenteredTextFitted(
   page: PDFPage,
   font: PDFFont,
   text: string,
   centerX: number,
   y: number,
-  size: number
+  maxWidth: number,
+  baseSize: number,
+  minSize = 5.5
 ) {
   const normalized = nfc(text)
-  const width = font.widthOfTextAtSize(normalized, size)
+  let size = baseSize
+  let width = font.widthOfTextAtSize(normalized, size)
+
+  if (width > maxWidth) {
+    size = Math.max(minSize, (maxWidth / width) * size)
+    width = font.widthOfTextAtSize(normalized, size)
+  }
 
   page.drawText(normalized, {
     x: centerX - width / 2,
@@ -212,6 +224,32 @@ function drawCenteredText(
     size,
     font,
   })
+}
+
+function splitOversizedWord(
+  word: string,
+  font: PDFFont,
+  fontSize: number,
+  maxWidth: number
+): string[] {
+  const chunks: string[] = []
+  let current = ""
+
+  for (const char of word) {
+    const candidate = current + char
+
+    if (current && font.widthOfTextAtSize(candidate, fontSize) > maxWidth) {
+      chunks.push(current)
+      current = char
+      continue
+    }
+
+    current = candidate
+  }
+
+  if (current) chunks.push(current)
+
+  return chunks
 }
 
 function wrapText(
@@ -237,12 +275,17 @@ function wrapText(
 
     if (current) {
       lines.push(current)
+      current = ""
+    }
+
+    if (font.widthOfTextAtSize(word, fontSize) <= maxWidth) {
       current = word
       continue
     }
 
-    lines.push(word)
-    current = ""
+    const chunks = splitOversizedWord(word, font, fontSize, maxWidth)
+    for (let i = 0; i < chunks.length - 1; i++) lines.push(chunks[i])
+    current = chunks[chunks.length - 1] ?? ""
   }
 
   if (current) lines.push(current)
@@ -1025,30 +1068,533 @@ function drawHandoverSection({
   }
 }
 
-type TableRowPosition = {
-  page: 1 | 2
-  top: number
-  bottom: number
+const OBLIG_TITLE_SIZE = HANDOVER_TITLE_SIZE
+
+const OBLIG_COL_ORG_WIDTH = 132
+const OBLIG_COL_OBLIGATION_WIDTH = 105
+const OBLIG_COL_RESOLVED_WIDTH = 42
+const OBLIG_COL_NOTE_WIDTH = 85
+const OBLIG_SUB_ROW_GAP = 6
+const OBLIG_COL_SIGNATURE_WIDTH =
+  SECTION_WIDTH -
+  OBLIG_COL_ORG_WIDTH -
+  OBLIG_COL_OBLIGATION_WIDTH -
+  OBLIG_COL_RESOLVED_WIDTH -
+  OBLIG_COL_NOTE_WIDTH
+
+const OBLIG_COL_ORG_X = SECTION_LEFT
+const OBLIG_COL_OBLIGATION_X = OBLIG_COL_ORG_X + OBLIG_COL_ORG_WIDTH
+const OBLIG_COL_RESOLVED_X = OBLIG_COL_OBLIGATION_X + OBLIG_COL_OBLIGATION_WIDTH
+const OBLIG_COL_NOTE_X = OBLIG_COL_RESOLVED_X + OBLIG_COL_RESOLVED_WIDTH
+const OBLIG_COL_SIGNATURE_X = OBLIG_COL_NOTE_X + OBLIG_COL_NOTE_WIDTH
+
+const OBLIG_CELL_PAD_X = 6
+const OBLIG_CELL_PAD_TOP = 8
+const OBLIG_ROW_PAD_BOTTOM = 6
+const OBLIG_ROW_MIN_BODY_HEIGHT = 24
+const OBLIG_SUBROW_CONTENT_PAD_Y = 4
+const OBLIG_HEADER_HEIGHT = 18
+const OBLIG_HEADER_LABEL_SIZE = 8.5
+const OBLIG_TEXT_SIZE = 9
+const OBLIG_LINE_HEIGHT = 10.8
+const OBLIG_SUB_TEXT_SIZE = 8
+const OBLIG_SUB_LINE_HEIGHT = 9.6
+const OBLIG_NOTE_TEXT_SIZE = 8
+const OBLIG_NOTE_LINE_HEIGHT = 9.6
+const OBLIG_TABLE_BOTTOM_MARGIN = 775
+const OBLIG_NEW_PAGE_TOP_Y = 60
+const SECTION_GAP_AFTER_TABLE = 26
+const SECTION_B_MIN_SPACE = 90
+
+type OrgLine = { text: string; bold: boolean; emphasizedSize: boolean }
+
+function measureSignatureBlockHeight(
+  fonts: FontSet,
+  signer: string | null | undefined,
+  signedAt: string | null | undefined,
+  maxWidth: number,
+  sizes: {
+    nameSize: number
+    dateSize: number
+    noteSize: number
+    lineHeight: number
+  }
+): number {
+  const rawName = cleanText(signer)
+  if (!rawName) return 0
+
+  const { name, isBehalf } = splitSignerForPdf(rawName)
+  const displayName = isBehalf ? `v.z. ${name}` : name
+  const nameLines = wrapText(
+    displayName,
+    fonts.regular,
+    sizes.nameSize,
+    maxWidth
+  )
+
+  let height = nameLines.length * sizes.lineHeight
+
+  if (signedAt) height += sizes.lineHeight - 1
+
+  const noteLines = wrapText(
+    SIGNATURE_NOTE_TEXT,
+    fonts.regular,
+    sizes.noteSize,
+    maxWidth
+  )
+  height += noteLines.length * (sizes.noteSize + 1)
+
+  return height
 }
 
-const rowPositionMap: Record<string, TableRowPosition> = {
-  handoverProtocol: { page: 1, top: 389.3, bottom: 446.0 },
-  sneoChip: { page: 1, top: 446.0, bottom: 502.7 },
-  sneoRemote: { page: 1, top: 502.7, bottom: 559.4 },
-  electronicTicket: { page: 1, top: 559.4, bottom: 616.1 },
-  carChip: { page: 1, top: 616.1, bottom: 672.8 },
-  cashAdvance: { page: 1, top: 672.8, bottom: 729.5 },
+const ORG_DEPARTMENT_LINE_KEYWORD =
+  /(Odbor|Oddělení|Kancelář|Správa|KITT6|Vedoucí|Ředitel|Právní odbor)/i
+const ORG_LINE_HAS_DIGIT = /\d/
 
-  serviceTools: { page: 2, top: 74.3, bottom: 131.0 },
-  serviceId: { page: 2, top: 131.0, bottom: 187.7 },
-  centralRegistry: { page: 2, top: 187.7, bottom: 244.4 },
-  classifiedDocs: { page: 2, top: 244.4, bottom: 301.1 },
-  fineBlocks: { page: 2, top: 301.1, bottom: 357.8 },
-  socialFundLoan: { page: 2, top: 357.8, bottom: 414.5 },
-  phoneCosts: { page: 2, top: 414.5, bottom: 471.2 },
-  itEquipment: { page: 2, top: 471.2, bottom: 527.9 },
-  espis: { page: 2, top: 527.9, bottom: 584.6 },
-  lawInfo: { page: 2, top: 584.6, bottom: 641.3 },
+type OrgLineKind = "department" | "name" | "detail"
+
+function classifyOrgLine(line: string): OrgLineKind {
+  if (ORG_LINE_HAS_DIGIT.test(line)) return "detail"
+  if (ORG_DEPARTMENT_LINE_KEYWORD.test(line)) return "department"
+  return "name"
+}
+
+function buildOrganizationLines(
+  organization: string,
+  managerName: string | null | undefined,
+  nameOverride: string | null | undefined,
+  fonts: FontSet,
+  maxWidth: number
+): OrgLine[] {
+  const rawLines = organization.split("\n").filter(Boolean)
+  if (rawLines.length === 0) return []
+
+  const lines: OrgLine[] = []
+
+  for (const wrapped of wrapText(
+    rawLines[0],
+    fonts.regular,
+    OBLIG_TEXT_SIZE,
+    maxWidth
+  )) {
+    lines.push({ text: wrapped, bold: false, emphasizedSize: true })
+  }
+
+  const cleanedManagerName = cleanText(managerName)
+
+  if (rawLines[0] === "Vedoucí odboru" && cleanedManagerName) {
+    for (const wrapped of wrapText(
+      cleanedManagerName,
+      fonts.bold,
+      OBLIG_TEXT_SIZE,
+      maxWidth
+    )) {
+      lines.push({ text: wrapped, bold: true, emphasizedSize: true })
+    }
+  }
+
+  const cleanedNameOverride = cleanText(nameOverride)
+  let usedOverride = false
+
+  for (const raw of rawLines.slice(1)) {
+    const kind = classifyOrgLine(raw)
+    const isName = kind === "name"
+    const emphasizedSize = kind === "department" || kind === "name"
+    const useOverrideHere =
+      isName && !usedOverride && Boolean(cleanedNameOverride)
+    const displayText = useOverrideHere ? cleanedNameOverride : raw
+    if (useOverrideHere) usedOverride = true
+
+    for (const wrapped of wrapText(
+      displayText,
+      isName ? fonts.bold : fonts.regular,
+      emphasizedSize ? OBLIG_TEXT_SIZE : OBLIG_SUB_TEXT_SIZE,
+      maxWidth
+    )) {
+      lines.push({ text: wrapped, bold: isName, emphasizedSize })
+    }
+  }
+
+  return lines
+}
+
+function drawObligationsTableHeader(
+  page: PDFPage,
+  fonts: FontSet,
+  topY: number
+) {
+  const labelY = cv(topY + 13)
+
+  drawBoldText(
+    page,
+    fonts,
+    "Odbor / organizace",
+    OBLIG_COL_ORG_X + OBLIG_CELL_PAD_X,
+    labelY,
+    OBLIG_HEADER_LABEL_SIZE
+  )
+  drawBoldText(
+    page,
+    fonts,
+    "Závazek",
+    OBLIG_COL_OBLIGATION_X + OBLIG_CELL_PAD_X,
+    labelY,
+    OBLIG_HEADER_LABEL_SIZE
+  )
+  drawCenteredTextFitted(
+    page,
+    fonts.bold,
+    "Vyrovnán",
+    OBLIG_COL_RESOLVED_X + OBLIG_COL_RESOLVED_WIDTH / 2,
+    labelY,
+    OBLIG_COL_RESOLVED_WIDTH - 4,
+    OBLIG_HEADER_LABEL_SIZE
+  )
+  drawBoldText(
+    page,
+    fonts,
+    "Poznámka",
+    OBLIG_COL_NOTE_X + OBLIG_CELL_PAD_X,
+    labelY,
+    OBLIG_HEADER_LABEL_SIZE
+  )
+  drawBoldText(
+    page,
+    fonts,
+    "Datum a podpis",
+    OBLIG_COL_SIGNATURE_X + OBLIG_CELL_PAD_X,
+    labelY,
+    OBLIG_HEADER_LABEL_SIZE
+  )
+
+  drawHorizontalLine(
+    page,
+    SECTION_LEFT,
+    SECTION_RIGHT,
+    topY + OBLIG_HEADER_HEIGHT,
+    0.5
+  )
+}
+
+function groupObligationItems(
+  items: ExitChecklistItem[]
+): ExitChecklistItem[][] {
+  const rowKeyToGroupId = new Map<string, string>()
+
+  for (const signatory of EXIT_CHECKLIST_SIGNATORIES) {
+    const groupId = signatory.rowKeys.join("+")
+    for (const key of signatory.rowKeys) rowKeyToGroupId.set(key, groupId)
+  }
+
+  for (const key of LAW_SIGNATORY.rowKeys) {
+    rowKeyToGroupId.set(key, LAW_SIGNATORY.rowKeys.join("+"))
+  }
+
+  const groups: ExitChecklistItem[][] = []
+  const groupIndexById = new Map<string, number>()
+
+  for (const item of items) {
+    const groupId = rowKeyToGroupId.get(item.key) ?? item.key
+    let index = groupIndexById.get(groupId)
+
+    if (index === undefined) {
+      index = groups.length
+      groupIndexById.set(groupId, index)
+      groups.push([])
+    }
+
+    groups[index].push(item)
+  }
+
+  return groups
+}
+
+function drawObligationsTableBorders(
+  page: PDFPage,
+  segmentTopY: number,
+  segmentBottomY: number,
+  innerLineYs: number[]
+) {
+  drawHorizontalLine(page, SECTION_LEFT, SECTION_RIGHT, segmentTopY, 0.6)
+
+  for (const lineY of innerLineYs) {
+    drawHorizontalLine(page, SECTION_LEFT, SECTION_RIGHT, lineY, 0.4)
+  }
+
+  drawHorizontalLine(page, SECTION_LEFT, SECTION_RIGHT, segmentBottomY, 0.6)
+  drawVerticalLine(page, SECTION_LEFT, segmentTopY, segmentBottomY, 0.6)
+  drawVerticalLine(
+    page,
+    OBLIG_COL_OBLIGATION_X,
+    segmentTopY,
+    segmentBottomY,
+    0.4
+  )
+  drawVerticalLine(page, OBLIG_COL_RESOLVED_X, segmentTopY, segmentBottomY, 0.4)
+  drawVerticalLine(page, OBLIG_COL_NOTE_X, segmentTopY, segmentBottomY, 0.4)
+  drawVerticalLine(
+    page,
+    OBLIG_COL_SIGNATURE_X,
+    segmentTopY,
+    segmentBottomY,
+    0.4
+  )
+  drawVerticalLine(page, SECTION_RIGHT, segmentTopY, segmentBottomY, 0.6)
+}
+
+function drawObligationsTable({
+  pdf,
+  fonts,
+  items,
+  conflictOfInterest,
+  managerName,
+  signatureRecipients,
+  startPageIndex,
+  startTopY,
+}: {
+  pdf: PDFDocument
+  fonts: FontSet
+  items: ExitChecklistItem[]
+  conflictOfInterest: boolean | null | undefined
+  managerName?: string | null
+  signatureRecipients?: ExitChecklistData["signatureRecipients"]
+  startPageIndex: number
+  startTopY: number
+}): { lastPageIndex: number; lastBottomY: number } {
+  const visibleItems = items.filter(
+    (item) => item.key !== "lawInfo" || conflictOfInterest === true
+  )
+
+  let pageIndex = startPageIndex
+  let page = getOrCreatePage(pdf, pageIndex)
+
+  drawBoldText(page, fonts, "A.", SECTION_LEFT, cv(startTopY), OBLIG_TITLE_SIZE)
+  drawBoldText(
+    page,
+    fonts,
+    "Vyrovnání závazků zaměstnance k zaměstnavateli",
+    SECTION_LEFT + 20,
+    cv(startTopY),
+    OBLIG_TITLE_SIZE
+  )
+
+  let headerTopY = startTopY + 19
+  drawObligationsTableHeader(page, fonts, headerTopY)
+
+  let cursorTopY = headerTopY + OBLIG_HEADER_HEIGHT
+  let segmentTopY = headerTopY
+  let innerLineYs: number[] = []
+
+  for (const group of groupObligationItems(visibleItems)) {
+    const firstItem = group[0]
+
+    const groupRowKeys = group.map((item) => item.key)
+    const nameOverride =
+      firstItem.key === "handoverProtocol"
+        ? null
+        : resolveRowSignatoryOverrideName(groupRowKeys, signatureRecipients)
+
+    const orgLines = buildOrganizationLines(
+      firstItem.organization,
+      firstItem.key === "handoverProtocol" ? managerName : null,
+      nameOverride,
+      fonts,
+      OBLIG_COL_ORG_WIDTH - OBLIG_CELL_PAD_X * 2
+    )
+
+    const subRows = group.map((item) => {
+      const obligationLines = wrapText(
+        item.obligation,
+        fonts.regular,
+        OBLIG_TEXT_SIZE,
+        OBLIG_COL_OBLIGATION_WIDTH - OBLIG_CELL_PAD_X * 2
+      )
+
+      const resolvedLabel =
+        item.resolved === "YES" ? "Ano" : item.resolved === "NO" ? "Ne" : null
+
+      const noteLines = wrapText(
+        cleanText(item.note),
+        fonts.regular,
+        OBLIG_NOTE_TEXT_SIZE,
+        OBLIG_COL_NOTE_WIDTH - OBLIG_CELL_PAD_X * 2
+      )
+
+      const signatureHeight = measureSignatureBlockHeight(
+        fonts,
+        item.signedByName,
+        item.signedAt,
+        OBLIG_COL_SIGNATURE_WIDTH - OBLIG_CELL_PAD_X * 2,
+        {
+          nameSize: TABLE_SIGNATURE_NAME_SIZE,
+          dateSize: TABLE_SIGNATURE_DATE_SIZE,
+          noteSize: TABLE_SIGNATURE_NOTE_SIZE,
+          lineHeight: TABLE_SIGNATURE_LINE_HEIGHT,
+        }
+      )
+
+      const contentHeight = Math.max(
+        obligationLines.length * OBLIG_LINE_HEIGHT,
+        noteLines.length * OBLIG_NOTE_LINE_HEIGHT,
+        signatureHeight
+      )
+
+      const height = Math.max(
+        contentHeight + OBLIG_SUBROW_CONTENT_PAD_Y * 2,
+        OBLIG_ROW_MIN_BODY_HEIGHT
+      )
+
+      return {
+        item,
+        obligationLines,
+        resolvedLabel,
+        noteLines,
+        signatureHeight,
+        height,
+      }
+    })
+
+    const subRowsTotalHeight =
+      subRows.reduce((sum, row) => sum + row.height, 0) +
+      OBLIG_SUB_ROW_GAP * (subRows.length - 1)
+
+    const orgHeight = orgLines.reduce(
+      (sum, line) =>
+        sum + (line.emphasizedSize ? OBLIG_LINE_HEIGHT : OBLIG_SUB_LINE_HEIGHT),
+      0
+    )
+
+    const bodyHeight = Math.max(orgHeight, subRowsTotalHeight)
+    const rowHeight = OBLIG_CELL_PAD_TOP + bodyHeight + OBLIG_ROW_PAD_BOTTOM
+
+    if (cursorTopY + rowHeight > OBLIG_TABLE_BOTTOM_MARGIN) {
+      innerLineYs.pop()
+      drawObligationsTableBorders(page, segmentTopY, cursorTopY, innerLineYs)
+
+      pageIndex += 1
+      page = getOrCreatePage(pdf, pageIndex)
+      headerTopY = OBLIG_NEW_PAGE_TOP_Y
+      drawObligationsTableHeader(page, fonts, headerTopY)
+      cursorTopY = headerTopY + OBLIG_HEADER_HEIGHT
+      segmentTopY = headerTopY
+      innerLineYs = []
+    }
+
+    const rowTopY = cursorTopY
+
+    const orgTopOffset = Math.max(0, (bodyHeight - orgHeight) / 2)
+    let orgY = cv(
+      rowTopY + OBLIG_CELL_PAD_TOP + orgTopOffset + OBLIG_TEXT_SIZE * 0.8
+    )
+
+    for (const line of orgLines) {
+      drawText(
+        page,
+        line.bold ? fonts.bold : fonts.regular,
+        line.text,
+        OBLIG_COL_ORG_X + OBLIG_CELL_PAD_X,
+        orgY,
+        line.emphasizedSize ? OBLIG_TEXT_SIZE : OBLIG_SUB_TEXT_SIZE
+      )
+      orgY -= line.emphasizedSize ? OBLIG_LINE_HEIGHT : OBLIG_SUB_LINE_HEIGHT
+    }
+
+    let subRowTopY = rowTopY + OBLIG_CELL_PAD_TOP
+
+    subRows.forEach((subRow, subRowIndex) => {
+      const obligationContentHeight =
+        subRow.obligationLines.length * OBLIG_LINE_HEIGHT
+      const obligationTopOffset = Math.max(
+        0,
+        (subRow.height - obligationContentHeight) / 2
+      )
+      let obligationY = cv(
+        subRowTopY + obligationTopOffset + OBLIG_TEXT_SIZE * 0.8
+      )
+
+      for (const line of subRow.obligationLines) {
+        drawText(
+          page,
+          fonts.regular,
+          line,
+          OBLIG_COL_OBLIGATION_X + OBLIG_CELL_PAD_X,
+          obligationY,
+          OBLIG_TEXT_SIZE
+        )
+        obligationY -= OBLIG_LINE_HEIGHT
+      }
+
+      if (subRow.resolvedLabel) {
+        const subRowCenterY = subRowTopY + subRow.height / 2
+
+        drawCenteredTextFitted(
+          page,
+          fonts.regular,
+          subRow.resolvedLabel,
+          OBLIG_COL_RESOLVED_X + OBLIG_COL_RESOLVED_WIDTH / 2,
+          cv(subRowCenterY + OBLIG_TEXT_SIZE * 0.32),
+          OBLIG_COL_RESOLVED_WIDTH - 4,
+          OBLIG_TEXT_SIZE
+        )
+      }
+
+      const noteContentHeight = subRow.noteLines.length * OBLIG_NOTE_LINE_HEIGHT
+      const noteTopOffset = Math.max(0, (subRow.height - noteContentHeight) / 2)
+      let noteY = cv(subRowTopY + noteTopOffset + OBLIG_TEXT_SIZE * 0.8)
+
+      for (const line of subRow.noteLines) {
+        drawText(
+          page,
+          fonts.regular,
+          line,
+          OBLIG_COL_NOTE_X + OBLIG_CELL_PAD_X,
+          noteY,
+          OBLIG_NOTE_TEXT_SIZE
+        )
+        noteY -= OBLIG_NOTE_LINE_HEIGHT
+      }
+
+      if (subRow.item.signedAt && subRow.item.signedByName) {
+        const signatureTopOffset = Math.max(
+          0,
+          (subRow.height - subRow.signatureHeight) / 2
+        )
+        const signatureY = cv(
+          subRowTopY + signatureTopOffset + OBLIG_TEXT_SIZE * 0.8
+        )
+
+        drawSignatureBlockTableRow(
+          page,
+          fonts,
+          subRow.item.signedByName,
+          subRow.item.signedAt,
+          OBLIG_COL_SIGNATURE_X + OBLIG_CELL_PAD_X,
+          signatureY,
+          OBLIG_COL_SIGNATURE_WIDTH - OBLIG_CELL_PAD_X * 2
+        )
+      }
+
+      subRowTopY += subRow.height + OBLIG_SUB_ROW_GAP
+
+      if (subRowIndex < subRows.length - 1) {
+        drawHorizontalLine(
+          page,
+          OBLIG_COL_OBLIGATION_X,
+          SECTION_RIGHT,
+          subRowTopY - OBLIG_SUB_ROW_GAP / 2,
+          0.3
+        )
+      }
+    })
+
+    cursorTopY += rowHeight
+    innerLineYs.push(cursorTopY)
+  }
+
+  innerLineYs.pop()
+  drawObligationsTableBorders(page, segmentTopY, cursorTopY, innerLineYs)
+
+  return { lastPageIndex: pageIndex, lastBottomY: cursorTopY }
 }
 
 export async function GET(
@@ -1109,11 +1655,8 @@ export async function GET(
         const matches = (checklist.signatureRecipients ?? []).filter(
           (recipient) => normalizeEmail(recipient.email) === currentUserEmail
         )
-        const hasActiveInvitedMatch = matches.some(
-          (recipient) => !recipient.revokedAt && Boolean(recipient.invitedAt)
-        )
 
-        if (!hasActiveInvitedMatch) {
+        if (!isActiveSignatureRecipient(currentUserEmail, matches)) {
           const wasRemoved = matches.some((recipient) => recipient.revokedAt)
           return new Response(
             JSON.stringify({
@@ -1150,8 +1693,6 @@ export async function GET(
     const fonts: FontSet = { regular: regularFont, bold: boldFont }
 
     const page1 = getOrCreatePage(pdf, 0)
-    const page2 = getOrCreatePage(pdf, 1)
-    const page3 = getOrCreatePage(pdf, 2)
 
     const {
       employeeName,
@@ -1166,6 +1707,7 @@ export async function GET(
       conflictOfInterest,
       managerName,
       handoverManagerSignature,
+      signatureRecipients,
     } = checklist
 
     drawBoldTextFitted(
@@ -1241,93 +1783,57 @@ export async function GET(
       )
     }
 
-    if (managerName) {
-      drawTextFitted(
-        page1,
-        fonts.regular,
-        cleanText(managerName),
-        50.5,
-        cv(420),
-        160,
-        GENERATED_TEXT_SIZE,
-        6
-      )
-    }
+    const obligationsResult = drawObligationsTable({
+      pdf,
+      fonts,
+      items,
+      conflictOfInterest,
+      managerName,
+      signatureRecipients,
+      startPageIndex: 0,
+      startTopY: 350,
+    })
 
-    for (const item of items) {
-      const rowInfo = rowPositionMap[item.key]
-      if (!rowInfo) continue
+    const bStartY = obligationsResult.lastBottomY + SECTION_GAP_AFTER_TABLE
+    const bFitsOnSamePage =
+      bStartY + SECTION_B_MIN_SPACE <= OBLIG_TABLE_BOTTOM_MARGIN
 
-      const page = rowInfo.page === 1 ? page1 : page2
-      const rowCenterFromTop = (rowInfo.top + rowInfo.bottom) / 2
-      const resolutionY = cv(rowCenterFromTop + 4)
-      const signatureY = cv(rowInfo.top + 18)
+    const bPageIndex = bFitsOnSamePage
+      ? obligationsResult.lastPageIndex
+      : obligationsResult.lastPageIndex + 1
+    const bPage = getOrCreatePage(pdf, bPageIndex)
 
-      if (item.key === "lawInfo" && !conflictOfInterest) {
-        drawCenteredText(
-          page,
-          fonts.regular,
-          "-----------",
-          TABLE_RESOLUTION_CENTER_X,
-          resolutionY,
-          GENERATED_TEXT_SIZE
-        )
-        drawText(
-          page,
-          fonts.regular,
-          "Nepodává se",
-          TABLE_SIGNATURE_X,
-          resolutionY,
-          GENERATED_TEXT_SIZE
-        )
-        continue
-      }
+    const bTitleTopY = bFitsOnSamePage ? bStartY : OBLIG_NEW_PAGE_TOP_Y
 
-      if (item.resolved === "YES") {
-        drawCenteredText(
-          page,
-          fonts.regular,
-          "Ano",
-          TABLE_RESOLUTION_CENTER_X,
-          resolutionY,
-          GENERATED_TEXT_SIZE
-        )
-      } else if (item.resolved === "NO") {
-        drawCenteredText(
-          page,
-          fonts.regular,
-          "Ne",
-          TABLE_RESOLUTION_CENTER_X,
-          resolutionY,
-          GENERATED_TEXT_SIZE
-        )
-      }
+    drawBoldText(
+      bPage,
+      fonts,
+      "B.",
+      SECTION_LEFT,
+      cv(bTitleTopY),
+      OBLIG_TITLE_SIZE
+    )
+    drawBoldText(
+      bPage,
+      fonts,
+      "Výpis z osobní karty zaměstnance o zapůjčení movitého majetku",
+      SECTION_LEFT + 20,
+      cv(bTitleTopY),
+      OBLIG_TITLE_SIZE
+    )
 
-      if (item.signedAt && item.signedByName) {
-        drawSignatureBlockTableRow(
-          page,
-          fonts,
-          item.signedByName,
-          item.signedAt,
-          TABLE_SIGNATURE_X,
-          signatureY,
-          TABLE_SIGNATURE_MAX_WIDTH
-        )
-      }
-    }
-
-    const bTableStartTopY = 128
+    const bTableStartTopY = bTitleTopY + 28
     const assetsTableBottomY = drawAssetsTableOnly({
-      page: page3,
+      page: bPage,
       fonts,
       assets,
       startTopY: bTableStartTopY,
     })
 
-    const issuerTopY = assetsTableBottomY + 26
+    const issuerTopY = assetsTableBottomY + 20
 
     drawText(
-      page3,
+      bPage,
       fonts.regular,
       "Za Odbor služeb potvrzuje správnost Výpisu:",
       SECTION_LEFT,
@@ -1337,7 +1843,7 @@ export async function GET(
 
     if (signatures?.issuer?.signedByName) {
       drawSignatureBlockSection(
-        page3,
+        bPage,
         fonts,
         signatures.issuer.signedByName,
         signatures.issuer.signedAt,
@@ -1347,7 +1853,7 @@ export async function GET(
       )
     }
 
-    const handoverStartY = issuerTopY + 52
+    const handoverStartY = issuerTopY + 40
 
     if (handoverStartY > 750) {
       const extraPage = createBlankPage(pdf)
@@ -1363,7 +1869,7 @@ export async function GET(
     } else {
       drawHandoverSection({
         pdf,
-        page: page3,
+        page: bPage,
         fonts,
         handover,
         managerName,
@@ -1394,11 +1900,15 @@ export async function GET(
       }
     }
 
+    const pdfFilename = `Vystupni-list-${sanitizeExitChecklistFilename(
+      employeeName || String(id)
+    )}.pdf`
+
     return new Response(toArrayBuffer(pdfBytes), {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `inline; filename="Vystupni-list-${id}.pdf"`,
+        "Content-Disposition": `inline; filename="${pdfFilename}"`,
         "Cache-Control": "no-store",
       },
     })

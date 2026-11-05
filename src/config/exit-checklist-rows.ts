@@ -9,13 +9,13 @@ export const EXIT_CHECKLIST_ROWS: ExitChecklistRowDefinition[] = [
   {
     key: "sneoChip",
     organization:
-      "Správa objektu – SNEO, a.s.\nMarek Tolde\nPřízemí - č. dv. 008",
+      "Správa objektu – SNEO, a.s.\nMarek Tolde\nPřízemí - č. dv. 008",
     obligation: "identifikační karta (čip) zaměstnance",
   },
   {
     key: "sneoRemote",
     organization:
-      "Správa objektu – SNEO, a.s.\nMarek Tolde\nPřízemí - č. dv. 008",
+      "Správa objektu – SNEO, a.s.\nMarek Tolde\nPřízemí - č. dv. 008",
     obligation: "dálkový/é ovladač/e (garáže, dvůr)",
   },
   {

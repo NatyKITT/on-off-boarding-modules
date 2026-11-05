@@ -44,7 +44,11 @@ import { useSignatureName } from "@/hooks/use-signature-name"
 import { looksLikePersonName } from "@/lib/exit-checklist-behalf-options"
 import { getExitChecklistCompletionState } from "@/lib/exit-checklist-completion"
 import { exitChecklistEventActionLabel } from "@/lib/exit-checklist-event-labels"
-import { recipientIdentityKey } from "@/lib/exit-checklist-recipient-key"
+import {
+  isActiveSignatureRecipient,
+  recipientIdentityKey,
+} from "@/lib/exit-checklist-recipient-key"
+import { resolveRowSignatoryOverrideName } from "@/lib/exit-checklist-row-signatory"
 import { joinNameWithTitles } from "@/lib/format-name"
 
 import {
@@ -225,10 +229,26 @@ function formatHandoverPositionLabel(
   return [positionNum?.trim(), cleanName, deptUnit].filter(Boolean).join(" — ")
 }
 
-function renderOrganization(text: string, managerName?: string | null) {
+function getNoteBorderClass(resolved: ExitResolvedValue, note: string | null) {
+  if (resolved === "NO") return "border-red-400 focus-visible:ring-red-400"
+
+  if (resolved === "YES" && note?.trim()) {
+    return "border-emerald-400 focus-visible:ring-emerald-400"
+  }
+
+  return ""
+}
+
+function renderOrganization(
+  text: string,
+  managerName?: string | null,
+  nameOverride?: string | null
+) {
   const lines = text.split("\n").filter(Boolean)
 
   if (lines.length === 0) return null
+
+  let usedOverride = false
 
   return (
     <div className="leading-snug">
@@ -236,18 +256,25 @@ function renderOrganization(text: string, managerName?: string | null) {
       {lines[0] === "Vedoucí odboru" && managerName && (
         <div className="text-xs font-medium text-foreground">{managerName}</div>
       )}
-      {lines.slice(1).map((line, i) => (
-        <div
-          key={i}
-          className={
-            looksLikePersonName(line)
-              ? "text-xs font-medium text-foreground"
-              : "text-xs text-muted-foreground"
-          }
-        >
-          {line}
-        </div>
-      ))}
+      {lines.slice(1).map((line, i) => {
+        const isName = looksLikePersonName(line)
+        const displayLine =
+          isName && nameOverride && !usedOverride ? nameOverride : line
+        if (isName && nameOverride && !usedOverride) usedOverride = true
+
+        return (
+          <div
+            key={i}
+            className={
+              isName
+                ? "text-xs font-medium text-foreground"
+                : "text-xs text-muted-foreground"
+            }
+          >
+            {displayLine}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -275,6 +302,8 @@ type HeaderSignatureBlockProps = {
   identityName?: string | null
   identityEmail?: string | null
   interactive?: boolean
+  highlighted?: boolean
+  highlightLabel?: string
   signDisabledReason?: string
   value: ExitChecklistSignatureValue
   isLocked: boolean
@@ -292,6 +321,8 @@ function HeaderSignatureBlock({
   identityName,
   identityEmail,
   interactive = true,
+  highlighted = false,
+  highlightLabel = "Vaše pole",
   signDisabledReason,
   value,
   isLocked,
@@ -322,10 +353,30 @@ function HeaderSignatureBlock({
     <div
       className={`flex flex-col rounded-md border bg-background p-3 ${
         interactive ? "" : "opacity-60"
+      } ${
+        highlighted
+          ? highlightLabel === "Vaše pole"
+            ? "border-emerald-200 bg-emerald-50/40"
+            : "border-purple-200 bg-purple-50/40"
+          : ""
       }`}
       style={{ minHeight: "130px" }}
     >
-      <Label className="mb-2 text-sm font-medium">{label}</Label>
+      <div className="mb-2 flex items-center gap-2">
+        <Label className="text-sm font-medium">{label}</Label>
+        {highlighted && (
+          <Badge
+            variant="outline"
+            className={`shrink-0 text-[10px] ${
+              highlightLabel === "Vaše pole"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                : "border-purple-200 bg-purple-50 text-purple-800"
+            }`}
+          >
+            {highlightLabel}
+          </Badge>
+        )}
+      </div>
 
       {identityName && (
         <div className="mb-2 rounded-md bg-muted/50 px-3 py-2 text-xs">
@@ -429,26 +480,22 @@ function TableSignatureCell({
   signedAt: string
 }) {
   return (
-    <div className="flex h-[78px] min-w-0 flex-col justify-center overflow-hidden">
+    <div className="flex min-h-[60px] min-w-0 flex-col justify-center py-1">
       {isSigned && !isMuted ? (
         <>
           <span
-            className="min-w-0 break-words text-sm font-semibold leading-tight text-foreground"
-            style={{
-              display: "-webkit-box",
-              WebkitBoxOrient: "vertical",
-              WebkitLineClamp: 2,
-              overflow: "hidden",
-            }}
+            className="min-w-0 whitespace-normal break-words text-xs font-semibold leading-tight text-foreground"
             title={signedByName ?? undefined}
           >
             {signedByName}
           </span>
-          <span className="mt-1 truncate text-[11px] text-muted-foreground">
-            Elektronicky podepsáno
-          </span>
-          <span className="truncate text-[11px] text-muted-foreground">
+          <span className="mt-1 whitespace-normal break-words text-[10px] leading-tight text-muted-foreground">
             {signedAt}
+          </span>
+          <span className="whitespace-normal break-words text-[10px] leading-tight text-muted-foreground">
+            Elektronicky podepsáno v aplikaci{" "}
+            <span className="whitespace-nowrap">On-Off-Boarding</span> ÚMČ Praha
+            {" "}6.
           </span>
         </>
       ) : (
@@ -463,7 +510,6 @@ function TableSignatureCell({
 function TableActionCell({
   showSignButton,
   showRevokeButton,
-  isOwnRow,
   signDisabled,
   onSign,
   onSignBehalf,
@@ -471,7 +517,6 @@ function TableActionCell({
 }: {
   showSignButton: boolean
   showRevokeButton: boolean
-  isOwnRow?: boolean
   signDisabled?: boolean
   onSign: () => void
   onSignBehalf: () => void
@@ -482,38 +527,35 @@ function TableActionCell({
     : undefined
 
   return (
-    <div className="grid h-[68px] w-full grid-rows-2 gap-1">
+    <div className="grid w-full grid-rows-2 gap-1.5">
       {showSignButton ? (
         <>
           <Button
             type="button"
             size="sm"
-            variant="outline"
-            className="h-8 w-full justify-start gap-1 px-1.5 text-xs"
+            className="h-auto min-h-7 w-full justify-start gap-1 border-[#00847C] bg-[#00847C] px-1.5 py-1 text-xs text-white hover:bg-[#00766b]"
             disabled={signDisabled}
             title={signDisabledReason}
             onClick={onSign}
           >
             <Check className="size-3 shrink-0" />
-            <span className="min-w-0 truncate text-left">Podepsat</span>
+            <span className="min-w-0 whitespace-normal text-left leading-tight">
+              Podepsat
+            </span>
           </Button>
 
           <Button
             type="button"
             size="sm"
             variant="outline"
-            className={`h-8 w-full justify-start gap-1 px-1.5 text-xs ${
-              isOwnRow
-                ? "border-emerald-300 bg-emerald-50 text-emerald-800"
-                : "text-muted-foreground"
-            }`}
+            className="h-auto min-h-7 w-full justify-start gap-1 bg-white px-1.5 py-1 text-xs text-muted-foreground"
             disabled={signDisabled}
-            title={signDisabledReason}
+            title={signDisabledReason ?? "Podepsat v zástupu"}
             onClick={onSignBehalf}
           >
             <Check className="size-3 shrink-0" />
-            <span className="min-w-0 truncate text-left">
-              Podepsat v zastoupení
+            <span className="min-w-0 whitespace-normal text-left leading-tight">
+              Podepsat v zástupu
             </span>
           </Button>
         </>
@@ -523,18 +565,20 @@ function TableActionCell({
             type="button"
             size="sm"
             variant="ghost"
-            className="h-8 w-full justify-start gap-1 px-2 text-xs text-muted-foreground"
+            className="h-auto min-h-7 w-full justify-start gap-1 px-2 py-1 text-xs text-muted-foreground"
             onClick={onRevoke}
           >
             <Undo2 className="size-3 shrink-0" />
-            <span className="min-w-0 truncate text-left">Zrušit podpis</span>
+            <span className="min-w-0 whitespace-normal text-left leading-tight">
+              Zrušit podpis
+            </span>
           </Button>
-          <div className="h-8 w-full" aria-hidden="true" />
+          <div className="h-7 w-full" aria-hidden="true" />
         </>
       ) : (
         <>
-          <div className="h-8 w-full" aria-hidden="true" />
-          <div className="h-8 w-full" aria-hidden="true" />
+          <div className="h-7 w-full" aria-hidden="true" />
+          <div className="h-7 w-full" aria-hidden="true" />
         </>
       )}
     </div>
@@ -597,38 +641,45 @@ function AdditionalNoteBlock({
   if (!editing) {
     if (item.additionalNote) {
       return (
-        <div className="mt-2 rounded-md border border-orange-200 bg-orange-50 px-2 py-1 text-[10px] text-orange-800">
-          <span className="font-medium">Dodatečně vyřízeno:</span>{" "}
-          {item.additionalNote}
-          {item.additionallyResolvedByName
-            ? ` (${item.additionallyResolvedByName}${
-                item.additionallyResolvedAt
-                  ? `, ${format(new Date(item.additionallyResolvedAt), "d.M.yyyy HH:mm")}`
-                  : ""
-              })`
-            : ""}
-          <button
+        <div className="space-y-1 rounded-md border border-orange-200 bg-orange-50 px-2 py-1.5 text-[10px] leading-snug text-orange-800">
+          <div className="whitespace-pre-wrap break-words">
+            <span className="font-medium">Dodatečně vyřízeno:</span>{" "}
+            {item.additionalNote}
+            {item.additionallyResolvedByName
+              ? ` (${item.additionallyResolvedByName}${
+                  item.additionallyResolvedAt
+                    ? `, ${format(new Date(item.additionallyResolvedAt), "d.M.yyyy HH:mm")}`
+                    : ""
+                })`
+              : ""}
+          </div>
+          <Button
             type="button"
-            className="ml-2 underline"
+            size="sm"
+            variant="ghost"
+            className="h-6 gap-1 px-1.5 text-[10px] text-orange-800 hover:bg-orange-100"
             onClick={() => {
               setValue(item.additionalNote ?? "")
               setEditing(true)
             }}
           >
-            upravit
-          </button>
+            Upravit
+          </Button>
         </div>
       )
     }
 
     return (
-      <button
+      <Button
         type="button"
-        className="mt-2 text-[10px] text-orange-700 underline"
+        size="sm"
+        variant="outline"
+        className="h-7 gap-1 border-orange-200 bg-orange-50 px-2 text-[10px] text-orange-800 hover:bg-orange-100"
         onClick={() => setEditing(true)}
       >
-        + Dodatečně vyřízeno
-      </button>
+        <Plus className="size-3 shrink-0" />
+        Přidat info
+      </Button>
     )
   }
 
@@ -1042,6 +1093,20 @@ export function ExitChecklistForm({
     )
   }
 
+  function isSubstituteVisitorFor(targetEmail: string | null | undefined) {
+    if (!targetEmail) return false
+    const targetKey = recipientIdentityKey({
+      email: normalizeEmail(targetEmail),
+      behalfLabel: undefined,
+    })
+    return signatureRecipients.some(
+      (recipient) =>
+        !recipient.revokedAt &&
+        recipient.substituteForKey === targetKey &&
+        normalizeEmail(recipient.email) === currentUserEmailNormalized
+    )
+  }
+
   const isManagerVisitor =
     !isInternalMode && isVisitorOrSubstituteFor(managerEmail)
 
@@ -1060,7 +1125,8 @@ export function ExitChecklistForm({
   const assetsFieldsLocked =
     isLocked ||
     isEmployeeVisitor ||
-    (assetsSignedByOther && !canOverrideOthersSignature)
+    (assetsSignedByOther && !canOverrideOthersSignature) ||
+    (!isInternalMode && !isSectionBResponsibleVisitor)
 
   const handoverSignedByOther =
     Boolean(handoverManagerSignature.signedAt) &&
@@ -1103,11 +1169,7 @@ export function ExitChecklistForm({
   const isPrivilegedRole = isInternalMode && role !== "USER"
   const isCurrentUserAuthorizedSigner =
     isPrivilegedRole ||
-    signatureRecipients.some(
-      (recipient) =>
-        normalizeEmail(recipient.email) === currentUserEmailNormalized &&
-        !recipient.revokedAt
-    )
+    isActiveSignatureRecipient(currentUserEmailNormalized, signatureRecipients)
 
   const validHandoverRecipients = useMemo(
     () =>
@@ -2554,6 +2616,25 @@ export function ExitChecklistForm({
     return keys
   }, [isInternalMode, currentUserEmailNormalized, signatureRecipients])
 
+  const ownRowSubstituteLabel = useMemo(() => {
+    const map = new Map<string, string>()
+    if (isInternalMode || !currentUserEmailNormalized) return map
+
+    signatureRecipients.forEach((recipient) => {
+      if (
+        !recipient.revokedAt &&
+        recipient.behalfLabel &&
+        normalizeEmail(recipient.email) === currentUserEmailNormalized
+      ) {
+        ;(recipient.rowKeys ?? []).forEach((key) => {
+          if (!map.has(key)) map.set(key, recipient.behalfLabel as string)
+        })
+      }
+    })
+
+    return map
+  }, [isInternalMode, currentUserEmailNormalized, signatureRecipients])
+
   const remainingOwnRowsCount = items.filter(
     (item) =>
       ownRowKeys.has(item.key) &&
@@ -2683,7 +2764,7 @@ export function ExitChecklistForm({
 
     if (pendingSaveIsLock && completion.percent < 100) {
       missingLines.push(
-        `Výstupní list ještě není 100% hotový (chybí: ${completion.missingSections.join(", ")}) – ne všichni podepisující ještě podepsali. I tak ho lze uzamknout, ale dál už nikdo nebude moct nic podepsat. Personální oddělení navíc dostane e-mail s upozorněním, aby to zkontrolovalo.`
+        `Výstupní list ještě není 100% hotový – chybí: ${completion.missingSections.join(", ")}. I tak ho lze uzamknout; Personální oddělení dostane e-mail se seznamem nesplněné agendy.`
       )
     }
 
@@ -2729,7 +2810,7 @@ export function ExitChecklistForm({
   }
 
   function requestSignRow(key: ExitChecklistItem["key"], behalf: boolean) {
-    if (!isInternalMode && ownRowKeys.size > 0 && !ownRowKeys.has(key)) {
+    if (!isInternalMode && !ownRowKeys.has(key)) {
       setForeignSignTarget({ key, behalf })
       return
     }
@@ -3374,6 +3455,7 @@ export function ExitChecklistForm({
               currentUserName={currentUserName}
               currentUserEmail={currentUserEmail}
               interactive={isInternalMode || isEmployeeVisitor}
+              highlighted={isEmployeeVisitor}
               onSign={() => signHeaderSignature("employee")}
               onSignBehalf={() => signHeaderSignatureBehalf("employee")}
               onRevoke={() => revokeHeaderSignature("employee")}
@@ -3382,12 +3464,36 @@ export function ExitChecklistForm({
             <div
               className={`flex flex-col rounded-md border bg-background p-3 ${
                 isEmployeeVisitor ? "opacity-60" : ""
+              } ${
+                isManagerVisitor
+                  ? isSubstituteVisitorFor(managerEmail)
+                    ? "border-purple-200 bg-purple-50/40"
+                    : "border-emerald-200 bg-emerald-50/40"
+                  : ""
               }`}
               style={{ minHeight: "130px" }}
             >
-              <Label className="mb-2 text-sm font-medium">
-                Podpis vedoucího odboru
-              </Label>
+              <div className="mb-2 flex items-center gap-2">
+                <Label className="text-sm font-medium">
+                  Podpis vedoucího odboru
+                </Label>
+                {isManagerVisitor &&
+                  (isSubstituteVisitorFor(managerEmail) ? (
+                    <Badge
+                      variant="outline"
+                      className="shrink-0 border-purple-200 bg-purple-50 text-[10px] text-purple-800"
+                    >
+                      Zástup – vaše pole
+                    </Badge>
+                  ) : (
+                    <Badge
+                      variant="outline"
+                      className="shrink-0 border-emerald-200 bg-emerald-50 text-[10px] text-emerald-800"
+                    >
+                      Vaše pole
+                    </Badge>
+                  ))}
+              </div>
 
               {isInternalMode && !isLocked && (
                 <div className="mb-2 space-y-2">
@@ -3650,17 +3756,23 @@ export function ExitChecklistForm({
               const currentUserIsSigner =
                 normalizeEmail(item.signedByEmail) ===
                 currentUserEmailNormalized
+              const canTouchHandoverProtocol =
+                item.key !== "handoverProtocol" ||
+                isInternalMode ||
+                isManagerVisitor
               const showSignButton =
                 !isLocked &&
                 !isSigned &&
                 !isSigningDisabled &&
-                !isEmployeeVisitor
+                !isEmployeeVisitor &&
+                canTouchHandoverProtocol
               const showRevokeButton =
                 !isLocked &&
                 isSigned &&
                 !isSigningDisabled &&
                 !isLawInfoGreyed &&
                 !isEmployeeVisitor &&
+                canTouchHandoverProtocol &&
                 (canOverrideOthersSignature || currentUserIsSigner)
               const resolutionEditable =
                 !isLocked &&
@@ -3686,17 +3798,29 @@ export function ExitChecklistForm({
                   }`}
                 >
                   <div className="flex flex-col items-start gap-1 text-xs">
-                    {isOwnRow && (
-                      <Badge
-                        variant="outline"
-                        className="shrink-0 border-emerald-200 bg-emerald-50 text-[10px] text-emerald-800"
-                      >
-                        Vaše agenda
-                      </Badge>
-                    )}
+                    {isOwnRow &&
+                      (ownRowSubstituteLabel.has(item.key) ? (
+                        <Badge
+                          variant="outline"
+                          className="shrink-0 border-purple-200 bg-purple-50 text-[10px] text-purple-800"
+                        >
+                          V zastoupení za {ownRowSubstituteLabel.get(item.key)}
+                        </Badge>
+                      ) : (
+                        <Badge
+                          variant="outline"
+                          className="shrink-0 border-emerald-200 bg-emerald-50 text-[10px] text-emerald-800"
+                        >
+                          Vaše agenda
+                        </Badge>
+                      ))}
                     {renderOrganization(
                       item.organization,
-                      item.key === "handoverProtocol" ? managerName : null
+                      item.key === "handoverProtocol" ? managerName : null,
+                      resolveRowSignatoryOverrideName(
+                        [item.key],
+                        signatureRecipients
+                      )
                     )}
                   </div>
 
@@ -3815,22 +3939,26 @@ export function ExitChecklistForm({
                             el.style.height = `${el.scrollHeight}px`
                           }
                         }}
-                        className={`min-h-[28px] resize-none overflow-hidden bg-background py-1 text-[11px] leading-4 ${
-                          noteMissingForNo
-                            ? "border-red-400 focus-visible:ring-red-400"
-                            : ""
-                        }`}
+                        className={`min-h-[28px] resize-none overflow-hidden bg-background py-1 text-[11px] leading-4 ${getNoteBorderClass(
+                          item.resolved,
+                          item.note
+                        )}`}
                       />
                       {noteMissingForNo && (
                         <p className="mt-1 text-[10px] text-red-600">
-                          Poznámka je povinná, než agendu podepíšete.
+                          Poznámka je povinná.
                         </p>
                       )}
                     </div>
                   )}
 
                   {!resolutionEditable && item.note && (
-                    <p className="text-[11px] text-muted-foreground">
+                    <p
+                      className={`whitespace-pre-wrap break-words rounded-md border bg-white px-2 py-1 text-[11px] leading-snug text-muted-foreground ${
+                        getNoteBorderClass(item.resolved, item.note) ||
+                        "border-border/60"
+                      }`}
+                    >
                       {item.note}
                     </p>
                   )}
@@ -3866,16 +3994,25 @@ export function ExitChecklistForm({
           </div>
 
           <div className="hidden overflow-x-auto lg:block">
-            <Table className="w-full min-w-[780px] table-fixed">
+            <Table className="w-full min-w-[720px] table-fixed">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[24%]">Odbor / organizace</TableHead>
-                  <TableHead className="w-[18%]">Závazek</TableHead>
-                  <TableHead className="w-[16%] text-center">
+                  <TableHead className="w-1/5 py-2">
+                    Odbor / organizace
+                  </TableHead>
+                  <TableHead className="w-[15%] py-2">Závazek</TableHead>
+                  <TableHead className="w-[11%] py-2 text-center">
                     Vyrovnán
                   </TableHead>
-                  <TableHead className="w-1/5 pl-2">Datum a podpis</TableHead>
-                  <TableHead className="w-[22%] pl-2 text-left">Akce</TableHead>
+                  <TableHead className="w-[15%] py-2 pl-4 text-left">
+                    Poznámka
+                  </TableHead>
+                  <TableHead className="w-[19%] py-2 pl-2">
+                    Datum a podpis
+                  </TableHead>
+                  <TableHead className="sticky right-0 z-10 w-1/5 bg-background py-2 pl-1 pr-3 text-left shadow-[-6px_0_6px_-4px_rgba(0,0,0,0.12)]">
+                    Akce
+                  </TableHead>
                 </TableRow>
               </TableHeader>
 
@@ -3894,17 +4031,23 @@ export function ExitChecklistForm({
                   const currentUserIsSigner =
                     normalizeEmail(item.signedByEmail) ===
                     currentUserEmailNormalized
+                  const canTouchHandoverProtocol =
+                    item.key !== "handoverProtocol" ||
+                    isInternalMode ||
+                    isManagerVisitor
                   const showSignButton =
                     !isLocked &&
                     !isSigned &&
                     !isSigningDisabled &&
-                    !isEmployeeVisitor
+                    !isEmployeeVisitor &&
+                    canTouchHandoverProtocol
                   const showRevokeButton =
                     !isLocked &&
                     isSigned &&
                     !isSigningDisabled &&
                     !isLawInfoGreyed &&
                     !isEmployeeVisitor &&
+                    canTouchHandoverProtocol &&
                     (canOverrideOthersSignature || currentUserIsSigner)
                   const resolutionEditable =
                     !isLocked &&
@@ -3913,41 +4056,62 @@ export function ExitChecklistForm({
                     !isEmployeeVisitor
                   const noteMissingForNo =
                     item.resolved === "NO" && !item.note?.trim()
+                  const rowTintClass =
+                    item.resolved === "NO"
+                      ? item.additionalNote
+                        ? "bg-orange-50/70"
+                        : "bg-red-50/70"
+                      : isOwnRow
+                        ? "bg-emerald-50/40"
+                        : ""
 
                   return (
                     <TableRow
                       key={item.key}
-                      className={`${isLawInfoGreyed ? "opacity-50" : ""} ${
-                        item.resolved === "NO"
-                          ? item.additionalNote
-                            ? "bg-orange-50/70"
-                            : "bg-red-50/70"
-                          : isOwnRow
-                            ? "bg-emerald-50/40"
-                            : ""
-                      }`}
-                      style={{ height: "92px" }}
+                      className={`group ${isLawInfoGreyed ? "opacity-50" : ""}`}
+                      style={{ minHeight: "76px" }}
                     >
-                      <TableCell className="w-[24%] align-middle text-sm">
+                      <TableCell
+                        className={`w-1/5 py-2 align-middle text-xs ${rowTintClass}`}
+                      >
                         <div className="flex flex-col items-start gap-1">
-                          {isOwnRow && (
-                            <Badge
-                              variant="outline"
-                              className="shrink-0 border-emerald-200 bg-emerald-50 text-[10px] text-emerald-800"
-                            >
-                              Vaše agenda
-                            </Badge>
-                          )}
+                          {isOwnRow &&
+                            (ownRowSubstituteLabel.has(item.key) ? (
+                              <Badge
+                                variant="outline"
+                                className="shrink-0 border-purple-200 bg-purple-50 text-[10px] text-purple-800"
+                              >
+                                V zastoupení za{" "}
+                                {ownRowSubstituteLabel.get(item.key)}
+                              </Badge>
+                            ) : (
+                              <Badge
+                                variant="outline"
+                                className="shrink-0 border-emerald-200 bg-emerald-50 text-[10px] text-emerald-800"
+                              >
+                                Vaše agenda
+                              </Badge>
+                            ))}
                           {renderOrganization(
                             item.organization,
-                            item.key === "handoverProtocol" ? managerName : null
+                            item.key === "handoverProtocol"
+                              ? managerName
+                              : null,
+                            resolveRowSignatoryOverrideName(
+                              [item.key],
+                              signatureRecipients
+                            )
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="w-[18%] whitespace-normal break-words align-middle text-sm leading-snug">
+                      <TableCell
+                        className={`w-[15%] whitespace-normal break-words py-2 align-middle text-xs leading-snug ${rowTintClass}`}
+                      >
                         {item.obligation}
                       </TableCell>
-                      <TableCell className="w-[16%] text-center align-middle">
+                      <TableCell
+                        className={`w-[11%] py-2 text-center align-middle ${rowTintClass}`}
+                      >
                         {resolutionEditable ? (
                           <div className="inline-flex w-fit items-center gap-2 rounded-md bg-muted px-1 py-0.5 text-[11px]">
                             <button
@@ -3984,9 +4148,12 @@ export function ExitChecklistForm({
                                   : "–"}
                           </span>
                         )}
-
+                      </TableCell>
+                      <TableCell
+                        className={`w-[15%] py-2 pl-4 text-left align-middle ${rowTintClass}`}
+                      >
                         {resolutionEditable && item.resolved !== null && (
-                          <div className="mt-2">
+                          <div className="text-left">
                             <Textarea
                               value={item.note ?? ""}
                               onChange={(e) =>
@@ -3997,48 +4164,56 @@ export function ExitChecklistForm({
                                   ? "Poznámka (povinná u odpovědi Ne)"
                                   : "poznámka"
                               }
-                              rows={1}
+                              rows={2}
                               ref={(el) => {
                                 if (el) {
                                   el.style.height = "auto"
                                   el.style.height = `${el.scrollHeight}px`
                                 }
                               }}
-                              className={`min-h-[24px] resize-none overflow-hidden bg-background px-2 py-0.5 text-[10px] leading-4 ${
-                                noteMissingForNo
-                                  ? "border-red-400 focus-visible:ring-red-400"
-                                  : ""
-                              }`}
+                              className={`min-h-[44px] w-full resize-none overflow-hidden rounded-md border border-input bg-background px-2 py-1.5 text-left text-xs leading-snug shadow-sm ${getNoteBorderClass(
+                                item.resolved,
+                                item.note
+                              )}`}
                             />
                             {noteMissingForNo && (
                               <p className="mt-1 text-[9px] text-red-600">
-                                Poznámka je povinná, než agendu podepíšete.
+                                Poznámka je povinná.
                               </p>
                             )}
                           </div>
                         )}
 
                         {!resolutionEditable && item.note && (
-                          <p className="mt-2 text-[10px] text-muted-foreground">
+                          <p
+                            className={`whitespace-pre-wrap break-words rounded-md border bg-white px-2 py-1 text-left text-[10px] leading-snug text-muted-foreground ${
+                              getNoteBorderClass(item.resolved, item.note) ||
+                              "border-border/60"
+                            }`}
+                          >
                             {item.note}
                           </p>
                         )}
 
                         {item.resolved === "NO" && item.signedAt && (
-                          <AdditionalNoteBlock
-                            item={item}
-                            isInternalMode={isInternalMode}
-                            offboardingId={resolvedOffboardingId}
-                            publicToken={publicToken ?? null}
-                            currentUserName={currentUserName}
-                            currentUserEmail={currentUserEmail}
-                            onSaved={(patch) =>
-                              applyItemAdditionalNotePatch(item.key, patch)
-                            }
-                          />
+                          <div className="mt-2">
+                            <AdditionalNoteBlock
+                              item={item}
+                              isInternalMode={isInternalMode}
+                              offboardingId={resolvedOffboardingId}
+                              publicToken={publicToken ?? null}
+                              currentUserName={currentUserName}
+                              currentUserEmail={currentUserEmail}
+                              onSaved={(patch) =>
+                                applyItemAdditionalNotePatch(item.key, patch)
+                              }
+                            />
+                          </div>
                         )}
                       </TableCell>
-                      <TableCell className="w-1/5 pl-2 align-middle">
+                      <TableCell
+                        className={`w-[19%] py-2 pl-2 align-middle ${rowTintClass}`}
+                      >
                         <TableSignatureCell
                           isSigned={isSigned}
                           isMuted={isLawInfoGreyed}
@@ -4046,11 +4221,12 @@ export function ExitChecklistForm({
                           signedAt={signedAtDate}
                         />
                       </TableCell>
-                      <TableCell className="w-[22%] pl-2 align-middle">
+                      <TableCell
+                        className={`sticky right-0 z-10 w-1/5 py-2 pl-1 pr-3 align-middle shadow-[-6px_0_6px_-4px_rgba(0,0,0,0.12)] ${rowTintClass || "bg-background group-hover:bg-muted/50"}`}
+                      >
                         <TableActionCell
                           showSignButton={showSignButton}
                           showRevokeButton={showRevokeButton}
-                          isOwnRow={isOwnRow}
                           signDisabled={noteMissingForNo}
                           onSign={() => requestSignRow(item.key, false)}
                           onSignBehalf={() => requestSignRow(item.key, true)}
@@ -4305,7 +4481,14 @@ export function ExitChecklistForm({
               value={signatures.issuer}
               isLocked={isLocked}
               isAdmin={canOverrideOthersSignature}
-              interactive={isInternalMode || !isEmployeeVisitor}
+              interactive={isInternalMode || isSectionBResponsibleVisitor}
+              highlighted={isSectionBResponsibleVisitor}
+              highlightLabel={
+                isSubstituteVisitorFor(managerEmail) ||
+                isSubstituteVisitorFor(sectionBResponsible?.email)
+                  ? "Zástup – vaše pole"
+                  : "Vaše pole"
+              }
               signDisabledReason={
                 !assetsComplete
                   ? "Nejdřív v sekci B vyplňte zapůjčený majetek, nebo zaškrtněte, že zaměstnanec žádný nemá."

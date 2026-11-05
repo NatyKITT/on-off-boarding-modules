@@ -2,6 +2,51 @@
 
 Historie významných změn v aplikaci On-Off-Boarding Modul. Nejnovější verze nahoře.
 
+## 0.17.1 – 2026-11-06
+
+### Opravy
+
+- **Sečtení agendy podle e-mailu nyní platí i pro úplně první pozvánku k podpisu, ne jen pro cronové připomínky** – appka před odesláním pozvánky (tlačítka "Odeslat k podpisu", "Odeslat vybraným", "Odeslat všem") nově sama dohledá všechny aktivní karty se stejným e-mailem v "Seznam a správa osob k podpisu" (i ty nově přidávané ve stejném odeslání) a odešle jen JEDEN e-mail se sečtenou agendou ze všech jich – stejný princip jako u cronových připomínek. Řeší i případ, kdy jeden zástup kryje víc různých lidí zároveň (e-mail bez vlastní přímé role) – dřív appka v tomto případě poslala 2 samostatné e-maily o zastoupení místo jednoho.
+- **"Ostatní podepisující" s vlastní, ručně přiřazenou agendou dostanou v pozvánce správný výčet "Vaše agenda"** – dřív appka u pozvánky vycházela jen ze statického seznamu známých signatářů (SNEO, Odbor služeb, …), takže ručně doplněný člověk s vlastními řádky dostal pozvánku bez jakéhokoli výpisu agendy.
+- **Oprava chybně nahlášeného "Nepřiřazeno" u role, která má stejný e-mail jako vedoucí odboru** (typicky vedoucí Personálního oddělení, pokud zrovna odchází někdo z jejich vlastního odboru) – appka při prvním návrhu seznamu osob dřív u shody e-mailu tiše zahodila jednu ze dvou rolí (nechala jen tu první), teď se jejich agenda sečte.
+- **Oprava zaškrtnutí u karty zaměstnance, vedoucího, sekce B a sekce C** – checkbox u těchto karet se dřív počítal jinak než samotný výběr, takže i reálně vybraná karta vypadala jako nezaškrtnutá.
+- **Dohledání funkce a odboru nově probíhá i pro kartu vedoucího hned při otevření okna "Seznam a správa osob"** (dřív se zkoušelo jen při uložení jeho karty) – stejně jako appka už dřív dohledávala funkci/odbor u ostatních karet.
+- **Oprava umístění zastoupení vytvořeného na kartě vedoucího, sekce B nebo sekce C** – pokud má role stejný e-mail jako jiná role (např. sekce C ve výchozím stavu = vedoucí odboru), zastoupení se dřív omylem zobrazilo jinde (v "Přidaní mimo běžnou agendu" namísto pod kartou, kde bylo vytvořené). Každá z těchto rolí má teď vlastní identitu nezávislou na e-mailu.
+
+## 0.17.0 – 2026-11-05
+
+### Nové funkce
+
+- **Dynamické jméno u agendy sekce A podle toho, kdo je aktuálně potvrzený k podpisu** – pokud se u konkrétní agendy (řádku) ve "Seznam a správa osob k podpisu" potvrdí a odešle jiná osoba, než je výchozí statický návrh, propíše se její jméno automaticky i do tabulky v appce i do generovaného PDF – řeší se jen jméno, e-mail se nikde nezobrazuje. Pokud se shoda osoby liší jen částečně (některé řádky skupiny mají jinou osobu než ostatní), appka pro jistotu zobrazí výchozí statické jméno, než aby ukázala neúplnou/nejednoznačnou informaci.
+- **Zvýraznění vlastní agendy vs. agendy v zastoupení** – u řádků sekce A i u polí v hlavičce (vedoucí odboru, odpovědná osoba za sekci B) appka nově automaticky pozná a barevně odliší, jestli je agenda přiřazená přímo (zelený odznak "Vaše agenda" / "Vaše pole"), nebo jen jako zastoupení za někoho jiného (fialový odznak "V zastoupení za {jméno}" / "Zástup – vaše pole").
+- **Sloupec "Akce" v tabulce sekce A je nyní "přilepený" k pravému okraji** (sticky) – tlačítka Podepsat/Podepsat v zástupu zůstanou vždy celá vidět i při horizontálním scrollu tabulky (např. když rozbalený postranní panel zmenší dostupnou šířku na notebooku); text tlačítek se už nezkracuje, ale zalomí na víc řádků, pokud se nevejde.
+- **Hromadné podepsání vlastní agendy v sekci A** (pokud má přihlášený přiřazeno víc než 1 řádek) – nová souhrnná lišta nad tabulkou s počtem podepsaných/nepodepsaných a tlačítky "Podepsat všechny své řádky", "Podepsat všechny v zastoupení" a "Zrušit podpis všech", místo podepisování po jednom.
+- **HR e-mail při zamčení nekompletního výstupního listu nově obsahuje přesný seznam nesplněné agendy** (odpověď „Ne" – co, kdo a kdy podepsal, poznámka, dodatečně vyřízeno), ne jen obecné upozornění.
+- **Název PDF souboru výstupního listu nově obsahuje jméno zaměstnance** (`Vystupni-list-Jmeno-Prijmeni.pdf`) místo pouhého čísla záznamu – platí i pro přímé stažení/náhled PDF, stejně jako už dřív platilo pro e-mailové přílohy.
+
+### Opravy
+
+- **Oprava chybného slučování karet osob se stejným e-mailem v "Seznam a správa osob k podpisu"** – appka dřív rozlišovala karty (agendové řádky) jen podle e-mailu, takže když se e-mail u jedné karty upravil na hodnotu, kterou už měla jiná, nesouvisející karta, appka je tiše sloučila do jednoho záznamu a ztratilo se jméno/agenda jedné z nich. Každá karta má teď vlastní, na e-mailu nezávislé `id` – úprava karty (včetně e-mailu) se vztahuje vždy jen na ni, i když má teď stejný e-mail jako jiná karta. E-mail dál slouží jen k ověření přístupu po přihlášení a k sečtení veškeré agendy do jedné pozvánky/připomínky – to nadále funguje stejně jako dřív.
+- **Cílené cronové připomínky k podpisu nyní sčítají nepodepsanou agendu podle e-mailu** – pokud je jeden e-mail přiřazen k více agendovým řádkům/rolím, dřív hrozilo, že druhá role žádnou vlastní připomínku nedostane (nesprávně se vyhodnotila jako "už odesláno"). Teď se u každého e-mailu pošle jedna připomínka se sečtenou nepodepsanou agendou ze všech jeho rolí; co už bylo podepsáno, se do ní nezahrne.
+- **Oprava tří různých definic "kdo je oprávněný podepisující"** – PDF generátor dřív navíc vyžadoval `invitedAt`, zatímco zobrazení v appce a veřejné podepisování ne, takže se stávalo, že člověk měl přístup k podpisu, ale PDF si nemohl stáhnout ("Nemáte přístup k PDF"). Sjednoceno na jednu definici (aktivní, nezrušený e-mail v seznamu) používanou na všech třech místech.
+- **Oprava mazání `rowKeys`/pozice/odboru při znovu-odeslání pozvánky** – server dřív při uložení/znovu-pozvání existujícího příjemce celý jeho záznam přepsal "holým" objektem bez uložené agendy, takže o ni mohl přijít. Sloučení je nyní po jednotlivých polích – chybějící pole v novém zápisu se doplní z toho stávajícího, ne přepíší prázdnem.
+- **Jedna pozvánka místo samostatné zprávy o "přidání nové agendy"** – pokud se u už pozvané osoby změní rozsah agendy, appka jí znovu pošle stejnou pozvánku s aktuálním výčtem veškeré agendy, místo samostatné zprávy "Nově vám byla přidána agenda k podpisu".
+- **E-mail zaměstnanci o dokončení výstupního listu už neobsahuje zmínku, že by nemusel dostat zápočtový list, ani souhrn nesplněné agendy** – text je teď vždy stejný (info, že je výstupní list podepsaný a ať se dostaví na Personální oddělení), nově navíc s přiloženým PDF výstupního listu (stejně jako e-mail pro HR).
+- **Oprava zalamování "SNEO, a.s." a dalších textů v PDF** – nepřerušitelná mezera (` `) se při čištění textu v generátoru PDF omylem převáděla na běžnou mezeru, takže se název přesto rozděloval na dva řádky.
+- **Jakkoli dlouhé jedno "slovo" (bez mezer) v PDF se už nemůže vykreslit mimo šířku svého sloupce** – `wrapText` ho nově v nouzi rozdělí po znacích, takže text nepřeteče do sousedního sloupce (typicky dlouhá poznámka bez mezer).
+- **Vycentrování obsahu v řádcích tabulky A v PDF** – závazek, poznámka i podpis se nově centrují podle vlastní výšky obsahu v rámci (dynamicky vysokého) řádku, s pevnou minimální rezervou nahoře/dole, takže podpis už nepůsobí nalepený na okraj buňky.
+- **Oprava nekonzistentního tučného písma v Organizace sloupci PDF** – sekundární řádky odboru/funkce (např. "Odbor služeb") byly omylem rozpoznány jako jméno osoby jen kvůli tomu, že klíčové slovo nebylo na začátku řádku (např. "Ekonomický odbor"), takže se zobrazovaly tučně a mohly se do nich i omylem propsat dynamická jména. Teď je tučně vždy jen skutečné jméno osoby.
+- **Sekce B v PDF navazuje hned pod tabulkou sekce A na stejné stránce, pokud se vejde** – dřív vždy skočila na novou stránku, i když zbylo dost místa.
+- **Řádek Právního odboru v PDF se nevykresluje, pokud se nepodepisuje** (střet zájmů nebyl potvrzen jako "Ano").
+- **Sekce A v PDF zarovnána se stejnou levou/pravou hranicí jako hlavička** šablony (dřív posunuta o několik bodů víc vpravo).
+- **Oprava podbarvení a hover efektu řádků v appce, které nepokrývaly sloupec Akce** – kvůli "přilepenému" sloupci Akce měl tento sloupec vlastní neprůhledé pozadí, které překrývalo jak barevné odlišení řádku (červená/oranžová/zelená), tak hover při najetí myší. Teď se stejná barva/hover efekt aplikuje i na tuto buňku.
+- **Sekce B (majetek) je nyní omezená jen na přiřazenou odpovědnou osobu, vedoucího nebo jeho zástup** – dřív ji mohl vyplnit/podepsat kdokoli s přístupem k výstupnímu listu, stejně otevřeně jako sekci A.
+- **Řádek "předávací protokol" (první řádek sekce A) je nyní vyhrazen jen vedoucímu odboru nebo jeho zástupu** – dřív ho (s potvrzovacím dialogem) mohl podepsat kdokoli jiný stejně jako běžný řádek sekce A.
+- **Potvrzovací dialog "nepodepisujete svou agendu" se v sekci A zobrazí vždy** při podpisu cizího řádku, dřív se u návštěvníka bez vlastní přiřazené agendy přeskočil úplně.
+- Zkrácen dlouhý potvrzovací text při uložení/zamčení nekompletního výstupního listu – detail (co a kdo) je už vidět v červeném přehledu nesplněné agendy na stránce.
+
+---
+
 ## 0.16.0 – 2026-11-04
 
 ### Nové funkce

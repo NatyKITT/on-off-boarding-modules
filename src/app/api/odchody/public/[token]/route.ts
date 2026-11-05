@@ -48,6 +48,7 @@ import {
 } from "@/lib/exit-checklist"
 import { getExitChecklistCompletionState } from "@/lib/exit-checklist-completion"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
+import { isActiveSignatureRecipient } from "@/lib/exit-checklist-recipient-key"
 import { canReadExitChecklist } from "@/lib/rbac"
 import { getSession } from "@/lib/session"
 
@@ -326,17 +327,20 @@ export async function PUT(
   const canAdmin = false
   const normalizedCurrentUserEmail = normalizeEmail(user.email)
   const headerForAccess = getJsonRecord(checklist.header)
-  const canSign = (
-    Array.isArray(headerForAccess.signatureRecipients)
-      ? headerForAccess.signatureRecipients
-      : []
-  ).some(
-    (recipient) =>
-      recipient &&
-      typeof recipient === "object" &&
-      normalizeEmail((recipient as { email?: string }).email) ===
-        normalizedCurrentUserEmail &&
-      !(recipient as { revokedAt?: string }).revokedAt
+  const rawRecipients = Array.isArray(headerForAccess.signatureRecipients)
+    ? headerForAccess.signatureRecipients
+    : []
+  const validRecipients = rawRecipients.filter(
+    (recipient): recipient is { email: string; revokedAt?: string } =>
+      Boolean(
+        recipient &&
+          typeof recipient === "object" &&
+          typeof (recipient as { email?: unknown }).email === "string"
+      )
+  )
+  const canSign = isActiveSignatureRecipient(
+    normalizedCurrentUserEmail,
+    validRecipients
   )
   const canEditContent = canSign
 
@@ -1166,6 +1170,10 @@ export async function PUT(
             updatedChecklist.offboarding.plannedEnd ??
             data.employmentEndDate
 
+          const completionPdfFilename = pdfBuffer
+            ? `Vystupni-list-${sanitizeExitChecklistFilename(data.employeeName || String(checklist.offboardingId))}.pdf`
+            : null
+
           if (employeeEmail) {
             try {
               await sendExitChecklistCompletedToEmployeeEmail({
@@ -1174,7 +1182,8 @@ export async function PUT(
                 employeePosition: completionEmployeePosition,
                 employeeDepartment: completionEmployeeDepartment,
                 employmentEndDate: completionEmploymentEndDate,
-                unresolvedItems: completionUnresolvedItems,
+                pdfBuffer,
+                pdfFilename: completionPdfFilename,
               })
               employeeNotified = true
             } catch (employeeEmailError) {
@@ -1194,9 +1203,7 @@ export async function PUT(
             completedByName: user.name ?? user.email ?? null,
             checklistUrl: `${baseUrl}/odchody/${checklist.offboardingId}/vystupni-list`,
             pdfBuffer,
-            pdfFilename: pdfBuffer
-              ? `Vystupni-list-${sanitizeExitChecklistFilename(data.employeeName || String(checklist.offboardingId))}.pdf`
-              : null,
+            pdfFilename: completionPdfFilename,
             employeeNotified,
             unresolvedItems: completionUnresolvedItems,
           })
