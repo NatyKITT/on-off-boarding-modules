@@ -256,6 +256,21 @@ export async function POST(
     Boolean(offboarding.userEmail) &&
     inviteeEmail === offboarding.userEmail?.trim().toLowerCase()
 
+  // Zaměstnanec (odcházející) smí podepsat jen svůj vlastní podpis v
+  // hlavičce – jeho e-mail nikdy nesmí nést agendu sekce A ani zastoupení.
+  if (
+    isEmployeeInvite &&
+    (rowKeys.length > 0 || isBehalf || alsoActingOnBehalfOfList.length > 0)
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Zaměstnanci nelze přiřadit žádnou další agendu ani zastoupení – smí podepsat jen svůj vlastní podpis v hlavičce.",
+      },
+      { status: 400 }
+    )
+  }
+
   const header = getHeaderObject(checklist.header)
   const managerEmail = cleanText(header.managerEmail).toLowerCase()
   const sectionBResponsibleHeader = getHeaderObject(header.sectionBResponsible)

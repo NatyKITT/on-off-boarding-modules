@@ -114,6 +114,7 @@ type Props = {
   sectionBResponsible?: ResponsiblePerson | null
   sectionCResponsible?: ResponsiblePerson | null
   kitt6OptionContact?: ResponsiblePerson | null
+  onEmployeeChange?: (value: { name: string; email: string }) => void
   onManagerChange?: (value: ResponsiblePerson) => void
   onSectionBResponsibleChange?: (value: ResponsiblePerson) => void
   onSectionCResponsibleChange?: (value: ResponsiblePerson) => void
@@ -125,15 +126,9 @@ function ensureRecipientIds(list: Recipient[]): Recipient[] {
   return list.map((r) => (r.id ? r : { ...r, id: generateRecipientId() }))
 }
 
-// Stejný e-mail může pokrývat víc karet (různé role/zástupy) – pozvánka se
-// má odeslat JEDNOU na e-mail, se sečtenou agendou ze všech jeho karet, ne
-// jedna pozvánka po kartě. Karta bez `behalfLabel` (přímá role) je vždy
-// primární; ostatní karty se stejným e-mailem (zástupné role) se k ní
-// přibalí jako "alsoActingOnBehalfOf". Pokud žádná přímá karta neexistuje,
-// primární je první zástupná karta a zbytek jde jako doplňkové zástupy.
 function groupRecipientsForInviteSend<T extends Recipient>(
   list: T[]
-): { primary: T; extras: T[] }[] {
+): { primary: T; extras: T[]; ownRowKeys: string[]; directExtras: T[] }[] {
   const byEmail = new Map<string, T[]>()
   for (const r of list) {
     const key = r.email.trim().toLowerCase()
@@ -141,19 +136,29 @@ function groupRecipientsForInviteSend<T extends Recipient>(
     arr.push(r)
     byEmail.set(key, arr)
   }
-  const groups: { primary: T; extras: T[] }[] = []
+  const groups: {
+    primary: T
+    extras: T[]
+    ownRowKeys: string[]
+    directExtras: T[]
+  }[] = []
   for (const entries of byEmail.values()) {
-    const direct = entries.find((entry) => !entry.behalfLabel)
-    if (direct) {
-      groups.push({
-        primary: direct,
-        extras: entries.filter(
-          (entry) => entry !== direct && Boolean(entry.behalfLabel)
-        ),
-      })
+    const direct = entries.filter((entry) => !entry.behalfLabel)
+    const behalf = entries.filter((entry) => entry.behalfLabel)
+    if (direct.length > 0) {
+      const [primary, ...directExtras] = direct
+      const ownRowKeys = Array.from(
+        new Set(direct.flatMap((entry) => entry.rowKeys ?? []))
+      )
+      groups.push({ primary, extras: behalf, ownRowKeys, directExtras })
     } else {
-      const [primary, ...extras] = entries
-      groups.push({ primary, extras })
+      const [primary, ...extras] = behalf
+      groups.push({
+        primary,
+        extras,
+        ownRowKeys: primary.rowKeys ?? [],
+        directExtras: [],
+      })
     }
   }
   return groups
@@ -227,30 +232,7 @@ function buildInitialRecipients(
     })
   }
 
-  // Stejný e-mail může patřit dvěma různým rolím najednou (typicky vedoucí
-  // odboru, který je zároveň statickým signatářem za svůj odbor) – sloučit
-  // jejich rowKeys (sečíst), ne tiše zahodit tu druhou roli, jinak by jeden
-  // z řádků agendy zůstal bez přiřazené osoby.
-  const byEmail = new Map<string, Recipient>()
-  for (const r of base) {
-    const key = r.email.trim().toLowerCase()
-    if (!key) continue
-    const existing = byEmail.get(key)
-    if (!existing) {
-      byEmail.set(key, { ...r })
-      continue
-    }
-    const combinedRowKeys = Array.from(
-      new Set([...(existing.rowKeys ?? []), ...(r.rowKeys ?? [])])
-    )
-    byEmail.set(key, {
-      ...existing,
-      rowKeys: combinedRowKeys.length > 0 ? combinedRowKeys : undefined,
-      position: existing.position ?? r.position,
-      department: existing.department ?? r.department,
-    })
-  }
-  return Array.from(byEmail.values())
+  return base.map((r) => ({ ...r, id: generateRecipientId() }))
 }
 
 function isValidEmail(email: string) {
@@ -311,6 +293,7 @@ export function SignatureRecipientsDialog({
   sectionBResponsible,
   sectionCResponsible,
   kitt6OptionContact,
+  onEmployeeChange,
   onManagerChange,
   onSectionBResponsibleChange,
   onSectionCResponsibleChange,
@@ -356,13 +339,36 @@ export function SignatureRecipientsDialog({
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
   const [infoTone, setInfoTone] = useState<"success" | "warning">("success")
+  const [sectionCTouched, setSectionCTouched] = useState(false)
 
   useEffect(() => {
     if (!info) return
     const timeout = setTimeout(() => setInfo(null), 6000)
     return () => clearTimeout(timeout)
   }, [info])
+
+  useEffect(() => {
+    if (!open || sectionCTouched) return
+    setRespSectionCName(respManagerName)
+    setRespSectionCPosition(respManagerPosition)
+    setRespSectionCDepartment(respManagerDepartment)
+    setRespSectionCEmail(respManagerEmail)
+  }, [
+    open,
+    sectionCTouched,
+    respManagerName,
+    respManagerPosition,
+    respManagerDepartment,
+    respManagerEmail,
+  ])
+
   const [lastSentAt, setLastSentAt] = useState<string | null>(null)
+  const [employeeRecipientId, setEmployeeRecipientId] = useState<string | null>(
+    null
+  )
+  const [managerRecipientId, setManagerRecipientId] = useState<string | null>(
+    null
+  )
   const [signedRemovalConfirm, setSignedRemovalConfirm] = useState<
     Recipient[] | null
   >(null)
@@ -473,6 +479,8 @@ export function SignatureRecipientsDialog({
     (r) => !selectedKeys.has(entryIdentityKey(r)) && r.invitedAt
   )
   const pendingNewInvites = toInviteNew.length
+  const pendingNewInviteEmails =
+    groupRecipientsForInviteSend(toInviteNew).length
   const pendingRemovals = toRevoke.length
 
   function normalizeCompare(value?: string | null): string {
@@ -629,6 +637,23 @@ export function SignatureRecipientsDialog({
               .map((r) => entryIdentityKey(r))
           )
         )
+        setEmployeeRecipientId(
+          employeeKey
+            ? (mergedWithIds.find(
+                (r) =>
+                  !r.behalfLabel && r.email.trim().toLowerCase() === employeeKey
+              )?.id ?? null)
+            : null
+        )
+        setManagerRecipientId(
+          managerEmailNormalized
+            ? (mergedWithIds.find(
+                (r) =>
+                  !r.behalfLabel &&
+                  r.email.trim().toLowerCase() === managerEmailNormalized
+              )?.id ?? null)
+            : null
+        )
         setHasExistingList(true)
         setLastSentAt(data?.signatureRecipientsSentAt ?? null)
         setLastSentByName(data?.signatureRecipientsSentByName ?? null)
@@ -647,6 +672,24 @@ export function SignatureRecipientsDialog({
         setRecipients(fallbackWithIds)
         setSelectedKeys(
           new Set(fallbackWithIds.map((r) => entryIdentityKey(r)))
+        )
+        const employeeKey = employeeEmail?.trim().toLowerCase()
+        setEmployeeRecipientId(
+          employeeKey
+            ? (fallbackWithIds.find(
+                (r) =>
+                  !r.behalfLabel && r.email.trim().toLowerCase() === employeeKey
+              )?.id ?? null)
+            : null
+        )
+        const managerKey = managerEmail?.trim().toLowerCase()
+        setManagerRecipientId(
+          managerKey
+            ? (fallbackWithIds.find(
+                (r) =>
+                  !r.behalfLabel && r.email.trim().toLowerCase() === managerKey
+              )?.id ?? null)
+            : null
         )
         setHasExistingList(false)
         setLastSentAt(null)
@@ -686,6 +729,10 @@ export function SignatureRecipientsDialog({
       setSectionCCardEditing(false)
       setKitt6CardEditing(false)
       setEmployeeCardEditing(false)
+      setSectionCTouched(
+        normalizeCompare(sectionCResponsible?.email) !==
+          normalizeCompare(managerEmail)
+      )
       setRespEmployeeEmail(employeeEmail ?? "")
       setRespManagerName(managerName ?? "")
       setRespManagerPosition(managerPosition ?? "")
@@ -719,6 +766,11 @@ export function SignatureRecipientsDialog({
     const sectionCEmail = respSectionCEmail.trim().toLowerCase()
     const kitt6Email = respKitt6Email.trim().toLowerCase()
 
+    const sectionCDivergedFromManager =
+      sectionCTouched &&
+      sectionCEmail !== managerEmailValue &&
+      normalizeCompare(respSectionCName) !== normalizeCompare(respManagerName)
+
     if (
       !employeeEmailValue ||
       !managerEmailValue ||
@@ -748,12 +800,14 @@ export function SignatureRecipientsDialog({
             department: respSectionBDepartment.trim(),
             email: sectionBEmail,
           },
-          sectionCResponsible: {
-            name: respSectionCName.trim(),
-            position: respSectionCPosition.trim(),
-            department: respSectionCDepartment.trim(),
-            email: sectionCEmail,
-          },
+          sectionCResponsible: sectionCDivergedFromManager
+            ? {
+                name: respSectionCName.trim(),
+                position: respSectionCPosition.trim(),
+                department: respSectionCDepartment.trim(),
+                email: sectionCEmail,
+              }
+            : { name: "", position: "", department: "", email: "" },
           kitt6OptionContact: {
             name: respKitt6Name.trim(),
             position: respKitt6Position.trim(),
@@ -774,6 +828,10 @@ export function SignatureRecipientsDialog({
       setManagerNotifyPrompt(json.managerNotifyPrompt)
     }
 
+    onEmployeeChange?.({
+      name: employeeName,
+      email: employeeEmailValue,
+    })
     onManagerChange?.({
       name: respManagerName.trim(),
       position: respManagerPosition.trim(),
@@ -786,12 +844,22 @@ export function SignatureRecipientsDialog({
       department: respSectionBDepartment.trim(),
       email: sectionBEmail,
     })
-    onSectionCResponsibleChange?.({
-      name: respSectionCName.trim(),
-      position: respSectionCPosition.trim(),
-      department: respSectionCDepartment.trim(),
-      email: sectionCEmail,
-    })
+    onSectionCResponsibleChange?.(
+      sectionCDivergedFromManager
+        ? {
+            name: respSectionCName.trim(),
+            position: respSectionCPosition.trim(),
+            department: respSectionCDepartment.trim(),
+            email: sectionCEmail,
+          }
+        : {
+            name: respManagerName.trim(),
+            position: respManagerPosition.trim(),
+            department: respManagerDepartment.trim(),
+            email: managerEmailValue,
+          }
+    )
+    setSectionCTouched(sectionCDivergedFromManager)
     onKitt6ContactChange?.({
       name: respKitt6Name.trim(),
       position: respKitt6Position.trim(),
@@ -946,6 +1014,7 @@ export function SignatureRecipientsDialog({
     nextPosition: string
     nextDepartment: string
     fallbackRowKeys: string[]
+    onResolved?: (id: string | undefined) => void
   }) {
     const email = args.nextEmail.trim().toLowerCase()
     const previousEmail = args.previousEmail.trim().toLowerCase()
@@ -975,6 +1044,7 @@ export function SignatureRecipientsDialog({
 
       if (!alreadyActive) {
         const newRecipient: Recipient = {
+          id: generateRecipientId(),
           name: args.nextName.trim() || email,
           email,
           ...(args.nextPosition.trim()
@@ -994,12 +1064,24 @@ export function SignatureRecipientsDialog({
           next.add(entryIdentityKey(newRecipient))
           return next
         })
+        args.onResolved?.(newRecipient.id)
       } else if (!hasOtherRole) {
         setSelectedKeys((prev) => {
           const next = new Set(prev)
           next.delete(previousKey)
           return next
         })
+      }
+
+      if (alreadyActive) {
+        args.onResolved?.(
+          recipients.find(
+            (r) =>
+              !r.revokedAt &&
+              !r.behalfLabel &&
+              r.email.trim().toLowerCase() === email
+          )?.id
+        )
       }
 
       setInfoTone("warning")
@@ -1032,6 +1114,14 @@ export function SignatureRecipientsDialog({
           `${args.nextName.trim() || email} je v seznamu i jinde – agenda role „${args.roleLabel}“ byla doplněna k jeho/její stávající agendě.`
         )
       }
+      args.onResolved?.(
+        recipients.find(
+          (r) =>
+            !r.revokedAt &&
+            !r.behalfLabel &&
+            r.email.trim().toLowerCase() === email
+        )?.id
+      )
       return
     }
 
@@ -1059,10 +1149,12 @@ export function SignatureRecipientsDialog({
       setInfo(
         `Aktualizace v návrhu seznamu: ${updated.name} jako ${args.roleLabel}.`
       )
+      args.onResolved?.(updated.id)
       return
     }
 
     const newRecipient: Recipient = {
+      id: generateRecipientId(),
       name: args.nextName.trim() || email,
       email,
       ...(args.nextPosition.trim()
@@ -1079,6 +1171,7 @@ export function SignatureRecipientsDialog({
     setInfo(
       `Přidání do návrhu seznamu: ${newRecipient.name} jako ${args.roleLabel}.`
     )
+    args.onResolved?.(newRecipient.id)
   }
 
   function syncSectionBResponsibleIntoRecipients(
@@ -1112,19 +1205,17 @@ export function SignatureRecipientsDialog({
       nextPosition,
       nextDepartment,
       fallbackRowKeys: ["handoverProtocol"],
+      onResolved: (id) => setManagerRecipientId(id ?? null),
     })
   }
 
   function syncEmployeeIntoRecipients(nextEmail: string) {
-    syncResponsibleRoleIntoRecipients({
-      roleLabel: "zaměstnanec (odcházející)",
-      previousEmail: employeeEmail ?? "",
-      nextName: employeeName,
-      nextEmail,
-      nextPosition: "",
-      nextDepartment: "",
-      fallbackRowKeys: [],
-    })
+    const email = nextEmail.trim().toLowerCase()
+    if (!email || !employeeRecipientId) return
+
+    setRecipients((prev) =>
+      prev.map((r) => (r.id === employeeRecipientId ? { ...r, email } : r))
+    )
   }
 
   function toggleEmployeeCardEditing() {
@@ -1201,6 +1292,7 @@ export function SignatureRecipientsDialog({
         respSectionCPosition,
         respSectionCDepartment
       )
+      setSectionCTouched(true)
     }
     setSectionCCardEditing((prev) => !prev)
   }
@@ -1220,6 +1312,7 @@ export function SignatureRecipientsDialog({
     setRespSectionCEmail(email)
     setRespSectionCPosition(position)
     setRespSectionCDepartment(department)
+    setSectionCTouched(true)
     syncSectionCResponsibleIntoRecipients(name, email, position, department)
   }
 
@@ -1412,6 +1505,18 @@ export function SignatureRecipientsDialog({
       return
     }
 
+    const employeeEmailNormalized = (employeeEmail ?? "").trim().toLowerCase()
+    if (
+      employeeEmailNormalized &&
+      email === employeeEmailNormalized &&
+      target.email.trim().toLowerCase() !== employeeEmailNormalized
+    ) {
+      setEditError(
+        "E-mail zaměstnance nelze přiřadit jiné kartě – zaměstnanec nesmí podepisovat ani vyplňovat nic dalšího."
+      )
+      return
+    }
+
     // Karta má vlastní stabilní identitu (id), nezávislou na e-mailu – i
     // kdyby nový e-mail odpovídal jiné kartě, tahle karta i ta druhá si
     // zachovají svoje vlastní jméno a agendu. Shoda e-mailu se řeší jen při
@@ -1511,6 +1616,7 @@ export function SignatureRecipientsDialog({
           recipients: next.map((r) => ({
             name: r.name,
             email: r.email,
+            ...(r.id ? { id: r.id } : {}),
             ...(r.rowKeys?.length ? { rowKeys: r.rowKeys } : {}),
             ...(r.behalfLabel ? { behalfLabel: r.behalfLabel } : {}),
             ...(r.invitedAt ? { invitedAt: r.invitedAt } : {}),
@@ -1539,7 +1645,12 @@ export function SignatureRecipientsDialog({
 
     const resendGroups = groupRecipientsForInviteSend(targets)
 
-    for (const { primary: target, extras } of resendGroups) {
+    for (const {
+      primary: target,
+      extras,
+      ownRowKeys,
+      directExtras,
+    } of resendGroups) {
       try {
         const res = await fetch(
           `/api/odchody/${offboardingId}/exit-checklist/invite`,
@@ -1556,7 +1667,7 @@ export function SignatureRecipientsDialog({
                     behalfOfDisplayLabel: target.behalfLabel,
                     behalfOfRowKeys: target.rowKeys ?? [],
                   }
-                : { rowKeys: target.rowKeys ?? [] }),
+                : { rowKeys: ownRowKeys }),
               ...(extras.length > 0
                 ? {
                     alsoActingOnBehalfOf: extras.map((extra) => ({
@@ -1573,6 +1684,7 @@ export function SignatureRecipientsDialog({
       } catch {
         failed.push(target.email)
         extras.forEach((extra) => failed.push(extra.email))
+        directExtras.forEach((extra) => failed.push(extra.email))
       }
     }
 
@@ -1970,6 +2082,14 @@ export function SignatureRecipientsDialog({
       return
     }
 
+    const employeeEmailNormalized = (employeeEmail ?? "").trim().toLowerCase()
+    if (employeeEmailNormalized && email === employeeEmailNormalized) {
+      setAddPersonError(
+        "E-mail zaměstnance nelze přidat jako dalšího podepisujícího – zaměstnanec nesmí podepisovat ani vyplňovat nic dalšího."
+      )
+      return
+    }
+
     let position: string | undefined
     let department: string | undefined
 
@@ -2108,7 +2228,12 @@ export function SignatureRecipientsDialog({
 
       const inviteGroups = groupRecipientsForInviteSend(toInviteNew)
 
-      for (const { primary: r, extras } of inviteGroups) {
+      for (const {
+        primary: r,
+        extras,
+        ownRowKeys,
+        directExtras,
+      } of inviteGroups) {
         const key = entryIdentityKey(r)
 
         try {
@@ -2159,7 +2284,7 @@ export function SignatureRecipientsDialog({
                       behalfOfDepartment: original?.department ?? null,
                       behalfOfEmail: original?.email ?? null,
                     }
-                  : { rowKeys: r.rowKeys ?? [] }),
+                  : { rowKeys: ownRowKeys }),
                 ...(pendingSubstitute
                   ? {
                       substituteName: pendingSubstitute.name,
@@ -2185,7 +2310,7 @@ export function SignatureRecipientsDialog({
           if (pendingSubstitute) {
             mergedOriginalKeys.add(key)
           }
-          for (const extra of extras) {
+          for (const extra of [...extras, ...directExtras]) {
             resultByKey.set(entryIdentityKey(extra), { status: "fulfilled" })
           }
         } catch (err) {
@@ -2194,7 +2319,7 @@ export function SignatureRecipientsDialog({
             error:
               err instanceof Error ? err : new Error("Chyba při odesílání."),
           })
-          for (const extra of extras) {
+          for (const extra of [...extras, ...directExtras]) {
             resultByKey.set(entryIdentityKey(extra), {
               status: "rejected",
               error: new Error("Chyba při odesílání."),
@@ -2233,8 +2358,11 @@ export function SignatureRecipientsDialog({
       setRecipients(updatedRecipients)
       setSendErrors(nextSendErrors)
 
+      // I karta, u které se odeslání nepodařilo, se musí uložit (jako
+      // nepotvrzená) – naposledy zadané jméno/e-mail se nikdy nesmí ztratit
+      // jen proto, že pozvánka zrovna neprošla.
       const recipientsToPersist = updatedRecipients.filter(
-        (r) => r.invitedAt || r.revokedAt
+        (r) => r.invitedAt || r.revokedAt || inviteKeys.has(entryIdentityKey(r))
       )
 
       const sentCount = toInviteNew.length - nextSendErrors.size
@@ -2442,21 +2570,25 @@ export function SignatureRecipientsDialog({
     }
   }
 
-  const managerRecipient = activeRecipients.find(
-    (r) =>
-      !r.behalfLabel &&
-      !r.substituteForKey &&
-      managerEmail &&
-      r.email.trim().toLowerCase() === managerEmail.trim().toLowerCase()
-  )
+  const managerRecipient = managerRecipientId
+    ? activeRecipients.find((r) => r.id === managerRecipientId)
+    : activeRecipients.find(
+        (r) =>
+          !r.behalfLabel &&
+          !r.substituteForKey &&
+          managerEmail &&
+          r.email.trim().toLowerCase() === managerEmail.trim().toLowerCase()
+      )
 
-  const employeeRecipient = activeRecipients.find(
-    (r) =>
-      !r.behalfLabel &&
-      !r.substituteForKey &&
-      employeeEmail &&
-      r.email.trim().toLowerCase() === employeeEmail.trim().toLowerCase()
-  )
+  const employeeRecipient = employeeRecipientId
+    ? activeRecipients.find((r) => r.id === employeeRecipientId)
+    : activeRecipients.find(
+        (r) =>
+          !r.behalfLabel &&
+          !r.substituteForKey &&
+          employeeEmail &&
+          r.email.trim().toLowerCase() === employeeEmail.trim().toLowerCase()
+      )
 
   const predefinedAgendaRows: AgendaRow[] = [
     {
@@ -3143,6 +3275,7 @@ export function SignatureRecipientsDialog({
               setRespSectionCPosition(respManagerPosition)
               setRespSectionCDepartment(respManagerDepartment)
               setRespSectionCEmail(respManagerEmail)
+              setSectionCTouched(false)
               syncSectionCResponsibleIntoRecipients(
                 respManagerName,
                 respManagerEmail,
@@ -4411,7 +4544,7 @@ export function SignatureRecipientsDialog({
             ) : toRevoke.length > 0 && toInviteNew.length > 0 ? (
               <>
                 <Send className="size-4" />
-                Odeslat a uložit (odeslat {toInviteNew.length}, odebrat{" "}
+                Odeslat a uložit (odeslat {pendingNewInviteEmails}, odebrat{" "}
                 {toRevoke.length})
               </>
             ) : toRevoke.length > 0 ? (
@@ -4422,7 +4555,7 @@ export function SignatureRecipientsDialog({
             ) : toInviteNew.length > 0 ? (
               <>
                 <Send className="size-4" />
-                Odeslat a uložit (odeslat {toInviteNew.length})
+                Odeslat a uložit (odeslat {pendingNewInviteEmails})
               </>
             ) : (
               <>
@@ -4592,8 +4725,8 @@ export function SignatureRecipientsDialog({
             <AlertDialogDescription className="space-y-1.5">
               {toInviteNew.length > 0 && (
                 <p>
-                  Novým příjemcům ({toInviteNew.length}) bude odeslána pozvánka
-                  k podpisu na jejich e-mail.
+                  Novým příjemcům ({pendingNewInviteEmails}) bude odeslána
+                  pozvánka k podpisu na jejich e-mail.
                 </p>
               )}
               {coiDirty && (

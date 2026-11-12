@@ -964,6 +964,9 @@ export function ExitChecklistForm({
   const [kitt6OptionContact, setKitt6OptionContact] = useState(
     initialData.kitt6OptionContact ?? null
   )
+  const [employeeEmailOverride, setEmployeeEmailOverride] = useState<
+    string | null
+  >(initialData.employeeEmail ?? null)
   const [managerLoading, setManagerLoading] = useState(false)
   const [managerLoadError, setManagerLoadError] = useState<string | null>(null)
 
@@ -1049,9 +1052,9 @@ export function ExitChecklistForm({
       positionNum: initialData.positionNum ?? null,
       positionName: initialData.positionName ?? null,
       employmentEndDate: initialData.employmentEndDate,
-      employeeEmail: initialData.employeeEmail ?? null,
+      employeeEmail: employeeEmailOverride,
     }),
-    [initialData]
+    [initialData, employeeEmailOverride]
   )
 
   const formattedDate = useMemo(
@@ -3083,6 +3086,9 @@ export function ExitChecklistForm({
                   sectionBResponsible={sectionBResponsible}
                   sectionCResponsible={sectionCResponsible}
                   kitt6OptionContact={kitt6OptionContact}
+                  onEmployeeChange={(value) =>
+                    setEmployeeEmailOverride(value.email)
+                  }
                   onManagerChange={(value) => {
                     setManagerName(value.name)
                     setManagerEmail(value.email)

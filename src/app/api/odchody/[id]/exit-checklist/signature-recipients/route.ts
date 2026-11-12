@@ -63,6 +63,7 @@ const bodySchema = z.object({
   recipients: z
     .array(
       z.object({
+        id: z.string().optional(),
         name: z.string().trim().min(1, "Jméno příjemce je povinné."),
         email: z.string().trim().email("Neplatný e-mail příjemce."),
         rowKeys: z.array(z.string()).optional(),
@@ -157,6 +158,7 @@ export async function POST(
         department: true,
         actualEnd: true,
         plannedEnd: true,
+        userEmail: true,
         exitChecklist: {
           select: {
             id: true,
@@ -203,6 +205,30 @@ export async function POST(
         },
         { status: 400 }
       )
+    }
+
+    // Zaměstnanec (odcházející) smí podepsat jen svůj vlastní podpis v
+    // hlavičce – jeho e-mail nikdy nesmí nést žádnou agendu sekce A ani
+    // zastoupení, jinak by si mohl fakticky vyplnit/podepsat něco dalšího.
+    const employeeEmailNormalized = normalizeEmail(offboarding.userEmail)
+    if (employeeEmailNormalized) {
+      const employeeEmailMisuse = uniqueRecipients.some(
+        (recipient) =>
+          !recipient.revokedAt &&
+          normalizeEmail(recipient.email) === employeeEmailNormalized &&
+          ((recipient.rowKeys?.length ?? 0) > 0 ||
+            Boolean(recipient.behalfLabel))
+      )
+      if (employeeEmailMisuse) {
+        return NextResponse.json(
+          {
+            status: "error",
+            message:
+              "E-mail zaměstnance (odcházejícího) nelze přiřadit k žádné agendě ani zastoupení – smí podepsat jen svůj vlastní podpis v hlavičce.",
+          },
+          { status: 400 }
+        )
+      }
     }
 
     const existingByKey = new Map<

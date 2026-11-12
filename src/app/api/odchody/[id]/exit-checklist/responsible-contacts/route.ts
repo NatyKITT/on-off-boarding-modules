@@ -134,6 +134,82 @@ export async function PATCH(
   const nextHeaderRecord: Record<string, unknown> = { ...header }
   const changedParts: string[] = []
 
+  // Zaměstnanec (odcházející) smí podepsat jen svůj vlastní podpis v
+  // hlavičce – jeho e-mail se tu nesmí objevit u žádné jiné odpovědné
+  // osoby, jinak by si fakticky mohl vyplnit/podepsat něco dalšího.
+  const unknownEmailStr = (value: unknown): string | undefined =>
+    typeof value === "string" ? value : undefined
+
+  const effectiveEmployeeEmail = normalizeEmail(
+    "employeeEmail" in body
+      ? unknownEmailStr(body.employeeEmail)
+      : offboarding.userEmail
+  )
+  if (effectiveEmployeeEmail) {
+    const otherRoleEmails: Array<{ label: string; email: string }> = []
+    if ("managerEmail" in body) {
+      otherRoleEmails.push({
+        label: "vedoucí odboru",
+        email: normalizeEmail(unknownEmailStr(body.managerEmail)),
+      })
+    }
+    if (
+      "sectionBResponsible" in body &&
+      body.sectionBResponsible &&
+      typeof body.sectionBResponsible === "object"
+    ) {
+      otherRoleEmails.push({
+        label: "odpovědná osoba za sekci B",
+        email: normalizeEmail(
+          unknownEmailStr(
+            (body.sectionBResponsible as { email?: unknown }).email
+          )
+        ),
+      })
+    }
+    if (
+      "sectionCResponsible" in body &&
+      body.sectionCResponsible &&
+      typeof body.sectionCResponsible === "object"
+    ) {
+      otherRoleEmails.push({
+        label: "odpovědná osoba za sekci C",
+        email: normalizeEmail(
+          unknownEmailStr(
+            (body.sectionCResponsible as { email?: unknown }).email
+          )
+        ),
+      })
+    }
+    if (
+      "kitt6OptionContact" in body &&
+      body.kitt6OptionContact &&
+      typeof body.kitt6OptionContact === "object"
+    ) {
+      otherRoleEmails.push({
+        label: "kontakt KITT6",
+        email: normalizeEmail(
+          unknownEmailStr(
+            (body.kitt6OptionContact as { email?: unknown }).email
+          )
+        ),
+      })
+    }
+
+    const conflict = otherRoleEmails.find(
+      (entry) => entry.email && entry.email === effectiveEmployeeEmail
+    )
+    if (conflict) {
+      return NextResponse.json(
+        {
+          status: "error",
+          message: `E-mail zaměstnance nelze použít pro roli „${conflict.label}" – zaměstnanec nesmí podepisovat ani vyplňovat nic dalšího.`,
+        },
+        { status: 400 }
+      )
+    }
+  }
+
   let supervisorUpdateData: Prisma.EmployeeOffboardingUpdateInput | null = null
   const supervisorChanges: Array<{
     field: string

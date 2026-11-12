@@ -2,6 +2,19 @@
 
 Historie významných změn v aplikaci On-Off-Boarding Modul. Nejnovější verze nahoře.
 
+## 0.17.2 – 2026-11-12
+
+### Opravy
+
+- **Karty v „Seznam a správa osob k podpisu" se už nikdy tiše neslučují jen proto, že mají stejný e-mail** – dřív se stávalo (hlavně u výchozího návrhu seznamu), že úprava e-mailu nebo jména na jedné kartě přepsala jméno či agendu jiné, nesouvisející karty se stejným e-mailem (typicky vedoucí odboru a zároveň statický signatář za stejný odbor). Každá karta má nově vlastní, trvalé id nezávislé na e-mailu po celou dobu práce s oknem, ne jen po uložení.
+- **Pozvánka k podpisu nově správně sečte agendu i tehdy, když stejný e-mail patří dvěma kartám BEZ zastoupení** (např. vedoucí odboru a zároveň samostatný signatář) – dřív se odeslala pozvánka jen s agendou z jedné z nich, druhá skončila chybně nahlášená jako neodeslaná, i když se o její odeslání appka vůbec nepokusila.
+- **Úprava e-mailu u karty zaměstnance nebo vedoucího odboru se už neuloží jako nová karta „mimo běžnou agendu" a nemaže zaškrtnutí** – appka tyto dvě karty nově rozpoznává podle jejich trvalé identity, ne podle právě napsaného e-mailu.
+- **Sekce C (předání agendy) se dál automaticky propisuje podle vedoucího odboru**, dokud se jí skutečně nepřiřadí jiná konkrétní osoba (jméno i e-mail se liší od vedoucího) – dřív se při jakémkoli uložení (i nesouvisejícím se sekcí C) „zamrzla" na aktuální hodnotu a přestala sledovat pozdější úpravy jména/e-mailu u vedoucího. Pokud se sekci C i vedoucímu nastaví zpátky stejná osoba, propojení se samo obnoví; teprve skutečná výměna na jedné z karet je od té chvíle nezávislá na druhé. Díky tomu platí i pro zastoupení – zástup nastavený u vedoucího odboru automaticky funguje i pro sekci C, dokud v ní není nastavena jiná konkrétní osoba.
+- **Oprava appky, která po úspěšně odeslaném a uloženém e-mailu zaměstnance dál hlásila neuložené změny** – oprava e-mailu zaměstnance se správně propsala do záznamu odchodu, ale okno o tom nevědělo a zbytečně vyzývalo k dalšímu uložení.
+- **Číslo v tlačítku „Odeslat a uložit (X)" nově ukazuje reálný počet e-mailových adres, kterým se pozvánka pošle**, ne počet karet – víc karet se stejným e-mailem jde jako jedna sečtená pozvánka.
+- **E-mail odcházejícího zaměstnance appka nově nedovolí přiřadit žádné jiné kartě, agendě ani zastoupení** – zaměstnanec smí podepsat jen svůj vlastní podpis v hlavičce.
+- **Karta, u které se odeslání pozvánky nepodaří, se už neztrácí beze stopy** – zůstane v seznamu jako nepotvrzená se zadaným jménem/e-mailem, místo aby po zavření a znovuotevření okna zmizela.
+
 ## 0.17.1 – 2026-11-06
 
 ### Opravy

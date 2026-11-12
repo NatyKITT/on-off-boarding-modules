@@ -718,17 +718,31 @@ agendy, řadí se pod sebe (ne vedle sebe) a mají jednotnou výšku a
 odlišení celého řádku; **sekce C je rozdělená na dvě části** – nahoře
 karta odpovědné osoby za předání agendy, dole za dělicí čárou karta
 kontaktu KITT6 (pro případ volby „KITT6 předá na jiné funkční místo").
-Odpovědná osoba za sekci C je nezávislá na vedoucím odboru (výchozí
-hodnota ale zůstává vedoucí, dá se změnit).
+Odpovědná osoba za sekci C je nezávislá na vedoucím odboru a dá se
+změnit – dokud se jí ale skutečně nepřiřadí jiná konkrétní osoba
+(jméno i e-mail se liší od vedoucího), zůstává to jen nabídka „stejná
+osoba jako vedoucí" a dál automaticky sleduje i pozdější úpravy jména
+a e-mailu u vedoucího. Pokud se sekci C i vedoucímu později nastaví
+zpátky stejná osoba, appka propojení sama obnoví; teprve skutečná
+výměna na jedné z karet je od té chvíle nezávislá na druhé. Zástup
+nastavený u vedoucího odboru tak automaticky platí i pro sekci C,
+dokud v ní není nastavena jiná konkrétní osoba.
 
 Karta **odcházejícího zaměstnance** se tu dá upravit stejným způsobem
 jako karta vedoucího, sekce B nebo sekce C – tlačítkem „Upravit" se
 odemkne needitovatelná karta, lze změnit jen e-mail (jméno zůstává
 needitovatelné). Dokud okno neuložíte tlačítkem „Odeslat a uložit",
 je změna vidět jen na kartě; po uložení se propíše přímo do záznamu
-odchodu. Stejně funguje i karta vedoucího – pokud nemá vyplněnou
-funkci a odbor, appka se je pokusí sama dohledat v EOS podle jména
-nebo e-mailu, a to už při otevření okna, nejen při uložení jeho karty.
+odchodu, včetně toho, že appka hned ví, že je uloženo, a neptá se
+znovu na uložení zbytečně. Zadaný e-mail nejde přiřadit žádné jiné
+kartě, agendě ani zastoupení – zaměstnanec smí podepsat jen svůj
+vlastní podpis v hlavičce. Stejně funguje i karta vedoucího – pokud
+nemá vyplněnou funkci a odbor, appka se je pokusí sama dohledat v EOS
+podle jména nebo e-mailu, a to už při otevření okna, nejen při
+uložení jeho karty. Obě karty appka po celou dobu práce s oknem
+rozpozná podle jejich trvalé identity, ne podle právě napsaného
+e-mailu – úprava se tak nikdy neuloží jako nová karta „mimo běžnou
+agendu" a nezmizí jí zaškrtnutí.
 
 **Zaškrtávací pole u karet se zobrazují jen na vyžádání** – tlačítky
 **„Vybrat ručně"** (zobrazí prázdné checkboxy u všech karet, zaškrtne
@@ -758,7 +772,11 @@ Odsud jde:
   přepíšete e-mail u existující karty), už v seznamu je u jiné agendy,
   appka agendu k té osobě **přiřadí navíc** místo aby uložení
   zablokovala – jedna osoba tak může mít na starosti libovolný počet
-  různých agend/rolí najednou.
+  různých agend/rolí najednou. Karty se tím nikdy neslučují do jedné –
+  každá si i při shodném e-mailu zachovává vlastní jméno, agendu
+  i identitu; e-mail jen rozhoduje, komu se agenda sečte do jedné
+  pozvánky. Výjimka je e-mail odcházejícího zaměstnance – ten appka
+  k žádné další kartě nedovolí přiřadit.
 - **tlačítko „Zastoupit"** u karty otevře formulář přímo pod ní (ne
   jako samostatný blok dole) – jde zaškrtnout i u ještě nepotvrzené
   (šedé, návrhové) karty, která se tím automaticky potvrdí zároveň se
@@ -794,7 +812,11 @@ uložení. Nijak se neodesílá hned při kliknutí – teprve hlavní tlačítk
 **„Odeslat a uložit"** dole v okně uloží a případně i odešle/zruší
 pozvánku Právnímu odboru (podle volby) společně s ostatními změnami
 v okně (přidání/odebrání příjemců, úprava odpovědných osob za sekci B,
-C a kontaktu KITT6). Samostatné tlačítko **„Odeslat znovu všem"**
+C a kontaktu KITT6). Číslo v závorce u tohoto tlačítka ukazuje počet
+e-mailových adres, kterým se pozvánka skutečně pošle, ne počet karet –
+víc karet se stejným e-mailem jde jako jedna sečtená pozvánka. Pokud
+se u některé karty odeslání nepovede, zůstane v seznamu jako
+nepotvrzená se zadaným jménem/e-mailem, ne že by beze stopy zmizela. Samostatné tlačítko **„Odeslat znovu všem"**
 (s potvrzovacím oknem) jen znovu rozešle pozvánky již potvrzeným lidem,
 nezávisle na tom, co je právě zaškrtnuté. Uložení v tomto okně je
 **samostatné** – není potřeba nic znovu ukládat v hlavním formuláři
