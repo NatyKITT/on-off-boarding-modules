@@ -80,13 +80,6 @@ type Recipient = {
   department?: string
 }
 
-const DEFAULT_SECTION_B_RESPONSIBLE = {
-  name: "Ing. Martina Krýzová",
-  position: "vedoucí Oddělení vnitřní správy",
-  department: "Odbor služeb",
-  email: "mkryzova@praha6.cz",
-}
-
 type ResponsiblePerson = {
   name: string
   position?: string
@@ -98,6 +91,8 @@ type Props = {
   offboardingId: number
   employeeName: string
   employeeEmail?: string | null
+  employeePosition?: string | null
+  employeeDepartment?: string | null
   publicToken?: string | null
   conflictOfInterest: boolean | null
   managerEmail?: string | null
@@ -114,11 +109,13 @@ type Props = {
   sectionBResponsible?: ResponsiblePerson | null
   sectionCResponsible?: ResponsiblePerson | null
   kitt6OptionContact?: ResponsiblePerson | null
+  spisovkaContacts?: ResponsiblePerson[] | null
   onEmployeeChange?: (value: { name: string; email: string }) => void
   onManagerChange?: (value: ResponsiblePerson) => void
   onSectionBResponsibleChange?: (value: ResponsiblePerson) => void
   onSectionCResponsibleChange?: (value: ResponsiblePerson) => void
   onKitt6ContactChange?: (value: ResponsiblePerson) => void
+  onSpisovkaContactsChange?: (value: ResponsiblePerson[]) => void
   onConflictOfInterestChange?: (value: boolean) => void
 }
 
@@ -277,6 +274,8 @@ export function SignatureRecipientsDialog({
   offboardingId,
   employeeName,
   employeeEmail,
+  employeePosition,
+  employeeDepartment,
   publicToken,
   conflictOfInterest,
   managerEmail,
@@ -293,11 +292,13 @@ export function SignatureRecipientsDialog({
   sectionBResponsible,
   sectionCResponsible,
   kitt6OptionContact,
+  spisovkaContacts,
   onEmployeeChange,
   onManagerChange,
   onSectionBResponsibleChange,
   onSectionCResponsibleChange,
   onKitt6ContactChange,
+  onSpisovkaContactsChange,
   onConflictOfInterestChange,
 }: Props) {
   const [open, setOpen] = useState(false)
@@ -306,6 +307,9 @@ export function SignatureRecipientsDialog({
   const [managerContactPickerOpen, setManagerContactPickerOpen] =
     useState(false)
   const [kitt6PickerOpen, setKitt6PickerOpen] = useState(false)
+  const [spisovkaPickerOpen, setSpisovkaPickerOpen] = useState<
+    [boolean, boolean]
+  >([false, false])
   const [managerCardEditing, setManagerCardEditing] = useState(false)
   const [sectionBCardEditing, setSectionBCardEditing] = useState(false)
   const [sectionCCardEditing, setSectionCCardEditing] = useState(false)
@@ -328,6 +332,23 @@ export function SignatureRecipientsDialog({
   const [respKitt6Position, setRespKitt6Position] = useState("")
   const [respKitt6Department, setRespKitt6Department] = useState("")
   const [respKitt6Email, setRespKitt6Email] = useState("")
+  const [spisovkaCardEditing, setSpisovkaCardEditing] = useState<
+    [boolean, boolean]
+  >([false, false])
+  const [respSpisovkaName, setRespSpisovkaName] = useState<[string, string]>([
+    "",
+    "",
+  ])
+  const [respSpisovkaPosition, setRespSpisovkaPosition] = useState<
+    [string, string]
+  >(["", ""])
+  const [respSpisovkaDepartment, setRespSpisovkaDepartment] = useState<
+    [string, string]
+  >(["", ""])
+  const [respSpisovkaEmail, setRespSpisovkaEmail] = useState<[string, string]>([
+    "",
+    "",
+  ])
   const [respError, setRespError] = useState<string | null>(null)
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -347,26 +368,17 @@ export function SignatureRecipientsDialog({
     return () => clearTimeout(timeout)
   }, [info])
 
-  useEffect(() => {
-    if (!open || sectionCTouched) return
-    setRespSectionCName(respManagerName)
-    setRespSectionCPosition(respManagerPosition)
-    setRespSectionCDepartment(respManagerDepartment)
-    setRespSectionCEmail(respManagerEmail)
-  }, [
-    open,
-    sectionCTouched,
-    respManagerName,
-    respManagerPosition,
-    respManagerDepartment,
-    respManagerEmail,
-  ])
-
   const [lastSentAt, setLastSentAt] = useState<string | null>(null)
   const [employeeRecipientId, setEmployeeRecipientId] = useState<string | null>(
     null
   )
   const [managerRecipientId, setManagerRecipientId] = useState<string | null>(
+    null
+  )
+  const [sectionBRecipientId, setSectionBRecipientId] = useState<string | null>(
+    null
+  )
+  const [sectionCRecipientId, setSectionCRecipientId] = useState<string | null>(
     null
   )
   const [signedRemovalConfirm, setSignedRemovalConfirm] = useState<
@@ -420,12 +432,19 @@ export function SignatureRecipientsDialog({
   const [editError, setEditError] = useState<string | null>(null)
 
   const [replaceTarget, setReplaceTarget] = useState<Recipient | null>(null)
+  const [replaceTargetRoleKey, setReplaceTargetRoleKey] = useState<
+    string | undefined
+  >(undefined)
   const [replaceName, setReplaceName] = useState("")
   const [replaceEmail, setReplaceEmail] = useState("")
   const [replacePosition, setReplacePosition] = useState<string | undefined>()
   const [replaceDepartment, setReplaceDepartment] = useState<
     string | undefined
   >()
+  const [crossSectionPrompt, setCrossSectionPrompt] = useState<{
+    message: string
+    onConfirm: () => void
+  } | null>(null)
   const [replacePickerOpen, setReplacePickerOpen] = useState(false)
   const [replaceError, setReplaceError] = useState<string | null>(null)
 
@@ -541,12 +560,27 @@ export function SignatureRecipientsDialog({
     normalizeCompare(respKitt6Email) !==
       normalizeCompare(kitt6OptionContact?.email)
 
+  const spisovkaCardDirty: [boolean, boolean] = [0, 1].map((i) => {
+    const contact = spisovkaContacts?.[i]
+    return (
+      normalizeCompare(respSpisovkaName[i]) !==
+        normalizeCompare(contact?.name) ||
+      normalizeCompare(respSpisovkaPosition[i]) !==
+        normalizeCompare(contact?.position) ||
+      normalizeCompare(respSpisovkaDepartment[i]) !==
+        normalizeCompare(contact?.department) ||
+      normalizeCompare(respSpisovkaEmail[i]) !==
+        normalizeCompare(contact?.email)
+    )
+  }) as [boolean, boolean]
+
   const contactsDirty =
     employeeCardDirty ||
     managerCardDirty ||
     sectionBCardDirty ||
     sectionCCardDirty ||
-    kitt6CardDirty
+    kitt6CardDirty ||
+    spisovkaCardDirty.some(Boolean)
 
   const hasUnsavedDialogChanges =
     toInviteNew.length > 0 || toRevoke.length > 0 || coiDirty || contactsDirty
@@ -654,6 +688,30 @@ export function SignatureRecipientsDialog({
               )?.id ?? null)
             : null
         )
+        const sectionBEmailNormalized = sectionBResponsible?.email
+          ?.trim()
+          .toLowerCase()
+        setSectionBRecipientId(
+          sectionBEmailNormalized
+            ? (mergedWithIds.find(
+                (r) =>
+                  !r.behalfLabel &&
+                  r.email.trim().toLowerCase() === sectionBEmailNormalized
+              )?.id ?? null)
+            : null
+        )
+        const sectionCEmailNormalized = sectionCResponsible?.email
+          ?.trim()
+          .toLowerCase()
+        setSectionCRecipientId(
+          sectionCEmailNormalized
+            ? (mergedWithIds.find(
+                (r) =>
+                  !r.behalfLabel &&
+                  r.email.trim().toLowerCase() === sectionCEmailNormalized
+              )?.id ?? null)
+            : null
+        )
         setHasExistingList(true)
         setLastSentAt(data?.signatureRecipientsSentAt ?? null)
         setLastSentByName(data?.signatureRecipientsSentByName ?? null)
@@ -688,6 +746,30 @@ export function SignatureRecipientsDialog({
             ? (fallbackWithIds.find(
                 (r) =>
                   !r.behalfLabel && r.email.trim().toLowerCase() === managerKey
+              )?.id ?? null)
+            : null
+        )
+        const sectionBKeyFallback = sectionBResponsible?.email
+          ?.trim()
+          .toLowerCase()
+        setSectionBRecipientId(
+          sectionBKeyFallback
+            ? (fallbackWithIds.find(
+                (r) =>
+                  !r.behalfLabel &&
+                  r.email.trim().toLowerCase() === sectionBKeyFallback
+              )?.id ?? null)
+            : null
+        )
+        const sectionCKeyFallback = sectionCResponsible?.email
+          ?.trim()
+          .toLowerCase()
+        setSectionCRecipientId(
+          sectionCKeyFallback
+            ? (fallbackWithIds.find(
+                (r) =>
+                  !r.behalfLabel &&
+                  r.email.trim().toLowerCase() === sectionCKeyFallback
               )?.id ?? null)
             : null
         )
@@ -754,6 +836,23 @@ export function SignatureRecipientsDialog({
       setRespKitt6Position(kitt6OptionContact?.position ?? "")
       setRespKitt6Department(kitt6OptionContact?.department ?? "")
       setRespKitt6Email(kitt6OptionContact?.email ?? "")
+      setSpisovkaCardEditing([false, false])
+      setRespSpisovkaName([
+        spisovkaContacts?.[0]?.name ?? "",
+        spisovkaContacts?.[1]?.name ?? "",
+      ])
+      setRespSpisovkaPosition([
+        spisovkaContacts?.[0]?.position ?? "",
+        spisovkaContacts?.[1]?.position ?? "",
+      ])
+      setRespSpisovkaDepartment([
+        spisovkaContacts?.[0]?.department ?? "",
+        spisovkaContacts?.[1]?.department ?? "",
+      ])
+      setRespSpisovkaEmail([
+        spisovkaContacts?.[0]?.email ?? "",
+        spisovkaContacts?.[1]?.email ?? "",
+      ])
       setRespError(null)
       void loadRecipients()
     }
@@ -765,6 +864,10 @@ export function SignatureRecipientsDialog({
     const sectionBEmail = respSectionBEmail.trim().toLowerCase()
     const sectionCEmail = respSectionCEmail.trim().toLowerCase()
     const kitt6Email = respKitt6Email.trim().toLowerCase()
+    const spisovkaEmails: [string, string] = [
+      respSpisovkaEmail[0].trim().toLowerCase(),
+      respSpisovkaEmail[1].trim().toLowerCase(),
+    ]
 
     const sectionCDivergedFromManager =
       sectionCTouched &&
@@ -776,10 +879,12 @@ export function SignatureRecipientsDialog({
       !managerEmailValue ||
       !sectionBEmail ||
       !sectionCEmail ||
-      !kitt6Email
+      !kitt6Email ||
+      !spisovkaEmails[0] ||
+      !spisovkaEmails[1]
     ) {
       throw new Error(
-        "E-mail zaměstnance, vedoucího odboru, odpovědné osoby za sekci B, za sekci C i kontakt KITT6 jsou povinné."
+        "E-mail zaměstnance, vedoucího odboru, odpovědné osoby za sekci B, za sekci C, kontakt KITT6 i oba kontakty spisové služby jsou povinné."
       )
     }
 
@@ -814,6 +919,12 @@ export function SignatureRecipientsDialog({
             department: respKitt6Department.trim(),
             email: kitt6Email,
           },
+          spisovkaContacts: [0, 1].map((i) => ({
+            name: respSpisovkaName[i].trim(),
+            position: respSpisovkaPosition[i].trim(),
+            department: respSpisovkaDepartment[i].trim(),
+            email: spisovkaEmails[i],
+          })),
         }),
       }
     )
@@ -866,11 +977,20 @@ export function SignatureRecipientsDialog({
       department: respKitt6Department.trim(),
       email: kitt6Email,
     })
+    onSpisovkaContactsChange?.(
+      [0, 1].map((i) => ({
+        name: respSpisovkaName[i].trim(),
+        position: respSpisovkaPosition[i].trim(),
+        department: respSpisovkaDepartment[i].trim(),
+        email: spisovkaEmails[i],
+      }))
+    )
     setEmployeeCardEditing(false)
     setManagerCardEditing(false)
     setSectionBCardEditing(false)
     setSectionCCardEditing(false)
     setKitt6CardEditing(false)
+    setSpisovkaCardEditing([false, false])
   }
 
   function discardAndClose() {
@@ -1188,6 +1308,7 @@ export function SignatureRecipientsDialog({
       nextPosition,
       nextDepartment,
       fallbackRowKeys: [],
+      onResolved: (id) => setSectionBRecipientId(id ?? null),
     })
   }
 
@@ -1245,6 +1366,28 @@ export function SignatureRecipientsDialog({
         respManagerPosition,
         respManagerDepartment
       )
+      if (sectionCRecipient) {
+        const name = respManagerName
+        const email = respManagerEmail
+        const position = respManagerPosition
+        const department = respManagerDepartment
+        setCrossSectionPrompt({
+          message: `Použít ${name || email} i pro sekci C (místo „${sectionCRecipient.name}“)?`,
+          onConfirm: () => {
+            setRespSectionCName(name)
+            setRespSectionCEmail(email)
+            setRespSectionCPosition(position)
+            setRespSectionCDepartment(department)
+            setSectionCTouched(true)
+            syncSectionCResponsibleIntoRecipients(
+              name,
+              email,
+              position,
+              department
+            )
+          },
+        })
+      }
     }
     setManagerCardEditing((prev) => !prev)
   }
@@ -1281,6 +1424,7 @@ export function SignatureRecipientsDialog({
       nextPosition,
       nextDepartment,
       fallbackRowKeys: [],
+      onResolved: (id) => setSectionCRecipientId(id ?? null),
     })
   }
 
@@ -1293,6 +1437,22 @@ export function SignatureRecipientsDialog({
         respSectionCDepartment
       )
       setSectionCTouched(true)
+      if (managerRecipient) {
+        const name = respSectionCName
+        const email = respSectionCEmail
+        const position = respSectionCPosition
+        const department = respSectionCDepartment
+        setCrossSectionPrompt({
+          message: `Použít ${name || email} i pro vedoucího odboru (místo „${managerRecipient.name}“)?`,
+          onConfirm: () => {
+            setRespManagerName(name)
+            setRespManagerEmail(email)
+            setRespManagerPosition(position)
+            setRespManagerDepartment(department)
+            syncManagerIntoRecipients(name, email, position, department)
+          },
+        })
+      }
     }
     setSectionCCardEditing((prev) => !prev)
   }
@@ -1342,6 +1502,35 @@ export function SignatureRecipientsDialog({
     setRespKitt6Email(employee.email ?? "")
     setRespKitt6Position(employee.positionName || "")
     setRespKitt6Department(employee.department || "")
+  }
+
+  function handleSpisovkaPersonSelected(index: 0 | 1, employee: EmployeeItem) {
+    const name = joinNameWithTitles({
+      titleBefore: employee.titleBefore,
+      name: employee.name,
+      surname: employee.surname,
+      titleAfter: employee.titleAfter,
+    })
+    setRespSpisovkaName((prev) => {
+      const next = [...prev] as [string, string]
+      next[index] = name
+      return next
+    })
+    setRespSpisovkaEmail((prev) => {
+      const next = [...prev] as [string, string]
+      next[index] = employee.email ?? ""
+      return next
+    })
+    setRespSpisovkaPosition((prev) => {
+      const next = [...prev] as [string, string]
+      next[index] = employee.positionName || ""
+      return next
+    })
+    setRespSpisovkaDepartment((prev) => {
+      const next = [...prev] as [string, string]
+      next[index] = employee.department || ""
+      return next
+    })
   }
 
   function handleSubstitutePersonSelected(employee: EmployeeItem) {
@@ -1722,8 +1911,53 @@ export function SignatureRecipientsDialog({
     toggleSelected(key)
   }
 
-  async function handleConfirmSubstitute() {
-    if (!substituteTarget) return
+  function finishSubstitute(target: Recipient, personLabel: string) {
+    setSubstituteTarget(null)
+    setSubstituteName("")
+    setSubstituteEmail("")
+    setSubstituteError(null)
+
+    if (target.id === "manager" && sectionCRecipient) {
+      setCrossSectionPrompt({
+        message: `Použít ${personLabel} jako zástup i pro sekci C (za „${sectionCRecipient.name}“)?`,
+        onConfirm: () =>
+          void handleConfirmSubstitute(
+            {
+              id: "sectionC",
+              name: sectionCRecipient.name,
+              email: sectionCRecipient.email,
+              position: sectionCRecipient.position,
+              department: sectionCRecipient.department,
+              rowKeys: sectionCRecipient.rowKeys,
+            },
+            true
+          ),
+      })
+    } else if (target.id === "sectionC" && managerRecipient) {
+      setCrossSectionPrompt({
+        message: `Použít ${personLabel} jako zástup i pro vedoucího odboru (za „${managerRecipient.name}“)?`,
+        onConfirm: () =>
+          void handleConfirmSubstitute(
+            {
+              id: "manager",
+              name: managerRecipient.name,
+              email: managerRecipient.email,
+              position: managerRecipient.position,
+              department: managerRecipient.department,
+              rowKeys: managerRecipient.rowKeys,
+            },
+            true
+          ),
+      })
+    }
+  }
+
+  async function handleConfirmSubstitute(
+    targetOverride?: Recipient,
+    skipCrossPrompt?: boolean
+  ) {
+    const substituteTargetResolved = targetOverride ?? substituteTarget
+    if (!substituteTargetResolved) return
 
     const email = substituteEmail.trim().toLowerCase()
     let name = substituteName.trim()
@@ -1749,10 +1983,12 @@ export function SignatureRecipientsDialog({
       }
     }
 
-    const agendaLabel = findAgendaLabelForRowKeys(substituteTarget.rowKeys)
+    const agendaLabel = findAgendaLabelForRowKeys(
+      substituteTargetResolved.rowKeys
+    )
     const behalfLabel = agendaLabel
-      ? `${substituteTarget.name} — ${agendaLabel}`
-      : substituteTarget.name
+      ? `${substituteTargetResolved.name} — ${agendaLabel}`
+      : substituteTargetResolved.name
     const candidateKey = entryIdentityKey({ email, behalfLabel })
     const existingMatch = recipients.find(
       (r) => entryIdentityKey(r) === candidateKey
@@ -1762,8 +1998,10 @@ export function SignatureRecipientsDialog({
       return
     }
 
-    const targetKey = entryIdentityKey(substituteTarget)
-    const targetEmailNormalized = substituteTarget.email.trim().toLowerCase()
+    const targetKey = entryIdentityKey(substituteTargetResolved)
+    const targetEmailNormalized = substituteTargetResolved.email
+      .trim()
+      .toLowerCase()
     const targetExists = recipients.some(
       (r) =>
         !r.revokedAt &&
@@ -1783,7 +2021,7 @@ export function SignatureRecipientsDialog({
       ...(position ? { position } : {}),
       ...(department ? { department } : {}),
       behalfLabel,
-      rowKeys: substituteTarget.rowKeys ?? [],
+      rowKeys: substituteTargetResolved.rowKeys ?? [],
       substituteForKey: targetKey,
     }
 
@@ -1798,16 +2036,16 @@ export function SignatureRecipientsDialog({
 
       const originalRecipient: Recipient = {
         id: generateRecipientId(),
-        name: substituteTarget.name,
-        email: substituteTarget.email,
-        ...(substituteTarget.position
-          ? { position: substituteTarget.position }
+        name: substituteTargetResolved.name,
+        email: substituteTargetResolved.email,
+        ...(substituteTargetResolved.position
+          ? { position: substituteTargetResolved.position }
           : {}),
-        ...(substituteTarget.department
-          ? { department: substituteTarget.department }
+        ...(substituteTargetResolved.department
+          ? { department: substituteTargetResolved.department }
           : {}),
-        ...(substituteTarget.rowKeys?.length
-          ? { rowKeys: substituteTarget.rowKeys }
+        ...(substituteTargetResolved.rowKeys?.length
+          ? { rowKeys: substituteTargetResolved.rowKeys }
           : {}),
       }
       return [...next, originalRecipient]
@@ -1819,12 +2057,16 @@ export function SignatureRecipientsDialog({
     })
     setInfoTone("success")
     setInfo(
-      `Přidání jako zástupce za ${substituteTarget.name}: ${name || email} – zaškrtnuto k odeslání, pozvánka se pošle až po potvrzení seznamu.`
+      `Přidání jako zástupce za ${substituteTargetResolved.name}: ${name || email} – zaškrtnuto k odeslání, pozvánka se pošle až po potvrzení seznamu.`
     )
-    setSubstituteTarget(null)
-    setSubstituteName("")
-    setSubstituteEmail("")
-    setSubstituteError(null)
+    if (skipCrossPrompt) {
+      setSubstituteTarget(null)
+      setSubstituteName("")
+      setSubstituteEmail("")
+      setSubstituteError(null)
+    } else {
+      finishSubstitute(substituteTargetResolved, name || email)
+    }
   }
 
   function requestReplace(target: Recipient, roleKey?: string) {
@@ -1841,6 +2083,7 @@ export function SignatureRecipientsDialog({
       return
     }
     setReplaceTarget(target)
+    setReplaceTargetRoleKey(roleKey)
     setReplaceName("")
     setReplaceEmail("")
     setReplacePosition(undefined)
@@ -1850,11 +2093,40 @@ export function SignatureRecipientsDialog({
 
   function cancelReplace() {
     setReplaceTarget(null)
+    setReplaceTargetRoleKey(undefined)
     setReplaceError(null)
   }
 
-  async function handleConfirmReplace() {
-    if (!replaceTarget) return
+  function finishReplace(roleKey: string | undefined, personLabel: string) {
+    setReplaceTarget(null)
+    setReplaceTargetRoleKey(undefined)
+    setReplaceName("")
+    setReplaceEmail("")
+    setReplaceError(null)
+
+    if (roleKey === "manager" && sectionCRecipient) {
+      setCrossSectionPrompt({
+        message: `Použít ${personLabel} i pro sekci C (místo „${sectionCRecipient.name}“)?`,
+        onConfirm: () =>
+          void handleConfirmReplace(sectionCRecipient, "sectionC", true),
+      })
+    } else if (roleKey === "sectionC" && managerRecipient) {
+      setCrossSectionPrompt({
+        message: `Použít ${personLabel} i pro vedoucího odboru (místo „${managerRecipient.name}“)?`,
+        onConfirm: () =>
+          void handleConfirmReplace(managerRecipient, "manager", true),
+      })
+    }
+  }
+
+  async function handleConfirmReplace(
+    targetOverride?: Recipient,
+    roleKeyOverride?: string,
+    skipCrossPrompt?: boolean
+  ) {
+    const target = targetOverride ?? replaceTarget
+    if (!target) return
+    const roleKey = targetOverride ? roleKeyOverride : replaceTargetRoleKey
 
     const email = replaceEmail.trim().toLowerCase()
     let name = replaceName.trim()
@@ -1885,11 +2157,9 @@ export function SignatureRecipientsDialog({
       (r) => entryIdentityKey(r) === candidateKey
     )
 
-    const targetKey = entryIdentityKey(replaceTarget)
-    const targetName = replaceTarget.name
-    const addedRowKeys = replaceTarget.rowKeys?.length
-      ? replaceTarget.rowKeys
-      : []
+    const targetKey = entryIdentityKey(target)
+    const targetName = target.name
+    const addedRowKeys = target.rowKeys?.length ? target.rowKeys : []
 
     if (existingMatch?.revokedAt) {
       const revivedRecipient: Recipient = {
@@ -1914,10 +2184,15 @@ export function SignatureRecipientsDialog({
       setInfo(
         `Výměna osoby za roli „${targetName}“: ${name || email} – po potvrzení tlačítkem dole ztratí ${targetName} přístup (a případné podpisy se zruší) a nová osoba dostane pozvánku.`
       )
-      setReplaceTarget(null)
-      setReplaceName("")
-      setReplaceEmail("")
-      setReplaceError(null)
+      if (skipCrossPrompt) {
+        setReplaceTarget(null)
+        setReplaceTargetRoleKey(undefined)
+        setReplaceName("")
+        setReplaceEmail("")
+        setReplaceError(null)
+      } else {
+        finishReplace(roleKey, name || email)
+      }
       return
     }
 
@@ -1944,10 +2219,15 @@ export function SignatureRecipientsDialog({
       setInfo(
         `${name || email} už v seznamu je u jiné agendy – nyní se mu přidala i agenda „${targetName}“. ${targetName} ztratí přístup (a případné podpisy se zruší) po potvrzení tlačítkem dole.`
       )
-      setReplaceTarget(null)
-      setReplaceName("")
-      setReplaceEmail("")
-      setReplaceError(null)
+      if (skipCrossPrompt) {
+        setReplaceTarget(null)
+        setReplaceTargetRoleKey(undefined)
+        setReplaceName("")
+        setReplaceEmail("")
+        setReplaceError(null)
+      } else {
+        finishReplace(roleKey, name || email)
+      }
       return
     }
     if (existingMatch) {
@@ -1977,10 +2257,15 @@ export function SignatureRecipientsDialog({
     setInfo(
       `Výměna osoby za roli „${targetName}“: ${name || email} – po potvrzení tlačítkem dole ztratí ${targetName} přístup (a případné podpisy se zruší) a nová osoba dostane pozvánku.`
     )
-    setReplaceTarget(null)
-    setReplaceName("")
-    setReplaceEmail("")
-    setReplaceError(null)
+    if (skipCrossPrompt) {
+      setReplaceTarget(null)
+      setReplaceTargetRoleKey(undefined)
+      setReplaceName("")
+      setReplaceEmail("")
+      setReplaceError(null)
+    } else {
+      finishReplace(roleKey, name || email)
+    }
   }
 
   function handleReplacePersonSelected(employee: EmployeeItem) {
@@ -2580,6 +2865,28 @@ export function SignatureRecipientsDialog({
           r.email.trim().toLowerCase() === managerEmail.trim().toLowerCase()
       )
 
+  const sectionBRecipient = sectionBRecipientId
+    ? activeRecipients.find((r) => r.id === sectionBRecipientId)
+    : activeRecipients.find(
+        (r) =>
+          !r.behalfLabel &&
+          !r.substituteForKey &&
+          sectionBResponsible?.email &&
+          r.email.trim().toLowerCase() ===
+            sectionBResponsible.email.trim().toLowerCase()
+      )
+
+  const sectionCRecipient = sectionCRecipientId
+    ? activeRecipients.find((r) => r.id === sectionCRecipientId)
+    : activeRecipients.find(
+        (r) =>
+          !r.behalfLabel &&
+          !r.substituteForKey &&
+          sectionCResponsible?.email &&
+          r.email.trim().toLowerCase() ===
+            sectionCResponsible.email.trim().toLowerCase()
+      )
+
   const employeeRecipient = employeeRecipientId
     ? activeRecipients.find((r) => r.id === employeeRecipientId)
     : activeRecipients.find(
@@ -2755,6 +3062,21 @@ export function SignatureRecipientsDialog({
           />
         </div>
 
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Input
+            placeholder="Pozice"
+            value={substitutePosition ?? ""}
+            onChange={(e) => setSubstitutePosition(e.target.value)}
+            className="h-8 bg-background py-1 text-sm"
+          />
+          <Input
+            placeholder="Odbor"
+            value={substituteDepartment ?? ""}
+            onChange={(e) => setSubstituteDepartment(e.target.value)}
+            className="h-8 bg-background py-1 text-sm"
+          />
+        </div>
+
         {substituteError && (
           <p className="text-xs text-red-600">{substituteError}</p>
         )}
@@ -2792,6 +3114,98 @@ export function SignatureRecipientsDialog({
     )
   }
 
+  function renderReplaceFormFor(targetKey: string) {
+    if (!replaceTarget) return null
+    if (entryIdentityKey(replaceTarget) !== targetKey) return null
+
+    return (
+      <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+        <p className="font-medium">
+          Vyměnit osobu u role „{replaceTarget.name}“
+        </p>
+        <p className="text-xs">
+          Po potvrzení tlačítkem dole se ihned uloží:{" "}
+          <strong>{replaceTarget.name}</strong> ztratí přístup k výstupnímu
+          listu (a případné podpisy se zruší), všem se to oznámí e-mailem a
+          zapíše do historie; nově zadaná osoba převezme stejnou agendu a
+          dostane pozvánku k podpisu.
+        </p>
+
+        <Button
+          type="button"
+          size="sm"
+          className="gap-1.5 bg-[#00847C] text-white hover:bg-[#0B6D73]"
+          onClick={() => setReplacePickerOpen(true)}
+        >
+          <Search className="size-4" />
+          Vybrat zaměstnance z EOS
+        </Button>
+
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Input
+            placeholder="Celé jméno nové osoby"
+            value={replaceName}
+            onChange={(e) => setReplaceName(e.target.value)}
+            className="h-8 bg-background py-1 text-sm"
+          />
+          <Input
+            placeholder="email@praha6.cz"
+            value={replaceEmail}
+            onChange={(e) => {
+              setReplaceEmail(e.target.value)
+              setReplaceError(null)
+            }}
+            className="h-8 bg-background py-1 text-sm"
+          />
+        </div>
+
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Input
+            placeholder="Pozice"
+            value={replacePosition ?? ""}
+            onChange={(e) => setReplacePosition(e.target.value)}
+            className="h-8 bg-background py-1 text-sm"
+          />
+          <Input
+            placeholder="Odbor"
+            value={replaceDepartment ?? ""}
+            onChange={(e) => setReplaceDepartment(e.target.value)}
+            className="h-8 bg-background py-1 text-sm"
+          />
+        </div>
+
+        {replaceError && <p className="text-xs text-red-600">{replaceError}</p>}
+
+        <div className="flex justify-end gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={cancelReplace}
+          >
+            Storno
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            className="gap-2 bg-amber-600 text-white hover:bg-amber-700"
+            onClick={() => void handleConfirmReplace()}
+          >
+            Vyměnit
+          </Button>
+        </div>
+
+        <EosPersonPickerDialog
+          open={replacePickerOpen}
+          onOpenChange={setReplacePickerOpen}
+          title="Vybrat novou osobu"
+          onSelect={handleReplacePersonSelected}
+          excludeActiveOffboardings={false}
+        />
+      </div>
+    )
+  }
+
   function renderEmployeeCard() {
     const isConfirmed = hasExistingList && !employeeCardDirty
     const cardStateClass = isConfirmed
@@ -2807,6 +3221,16 @@ export function SignatureRecipientsDialog({
           <p className="truncate text-xs text-muted-foreground">
             {employeeName}
           </p>
+          {employeePosition && (
+            <p className="truncate text-[11px] text-muted-foreground">
+              {employeePosition}
+            </p>
+          )}
+          {employeeDepartment && (
+            <p className="truncate text-[11px] text-muted-foreground">
+              {employeeDepartment}
+            </p>
+          )}
           <Input
             type="email"
             value={respEmployeeEmail}
@@ -2881,6 +3305,16 @@ export function SignatureRecipientsDialog({
               <p className="overflow-x-auto whitespace-nowrap font-mono text-xs text-muted-foreground">
                 {respEmployeeEmail || "—"}
               </p>
+              {employeePosition && (
+                <p className="whitespace-nowrap text-[11px] text-muted-foreground">
+                  {employeePosition}
+                </p>
+              )}
+              {employeeDepartment && (
+                <p className="whitespace-nowrap text-[11px] text-muted-foreground">
+                  {employeeDepartment}
+                </p>
+              )}
             </div>
           </div>
           {isConfirmed ? (
@@ -2933,6 +3367,10 @@ export function SignatureRecipientsDialog({
     dirty?: boolean
     onReset?: () => void
     resetTitle?: string
+    resetLabel?: string
+    resetIcon?: "refresh" | "swap" | "trash"
+    onReplace?: () => void
+    substituteRoleKey?: string
     emptyStateMessage?: string
     // Stabilní identita ROLE (vedoucí/sekce B/sekce C), nezávislá na
     // e-mailu – sekce C je dnes ve výchozím stavu vedoucí odboru, ale je to
@@ -3053,7 +3491,13 @@ export function SignatureRecipientsDialog({
     const substituteOwnerKey = fields.roleKey
       ? entryIdentityKey({ id: fields.roleKey, email: fields.email })
       : entryIdentityKey({ email: fields.email })
-    const linkedSubstitute = substitutesByOriginalKey.get(substituteOwnerKey)
+    const linkedSubstitute =
+      substitutesByOriginalKey.get(substituteOwnerKey) ??
+      (fields.roleKey === "sectionC" && !sectionCTouched
+        ? substitutesByOriginalKey.get(
+            entryIdentityKey({ id: "manager", email: fields.email })
+          )
+        : undefined)
 
     return (
       <Fragment>
@@ -3124,6 +3568,18 @@ export function SignatureRecipientsDialog({
               <Pencil className="size-3" />
               Upravit
             </Button>
+            {fields.onReplace && isConfirmed && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 gap-1 border-amber-300 bg-background text-xs text-amber-800 hover:bg-amber-50"
+                onClick={fields.onReplace}
+              >
+                <ArrowLeftRight className="size-3" />
+                Vyměnit
+              </Button>
+            )}
             {fields.offerSubstitute && fields.email && !linkedSubstitute && (
               <Button
                 type="button"
@@ -3131,8 +3587,10 @@ export function SignatureRecipientsDialog({
                 variant="outline"
                 className="h-7 gap-1 border-purple-300 bg-background text-xs text-purple-800 hover:bg-purple-50"
                 onClick={() => {
+                  const effectiveRoleKey =
+                    fields.substituteRoleKey ?? fields.roleKey
                   setSubstituteTarget({
-                    ...(fields.roleKey ? { id: fields.roleKey } : {}),
+                    ...(effectiveRoleKey ? { id: effectiveRoleKey } : {}),
                     name: fields.name || fields.email,
                     email: fields.email,
                     ...(fields.position ? { position: fields.position } : {}),
@@ -3152,13 +3610,24 @@ export function SignatureRecipientsDialog({
             {fields.onReset && (
               <Button
                 type="button"
-                size="icon"
+                size="sm"
                 variant="outline"
-                className="size-7 border-red-200 bg-background text-red-600 hover:bg-red-50"
-                title={fields.resetTitle ?? "Odebrat"}
+                className={
+                  fields.resetIcon === "trash"
+                    ? "h-7 gap-1 border-red-200 bg-background text-xs text-red-600 hover:bg-red-50"
+                    : "h-7 gap-1 border-amber-300 bg-background text-xs text-amber-800 hover:bg-amber-50"
+                }
+                title={fields.resetTitle}
                 onClick={fields.onReset}
               >
-                <Trash2 className="size-3" />
+                {fields.resetIcon === "refresh" ? (
+                  <RefreshCw className="size-3" />
+                ) : fields.resetIcon === "trash" ? (
+                  <Trash2 className="size-3" />
+                ) : (
+                  <ArrowLeftRight className="size-3" />
+                )}
+                {fields.resetLabel ?? "Vyměnit"}
               </Button>
             )}
           </div>
@@ -3195,6 +3664,15 @@ export function SignatureRecipientsDialog({
           )}
         </div>
         {renderSubstituteFormFor(substituteOwnerKey)}
+        {fields.roleKey === "manager" &&
+          managerRecipient &&
+          renderReplaceFormFor(entryIdentityKey(managerRecipient))}
+        {fields.roleKey === "sectionB" &&
+          sectionBRecipient &&
+          renderReplaceFormFor(entryIdentityKey(sectionBRecipient))}
+        {fields.roleKey === "sectionC" &&
+          sectionCRecipient &&
+          renderReplaceFormFor(entryIdentityKey(sectionCRecipient))}
       </Fragment>
     )
   }
@@ -3217,10 +3695,9 @@ export function SignatureRecipientsDialog({
           offerSelection: true,
           roleKey: "manager",
           dirty: managerCardDirty,
-          onReset: managerRecipient
+          onReplace: managerRecipient
             ? () => requestReplace(managerRecipient, "manager")
             : undefined,
-          resetTitle: "Vyměnit osobu",
         }
       : row.kind === "sectionB"
         ? {
@@ -3240,19 +3717,26 @@ export function SignatureRecipientsDialog({
             roleKey: "sectionB",
             dirty: sectionBCardDirty,
             onReset: () => {
-              setRespSectionBName(DEFAULT_SECTION_B_RESPONSIBLE.name)
-              setRespSectionBPosition(DEFAULT_SECTION_B_RESPONSIBLE.position)
-              setRespSectionBDepartment(
-                DEFAULT_SECTION_B_RESPONSIBLE.department
-              )
-              setRespSectionBEmail(DEFAULT_SECTION_B_RESPONSIBLE.email)
-              syncSectionBResponsibleIntoRecipients(
-                DEFAULT_SECTION_B_RESPONSIBLE.name,
-                DEFAULT_SECTION_B_RESPONSIBLE.email,
-                DEFAULT_SECTION_B_RESPONSIBLE.position,
-                DEFAULT_SECTION_B_RESPONSIBLE.department
-              )
+              if (sectionBRecipient) {
+                if (sectionBRecipient.invitedAt) {
+                  toggleSelected(entryIdentityKey(sectionBRecipient))
+                } else {
+                  requestRemovePending(sectionBRecipient)
+                }
+              }
+              setRespSectionBName("")
+              setRespSectionBPosition("")
+              setRespSectionBDepartment("")
+              setRespSectionBEmail("")
             },
+            resetTitle: "Odebere odpovědnou osobu za sekci B.",
+            resetLabel: "Odebrat",
+            resetIcon: "trash" as const,
+            onReplace: sectionBRecipient
+              ? () => requestReplace(sectionBRecipient, "sectionB")
+              : undefined,
+            emptyStateMessage:
+              "Chybí odpovědná osoba za sekci B – je potřeba doplnit, kdo vyrovnání majetku podepíše.",
           }
         : {
             editing: sectionCCardEditing,
@@ -3269,20 +3753,30 @@ export function SignatureRecipientsDialog({
             offerSubstitute: true,
             offerSelection: true,
             roleKey: "sectionC",
+            substituteRoleKey: sectionCTouched ? "sectionC" : "manager",
             dirty: sectionCCardDirty,
             onReset: () => {
-              setRespSectionCName(respManagerName)
-              setRespSectionCPosition(respManagerPosition)
-              setRespSectionCDepartment(respManagerDepartment)
-              setRespSectionCEmail(respManagerEmail)
-              setSectionCTouched(false)
-              syncSectionCResponsibleIntoRecipients(
-                respManagerName,
-                respManagerEmail,
-                respManagerPosition,
-                respManagerDepartment
-              )
+              if (sectionCRecipient) {
+                if (sectionCRecipient.invitedAt) {
+                  toggleSelected(entryIdentityKey(sectionCRecipient))
+                } else {
+                  requestRemovePending(sectionCRecipient)
+                }
+              }
+              setRespSectionCName("")
+              setRespSectionCPosition("")
+              setRespSectionCDepartment("")
+              setRespSectionCEmail("")
+              setSectionCTouched(true)
             },
+            resetTitle: "Odebere odpovědnou osobu za sekci C.",
+            resetLabel: "Odebrat",
+            resetIcon: "trash" as const,
+            onReplace: sectionCRecipient
+              ? () => requestReplace(sectionCRecipient, "sectionC")
+              : undefined,
+            emptyStateMessage:
+              "Chybí odpovědná osoba za sekci C – je potřeba doplnit, kdo potvrdí způsob předání agendy.",
           }
   }
 
@@ -3300,6 +3794,7 @@ export function SignatureRecipientsDialog({
     email: string
     position: string
     department: string
+    roleKey?: string
   }) {
     if (!fields.email) return null
     return (
@@ -3311,6 +3806,7 @@ export function SignatureRecipientsDialog({
           className="h-7 gap-1 bg-background text-xs"
           onClick={() => {
             setSubstituteTarget({
+              ...(fields.roleKey ? { id: fields.roleKey } : {}),
               name: fields.name || fields.email,
               email: fields.email,
               ...(fields.position ? { position: fields.position } : {}),
@@ -3344,6 +3840,10 @@ export function SignatureRecipientsDialog({
         setRespKitt6Department("")
         setRespKitt6Email("")
       },
+      resetTitle: "Odebere kontakt KITT6.",
+      resetLabel: "Odebrat",
+      resetIcon: "trash" as const,
+      onReplace: () => setKitt6CardEditing(true),
       onNameChange: setRespKitt6Name,
       onPositionChange: setRespKitt6Position,
       onDepartmentChange: setRespKitt6Department,
@@ -3352,6 +3852,88 @@ export function SignatureRecipientsDialog({
       cardLabel: "Kontakt KITT6 („předání na jiné funkční místo“)",
       emptyStateMessage:
         "Chybí vyplněný kontakt KITT6 – je potřeba doplnit, kdo bude informován o předání na jiné funkční místo.",
+    })
+  }
+
+  function renderSpisovkaCard(index: 0 | 1) {
+    return renderContactCard({
+      editing: spisovkaCardEditing[index],
+      onToggleEdit: () =>
+        setSpisovkaCardEditing((prev) => {
+          const next = [...prev] as [boolean, boolean]
+          next[index] = !next[index]
+          return next
+        }),
+      onOpenPicker: () =>
+        setSpisovkaPickerOpen((prev) => {
+          const next = [...prev] as [boolean, boolean]
+          next[index] = true
+          return next
+        }),
+      name: respSpisovkaName[index],
+      position: respSpisovkaPosition[index],
+      department: respSpisovkaDepartment[index],
+      email: respSpisovkaEmail[index],
+      dirty: spisovkaCardDirty[index],
+      onReset: () => {
+        setRespSpisovkaName((prev) => {
+          const next = [...prev] as [string, string]
+          next[index] = ""
+          return next
+        })
+        setRespSpisovkaPosition((prev) => {
+          const next = [...prev] as [string, string]
+          next[index] = ""
+          return next
+        })
+        setRespSpisovkaDepartment((prev) => {
+          const next = [...prev] as [string, string]
+          next[index] = ""
+          return next
+        })
+        setRespSpisovkaEmail((prev) => {
+          const next = [...prev] as [string, string]
+          next[index] = ""
+          return next
+        })
+      },
+      resetTitle: "Odebere tento kontakt spisové služby.",
+      resetLabel: "Odebrat",
+      resetIcon: "trash" as const,
+      onReplace: () =>
+        setSpisovkaCardEditing((prev) => {
+          const next = [...prev] as [boolean, boolean]
+          next[index] = true
+          return next
+        }),
+      onNameChange: (value) =>
+        setRespSpisovkaName((prev) => {
+          const next = [...prev] as [string, string]
+          next[index] = value
+          return next
+        }),
+      onPositionChange: (value) =>
+        setRespSpisovkaPosition((prev) => {
+          const next = [...prev] as [string, string]
+          next[index] = value
+          return next
+        }),
+      onDepartmentChange: (value) =>
+        setRespSpisovkaDepartment((prev) => {
+          const next = [...prev] as [string, string]
+          next[index] = value
+          return next
+        }),
+      onEmailChange: (value) =>
+        setRespSpisovkaEmail((prev) => {
+          const next = [...prev] as [string, string]
+          next[index] = value
+          return next
+        }),
+      offerSubstitute: false,
+      cardLabel: `Kontakt spisová služba ${index + 1}`,
+      emptyStateMessage:
+        "Chybí vyplněný kontakt spisové služby – finální PDF výstupního listu mu nebude odesláno.",
     })
   }
 
@@ -3607,7 +4189,7 @@ export function SignatureRecipientsDialog({
                     type="button"
                     size="sm"
                     variant="outline"
-                    className="h-7 gap-1 border-amber-300 text-xs text-amber-800 hover:bg-amber-50"
+                    className="h-7 gap-1 border-amber-300 bg-background text-xs text-amber-800 hover:bg-amber-50"
                     onClick={() => requestReplace(r)}
                   >
                     <ArrowLeftRight className="size-3" />
@@ -3672,6 +4254,7 @@ export function SignatureRecipientsDialog({
           )}
         </div>
         {renderSubstituteFormFor(key)}
+        {renderReplaceFormFor(key)}
       </Fragment>
     )
   }
@@ -3970,6 +4553,12 @@ export function SignatureRecipientsDialog({
             </div>
             <div className="flex w-full flex-col items-stretch gap-2 sm:w-1/2">
               {renderKitt6Card()}
+              {renderAddAnotherPersonBlock({
+                name: respKitt6Name,
+                email: respKitt6Email,
+                position: respKitt6Position,
+                department: respKitt6Department,
+              })}
             </div>
           </div>
         </div>
@@ -4315,82 +4904,40 @@ export function SignatureRecipientsDialog({
                         </Fragment>
                       ))}
                     </div>
+
+                    <div className="space-y-3 rounded-lg border border-violet-200 bg-violet-50/40 p-3">
+                      <p className="text-sm font-semibold text-foreground">
+                        Kontakty spisová služba
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Po dokončení a podpisu celého výstupního listu obdrží
+                        tyto dvě osoby finální PDF e-mailem – potvrďte je stejně
+                        jako ostatní karty, nebo jméno/e-mail upravte, zastupte,
+                        vyměňte, případně odeberte.
+                      </p>
+                      <div className="flex flex-col gap-3 sm:flex-row">
+                        <div className="flex w-full flex-col items-stretch gap-2 sm:w-1/2">
+                          {renderSpisovkaCard(0)}
+                          {renderAddAnotherPersonBlock({
+                            name: respSpisovkaName[0],
+                            email: respSpisovkaEmail[0],
+                            position: respSpisovkaPosition[0],
+                            department: respSpisovkaDepartment[0],
+                          })}
+                        </div>
+                        <div className="flex w-full flex-col items-stretch gap-2 sm:w-1/2">
+                          {renderSpisovkaCard(1)}
+                          {renderAddAnotherPersonBlock({
+                            name: respSpisovkaName[1],
+                            email: respSpisovkaEmail[1],
+                            position: respSpisovkaPosition[1],
+                            department: respSpisovkaDepartment[1],
+                          })}
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </>
-              )}
-
-              {replaceTarget && (
-                <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-                  <p className="font-medium">
-                    Vyměnit osobu u role „{replaceTarget.name}“
-                  </p>
-                  <p className="text-xs">
-                    Po potvrzení tlačítkem dole se ihned uloží:{" "}
-                    <strong>{replaceTarget.name}</strong> ztratí přístup k
-                    výstupnímu listu (a případné podpisy se zruší), všem se to
-                    oznámí e-mailem a zapíše do historie; nově zadaná osoba
-                    převezme stejnou agendu a dostane pozvánku k podpisu.
-                  </p>
-
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="gap-1.5 bg-[#00847C] text-white hover:bg-[#0B6D73]"
-                    onClick={() => setReplacePickerOpen(true)}
-                  >
-                    <Search className="size-4" />
-                    Vybrat zaměstnance z EOS
-                  </Button>
-
-                  <div className="flex flex-col gap-2 sm:flex-row">
-                    <Input
-                      placeholder="Celé jméno nové osoby"
-                      value={replaceName}
-                      onChange={(e) => setReplaceName(e.target.value)}
-                      className="h-8 bg-background py-1 text-sm"
-                    />
-                    <Input
-                      placeholder="email@praha6.cz"
-                      value={replaceEmail}
-                      onChange={(e) => {
-                        setReplaceEmail(e.target.value)
-                        setReplaceError(null)
-                      }}
-                      className="h-8 bg-background py-1 text-sm"
-                    />
-                  </div>
-
-                  {replaceError && (
-                    <p className="text-xs text-red-600">{replaceError}</p>
-                  )}
-
-                  <div className="flex justify-end gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={cancelReplace}
-                    >
-                      Storno
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      className="gap-2 bg-amber-600 text-white hover:bg-amber-700"
-                      onClick={() => void handleConfirmReplace()}
-                    >
-                      Vyměnit
-                    </Button>
-                  </div>
-
-                  <EosPersonPickerDialog
-                    open={replacePickerOpen}
-                    onOpenChange={setReplacePickerOpen}
-                    title="Vybrat novou osobu"
-                    onSelect={handleReplacePersonSelected}
-                    excludeActiveOffboardings={false}
-                  />
-                </div>
               )}
 
               <EosPersonPickerDialog
@@ -4428,6 +4975,28 @@ export function SignatureRecipientsDialog({
                   onOpenChange={setKitt6PickerOpen}
                   title="Vybrat kontakt KITT6"
                   onSelect={handleKitt6PersonSelected}
+                  excludeActiveOffboardings={false}
+                />
+                <EosPersonPickerDialog
+                  open={spisovkaPickerOpen[0]}
+                  onOpenChange={(open) =>
+                    setSpisovkaPickerOpen((prev) => [open, prev[1]])
+                  }
+                  title="Vybrat kontakt spisová služba 1"
+                  onSelect={(employee) =>
+                    handleSpisovkaPersonSelected(0, employee)
+                  }
+                  excludeActiveOffboardings={false}
+                />
+                <EosPersonPickerDialog
+                  open={spisovkaPickerOpen[1]}
+                  onOpenChange={(open) =>
+                    setSpisovkaPickerOpen((prev) => [prev[0], open])
+                  }
+                  title="Vybrat kontakt spisová služba 2"
+                  onSelect={(employee) =>
+                    handleSpisovkaPersonSelected(1, employee)
+                  }
                   excludeActiveOffboardings={false}
                 />
 
@@ -4670,6 +5239,35 @@ export function SignatureRecipientsDialog({
               onClick={confirmRemoveSubstituteToo}
             >
               Odebrat i zastoupení
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={crossSectionPrompt !== null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setCrossSectionPrompt(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Provést i v druhé sekci?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {crossSectionPrompt?.message}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setCrossSectionPrompt(null)}>
+              Ne, ponechat zvlášť
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                crossSectionPrompt?.onConfirm()
+                setCrossSectionPrompt(null)
+              }}
+            >
+              Ano, provést i tam
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

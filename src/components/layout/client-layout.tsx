@@ -24,7 +24,7 @@ export function ClientLayout({ children }: { children: React.ReactNode }) {
         <SmoothScrollProvider>
           <ThemeProvider
             attribute="class"
-            defaultTheme="light"
+            defaultTheme="system"
             enableSystem
             disableTransitionOnChange
             storageKey="kitt6-theme"

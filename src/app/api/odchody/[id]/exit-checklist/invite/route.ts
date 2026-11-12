@@ -22,6 +22,10 @@ import {
 } from "@/lib/exit-checklist"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
 import {
+  recipientIdentityKey,
+  roleSubstituteKey,
+} from "@/lib/exit-checklist-recipient-key"
+import {
   EXIT_CHECKLIST_MANAGER_HEADER_SUBTITLE,
   EXIT_CHECKLIST_MANAGER_ROLE_NOTE,
   EXIT_CHECKLIST_SECTION_B_ROLE_NOTE,
@@ -66,6 +70,8 @@ type AggEntry = {
   position: string | null
   department: string | null
   id?: string | null
+  isManager?: boolean
+  isSectionB?: boolean
 }
 
 export async function POST(
@@ -342,6 +348,13 @@ export async function POST(
   const directCandidates: AggEntry[] = []
   const behalfCandidates: AggEntry[] = []
 
+  const managerKey = managerEmail
+    ? recipientIdentityKey({ email: managerEmail, behalfLabel: undefined })
+    : null
+  const sectionBKey = sectionBEmail
+    ? recipientIdentityKey({ email: sectionBEmail, behalfLabel: undefined })
+    : null
+
   if (isBehalf) {
     behalfCandidates.push({
       name:
@@ -350,6 +363,8 @@ export async function POST(
       position: behalfOfPosition,
       department: behalfOfDepartment,
       id: recipientId,
+      isManager: Boolean(managerEmail) && behalfOfEmail === managerEmail,
+      isSectionB: Boolean(sectionBEmail) && behalfOfEmail === sectionBEmail,
     })
   } else {
     directCandidates.push({
@@ -379,11 +394,20 @@ export async function POST(
     if (existing.revokedAt) continue
     if (recipientId && existing.id === recipientId) continue
 
+    const existingSubstituteForKey = cleanText(existing.substituteForKey)
     const entry: AggEntry = {
       name: cleanText(existing.name) || existingEmail,
       rowKeys: cleanStringArray(existing.rowKeys),
       position: cleanText(existing.position) || null,
       department: cleanText(existing.department) || null,
+      isManager:
+        Boolean(existingSubstituteForKey) &&
+        (existingSubstituteForKey === managerKey ||
+          existingSubstituteForKey === roleSubstituteKey("manager")),
+      isSectionB:
+        Boolean(existingSubstituteForKey) &&
+        (existingSubstituteForKey === sectionBKey ||
+          existingSubstituteForKey === roleSubstituteKey("sectionB")),
     }
 
     if (cleanText(existing.behalfLabel)) {
@@ -408,6 +432,8 @@ export async function POST(
       rowKeys: Set<string>
       position: string | null
       department: string | null
+      isManager: boolean
+      isSectionB: boolean
     }
   >()
   for (const entry of behalfCandidates) {
@@ -420,6 +446,8 @@ export async function POST(
         rowKeys: new Set(),
         position: entry.position,
         department: entry.department,
+        isManager: false,
+        isSectionB: false,
       }
       behalfGroups.set(key, group)
     }
@@ -427,12 +455,16 @@ export async function POST(
     if (!group.position && entry.position) group.position = entry.position
     if (!group.department && entry.department)
       group.department = entry.department
+    if (entry.isManager) group.isManager = true
+    if (entry.isSectionB) group.isSectionB = true
   }
   const behalfEntries = Array.from(behalfGroups.values()).map((group) => ({
     name: group.name,
     rowKeys: Array.from(group.rowKeys),
     position: group.position,
     department: group.department,
+    isManager: group.isManager,
+    isSectionB: group.isSectionB,
   }))
 
   try {
@@ -481,8 +513,8 @@ export async function POST(
                 department: entry.department,
                 obligations: resolveExitChecklistPendingItems({
                   isEmployee: false,
-                  isManager: false,
-                  isSectionB: false,
+                  isManager: entry.isManager,
+                  isSectionB: entry.isSectionB,
                   rowKeys: entry.rowKeys,
                   ...commonPendingArgs,
                 }),
@@ -507,8 +539,8 @@ export async function POST(
         signUrl,
         obligations: resolveExitChecklistPendingItems({
           isEmployee: false,
-          isManager: false,
-          isSectionB: false,
+          isManager: primaryBehalf.isManager,
+          isSectionB: primaryBehalf.isSectionB,
           rowKeys: primaryBehalf.rowKeys,
           ...commonPendingArgs,
         }),
@@ -520,8 +552,8 @@ export async function POST(
                 department: entry.department,
                 obligations: resolveExitChecklistPendingItems({
                   isEmployee: false,
-                  isManager: false,
-                  isSectionB: false,
+                  isManager: entry.isManager,
+                  isSectionB: entry.isSectionB,
                   rowKeys: entry.rowKeys,
                   ...commonPendingArgs,
                 }),

@@ -68,6 +68,10 @@ export function sanitizeText(value: unknown): string {
   return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : ""
 }
 
+function foldName(value: unknown): string {
+  return sanitizeText(value).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+}
+
 export function sanitizeHrEditMarker(
   value: unknown
 ): Prisma.InputJsonValue | null {
@@ -983,6 +987,20 @@ const DEFAULT_KITT6_OPTION_CONTACT: ExitChecklistResponsiblePerson = {
   email: "vsuvarina@praha6.cz",
 }
 
+const DEFAULT_SPISOVKA_CONTACT_1: ExitChecklistResponsiblePerson = {
+  name: "Bc. Martin Rokos",
+  position: "vedoucí Oddělení spisové služby",
+  department: "Kancelář tajemníka",
+  email: "mrokos@praha6.cz",
+}
+
+const DEFAULT_SPISOVKA_CONTACT_2: ExitChecklistResponsiblePerson = {
+  name: "Eva Málková",
+  position: "archivářka, Oddělení spisové služby",
+  department: "Kancelář tajemníka",
+  email: "emalkova@praha6.cz",
+}
+
 export function sanitizeResponsiblePersonForResponse(
   value: unknown,
   fallback: ExitChecklistResponsiblePerson
@@ -1054,6 +1072,25 @@ export function sanitizeKitt6ContactForJson(
   return sanitizeKitt6ContactForResponse(
     value
   ) as unknown as Prisma.InputJsonObject
+}
+
+export function sanitizeSpisovkaContactsForResponse(
+  value: unknown
+): ExitChecklistResponsiblePerson[] {
+  const raw = Array.isArray(value) ? value : []
+
+  return [
+    sanitizeResponsiblePersonForResponse(raw[0], DEFAULT_SPISOVKA_CONTACT_1),
+    sanitizeResponsiblePersonForResponse(raw[1], DEFAULT_SPISOVKA_CONTACT_2),
+  ]
+}
+
+export function sanitizeSpisovkaContactsForJson(
+  value: unknown
+): Prisma.InputJsonValue {
+  return sanitizeSpisovkaContactsForResponse(
+    value
+  ) as unknown as Prisma.InputJsonValue
 }
 
 export function mergeSignatureRecipients(
@@ -1226,10 +1263,16 @@ export function mapToExitChecklistData(
     ? sanitizeText(off.supervisorName) || headerManagerNameValue
     : headerManagerNameValue
 
-  const managerMatchesSupervisor =
+  const managerNameMatchesSupervisor =
+    Boolean(managerNameValue) &&
+    Boolean(off.supervisorName) &&
+    foldName(managerNameValue) === foldName(off.supervisorName)
+  const managerEmailMatchesSupervisor =
     Boolean(managerEmailValue) &&
     managerEmailValue!.trim().toLowerCase() ===
       (off.supervisorEmail ?? "").trim().toLowerCase()
+  const managerMatchesSupervisor =
+    managerNameMatchesSupervisor || managerEmailMatchesSupervisor
   const managerPositionValue = signatureListNotYetSent
     ? sanitizeText(off.supervisorPosition) || headerManagerPositionValue
     : headerManagerPositionValue ||
@@ -1323,6 +1366,9 @@ export function mapToExitChecklistData(
     ),
     kitt6OptionContact: sanitizeKitt6ContactForResponse(
       headerData.kitt6OptionContact
+    ),
+    spisovkaContacts: sanitizeSpisovkaContactsForResponse(
+      headerData.spisovkaContacts
     ),
   }
 }

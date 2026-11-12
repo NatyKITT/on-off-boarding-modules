@@ -6,6 +6,7 @@ import { getEmployees } from "@/lib/eos-employees"
 import {
   sanitizeKitt6ContactForJson,
   sanitizeResponsiblePersonForJson,
+  sanitizeSpisovkaContactsForJson,
 } from "@/lib/exit-checklist"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
 import { buildManagerNotifyPromptForChanges } from "@/lib/new-record-manager-watch"
@@ -195,6 +196,18 @@ export async function PATCH(
         ),
       })
     }
+    if ("spisovkaContacts" in body && Array.isArray(body.spisovkaContacts)) {
+      for (const entry of body.spisovkaContacts) {
+        if (entry && typeof entry === "object") {
+          otherRoleEmails.push({
+            label: "kontakt spisová služba",
+            email: normalizeEmail(
+              unknownEmailStr((entry as { email?: unknown }).email)
+            ),
+          })
+        }
+      }
+    }
 
     const conflict = otherRoleEmails.find(
       (entry) => entry.email && entry.email === effectiveEmployeeEmail
@@ -335,6 +348,16 @@ export async function PATCH(
     nextHeaderRecord.kitt6OptionContact = kitt6OptionContact
     changedParts.push(
       `kontakt KITT6: ${(kitt6OptionContact as unknown as { email: string }).email}`
+    )
+  }
+
+  if ("spisovkaContacts" in body) {
+    const spisovkaContacts = sanitizeSpisovkaContactsForJson(
+      body.spisovkaContacts
+    )
+    nextHeaderRecord.spisovkaContacts = spisovkaContacts
+    changedParts.push(
+      `kontakty spisová služba: ${(spisovkaContacts as unknown as { email: string }[]).map((c) => c.email).join(", ")}`
     )
   }
 

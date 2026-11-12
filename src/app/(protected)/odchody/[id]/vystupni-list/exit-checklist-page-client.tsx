@@ -260,34 +260,6 @@ export function ExitChecklistPageClient({
               onSaved={handleSaved}
               externalSaveTrigger={saveTrigger}
             />
-
-            {canAccessApp && (
-              <div className="flex items-center justify-end gap-2">
-                {dirty && (
-                  <span className="text-xs font-medium text-amber-700">
-                    Máte neuložené změny
-                  </span>
-                )}
-                <Button
-                  type="button"
-                  size="sm"
-                  className="gap-1 bg-[#00847C] text-white hover:bg-[#0B6D73]"
-                  onClick={() => setSaveTrigger((t) => t + 1)}
-                  disabled={!dirty || formSaving}
-                >
-                  <SavingButtonLabel
-                    saving={formSaving}
-                    savingText="Ukládám…"
-                    idleText={
-                      <>
-                        <Save className="size-4" />
-                        Uložit
-                      </>
-                    }
-                  />
-                </Button>
-              </div>
-            )}
           </>
         )}
       </div>

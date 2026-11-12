@@ -45,6 +45,7 @@ import { looksLikePersonName } from "@/lib/exit-checklist-behalf-options"
 import { getExitChecklistCompletionState } from "@/lib/exit-checklist-completion"
 import { exitChecklistEventActionLabel } from "@/lib/exit-checklist-event-labels"
 import {
+  entryIdentityKey,
   isActiveSignatureRecipient,
   recipientIdentityKey,
 } from "@/lib/exit-checklist-recipient-key"
@@ -337,8 +338,7 @@ function HeaderSignatureBlock({
   const currentUserIsSigner =
     normalizeEmail(value.signedByEmail) === normalizeEmail(currentUserEmail)
 
-  const canRevoke =
-    interactive && !isLocked && isSigned && (isAdmin || currentUserIsSigner)
+  const canRevoke = !isLocked && isSigned && (isAdmin || currentUserIsSigner)
   const canSign =
     interactive &&
     !isLocked &&
@@ -964,6 +964,9 @@ export function ExitChecklistForm({
   const [kitt6OptionContact, setKitt6OptionContact] = useState(
     initialData.kitt6OptionContact ?? null
   )
+  const [spisovkaContacts, setSpisovkaContacts] = useState(
+    initialData.spisovkaContacts ?? null
+  )
   const [employeeEmailOverride, setEmployeeEmailOverride] = useState<
     string | null
   >(initialData.employeeEmail ?? null)
@@ -1010,6 +1013,14 @@ export function ExitChecklistForm({
     key: ExitChecklistItem["key"]
     behalf: boolean
   } | null>(null)
+  const [pendingRevoke, setPendingRevoke] = useState<{
+    label: string
+    onConfirm: () => void
+  } | null>(null)
+
+  function requestRevoke(label: string, onConfirm: () => void) {
+    setPendingRevoke({ label, onConfirm })
+  }
   const [pendingSaveAction, setPendingSaveAction] = useState<
     (() => void) | null
   >(null)
@@ -1079,47 +1090,73 @@ export function ExitChecklistForm({
     [initialData.signatureRecipients]
   )
 
-  function isVisitorOrSubstituteFor(targetEmail: string | null | undefined) {
+  function targetRecipientKeys(
+    targetEmail: string,
+    roleKey?: "manager" | "sectionB" | "sectionC"
+  ): Set<string> {
+    const targetEmailNormalized = normalizeEmail(targetEmail)
+    const keys = new Set<string>([
+      recipientIdentityKey({
+        email: targetEmailNormalized,
+        behalfLabel: undefined,
+      }),
+    ])
+    const targetRecipient = signatureRecipients.find(
+      (recipient) =>
+        !recipient.revokedAt &&
+        !recipient.behalfLabel &&
+        normalizeEmail(recipient.email) === targetEmailNormalized
+    )
+    if (targetRecipient) keys.add(entryIdentityKey(targetRecipient))
+    if (roleKey)
+      keys.add(entryIdentityKey({ id: roleKey, email: targetEmailNormalized }))
+    return keys
+  }
+
+  function isVisitorOrSubstituteFor(
+    targetEmail: string | null | undefined,
+    roleKey?: "manager" | "sectionB" | "sectionC"
+  ) {
     if (!targetEmail) return false
     const targetEmailNormalized = normalizeEmail(targetEmail)
     if (currentUserEmailNormalized === targetEmailNormalized) return true
 
-    const targetKey = recipientIdentityKey({
-      email: targetEmailNormalized,
-      behalfLabel: undefined,
-    })
+    const targetKeys = targetRecipientKeys(targetEmailNormalized, roleKey)
     return signatureRecipients.some(
       (recipient) =>
         !recipient.revokedAt &&
-        recipient.substituteForKey === targetKey &&
+        Boolean(recipient.substituteForKey) &&
+        targetKeys.has(recipient.substituteForKey as string) &&
         normalizeEmail(recipient.email) === currentUserEmailNormalized
     )
   }
 
-  function isSubstituteVisitorFor(targetEmail: string | null | undefined) {
+  function isSubstituteVisitorFor(
+    targetEmail: string | null | undefined,
+    roleKey?: "manager" | "sectionB" | "sectionC"
+  ) {
     if (!targetEmail) return false
-    const targetKey = recipientIdentityKey({
-      email: normalizeEmail(targetEmail),
-      behalfLabel: undefined,
-    })
+    const targetKeys = targetRecipientKeys(normalizeEmail(targetEmail), roleKey)
     return signatureRecipients.some(
       (recipient) =>
         !recipient.revokedAt &&
-        recipient.substituteForKey === targetKey &&
+        Boolean(recipient.substituteForKey) &&
+        targetKeys.has(recipient.substituteForKey as string) &&
         normalizeEmail(recipient.email) === currentUserEmailNormalized
     )
   }
 
   const isManagerVisitor =
-    !isInternalMode && isVisitorOrSubstituteFor(managerEmail)
+    !isInternalMode && isVisitorOrSubstituteFor(managerEmail, "manager")
 
   const isSectionBResponsibleVisitor =
     !isInternalMode &&
-    (isManagerVisitor || isVisitorOrSubstituteFor(sectionBResponsible?.email))
+    isVisitorOrSubstituteFor(sectionBResponsible?.email, "sectionB")
 
   const isSectionCResponsibleVisitor =
     !isInternalMode &&
-    (isManagerVisitor || isVisitorOrSubstituteFor(sectionCResponsible?.email))
+    (isManagerVisitor ||
+      isVisitorOrSubstituteFor(sectionCResponsible?.email, "sectionC"))
 
   const assetsSignedByOther =
     Boolean(signatures.issuer.signedAt) &&
@@ -1315,6 +1352,7 @@ export function ExitChecklistForm({
     setSectionBResponsible(initialData.sectionBResponsible ?? null)
     setSectionCResponsible(initialData.sectionCResponsible ?? null)
     setKitt6OptionContact(initialData.kitt6OptionContact ?? null)
+    setSpisovkaContacts(initialData.spisovkaContacts ?? null)
     markClean()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialDataIdentity])
@@ -3070,6 +3108,12 @@ export function ExitChecklistForm({
                   offboardingId={resolvedOffboardingId}
                   employeeName={header.employeeName ?? ""}
                   employeeEmail={header.employeeEmail ?? null}
+                  employeePosition={initialData.positionName ?? null}
+                  employeeDepartment={
+                    [initialData.department, initialData.unitName]
+                      .filter(Boolean)
+                      .join(" – ") || null
+                  }
                   publicToken={initialData.publicToken ?? null}
                   conflictOfInterest={conflictOfInterest}
                   managerEmail={managerEmail || null}
@@ -3086,6 +3130,7 @@ export function ExitChecklistForm({
                   sectionBResponsible={sectionBResponsible}
                   sectionCResponsible={sectionCResponsible}
                   kitt6OptionContact={kitt6OptionContact}
+                  spisovkaContacts={spisovkaContacts}
                   onEmployeeChange={(value) =>
                     setEmployeeEmailOverride(value.email)
                   }
@@ -3098,6 +3143,7 @@ export function ExitChecklistForm({
                   onSectionBResponsibleChange={setSectionBResponsible}
                   onSectionCResponsibleChange={setSectionCResponsible}
                   onKitt6ContactChange={setKitt6OptionContact}
+                  onSpisovkaContactsChange={setSpisovkaContacts}
                   onConflictOfInterestChange={setConflictOfInterest}
                 />
               )}
@@ -3361,9 +3407,9 @@ export function ExitChecklistForm({
               <span>
                 Nejste (nebo už nejste) v seznamu osob pozvaných k podpisu
                 tohoto výstupního listu, takže ho aktuálně nemůžete podepsat ani
-                upravovat. Výstupní list si můžete prohlédnout, ale pokud si
-                myslíte, že byste mezi podepisujícími být měl(a), požádejte
-                Personální oddělení o přidání do seznamu příjemců.
+                upravovat. Obnovte prosím stránku – pokud si myslíte, že byste
+                mezi podepisujícími být měl(a), požádejte Personální oddělení o
+                přidání do seznamu příjemců.
               </span>
             </div>
           )}
@@ -3464,7 +3510,11 @@ export function ExitChecklistForm({
               highlighted={isEmployeeVisitor}
               onSign={() => signHeaderSignature("employee")}
               onSignBehalf={() => signHeaderSignatureBehalf("employee")}
-              onRevoke={() => revokeHeaderSignature("employee")}
+              onRevoke={() =>
+                requestRevoke("podpis zaměstnance", () =>
+                  revokeHeaderSignature("employee")
+                )
+              }
             />
 
             <div
@@ -3472,7 +3522,7 @@ export function ExitChecklistForm({
                 isEmployeeVisitor ? "opacity-60" : ""
               } ${
                 isManagerVisitor
-                  ? isSubstituteVisitorFor(managerEmail)
+                  ? isSubstituteVisitorFor(managerEmail, "manager")
                     ? "border-purple-200 bg-purple-50/40"
                     : "border-emerald-200 bg-emerald-50/40"
                   : ""
@@ -3484,7 +3534,7 @@ export function ExitChecklistForm({
                   Podpis vedoucího odboru
                 </Label>
                 {isManagerVisitor &&
-                  (isSubstituteVisitorFor(managerEmail) ? (
+                  (isSubstituteVisitorFor(managerEmail, "manager") ? (
                     <Badge
                       variant="outline"
                       className="shrink-0 border-purple-200 bg-purple-50 text-[10px] text-purple-800"
@@ -3655,7 +3705,6 @@ export function ExitChecklistForm({
                   )}
 
                 {!isLocked &&
-                  (isInternalMode || isManagerVisitor) &&
                   !isEmployeeVisitor &&
                   signatures.manager.signedAt &&
                   (canOverrideOthersSignature ||
@@ -3666,7 +3715,11 @@ export function ExitChecklistForm({
                       size="sm"
                       variant="ghost"
                       className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs text-muted-foreground"
-                      onClick={() => revokeHeaderSignature("manager")}
+                      onClick={() =>
+                        requestRevoke("podpis vedoucího odboru", () =>
+                          revokeHeaderSignature("manager")
+                        )
+                      }
                     >
                       <Undo2 className="size-3" /> Zrušit podpis
                     </Button>
@@ -3739,7 +3792,12 @@ export function ExitChecklistForm({
                         size="sm"
                         variant="ghost"
                         className="h-8 gap-1 text-xs text-muted-foreground"
-                        onClick={revokeAllOwnRows}
+                        onClick={() =>
+                          requestRevoke(
+                            `všech vašich podepsaných položek (${signedOwnCount})`,
+                            revokeAllOwnRows
+                          )
+                        }
                       >
                         <Undo2 className="size-3 shrink-0" />
                         Zrušit podpis všech ({signedOwnCount})
@@ -3778,7 +3836,7 @@ export function ExitChecklistForm({
                 !isSigningDisabled &&
                 !isLawInfoGreyed &&
                 !isEmployeeVisitor &&
-                canTouchHandoverProtocol &&
+                (canTouchHandoverProtocol || currentUserIsSigner) &&
                 (canOverrideOthersSignature || currentUserIsSigner)
               const resolutionEditable =
                 !isLocked &&
@@ -3918,7 +3976,11 @@ export function ExitChecklistForm({
                           size="sm"
                           variant="ghost"
                           className="h-7 gap-1 whitespace-nowrap px-2 text-xs text-muted-foreground"
-                          onClick={() => revokeSignature(item.key)}
+                          onClick={() =>
+                            requestRevoke(item.obligation, () =>
+                              revokeSignature(item.key)
+                            )
+                          }
                         >
                           <Undo2 className="size-3" /> Zrušit
                         </Button>
@@ -4053,7 +4115,7 @@ export function ExitChecklistForm({
                     !isSigningDisabled &&
                     !isLawInfoGreyed &&
                     !isEmployeeVisitor &&
-                    canTouchHandoverProtocol &&
+                    (canTouchHandoverProtocol || currentUserIsSigner) &&
                     (canOverrideOthersSignature || currentUserIsSigner)
                   const resolutionEditable =
                     !isLocked &&
@@ -4236,7 +4298,11 @@ export function ExitChecklistForm({
                           signDisabled={noteMissingForNo}
                           onSign={() => requestSignRow(item.key, false)}
                           onSignBehalf={() => requestSignRow(item.key, true)}
-                          onRevoke={() => revokeSignature(item.key)}
+                          onRevoke={() =>
+                            requestRevoke(item.obligation, () =>
+                              revokeSignature(item.key)
+                            )
+                          }
                         />
                       </TableCell>
                     </TableRow>
@@ -4490,8 +4556,7 @@ export function ExitChecklistForm({
               interactive={isInternalMode || isSectionBResponsibleVisitor}
               highlighted={isSectionBResponsibleVisitor}
               highlightLabel={
-                isSubstituteVisitorFor(managerEmail) ||
-                isSubstituteVisitorFor(sectionBResponsible?.email)
+                isSubstituteVisitorFor(sectionBResponsible?.email, "sectionB")
                   ? "Zástup – vaše pole"
                   : "Vaše pole"
               }
@@ -4504,7 +4569,11 @@ export function ExitChecklistForm({
               currentUserEmail={currentUserEmail}
               onSign={() => signHeaderSignature("issuer")}
               onSignBehalf={() => signHeaderSignatureBehalf("issuer")}
-              onRevoke={() => revokeHeaderSignature("issuer")}
+              onRevoke={() =>
+                requestRevoke("podpis za Odbor služeb", () =>
+                  revokeHeaderSignature("issuer")
+                )
+              }
             />
           </div>
         </CardContent>
@@ -5040,17 +5109,49 @@ export function ExitChecklistForm({
 
           <div className="border-t pt-4">
             <div
-              className="flex flex-col rounded-md border bg-background p-3"
+              className={`flex flex-col rounded-md border bg-background p-3 ${
+                isSectionCResponsibleVisitor
+                  ? isSubstituteVisitorFor(managerEmail, "manager") ||
+                    isSubstituteVisitorFor(
+                      sectionCResponsible?.email,
+                      "sectionC"
+                    )
+                    ? "border-purple-200 bg-purple-50/40"
+                    : "border-emerald-200 bg-emerald-50/40"
+                  : ""
+              }`}
               style={{ minHeight: "110px" }}
             >
-              <Label className="mb-2 text-sm font-medium">
-                Způsob předání agendy potvrzuje — Vedoucí odboru
-                {managerName && (
-                  <span className="ml-2 font-semibold text-foreground">
-                    {managerName}
-                  </span>
-                )}
-              </Label>
+              <div className="mb-2 flex items-center gap-2">
+                <Label className="text-sm font-medium">
+                  Způsob předání agendy potvrzuje — Vedoucí odboru
+                  {managerName && (
+                    <span className="ml-2 font-semibold text-foreground">
+                      {managerName}
+                    </span>
+                  )}
+                </Label>
+                {isSectionCResponsibleVisitor &&
+                  (isSubstituteVisitorFor(managerEmail, "manager") ||
+                  isSubstituteVisitorFor(
+                    sectionCResponsible?.email,
+                    "sectionC"
+                  ) ? (
+                    <Badge
+                      variant="outline"
+                      className="shrink-0 border-purple-200 bg-purple-50 text-[10px] text-purple-800"
+                    >
+                      Zástup – vaše pole
+                    </Badge>
+                  ) : (
+                    <Badge
+                      variant="outline"
+                      className="shrink-0 border-emerald-200 bg-emerald-50 text-[10px] text-emerald-800"
+                    >
+                      Vaše pole
+                    </Badge>
+                  ))}
+              </div>
 
               <div style={{ minHeight: "52px" }} className="flex-1">
                 {handoverManagerSignature.signedAt ? (
@@ -5075,69 +5176,116 @@ export function ExitChecklistForm({
                 )}
               </div>
 
-              {!isLocked && (isInternalMode || isManagerVisitor) && (
-                <div
-                  className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-[168px_168px]"
-                  style={{ minHeight: "70px" }}
-                >
-                  {!handoverManagerSignature.signedAt &&
-                    Boolean(currentUserName || currentUserEmail) && (
-                      <>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs"
-                          onClick={() => signHandoverManagerSignature(false)}
-                          disabled={!handoverSignReady}
-                          title={
-                            !handoverSignReady
-                              ? handoverSignBlockedReason
-                              : undefined
-                          }
-                        >
-                          <Check className="size-3 shrink-0" /> Podepsat
-                        </Button>
-
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs text-muted-foreground"
-                          onClick={() => signHandoverManagerSignature(true)}
-                          disabled={!handoverSignReady}
-                          title={
-                            !handoverSignReady
-                              ? handoverSignBlockedReason
-                              : undefined
-                          }
-                        >
-                          <Check className="size-3 shrink-0" /> Podepsat v
-                          zastoupení
-                        </Button>
-                      </>
-                    )}
-
-                  {handoverManagerSignature.signedAt &&
+              {!isLocked &&
+                (isInternalMode ||
+                  isManagerVisitor ||
+                  (handoverManagerSignature.signedAt &&
                     (canOverrideOthersSignature ||
                       normalizeEmail(handoverManagerSignature.signedByEmail) ===
-                        currentUserEmailNormalized) && (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs text-muted-foreground"
-                        onClick={revokeHandoverManagerSignature}
-                      >
-                        <Undo2 className="size-3" /> Zrušit podpis
-                      </Button>
-                    )}
-                </div>
-              )}
+                        currentUserEmailNormalized))) && (
+                  <div
+                    className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-[168px_168px]"
+                    style={{ minHeight: "70px" }}
+                  >
+                    {(isInternalMode || isManagerVisitor) &&
+                      !handoverManagerSignature.signedAt &&
+                      Boolean(currentUserName || currentUserEmail) && (
+                        <>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs"
+                            onClick={() => signHandoverManagerSignature(false)}
+                            disabled={!handoverSignReady}
+                            title={
+                              !handoverSignReady
+                                ? handoverSignBlockedReason
+                                : undefined
+                            }
+                          >
+                            <Check className="size-3 shrink-0" /> Podepsat
+                          </Button>
+
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs text-muted-foreground"
+                            onClick={() => signHandoverManagerSignature(true)}
+                            disabled={!handoverSignReady}
+                            title={
+                              !handoverSignReady
+                                ? handoverSignBlockedReason
+                                : undefined
+                            }
+                          >
+                            <Check className="size-3 shrink-0" /> Podepsat v
+                            zastoupení
+                          </Button>
+                        </>
+                      )}
+
+                    {handoverManagerSignature.signedAt &&
+                      (canOverrideOthersSignature ||
+                        normalizeEmail(
+                          handoverManagerSignature.signedByEmail
+                        ) === currentUserEmailNormalized) && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 w-full justify-start gap-1 whitespace-nowrap text-xs text-muted-foreground"
+                          onClick={() =>
+                            requestRevoke(
+                              "podpis k předávané agendě (sekce C)",
+                              revokeHandoverManagerSignature
+                            )
+                          }
+                        >
+                          <Undo2 className="size-3" /> Zrušit podpis
+                        </Button>
+                      )}
+                  </div>
+                )}
             </div>
           </div>
         </CardContent>
       </Card>
+
+      {!isLocked && (
+        <div className="flex items-center justify-between gap-2 rounded-xl border bg-background p-4 shadow-sm">
+          <span className="text-sm text-muted-foreground">
+            {dirty
+              ? "Formulář má neuložené změny."
+              : "Všechny změny jsou uložené."}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            className="gap-1 bg-[#00847C] text-white hover:bg-[#0B6D73] disabled:bg-[#00847C]"
+            onClick={() =>
+              isInternalMode
+                ? requestSave(
+                    () => void handleSave(false, { requestClose: true })
+                  )
+                : onRequestSave?.()
+            }
+            disabled={!dirty || saving}
+          >
+            <SavingButtonLabel
+              saving={saving}
+              savingText="Ukládám…"
+              idleText={
+                <>
+                  <Save className="size-4" />
+                  Uložit
+                </>
+              }
+            />
+          </Button>
+        </div>
+      )}
 
       <AlertDialog
         open={sendPdfDialogOpen}
@@ -5276,6 +5424,49 @@ export function ExitChecklistForm({
                 onClick={confirmForeignSign}
               >
                 Přesto podepsat
+              </Button>
+            </AlertDialogFooter>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={pendingRevoke !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingRevoke(null)
+        }}
+      >
+        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-lg overflow-hidden p-0">
+          <div className="p-6 sm:px-8 sm:py-7">
+            <AlertDialogHeader className="space-y-3 text-left">
+              <AlertDialogTitle className="text-xl font-semibold">
+                Zrušit podpis?
+              </AlertDialogTitle>
+
+              <AlertDialogDescription className="text-sm leading-6">
+                Opravdu chcete zrušit {pendingRevoke?.label}? Po zrušení bude
+                tato část znovu označena jako nepodepsaná a budou vám k ní
+                chodit automatické připomínky, dokud ji znovu nepodepíšete.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+
+            <AlertDialogFooter className="mt-6 gap-2 sm:gap-2">
+              <AlertDialogCancel
+                onClick={() => setPendingRevoke(null)}
+                className="h-10 min-w-[120px]"
+              >
+                Zpět
+              </AlertDialogCancel>
+
+              <Button
+                type="button"
+                className="h-10 min-w-[150px] bg-[#00847C] text-white hover:bg-[#0B6D73]"
+                onClick={() => {
+                  pendingRevoke?.onConfirm()
+                  setPendingRevoke(null)
+                }}
+              >
+                Zrušit podpis
               </Button>
             </AlertDialogFooter>
           </div>

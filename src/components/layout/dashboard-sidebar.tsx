@@ -51,151 +51,153 @@ export function DashboardSidebar({
 
   return (
     <TooltipProvider delayDuration={0}>
-      <div className="sticky top-0 h-screen">
-        <ScrollArea className="h-screen overflow-y-auto border-r">
-          <aside
-            className={cn(
-              isSidebarExpanded ? "w-[220px] xl:w-[260px]" : "w-[68px]",
-              "hidden h-screen md:block"
-            )}
-          >
-            <div className="flex h-full max-h-screen flex-1 flex-col gap-2">
-              <div className="flex h-14 items-center gap-2 p-4 lg:h-[60px]">
-                <Link
-                  href="/prehled"
-                  prefetch={false}
-                  className="flex items-center gap-2"
-                >
-                  {isSidebarExpanded && (
-                    <Image
-                      src="/assets/icons/onboarding.svg"
-                      alt="On-Off-Boarding-modul"
-                      width={140}
-                      height={36}
-                      priority
-                      className="h-8 w-auto"
-                    />
-                  )}
-                </Link>
+      <div className="relative min-h-screen border-r">
+        <div className="sticky top-0 h-screen">
+          <div className="h-screen overflow-y-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <aside
+              className={cn(
+                isSidebarExpanded ? "w-[220px] xl:w-[260px]" : "w-[68px]",
+                "hidden h-screen md:block"
+              )}
+            >
+              <div className="flex h-full max-h-screen flex-1 flex-col gap-2">
+                <div className="flex h-14 items-center gap-2 p-4 lg:h-[60px]">
+                  <Link
+                    href="/prehled"
+                    prefetch={false}
+                    className="flex items-center gap-2"
+                  >
+                    {isSidebarExpanded && (
+                      <Image
+                        src="/assets/icons/onboarding.svg"
+                        alt="On-Off-Boarding-modul"
+                        width={140}
+                        height={36}
+                        priority
+                        className="h-8 w-auto"
+                      />
+                    )}
+                  </Link>
 
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="ml-auto size-9 lg:size-8"
-                  onClick={toggleSidebar}
-                >
-                  {isSidebarExpanded ? (
-                    <PanelLeftClose
-                      size={18}
-                      className="stroke-muted-foreground"
-                    />
-                  ) : (
-                    <PanelRightClose
-                      size={18}
-                      className="stroke-muted-foreground"
-                    />
-                  )}
-                  <span className="sr-only">Přepnout postranní panel</span>
-                </Button>
-              </div>
-
-              <nav
-                role="navigation"
-                aria-label="Postranní navigace"
-                className={cn(
-                  "flex flex-1 flex-col gap-8 pt-4",
-                  isSidebarExpanded ? "px-4" : "px-2"
-                )}
-              >
-                {links.map((section) => (
-                  <section
-                    key={section.title}
-                    className="flex flex-col gap-0.5"
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="ml-auto size-9 lg:size-8"
+                    onClick={toggleSidebar}
                   >
                     {isSidebarExpanded ? (
-                      <p className="text-xs text-muted-foreground">
-                        {section.title}
-                      </p>
+                      <PanelLeftClose
+                        size={18}
+                        className="stroke-muted-foreground"
+                      />
                     ) : (
-                      <div className="h-4" />
+                      <PanelRightClose
+                        size={18}
+                        className="stroke-muted-foreground"
+                      />
                     )}
+                    <span className="sr-only">Přepnout postranní panel</span>
+                  </Button>
+                </div>
 
-                    {section.items.map((item) => {
-                      const Icon = Icons[item.icon || "arrowRight"]
-                      const isActive = path === item.href
-                      if (!item.href) return null
+                <nav
+                  role="navigation"
+                  aria-label="Postranní navigace"
+                  className={cn(
+                    "flex flex-1 flex-col gap-8 pt-4",
+                    isSidebarExpanded ? "px-4" : "px-2"
+                  )}
+                >
+                  {links.map((section) => (
+                    <section
+                      key={section.title}
+                      className="flex flex-col gap-0.5"
+                    >
+                      {isSidebarExpanded ? (
+                        <p className="text-xs text-muted-foreground">
+                          {section.title}
+                        </p>
+                      ) : (
+                        <div className="h-4" />
+                      )}
 
-                      return (
-                        <Fragment key={`link-fragment-${item.title}`}>
-                          {isSidebarExpanded ? (
-                            <Link
-                              href={item.disabled ? "#" : item.href}
-                              prefetch={false}
-                              aria-current={isActive ? "page" : undefined}
-                              className={cn(
-                                "flex items-center gap-3 rounded-md p-2 text-sm font-medium hover:bg-muted",
-                                isActive
-                                  ? "bg-muted text-foreground"
-                                  : "text-muted-foreground hover:text-accent-foreground",
-                                item.disabled &&
-                                  "cursor-not-allowed opacity-80 hover:bg-transparent hover:text-muted-foreground"
-                              )}
-                            >
-                              <Icon className="size-5" />
-                              {item.title}
-                              {item.badge && (
-                                <Badge className="ml-auto flex size-5 shrink-0 items-center justify-center rounded-full">
-                                  {item.badge}
-                                </Badge>
-                              )}
-                            </Link>
-                          ) : (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Link
-                                  href={item.disabled ? "#" : item.href}
-                                  prefetch={false}
-                                  aria-current={isActive ? "page" : undefined}
-                                  className={cn(
-                                    "flex items-center gap-3 rounded-md py-2 text-sm font-medium hover:bg-muted",
-                                    isActive
-                                      ? "bg-muted text-foreground"
-                                      : "text-muted-foreground hover:text-accent-foreground",
-                                    item.disabled &&
-                                      "cursor-not-allowed opacity-80 hover:bg-transparent hover:text-muted-foreground"
-                                  )}
-                                >
-                                  <span className="flex size-full items-center justify-center">
-                                    <Icon className="size-5" />
-                                  </span>
-                                </Link>
-                              </TooltipTrigger>
-                              <TooltipContent side="right">
+                      {section.items.map((item) => {
+                        const Icon = Icons[item.icon || "arrowRight"]
+                        const isActive = path === item.href
+                        if (!item.href) return null
+
+                        return (
+                          <Fragment key={`link-fragment-${item.title}`}>
+                            {isSidebarExpanded ? (
+                              <Link
+                                href={item.disabled ? "#" : item.href}
+                                prefetch={false}
+                                aria-current={isActive ? "page" : undefined}
+                                className={cn(
+                                  "flex items-center gap-3 rounded-md p-2 text-sm font-medium hover:bg-muted",
+                                  isActive
+                                    ? "bg-muted text-foreground"
+                                    : "text-muted-foreground hover:text-accent-foreground",
+                                  item.disabled &&
+                                    "cursor-not-allowed opacity-80 hover:bg-transparent hover:text-muted-foreground"
+                                )}
+                              >
+                                <Icon className="size-5" />
                                 {item.title}
-                              </TooltipContent>
-                            </Tooltip>
-                          )}
-                        </Fragment>
-                      )
-                    })}
-                  </section>
-                ))}
+                                {item.badge && (
+                                  <Badge className="ml-auto flex size-5 shrink-0 items-center justify-center rounded-full">
+                                    {item.badge}
+                                  </Badge>
+                                )}
+                              </Link>
+                            ) : (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Link
+                                    href={item.disabled ? "#" : item.href}
+                                    prefetch={false}
+                                    aria-current={isActive ? "page" : undefined}
+                                    className={cn(
+                                      "flex items-center gap-3 rounded-md py-2 text-sm font-medium hover:bg-muted",
+                                      isActive
+                                        ? "bg-muted text-foreground"
+                                        : "text-muted-foreground hover:text-accent-foreground",
+                                      item.disabled &&
+                                        "cursor-not-allowed opacity-80 hover:bg-transparent hover:text-muted-foreground"
+                                    )}
+                                  >
+                                    <span className="flex size-full items-center justify-center">
+                                      <Icon className="size-5" />
+                                    </span>
+                                  </Link>
+                                </TooltipTrigger>
+                                <TooltipContent side="right">
+                                  {item.title}
+                                </TooltipContent>
+                              </Tooltip>
+                            )}
+                          </Fragment>
+                        )
+                      })}
+                    </section>
+                  ))}
 
-                <BuildVersionBadge compact={!isSidebarExpanded} />
+                  <BuildVersionBadge compact={!isSidebarExpanded} />
 
-                {!isProduction && isSidebarExpanded && (
-                  <p className="flex items-start gap-1.5 rounded-md border border-[#00847C]/20 bg-[#00847C]/10 px-2 py-1.5 text-[11px] leading-snug text-[#00847C] dark:border-[#00847C]/30 dark:bg-[#00847C]/15 dark:text-[#4fd1c5]">
-                    <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-                    <span>
-                      Jste v testovacím prostředí. Data ze systemizace a EOS se
-                      dohledávají podle skutečnosti.
-                    </span>
-                  </p>
-                )}
-              </nav>
-            </div>
-          </aside>
-        </ScrollArea>
+                  {!isProduction && isSidebarExpanded && (
+                    <p className="flex items-start gap-1.5 rounded-md border border-[#00847C]/20 bg-[#00847C]/10 px-2 py-1.5 text-[11px] leading-snug text-[#00847C] dark:border-[#00847C]/30 dark:bg-[#00847C]/15 dark:text-[#4fd1c5]">
+                      <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                      <span>
+                        Jste v testovacím prostředí. Data ze systemizace a EOS
+                        se dohledávají podle skutečnosti.
+                      </span>
+                    </p>
+                  )}
+                </nav>
+              </div>
+            </aside>
+          </div>
+        </div>
       </div>
     </TooltipProvider>
   )

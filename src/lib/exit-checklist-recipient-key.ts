@@ -17,6 +17,12 @@ export function entryIdentityKey(recipient: {
   return recipientIdentityKey(recipient)
 }
 
+export function roleSubstituteKey(
+  roleKey: "manager" | "sectionB" | "sectionC"
+): string {
+  return `id::${roleKey}`
+}
+
 export function generateRecipientId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID()

@@ -78,6 +78,11 @@ Google účtu. Administrátor je pak může u kteréhokoli uživatele
 v sekci _Administrace_ kdykoli ručně doplnit nebo opravit (viz
 kapitola 3).
 
+**Světlý/tmavý vzhled.** Při prvním přihlášení appka vzhled nastaví
+podle systémového nastavení prohlížeče/počítače. Jakmile si ho
+v appce sami přepnete (ikona vpravo nahoře), appka si vaši volbu
+zapamatuje v tomto prohlížeči a dál už se systémovým nastavením neřídí.
+
 ## 3. Role a oprávnění
 
 Roli přiděluje **administrátor** v sekci _Administrace_
@@ -122,6 +127,10 @@ k podpisu).
 
 - **ADMIN** – jediná role s přístupem do Administrace (správa
   uživatelů a rolí) a do Nastavení; jinak má stejná práva jako HR.
+  Nového uživatele jde v Administraci přidat i vyhledáním v EOS
+  (tlačítko „Vybrat z EOS" – předvyplní jméno, příjmení a e-mail),
+  nemusí se psát ručně. Změna role u existujícího uživatele i jeho
+  odebrání z Administrace appka vždy nejdřív potvrdí dialogovým oknem.
 - **HR** – plný rozsah běžné agendy: zakládá a upravuje nástupy,
   odchody a změny, spravuje interní dokumenty (včetně přiřazení,
   zámku a znovu-vygenerování), žádost o pracovnělékařskou prohlídku a
@@ -147,9 +156,12 @@ v administraci, dostane při každém přihlášení **automaticky READONLY**
 místo USER, pokud se objevuje jako vedoucí (`supervisorEmail`) u
 alespoň jednoho nástupu, odchodu, zaměstnanecké změny nebo vyhodnocení
 zkušební doby, nebo je aktuálně nastaven jako tajemník
-(`tajemnik_override` v administraci). Přepočítává se znovu při každém
-přihlášení, takže nově přiřazený vedoucí dostane READONLY automaticky,
-jakmile se u nějakého záznamu objeví. Netýká se to přístupu k
+(`tajemnik_override` v administraci). Appka roli nově ověřuje
+z databáze při každém načtení stránky (ne jen při přihlášení), takže
+nově přiřazený vedoucí dostane READONLY automaticky, jakmile se u
+nějakého záznamu objeví, a jakákoli změna role (i ta provedená jinou
+osobou v Administraci) se projeví hned při další akci – bez nutnosti
+se znovu odhlásit a přihlásit. Netýká se to přístupu k
 veřejnému výstupnímu listu – ten se vždy řídí jen příslušností k
 seznamu osob k podpisu daného odchodu (kapitola 5.3), ne rolí v
 appce.
@@ -426,6 +438,13 @@ e-mailem). Dohledaný vedoucí je vidět přímo v detailu odchodu, ne jen
 po otevření výstupního listu. Automatické dohledání se ale nemusí
 vždy podařit (např. neobsazená pozice nebo chybějící údaj
 v systemizaci) – v takovém případě je potřeba vedoucího doplnit ručně.
+Appka při dohledání nejdřív zkouší přímého nadřízeného podle skutečné
+organizační struktury v EOS a teprve když EOS nic nevrátí, použije
+odhad podle systemizace (vedoucí odboru podle shody odboru). Funkce
+a odbor vedoucího se ve výstupním listu dál zobrazují podle shody
+**jména** se zjištěným nadřízeným, a až druhotně podle e-mailu – takže
+se zobrazí i v případě, že se u vedoucího zadá jiný/alternativní e-mail,
+pokud jméno zůstane stejné.
 Dokud ještě nebyl u výstupního listu odeslán seznam osob k podpisu,
 vedoucí v hlavičce výstupního listu dál sleduje živě vedoucího na
 záznamu odchodu – jakmile ho tady změníte (i jen jméno/příjmení), uvidíte
@@ -597,8 +616,11 @@ podle role v appce):
   hlavičkové podpisy zaměstnance ani vedoucího, ani na sekci C (tu smí
   vyplnit a podepsat jen vedoucí nebo jeho zástup); mají přístup do
   sekce A. Sekci B smí vyplnit a podepsat jen konfigurovaná odpovědná
-  osoba za sekci B, vedoucí odboru nebo jeho zástup – ostatní ji vidí,
-  ale needitovatelnou.
+  osoba za sekci B nebo její zástup – ostatní ji vidí, ale
+  needitovatelnou. Vedoucí odboru sekci B automaticky nezíská, pokud
+  je potvrzená na jinou konkrétní osobu – zvýraznění „Vaše pole" a
+  bannery se zobrazí jen tomu, kdo je u sekce B skutečně potvrzen (nebo
+  jeho zástupu), vedoucímu se stejným způsobem zvýrazňuje jen sekce C.
 - **Konkrétní funkční signatáři** (SNEO, spisová služba, mzdová
   účtárna, Personální oddělení, KITT6, Právní odbor...) i lidé přidaní
   „v zastoupení" za takovou osobu mají v sekci A přiřazený svůj
@@ -612,7 +634,11 @@ podle role v appce):
   zrušit – ani hodnotu Ano/Ne, ani poznámku – nikým jiným než tím, kdo
   ho podepsal; ten musí nejdřív zrušit svůj podpis, než se dá cokoliv
   změnit. V interní appce to navíc smí ADMIN/HR/IT (přepsat/zrušit cizí
-  podpis), ve veřejné verzi vždy jen ten, kdo podepsal.
+  podpis), ve veřejné verzi vždy jen ten, kdo podepsal. **Svůj vlastní
+  podpis jde zrušit vždy**, bez ohledu na to, jestli je daný řádek nebo
+  pole právě přiřazené k vaší agendě – appka se před zrušením vždy
+  zeptá na potvrzení a připomene, že se tím řádek vrátí mezi
+  nepodepsané a budou k němu znovu chodit automatické připomínky.
 
 **Zvýraznění vlastní agendy.** Vlastní řádky v sekci A (a vlastní pole
 v hlavičce – podpis vedoucího, podpis za sekci B) appka barevně
@@ -642,7 +668,13 @@ zmínku o možném dopadu na zápočtový list nevidí** – jeho e-mail má
 vždy stejný, neutrální text (že je výstupní list podepsán a má se
 dostavit na Personální oddělení), nově s přiloženým PDF výstupního
 listu. Nesplněná agenda se do 100 % dokončení počítá stejně jako
-splněná (appka jen upozorní, nic neblokuje).
+splněná (appka jen upozorní, nic neblokuje). Pokud se u položky nově
+zaškrtne odpověď „Ne", e-mail s přehledem nevyrovnané položky dostane
+nově i odcházející zaměstnanec, ne jen Personální oddělení. Po
+dokončení celého výstupního listu dostane finální PDF (společně
+s Personálním oddělením) nově i **vedoucí odboru** (a jeho zástup,
+pokud je nastaven) a dvě karty v nové sekci **„Kontakty spisová
+služba"** (viz níže).
 
 **„Dodatečně vyřízeno"** – k už podepsané položce s odpovědí „Ne" (i
 po úplném dokončení a zamčení výstupního listu, v appce i ve veřejné
@@ -697,6 +729,12 @@ needitovatelné (disabled) tlačítko, dokud není vyplněn alespoň jeden
 řádek majetku nebo zaškrtnuto „žádný majetek" – tooltip na tlačítku
 vysvětlí, co ještě chybí.
 
+Tlačítko **„Uložit"** je nově jen jednou, úplně dole pod celým
+formulářem výstupního listu – mimo kartu samotného listu, ne v rámci
+sekce C – a to jak v interní appce, tak ve veřejné verzi. Zezelená,
+když má formulář neuložené změny, jinak zůstává (průsvitně) neaktivní.
+U delšího listu se tak nemusí scrollovat zpět nahoru.
+
 **Potvrzovací okno při ukládání.** Kliknutí na „Uložit" (odkudkoli –
 v samotném výstupním listu, na stránce okolo něj, nebo „Uložit
 a odejít" v okně o neuložených změnách) nejdřív otevře okno „Uložit
@@ -718,21 +756,48 @@ agendy, řadí se pod sebe (ne vedle sebe) a mají jednotnou výšku a
 odlišení celého řádku; **sekce C je rozdělená na dvě části** – nahoře
 karta odpovědné osoby za předání agendy, dole za dělicí čárou karta
 kontaktu KITT6 (pro případ volby „KITT6 předá na jiné funkční místo").
+Úplně na konci okna je ještě samostatná sekce **„Kontakty spisová
+služba"** – dvě předvyplněné karty (Bc. Martin Rokos, Eva Málková),
+které po dokončení a podpisu celého výstupního listu dostanou finální
+PDF e-mailem. Kontakt KITT6 a obě karty spisové služby nikdy
+nedostávají pozvánku k podpisu, jen informační e-maily – proto u nich
+tlačítko „Vyměnit" dělá to samé jako „Upravit" (není co rušit), zato
+mají navíc „Přidat další osobu" pro doplnění záložního kontaktu.
 Odpovědná osoba za sekci C je nezávislá na vedoucím odboru a dá se
-změnit – dokud se jí ale skutečně nepřiřadí jiná konkrétní osoba
-(jméno i e-mail se liší od vedoucího), zůstává to jen nabídka „stejná
-osoba jako vedoucí" a dál automaticky sleduje i pozdější úpravy jména
-a e-mailu u vedoucího. Pokud se sekci C i vedoucímu později nastaví
-zpátky stejná osoba, appka propojení sama obnoví; teprve skutečná
-výměna na jedné z karet je od té chvíle nezávislá na druhé. Zástup
-nastavený u vedoucího odboru tak automaticky platí i pro sekci C,
-dokud v ní není nastavena jiná konkrétní osoba.
+změnit. Appka už sekci C **neudržuje automaticky na pozadí propojenou**
+s vedoucím – při otevření okna se jí (pokud dosud nebyla nastavena
+jiná konkrétní osoba) jen jednou nabídne stejná karta jako vedoucí
+jako výchozí návrh; jakmile je okno otevřené, úprava vedoucího už
+sekci C sama od sebe dál nepřepisuje. Propojení mezi oběma rolemi se
+od teď řeší výhradně přes otázku **„Provést i v druhé sekci?"**
+(viz dále).
 
-Karta **odcházejícího zaměstnance** se tu dá upravit stejným způsobem
+**Jednotné akce u karty vedoucího, sekce B a sekce C:** Upravit
+(přepíše jméno/e-mail na té samé kartě), Zastoupit (přidá zástupce,
+formulář se otevře přímo pod kartou), **Vyměnit** (zruší přístup
+původní osobě – a případné podpisy – a pozve novou osobu se stejnou
+agendou; zobrazí se až u už potvrzené karty) a **Odebrat**
+(popelnička – vyprázdní kartu, u sekce C i s případným zrušením
+přístupu dosavadní osobě; místo nabídne jen nový prázdný formulář,
+žádné automatické propojení). Vedoucího odboru samotného odebrat
+nejde – vždy musí být někdo nastaven, lze ho ale zastoupit, upravit
+nebo vyměnit. Po výměně osoby, úpravě jména/e-mailu nebo nastavení
+zástupu u vedoucího nebo u sekce C appka nabídne otázku
+**„Provést i v druhé sekci?"** – stejnou změnu tak jde jedním
+kliknutím použít i pro druhou roli, nebo necháte obě role nezávislé.
+Zástup založený přímo na kartě sekce C se navíc chová podle toho, jestli
+sekce C zrovna zrcadlí vedoucího: pokud ano, zástupce dostane stejná
+práva jako zástupce vedoucího (hlavička, sekce A i C); pokud je sekce
+C už rozpojená od vedoucího (jiná konkrétní osoba), zástupce má práva
+jen k sekci C. „Přidat další osobu" u sekce C je vždy jen pro sekci C,
+bez ohledu na to, jestli je právě propojená s vedoucím.
+
+Karta **odcházejícího zaměstnance** zobrazuje (stejně jako ostatní
+karty) jméno, e-mail, funkci a odbor. Dá se upravit stejným způsobem
 jako karta vedoucího, sekce B nebo sekce C – tlačítkem „Upravit" se
-odemkne needitovatelná karta, lze změnit jen e-mail (jméno zůstává
-needitovatelné). Dokud okno neuložíte tlačítkem „Odeslat a uložit",
-je změna vidět jen na kartě; po uložení se propíše přímo do záznamu
+odemkne needitovatelná karta, lze změnit jen e-mail (jméno, funkce
+a odbor zůstávají needitovatelné). Dokud okno neuložíte tlačítkem
+„Odeslat a uložit", je změna vidět jen na kartě; po uložení se propíše přímo do záznamu
 odchodu, včetně toho, že appka hned ví, že je uloženo, a neptá se
 znovu na uložení zbytečně. Zadaný e-mail nejde přiřadit žádné jiné
 kartě, agendě ani zastoupení – zaměstnanec smí podepsat jen svůj

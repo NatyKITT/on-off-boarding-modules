@@ -649,7 +649,6 @@ export default function OnboardingDetailPage({ params }: PageProps) {
                   description: "Skutečný nástup byl potvrzen.",
                 })
                 router.refresh()
-                window.location.href = `/nastupy/${params.id}`
               }}
             />
           </div>

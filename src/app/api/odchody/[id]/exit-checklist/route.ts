@@ -59,6 +59,7 @@ import {
 import { cancelExitChecklistSignatureJobsForOffboarding } from "@/lib/mail-queue-cleanup"
 import {
   resolveBehalfOriginalInfo,
+  resolveManagerNotificationEmails,
   resolveSignatureRecipientStatus,
 } from "@/lib/offboarding-cron-jobs"
 import {
@@ -1329,7 +1330,15 @@ export async function PUT(
     )
 
     if (completion.isComplete && !alreadyNotified) {
-      const recipients = getHrRecipientsFromEnv()
+      const recipients = Array.from(
+        new Set([
+          ...getHrRecipientsFromEnv(),
+          ...resolveManagerNotificationEmails(data),
+          ...(data.spisovkaContacts ?? [])
+            .map((contact) => contact.email)
+            .filter(Boolean),
+        ])
+      )
       const baseUrl = getAppBaseUrl()
 
       if (recipients.length > 0 && baseUrl) {
@@ -1431,7 +1440,12 @@ export async function PUT(
     }
 
     if (unresolvedChanged && unresolvedItems.length > 0) {
-      const unresolvedRecipients = getHrRecipientsFromEnv()
+      const unresolvedRecipients = Array.from(
+        new Set([
+          ...getHrRecipientsFromEnv(),
+          ...(data.employeeEmail ? [data.employeeEmail] : []),
+        ])
+      )
       const baseUrl = getAppBaseUrl()
 
       if (unresolvedRecipients.length > 0) {

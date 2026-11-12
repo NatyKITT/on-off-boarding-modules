@@ -175,6 +175,7 @@ export interface ExitChecklistData {
   sectionBResponsible?: ExitChecklistResponsiblePerson | null
   sectionCResponsible?: ExitChecklistResponsiblePerson | null
   kitt6OptionContact?: ExitChecklistResponsiblePerson | null
+  spisovkaContacts?: ExitChecklistResponsiblePerson[] | null
 }
 
 export interface ExitChecklistSignatureRecipient {

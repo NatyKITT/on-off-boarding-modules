@@ -2,6 +2,41 @@
 
 Historie významných změn v aplikaci On-Off-Boarding Modul. Nejnovější verze nahoře.
 
+## 0.18.0 – 2026-11-12
+
+### Nové funkce
+
+- **Nová sekce „Kontakty spisová služba" v okně „Seznam a správa osob k podpisu"** – dvě předvyplněné karty (Bc. Martin Rokos, Eva Málková), které se potvrzují/upravují stejně jako ostatní karty. Po dokončení a podpisu celého výstupního listu jim appka automaticky odešle finální PDF (společně s Personálním oddělením a vedoucím odboru).
+- **Dokončovací e-mail s finálním PDF nově chodí i vedoucímu odboru** (a jeho zástupu, pokud je nastaven), ne jen Personálnímu oddělení.
+- **E-mail o nevyrovnané položce („Ne") nově chodí i odcházejícímu zaměstnanci**, ne jen Personálnímu oddělení.
+- **Tlačítko „Uložit" je nově i na konci veřejného výstupního listu**, nejen v záhlaví – u delšího formuláře se tak nemusí scrollovat zpět nahoru.
+- **Jednotná sada akcí u všech karet v „Seznam a správa osob k podpisu"** – Upravit, Zastoupit, Vyměnit a Odebrat (popelnička) jsou nově dostupné stejně u vedoucího, sekce B, sekce C, kontaktu KITT6 i kontaktů spisové služby (kromě odcházejícího zaměstnance, kde zůstává jen Upravit, a vedoucího, kterého nelze odebrat úplně). „Vyměnit" (zrušení přístupu původní osobě a pozvánka nové se stejnou agendou) se u skutečných podepisujících zobrazí až po potvrzení karty. Sekce B a sekce C mají nově místo „Obnovit výchozí"/„Propojit s vedoucím" popelničku (Odebrat), kontakt KITT6 a kontakty spisové služby mají nově i „Přidat další osobu".
+- **Tlačítko „Vyměnit" se nově zobrazuje přímo pod kartou, kterou se týká** – dřív se formulář pro vyhledání nové osoby zobrazoval na jednom pevném místě dole v okně, bez ohledu na to, kterou kartu uživatel měnil.
+- **Výměna osoby, přidání další osoby i zastoupení u vedoucího odboru a sekce C se nově vzájemně nabízí k propsání** – po potvrzení akce u jedné z těchto dvou rolí appka nabídne „Provést i v druhé sekci?" (ano/ne), takže se obě role můžou snadno sladit, nebo zůstat nezávislé podle potřeby.
+- **Potvrzovací dialog při změně role uživatele v Administraci** – appka se nově vždy zeptá, než roli skutečně změní, aby nedošlo k omylu.
+- **Přidání nového uživatele v Administraci nově umí vyhledat osobu přímo v EOS** (tlačítko „Vybrat z EOS") – jméno, příjmení a e-mail se předvyplní automaticky, nemusí se psát ručně.
+- **Formuláře „Zastoupit" a „Vyměnit" v „Seznam a správa osob k podpisu" mají nově i pole Pozice a Odbor** pro novou/zastupující osobu, ne jen jméno a e-mail.
+- **Karta odcházejícího zaměstnance v „Seznam a správa osob k podpisu" nově zobrazuje i funkci a odbor**, stejně jako ostatní karty (jméno, e-mail, funkce, odbor).
+- **Zastoupení přidané přímo na kartě sekce C se nově chová obousměrně** – pokud sekce C aktuálně zrcadlí vedoucího (nebyla jí přiřazena jiná konkrétní osoba), zastoupení získá stejná práva jako zastoupení vedoucího (hlavička, sekce A i C); pokud je sekce C rozpojená od vedoucího, zastoupení platí jen pro sekci C. „Přidat další osobu" u sekce C zůstává vždy jen na sekci C, bez ohledu na to, jestli je zrovna propojená s vedoucím.
+- **Tlačítko „Uložit" je nově jen jednou, zcela na konci formuláře** (v interní appce i veřejné verzi) – mimo kartu výstupního listu, ne v rámci sekce C. Zezelená, když jsou v formuláři neuložené změny, jinak zůstává (průsvitně) neaktivní. V interní appce zmizelo duplicitní tlačítko „Uložit" pod formulářem, které se zobrazovalo navíc ke stejnému tlačítku nad ním.
+
+### Opravy
+
+- **Vedoucí odboru a odpovědná osoba za sekci B se už nepletou** – appka dřív vedoucímu automaticky přiřazovala i agendu/práva sekce B, i když byla sekce B potvrzená na úplně jinou osobu (bannery, zvýraznění i přístup k vyplnění sekce B se dřív chybně zobrazovaly i vedoucímu).
+- **Zástup (zastoupení) nastavený přímo na kartě vedoucího, sekce B nebo sekce C se nově vždy správně pozná** – jak ve veřejném výstupním listu (přístup k hlavičce, sekci B, sekci C), tak v pozvánce k podpisu (sečtená agenda) a v cronových připomínkách. Dřív appka tyto zástupy u těchto tří rolí nerozpoznala, pokud karta v „Seznam a správa osob" získala vlastní stabilní id (což je dnes běžné) – zástup tak ve veřejné verzi i v e-mailech vypadal, jako by neměl žádnou agendu.
+- **Pozvánka pro zástup vedoucího nebo sekce B nově vypisuje skutečnou agendu** (podpis v hlavičce, sekce C) – dřív byla u této pozvánky agenda vždy prázdná.
+- **Rušení vlastního podpisu nově funguje vždy**, bez ohledu na to, jestli je podepsaný řádek/pole právě přiřazené k přihlášenému uživateli – cizí podpisy nadále nelze zrušit (to zůstává jen pro HR/PO v appce). Před zrušením se appka nově vždy zeptá na potvrzení.
+- **Sekce C ve veřejném výstupním listu nově ukazuje odznak „Vaše pole"/„Zástup – vaše pole"** stejně jako pole vedoucího v hlavičce.
+- **Oprava úniku dat ve veřejném výstupním listu** – kdokoliv přihlášený s `@praha6.cz`/`@kitt6.cz` e-mailem a znalostí odkazu mohl dřív vidět celý obsah výstupního listu (jména, agendu, podpisy), i když nebyl v seznamu pozvaných – appka to jen schovávala varováním, ale data už byla v prohlížeči. Appka nově ověří, že je přihlášený buď odcházející zaměstnanec, nebo aktivní příjemce k podpisu, ještě než jakákoli data pošle do prohlížeče – pokud ne, zobrazí se jen hláška „Nemáte přístup", žádný obsah.
+- **Oprava posuvníku v postranním panelu, který se objevoval při najetí myší** i bez ohledu na to, jestli je co scrollovat (šlo o výchozí chování použité knihovny) – postranní panel nově používá běžné scrollování se schovaným posuvníkem.
+- **Oprava vyhledávání vedoucího odboru** – appka nově nejdřív zkouší přímého nadřízeného z EOS (reálná organizační struktura), systemizační odhad (vedoucí odboru podle shody odboru) používá jen jako záložní řešení, když EOS nic nevrátí. Dřív appka vždy použila systemizační odhad, i když neodpovídal skutečné organizační struktuře.
+- **Funkce a odbor u vedoucího se nově dohledají podle shody jména**, a až druhotně podle e-mailu – dřív appka funkci/odbor zobrazila jen při shodě e-mailu s nalezeným nadřízeným, takže při zadání jiného e-mailu u stejné osoby (jiný tvar/alias e-mailu) pole zůstala prázdná, i když šlo o stejného vedoucího.
+- **Role uživatele se nově ověřuje z databáze při každém načtení stránky, ne jen při přihlášení** – po změně role (např. v Administraci) se změna projeví okamžitě, bez nutnosti se znovu odhlásit a přihlásit.
+- **Oprava tvrdého načtení celé stránky po potvrzení skutečného data nástupu** – appka po uložení zbytečně znovu načetla celou stránku (ztráta pozice na stránce a rozbalených položek), místo aby jen tiše aktualizovala data.
+- **Administrace uživatelů: tabulka uživatelů je nově responzivnější** (minimální šířka + lépe rozložené sloupce) – na menších noteboocích se už tlačítko „Odebrat" ani název role nezkracují/nemizí, tabulka se místo toho horizontálně scrolluje.
+- **Dělící čára postranního panelu nyní vždy sahá až na konec stránky**, i u delšího obsahu (dřív na některých stránkách skončila uprostřed a vypadalo to rozbitě), a už se u ní nezobrazuje zbytečný posuvník.
+- **Světlý/tmavý režim appky se při prvním přihlášení nově řídí podle systémového nastavení prohlížeče/počítače**, místo aby byl vždy nastaven na světlý. Jakmile si uživatel režim sám vybere, appka si jeho volbu dál pamatuje (beze změny).
+
 ## 0.17.2 – 2026-11-12
 
 ### Opravy

@@ -9,6 +9,7 @@ import {
   Lock,
   Pencil,
   Plus,
+  Search,
   ShieldCheck,
   Trash2,
   UserPlus,
@@ -39,6 +40,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import type { EmployeeItem } from "@/components/common/employee-combobox"
+import { EosPersonPickerDialog } from "@/components/common/eos-person-picker-dialog"
 import { DocumentHistoryDialog } from "@/components/history/document-history-dialog"
 import { Icons } from "@/components/shared/icons"
 
@@ -81,6 +84,11 @@ type RemoveDialogUser = {
   titleBefore: string | null
   titleAfter: string | null
   role: Role
+} | null
+
+type PendingRoleChange = {
+  user: DbUser
+  newRole: Role
 } | null
 
 const ROLE_BADGE_CLASS: Record<Role, string> = {
@@ -142,12 +150,20 @@ function AddUserDialog({ onAdded }: { onAdded: () => void }) {
   const [role, setRole] = useState<Role>("USER")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [eosPickerOpen, setEosPickerOpen] = useState(false)
 
   function reset() {
     setEmail("")
     setName("")
     setSurname("")
     setRole("USER")
+    setError(null)
+  }
+
+  function handleEosPersonSelected(employee: EmployeeItem) {
+    setEmail(employee.email ?? "")
+    setName(employee.name)
+    setSurname(employee.surname)
     setError(null)
   }
 
@@ -233,6 +249,18 @@ function AddUserDialog({ onAdded }: { onAdded: () => void }) {
         </DialogHeader>
 
         <div className="space-y-4 py-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="w-full gap-1.5"
+            onClick={() => setEosPickerOpen(true)}
+            disabled={loading}
+          >
+            <Search className="size-4" />
+            Vybrat z EOS
+          </Button>
+
           <div className="space-y-1.5">
             <Label htmlFor="add-email">
               E-mail <span className="text-destructive">*</span>
@@ -329,6 +357,14 @@ function AddUserDialog({ onAdded }: { onAdded: () => void }) {
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      <EosPersonPickerDialog
+        open={eosPickerOpen}
+        onOpenChange={setEosPickerOpen}
+        title="Vybrat zaměstnance z EOS"
+        onSelect={handleEosPersonSelected}
+        excludeActiveOffboardings={false}
+      />
     </Dialog>
   )
 }
@@ -465,7 +501,7 @@ function DbUsersList({
 }: {
   users: DbUser[]
   updatingUserId: string | null
-  onRoleChange: (userId: string, role: Role) => void
+  onRoleChange: (user: DbUser, role: Role) => void
   onRenameUser: (userId: string, name: string, surname: string) => void
   onRemoveUser: (user: DbUser) => void
 }) {
@@ -545,9 +581,7 @@ function DbUsersList({
 
                 <Select
                   value={user.role}
-                  onValueChange={(value) =>
-                    onRoleChange(user.id, value as Role)
-                  }
+                  onValueChange={(value) => onRoleChange(user, value as Role)}
                   disabled={updatingUserId === user.id}
                 >
                   <SelectTrigger className="h-8 w-[150px] text-xs">
@@ -590,13 +624,13 @@ function DbUsersList({
       </div>
 
       <div className="hidden overflow-x-auto rounded-md border md:block">
-        <table className="w-full table-fixed text-sm">
+        <table className="w-full min-w-[900px] table-fixed text-sm">
           <colgroup>
-            <col className="w-[27%]" />
-            <col className="w-[27%]" />
-            <col className="w-[19%]" />
-            <col className="w-[14%]" />
-            <col className="w-[13%]" />
+            <col className="w-[24%]" />
+            <col className="w-[24%]" />
+            <col className="w-[18%]" />
+            <col className="w-[18%]" />
+            <col className="w-[16%]" />
           </colgroup>
           <thead>
             <tr className="border-b bg-muted/50">
@@ -681,9 +715,7 @@ function DbUsersList({
                 <td className="p-3">
                   <Select
                     value={user.role}
-                    onValueChange={(value) =>
-                      onRoleChange(user.id, value as Role)
-                    }
+                    onValueChange={(value) => onRoleChange(user, value as Role)}
                     disabled={updatingUserId === user.id}
                   >
                     <SelectTrigger className="w-full">
@@ -724,6 +756,70 @@ function DbUsersList({
         </table>
       </div>
     </>
+  )
+}
+
+function RoleChangeDialog({
+  pending,
+  loading,
+  onCancel,
+  onConfirm,
+}: {
+  pending: PendingRoleChange
+  loading: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const fullName = pending ? getFullName(pending.user) : ""
+
+  return (
+    <Dialog
+      open={Boolean(pending)}
+      onOpenChange={(open) => !open && onCancel()}
+    >
+      <DialogContent
+        className="sm:max-w-md"
+        onInteractOutside={(event) => event.preventDefault()}
+      >
+        <DialogHeader>
+          <DialogTitle>Změnit roli uživatele?</DialogTitle>
+
+          <DialogDescription>
+            Role ovlivňuje, co uživatel v aplikaci uvidí a může upravovat.
+          </DialogDescription>
+        </DialogHeader>
+
+        {pending && (
+          <div className="rounded-lg border bg-muted/40 p-4 text-sm">
+            <p className="font-medium">{fullName || pending.user.email}</p>
+            <p className="mt-0.5 break-all text-muted-foreground">
+              {pending.user.email}
+            </p>
+
+            <div className="mt-3 flex items-center gap-2">
+              <Badge className={ROLE_BADGE_CLASS[pending.user.role]}>
+                {ROLE_LABELS[pending.user.role]}
+              </Badge>
+              <span className="text-muted-foreground">→</span>
+              <Badge className={ROLE_BADGE_CLASS[pending.newRole]}>
+                {ROLE_LABELS[pending.newRole]}
+              </Badge>
+            </div>
+          </div>
+        )}
+
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button variant="outline" onClick={onCancel} disabled={loading}>
+            Zrušit
+          </Button>
+
+          <Button onClick={onConfirm} disabled={loading || !pending}>
+            {loading && <Icons.spinner className="mr-2 size-4 animate-spin" />}
+            Změnit roli
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -815,6 +911,8 @@ export function UserRoleManagement() {
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null)
   const [removeDialogUser, setRemoveDialogUser] =
     useState<RemoveDialogUser>(null)
+  const [pendingRoleChange, setPendingRoleChange] =
+    useState<PendingRoleChange>(null)
 
   async function fetchAll() {
     try {
@@ -867,6 +965,7 @@ export function UserRoleManagement() {
       }
 
       toast.success("Role byla aktualizována.")
+      setPendingRoleChange(null)
       await fetchAll()
     } catch (error) {
       toast.error(
@@ -949,6 +1048,9 @@ export function UserRoleManagement() {
   const removeDialogLoading = Boolean(
     removeDialogUser && updatingUserId === removeDialogUser.id
   )
+  const roleChangeDialogLoading = Boolean(
+    pendingRoleChange && updatingUserId === pendingRoleChange.user.id
+  )
 
   return (
     <div className="space-y-6">
@@ -1009,7 +1111,10 @@ export function UserRoleManagement() {
         <DbUsersList
           users={dbUsers}
           updatingUserId={updatingUserId}
-          onRoleChange={updateUserRole}
+          onRoleChange={(user, newRole) => {
+            if (newRole === user.role) return
+            setPendingRoleChange({ user, newRole })
+          }}
           onRenameUser={renameUser}
           onRemoveUser={(user) =>
             setRemoveDialogUser({
@@ -1037,6 +1142,21 @@ export function UserRoleManagement() {
           if (!removeDialogLoading) setRemoveDialogUser(null)
         }}
         onConfirm={() => void removeUser()}
+      />
+
+      <RoleChangeDialog
+        pending={pendingRoleChange}
+        loading={roleChangeDialogLoading}
+        onCancel={() => {
+          if (!roleChangeDialogLoading) setPendingRoleChange(null)
+        }}
+        onConfirm={() => {
+          if (!pendingRoleChange) return
+          void updateUserRole(
+            pendingRoleChange.user.id,
+            pendingRoleChange.newRole
+          )
+        }}
       />
     </div>
   )

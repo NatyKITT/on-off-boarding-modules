@@ -16,7 +16,10 @@ import {
 } from "@/lib/exit-checklist"
 import { getExitChecklistCompletionState } from "@/lib/exit-checklist-completion"
 import { logExitChecklistEvent } from "@/lib/exit-checklist-events"
-import { recipientIdentityKey } from "@/lib/exit-checklist-recipient-key"
+import {
+  recipientIdentityKey,
+  roleSubstituteKey,
+} from "@/lib/exit-checklist-recipient-key"
 import {
   EXIT_CHECKLIST_EMPLOYEE_ROLE_NOTE,
   EXIT_CHECKLIST_MANAGER_ROLE_NOTE,
@@ -84,7 +87,10 @@ export function resolveBehalfOriginalInfo(
       behalfLabel: undefined,
     })
 
-    if (recipient.substituteForKey === managerKey) {
+    if (
+      recipient.substituteForKey === managerKey ||
+      recipient.substituteForKey === roleSubstituteKey("manager")
+    ) {
       return {
         name: data.managerName || recipient.behalfLabel,
         position: data.managerPosition || "Vedoucí odboru",
@@ -119,6 +125,30 @@ export function resolveBehalfOriginalInfo(
     position: null,
     department: null,
   }
+}
+
+export function resolveManagerNotificationEmails(
+  data: ExitChecklistData
+): string[] {
+  if (!data.managerEmail) return []
+
+  const managerKey = recipientIdentityKey({
+    email: data.managerEmail,
+    behalfLabel: undefined,
+  })
+
+  const substituteEmails = (data.signatureRecipients ?? [])
+    .filter(
+      (recipient) =>
+        !recipient.revokedAt &&
+        Boolean(recipient.substituteForKey) &&
+        (recipient.substituteForKey === managerKey ||
+          recipient.substituteForKey === roleSubstituteKey("manager"))
+    )
+    .map((recipient) => recipient.email.trim())
+    .filter(Boolean)
+
+  return Array.from(new Set([data.managerEmail.trim(), ...substituteEmails]))
 }
 
 function dayCountLabelCs(days: number): string {
@@ -506,7 +536,10 @@ export function resolveSignatureRecipientStatus(
       email: data.managerEmail,
       behalfLabel: undefined,
     })
-    if (recipient.substituteForKey === managerKey) {
+    if (
+      recipient.substituteForKey === managerKey ||
+      recipient.substituteForKey === roleSubstituteKey("manager")
+    ) {
       return {
         hasSigned: managerHasSigned(data),
         label: "vedoucí (zastoupení)",
